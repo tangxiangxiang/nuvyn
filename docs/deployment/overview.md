@@ -19,6 +19,17 @@ The supplied Compose service:
 
 Continue with [Docker](docker.md), [Security](security.md), and [Backup and Restore](backup-and-restore.md).
 
+For a production host without a source checkout, use the registry-image
+workflow and [`compose.production.yml`](../../compose.production.yml) instead:
+
+```bash
+docker compose -f compose.production.yml pull
+docker compose -f compose.production.yml up -d
+```
+
+See [Docker Release Deployment](docker-release.md) for first deploy, upgrade,
+rollback, and backup procedures.
+
 ## Bare-Metal Production
 
 Use Node.js 22 for production parity:

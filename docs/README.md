@@ -31,6 +31,7 @@ The canonical product definition and long-term design principles are in [Nuvyn â
 
 - [Deployment Overview](deployment/overview.md)
 - [Docker](deployment/docker.md)
+- [Docker Release Deployment](deployment/docker-release.md)
 - [Runtime Configuration](deployment/configuration.md)
 - [Security](deployment/security.md)
 - [Backup and Restore](deployment/backup-and-restore.md)

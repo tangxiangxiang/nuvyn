@@ -75,7 +75,10 @@ The four roots are reserved by Nuvyn and cannot be renamed, deleted, or moved. `
 
 ## Production Deployment
 
-The recommended deployment is Docker Compose:
+### Local / source-build deployment
+
+The existing Compose file remains available for local or self-build
+deployments:
 
 ```bash
 docker compose up -d --build
@@ -84,10 +87,29 @@ curl --fail http://127.0.0.1:3000/api/health
 
 By default, Compose binds only to `127.0.0.1:3000`, mounts `./src/content` as the vault, and stores SQLite plus the managed AI master key in the `nuvyn-data` volume. The first browser visit completes the token-protected owner setup; later visits require login.
 
+### Production release-image deployment
+
+Production hosts should use the reviewed immutable image published to GHCR and
+do not need the Nuvyn source tree, Node.js, npm, or a Docker build toolchain.
+Copy `compose.production.yml` and `deploy/.env.example` to the deployment host,
+create an untracked `.env`, and set `NUVYN_IMAGE` to an exact release tag:
+
+```bash
+docker compose -f compose.production.yml pull
+docker compose -f compose.production.yml up -d
+curl --fail http://127.0.0.1:3000/api/health
+```
+
+The production Compose file uses `./content` as the default host vault path,
+keeps SQLite in the `nuvyn-data` named volume, and never defaults the image to
+`latest`. See the [Docker release deployment guide](docs/deployment/docker-release.md)
+for first deploy, upgrade, rollback, and backup procedures.
+
 Nuvyn provides single-owner authentication but does not terminate TLS. Keep direct HTTP access on loopback, or put an HTTPS reverse proxy in front of Nuvyn for remote access. Set the canonical browser-facing `NUVYN_PUBLIC_ORIGIN` for that proxy. Back up both the vault—including its hidden `.git`—and `data/`.
 
 - [Deployment overview](docs/deployment/overview.md)
 - [Docker guide](docs/deployment/docker.md)
+- [Docker release deployment](docs/deployment/docker-release.md)
 - [Runtime configuration](docs/deployment/configuration.md)
 - [Security checklist](docs/deployment/security.md)
 - [Backup and restore](docs/deployment/backup-and-restore.md)

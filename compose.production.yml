@@ -1,0 +1,52 @@
+# Nuvyn production deployment from an immutable registry image.
+# This file intentionally has no source-build directive. The image is selected
+# explicitly through NUVYN_IMAGE in the deployment host's untracked .env file.
+
+services:
+  nuvyn:
+    image: ${NUVYN_IMAGE:?NUVYN_IMAGE is required}
+    container_name: nuvyn
+    restart: unless-stopped
+
+    ports:
+      - "${NUVYN_BIND_ADDRESS:-127.0.0.1}:${NUVYN_PORT:-3000}:3000"
+
+    environment:
+      NODE_ENV: production
+      PORT: "3000"
+      HOST: "0.0.0.0"
+      NUVYN_PUBLIC_ORIGIN: ${NUVYN_PUBLIC_ORIGIN:-http://127.0.0.1:${NUVYN_PORT:-3000}}
+      NUVYN_SETUP_TOKEN: ${NUVYN_SETUP_TOKEN:-}
+      NUVYN_AUTH_REVOKE_SESSIONS_ON_START: ${NUVYN_AUTH_REVOKE_SESSIONS_ON_START:-0}
+      NUVYN_MASTER_KEY: ${NUVYN_MASTER_KEY:-}
+      NUVYN_MASTER_KEY_FILE: ${NUVYN_MASTER_KEY_FILE:-}
+      GIT_AUTHOR_NAME: ${GIT_AUTHOR_NAME:-nuvyn}
+      GIT_AUTHOR_EMAIL: ${GIT_AUTHOR_EMAIL:-nuvyn@localhost}
+
+    volumes:
+      - nuvyn-data:/app/data
+      - "${NUVYN_CONTENT_DIR:-./content}:/app/src/content:rw"
+
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3000/api/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
+
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+    security_opt:
+      - no-new-privileges:true
+    read_only: true
+    tmpfs:
+      - /tmp
+    user: "1000:1000"
+
+volumes:
+  nuvyn-data:
+    name: nuvyn-data

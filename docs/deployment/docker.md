@@ -1,5 +1,9 @@
 # Docker Deployment
 
+This guide covers the local/source-build Compose deployment. For production
+hosts that consume immutable GHCR images without a source checkout, see
+[Docker Release Deployment](docker-release.md).
+
 ## Prepare the Vault
 
 Compose bind-mounts the host's `./src/content` at `/app/src/content`. On Linux or NAS hosts, make it writable by UID/GID 1000, which is the container user:

@@ -75,7 +75,9 @@ src/content/
 
 ## 生产部署
 
-推荐使用 Docker Compose：
+### 本地 / 源码构建部署
+
+现有 Compose 文件继续用于本地或自行构建镜像的部署：
 
 ```bash
 docker compose up -d --build
@@ -84,9 +86,27 @@ curl --fail http://127.0.0.1:3000/api/health
 
 Compose 默认只绑定 `127.0.0.1:3000`，将 `./src/content` 挂载为笔记库，并把 SQLite 与托管的 AI 主密钥保存在 `nuvyn-data` 卷中。首次打开浏览器时完成 token 保护的 owner setup；之后的访问需要登录。
 
-Nuvyn 提供单 owner 身份认证，但不负责 TLS 终止。直接 HTTP 访问应保持在回环地址；需要远程访问时，请在 Nuvyn 前配置 HTTPS 反向代理，并设置规范的、面向浏览器的 `NUVYN_PUBLIC_ORIGIN`。备份必须同时包含笔记库（包括隐藏的 `.git`）和 `data/`。
+### 生产发布镜像部署
 
-生产实例必须将实际的浏览器访问地址写入仓库根目录、与 `docker-compose.yml` 同级的 `.env`；下面仅为占位示例，请替换为真实地址：
+生产主机应使用发布到 GHCR 的、带明确版本号的不可变镜像，不需要
+Nuvyn 源码、Node.js、npm 或 Docker 构建工具链。将
+`compose.production.yml` 与 `deploy/.env.example` 复制到生产目录，创建不纳入 Git
+的 `.env`，并将 `NUVYN_IMAGE` 设置为明确的 release tag：
+
+```bash
+docker compose -f compose.production.yml pull
+docker compose -f compose.production.yml up -d
+curl --fail http://127.0.0.1:3000/api/health
+```
+
+生产 Compose 默认将 `./content` 作为宿主机笔记库目录，将 SQLite 保存在
+`nuvyn-data` 命名卷中，并且不会静默回退到 `latest`。首次部署、升级、回滚与备份
+请参阅 [Docker 发布部署指南](docs/deployment/docker-release.md)。
+
+Nuvyn 提供单 owner 身份认证，但不负责 TLS 终止。直接 HTTP 访问应保持在回环地址；需要远程访问时，请在 Nuvyn 前配置 HTTPS 反向代理，并设置规范的、面向浏览器的 `NUVYN_PUBLIC_ORIGIN`。备份必须同时包含笔记库（包括隐藏的 `.git`）和持久化数据。
+
+如果使用本地 / 源码构建 Compose，实际的浏览器访问地址应写入与
+`docker-compose.yml` 同级的 `.env`；下面仅为占位示例，请替换为真实地址：
 
 ```dotenv
 NUVYN_PUBLIC_ORIGIN=https://your-nuvyn.example.com
@@ -96,6 +116,7 @@ NUVYN_PUBLIC_ORIGIN=https://your-nuvyn.example.com
 
 - [部署概览](docs/deployment/overview.md)
 - [Docker 指南](docs/deployment/docker.md)
+- [Docker 发布部署](docs/deployment/docker-release.md)
 - [运行时配置](docs/deployment/configuration.md)
 - [安全清单](docs/deployment/security.md)
 - [备份与恢复](docs/deployment/backup-and-restore.md)
