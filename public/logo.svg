@@ -1,0 +1,17 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" width="200" height="200" role="img" aria-labelledby="title desc">
+  <title id="title">Nuvyn — Personal OS</title>
+  <desc id="desc">A knowledge crest with connected nodes</desc>
+  <defs>
+    <linearGradient id="knowledge-gradient" x1="116" y1="112" x2="872" y2="906" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#A78BFA"/>
+      <stop offset="1" stop-color="#5B6EE1"/>
+    </linearGradient>
+  </defs>
+  <g fill="url(#knowledge-gradient)" shape-rendering="geometricPrecision">
+    <circle cx="377" cy="506" r="57"/>
+    <path d="M512 960a448 448 0 1 1 174-861 448 448 0 0 1-174 861Zm0-876C276 84 84 276 84 512s192 428 428 428 428-192 428-428S748 84 512 84Z"/>
+    <path d="M512 910a397 397 0 1 1 155-31 396 396 0 0 1-155 31Zm0-787c-214 0-388 174-388 389s174 388 388 388 388-174 388-388-174-389-388-389Z"/>
+    <path d="M377 376a130 130 0 1 1-92 38 130 130 0 0 1 92-38Zm0-69c-110 0-199 89-199 199s89 199 199 199 199-89 199-199-89-199-199-199Zm380 156a54 54 0 1 1-54 54 54 54 0 0 1 54-54Zm0-49a103 103 0 1 0 103 103 103 103 0 0 0-103-103Z"/>
+    <path d="M659 520a17 17 0 0 1-10-3c-5-3-21-13-33-13-13 0-32 10-38 13a17 17 0 1 1-17-30c3-2 31-18 55-18 26 0 51 18 54 20a17 17 0 0 1-10 31Z"/>
+  </g>
+</svg>

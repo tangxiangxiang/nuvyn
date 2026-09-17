@@ -1,0 +1,5850 @@
+:root {
+  --sans: system-ui, 'Segoe UI', Roboto, sans-serif;
+  --mono: ui-monospace, 'SF Mono', Menlo, Consolas, monospace;
+
+  font: 16px/1.6 var(--sans);
+  color: var(--text);
+  background: var(--bg);
+  color-scheme: light dark;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;
+}
+
+body {
+  margin: 0;
+}
+body.vault-mode {
+  overflow: hidden;
+  height: 100%;
+}
+body.vault-mode #app { height: 100%; }
+
+/* Shared empty state for the document sidebar tabs. Each tab keeps its own
+   content, but an unselected document should produce the same calm, compact
+   surface everywhere. */
+.right-rail-empty-state {
+  display: flex;
+  min-height: 112px;
+  box-sizing: border-box;
+  flex-direction: column;
+  align-items: flex-start;
+  justify-content: flex-start;
+  gap: 10px;
+  padding: 32px 18px 24px;
+  color: var(--vs-text-2, var(--text-muted));
+  font-size: 0.78rem;
+  line-height: 1.5;
+  text-align: left;
+}
+.right-rail-empty-state p {
+  margin: 0;
+}
+.right-rail-empty-action {
+  margin: 0;
+  padding: 4px 10px;
+  border: 1px solid var(--vs-border, var(--border));
+  border-radius: 4px;
+  background: transparent;
+  color: var(--vs-text-2, var(--text-muted));
+  font: inherit;
+  font-size: 0.74rem;
+  line-height: 1.35;
+  cursor: pointer;
+}
+.right-rail-empty-action:hover {
+  color: var(--vs-text-1, var(--text));
+  border-color: var(--vs-accent, var(--accent));
+  background: var(--vs-hover-bg, var(--bg-soft));
+}
+
+/* Shared document path header for the properties and history tabs. Keep
+   these two lightweight context strips identical in typography and rhythm. */
+.right-rail-path-header {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  box-sizing: border-box;
+  height: 32px;
+  padding: 0 18px;
+  border-bottom: 1px solid color-mix(in srgb, var(--vs-border) 60%, transparent);
+}
+.right-rail-path-header span {
+  display: block;
+  overflow: hidden;
+  color: var(--vs-text-3, var(--text-muted));
+  font: 0.7rem/1.2 var(--mono);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Global focus-visible ring. The vault and the command palette both
+   set `outline: none` on their containers / inputs (those inputs then
+   draw their own custom focus state via border-color + box-shadow), so
+   the default browser outline never shows. Without a replacement,
+   keyboard users can't see what is focused. This rule uses :where()
+   to keep specificity at zero — it sits *under* any input that draws
+   its own focus styling (which typically uses border-color /
+   box-shadow, not outline) and *over* every other interactive element
+   that only relied on the default outline.
+   `:focus-visible` (not `:focus`) means mouse clicks don't draw a
+   ring, only Tab navigation does — the standard keyboard-focus idiom. */
+:where(a, button, [role='button'], [role='tab'], [role='option'],
+       [tabindex], input, textarea, select, summary):focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+  border-radius: 2px;
+}
+/* Naive primitives own their focus presentation. Keep this exclusion narrow:
+   future migrated primitives must earn an explicit compatibility decision. */
+:where(.n-button, .n-input input):focus-visible {
+  outline: none;
+}
+.vault :where(a, button, [role='button'], [role='tab'], [role='option'],
+              [tabindex], input, textarea, select, summary):focus-visible {
+  outline-color: var(--vs-accent);
+}
+
+/* ---------- Global scrollbar ----------
+   Thin line + auto-hide when not in use. Default thumb is nearly
+   transparent (essentially invisible). Becomes readable on hover of
+   the scrollable container or on direct hover of the thumb itself.
+   Covers every overflow:auto region in the app (tree, tabs, tag
+   list, results, reading-toc, preview, palette, ...) without each
+   having to declare its own scrollbar rules. */
+:root {
+  --sb-size: 6px;
+  --sb-radius: 3px;
+  --sb-thumb: rgba(155, 155, 155, 0.22);
+  --sb-thumb-hover: rgba(155, 155, 155, 0.55);
+}
+/* Firefox + standard CSS scrollbars */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--sb-thumb) transparent;
+}
+/* WebKit / Blink / Safari */
+::-webkit-scrollbar {
+  width: var(--sb-size);
+  height: var(--sb-size);
+}
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb {
+  background: var(--sb-thumb);
+  border-radius: var(--sb-radius);
+  transition: background 0.15s;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: var(--sb-thumb-hover);
+}
+/* Lift the thumb to full visibility when the user hovers the
+   scrollable area itself (not just the thin thumb). Targets the
+   known scroll containers so a stray hover on a button doesn't
+   make every scrollbar in the page light up. */
+.tabs:hover::-webkit-scrollbar-thumb,
+.tree:hover::-webkit-scrollbar-thumb,
+.tag-list:hover::-webkit-scrollbar-thumb,
+.results-list:hover::-webkit-scrollbar-thumb,
+.palette-list:hover::-webkit-scrollbar-thumb,
+.vault .file-tree .tree:hover::-webkit-scrollbar-thumb {
+  background: var(--sb-thumb-hover);
+}
+
+/* Ledger is the workspace whose page intentionally scrolls below the shared
+   navbar. Keep that outer scrollbar out of the visual surface while
+   preserving wheel/trackpad scrolling. */
+body.ledger-mode,
+html.ledger-mode {
+  scrollbar-width: none;
+}
+body.ledger-mode::-webkit-scrollbar,
+html.ledger-mode::-webkit-scrollbar {
+  display: none;
+  width: 0;
+  height: 0;
+}
+html.ledger-accounts-mode,
+body.ledger-accounts-mode {
+  height: 100%;
+  overflow: hidden;
+}
+body.ledger-accounts-mode #app {
+  height: 100%;
+  overflow: hidden;
+}
+
+/* Ledger transaction select renderers are also used inside Naive UI's
+   teleported dropdown. Keep their presentation global and namespaced so the
+   option row stays stable in both the popup and the selected value. */
+.ledger-account-select-option,
+.ledger-category-select-option {
+  display: flex;
+  width: 100%;
+  min-width: 0;
+  align-items: center;
+  gap: 8px;
+  box-sizing: border-box;
+}
+.n-base-select-option__content:has(> .ledger-account-select-option),
+.n-base-select-option__content:has(> .ledger-category-select-option) {
+  width: 100%;
+  min-width: 0;
+  flex: 1 1 auto;
+}
+.n-base-selection-input__content .ledger-account-select-balance {
+  display: none;
+}
+.ledger-account-select-icon,
+.ledger-category-select-icon {
+  display: inline-flex;
+  flex: 0 0 18px;
+  width: 18px;
+  height: 18px;
+  align-items: center;
+  justify-content: center;
+  color: var(--accent);
+  line-height: 0;
+}
+.ledger-account-select-icon img,
+.ledger-category-select-icon img {
+  display: block;
+  width: 18px;
+  height: 18px;
+  object-fit: contain;
+}
+.ledger-account-select-label,
+.ledger-category-select-label {
+  min-width: 0;
+  flex: 1 1 auto;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.ledger-account-select-balance {
+  flex: 0 0 auto;
+  margin-left: auto;
+  min-width: 96px;
+  color: var(--text-muted);
+  font-size: .76rem;
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+  white-space: nowrap;
+}
+.ledger-account-select-group {
+  display: block;
+  padding: 2px 0;
+  color: var(--text-muted);
+  font-size: .72rem;
+  font-weight: 600;
+}
+
+@media (min-width: 651px) {
+  html.ledger-transactions-mode,
+  body.ledger-transactions-mode,
+  body.ledger-transactions-mode #app {
+    height: 100%;
+    overflow: hidden;
+  }
+}
+
+h1, h2, h3, h4 {
+  font-family: var(--sans);
+  font-weight: 600;
+  color: var(--text-h);
+  line-height: 1.25;
+  margin: 1.6em 0 0.6em;
+}
+
+h1 { font-size: 2rem; margin-top: 0.4em; }
+h2 { font-size: 1.5rem; }
+h3 { font-size: 1.2rem; }
+
+p { margin: 0.8em 0; }
+
+a {
+  color: var(--accent);
+  text-decoration: none;
+}
+a:hover { color: var(--accent-hover); text-decoration: underline; }
+
+code {
+  font-family: var(--mono);
+  font-size: 0.9em;
+  padding: 2px 6px;
+  border-radius: 4px;
+  background: #e5e7eb;
+  color: #111827;
+}
+@media (prefers-color-scheme: dark) {
+  code {
+    background: #1f2937;
+    color: #f9fafb;
+  }
+}
+
+pre {
+  border-radius: 8px;
+  padding: 16px;
+  overflow-x: auto;
+  font-size: 0.9em;
+  line-height: 1.5;
+  border: 1px solid var(--border);
+}
+
+pre code {
+  background: transparent;
+  padding: 0;
+  color: inherit;
+}
+
+blockquote {
+  border-left: 3px solid var(--accent);
+  margin: 1em 0;
+  padding: 0.2em 1em;
+  color: var(--text-muted);
+  background: var(--bg-soft);
+}
+
+table {
+  border-collapse: collapse;
+  margin: 1em 0;
+  width: 100%;
+}
+th, td {
+  border: 1px solid var(--border);
+  padding: 8px 12px;
+  text-align: left;
+}
+th { background: var(--bg-soft); }
+
+hr {
+  border: 0;
+  border-top: 1px solid var(--border);
+  margin: 2em 0;
+}
+
+.container {
+  max-width: 760px;
+  margin: 0 auto;
+  padding: 0 20px;
+}
+.container.full-width {
+  max-width: none;
+  padding: 0;
+}
+
+/* Phase 4 authentication pages: a compact tool surface, not a marketing
+   landing page. The auth route deliberately does not render the normal
+   workspace navbar or controls. */
+.auth-page {
+  position: relative;
+  display: grid;
+  min-height: 100vh;
+  box-sizing: border-box;
+  place-items: center;
+  padding: 32px 20px;
+}
+.auth-page-brand {
+  position: fixed;
+  top: 6px;
+  left: 10px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.auth-page-brand-logo {
+  display: block;
+  width: 24px;
+  height: 24px;
+  object-fit: contain;
+  flex-shrink: 0;
+}
+.auth-page-brand-wordmark {
+  font-family: ui-rounded, "SF Pro Rounded", "Avenir Next", var(--sans);
+  color: var(--text-h);
+  font-size: 0.9rem;
+  font-weight: 700;
+  letter-spacing: 0.005em;
+  line-height: 1;
+}
+.auth-card {
+  width: min(100%, 380px);
+  box-sizing: border-box;
+  padding: 28px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--bg-soft);
+  box-shadow: 0 12px 36px rgba(15, 23, 42, 0.12);
+}
+.auth-card h1 {
+  margin: 0;
+  font-size: 1.45rem;
+}
+.auth-subtitle {
+  margin: 8px 0 22px;
+  color: var(--text-muted);
+  font-size: 0.86rem;
+  line-height: 1.5;
+}
+.auth-notice {
+  margin: -6px 0 16px;
+  padding: 8px 10px;
+  border: 1px solid color-mix(in srgb, var(--accent) 35%, var(--border));
+  border-radius: 6px;
+  color: var(--text);
+  background: color-mix(in srgb, var(--accent) 8%, transparent);
+  font-size: 0.8rem;
+}
+.auth-form {
+  display: grid;
+  gap: 14px;
+}
+.auth-field {
+  display: grid;
+  gap: 5px;
+}
+.auth-field label {
+  color: var(--text-h);
+  font-size: 0.8rem;
+  font-weight: 600;
+}
+.auth-help {
+  margin: -1px 0 0;
+  color: var(--text-muted);
+  font-size: 0.73rem;
+  line-height: 1.45;
+}
+.auth-field > .auth-control {
+  width: 100%;
+  box-sizing: border-box;
+  min-height: 34px;
+  border-radius: 6px;
+  font-size: 0.86rem;
+}
+.auth-form[aria-busy="true"] .auth-submit { cursor: wait; }
+.auth-error {
+  margin: 0;
+  color: #b42318;
+  font-size: 0.8rem;
+  line-height: 1.4;
+}
+@media (prefers-color-scheme: dark) {
+  .auth-error { color: #fda4af; }
+  .auth-card { box-shadow: 0 12px 36px rgba(0, 0, 0, 0.28); }
+}
+.auth-submit {
+  min-height: 34px;
+  margin-top: 4px;
+  border-radius: 6px;
+  font-size: 0.84rem;
+  font-weight: 600;
+}
+.auth-submit:disabled { cursor: wait; opacity: 0.65; }
+.auth-bootstrap-surface {
+  display: grid;
+  min-height: 100vh;
+  place-items: center;
+  padding: 24px;
+  box-sizing: border-box;
+}
+.auth-bootstrap-card {
+  display: grid;
+  gap: 12px;
+  width: min(100%, 360px);
+  padding: 22px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--bg-soft);
+  color: var(--text-muted);
+  text-align: center;
+  font-size: 0.86rem;
+}
+.auth-bootstrap-card p { margin: 0; }
+.auth-bootstrap-card > .n-button {
+  min-height: 32px;
+  border-radius: 6px;
+}
+
+@media (max-width: 420px) {
+  .auth-page { padding: 20px 12px; }
+  .auth-card { padding: 22px 18px; }
+}
+
+/* NavBar (frosted glass) — token-driven so light/dark follow data-theme.
+   Uses --bg-soft (a slightly lighter wash than the page background) so
+   the blur has something visible to pick up.  The old hardcoded
+   rgba(255,255,255,0.72) was stuck light in dark mode and produced a
+   milky overlay on top of dark content. */
+.navbar {
+  position: sticky;
+  top: 0;
+  z-index: 100;
+  background: var(--bg-soft);
+  -webkit-backdrop-filter: saturate(180%) blur(18px);
+  backdrop-filter: saturate(180%) blur(18px);
+  border-bottom: 1px solid var(--border);
+}
+.navbar.is-vault {
+  background: var(--navbar-vault-bg);
+  border-bottom-color: var(--navbar-vault-border);
+}
+.navbar.is-workspace {
+  background: var(--navbar-vault-bg);
+  border-bottom-color: var(--navbar-vault-border);
+}
+.navbar-inner {
+  display: flex;
+  align-items: center;
+  gap: 28px;
+  height: 56px;
+  min-width: 0;
+  padding-left: 10px;
+  padding-right: 3px;
+}
+.navbar.is-vault .navbar-inner {
+  height: 36px;
+  gap: 20px;
+}
+.navbar.is-workspace .navbar-inner {
+  height: 36px;
+  gap: 20px;
+}
+.brand {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  font: inherit;
+  font-weight: 700;
+  font-size: 1.05rem;
+  color: var(--text-h);
+  letter-spacing: 0.2px;
+  text-decoration: none;
+  cursor: pointer;
+}
+.brand:hover { text-decoration: none; color: var(--accent); }
+.brand-logo {
+  width: 24px;
+  height: 24px;
+  display: block;
+  flex-shrink: 0;
+}
+.brand-wordmark {
+  /* The wordmark follows the rounded geometry of the knowledge crest. */
+  font-family: ui-rounded, "SF Pro Rounded", "Avenir Next", var(--sans);
+  font-weight: 700;
+  letter-spacing: 0.005em;
+  line-height: 1;
+  color: var(--text-h);
+}
+.brand:hover .brand-wordmark {
+  color: var(--accent);
+}
+.navbar.is-vault .brand { font-size: 0.95rem; }
+.navbar.is-vault .brand-logo { width: 24px; height: 24px; }
+.navbar.is-vault .brand-wordmark { font-size: 0.9rem; }
+.navbar.is-workspace .brand { font-size: 0.95rem; }
+.navbar.is-workspace .brand-logo { width: 24px; height: 24px; }
+.navbar.is-workspace .brand-wordmark { font-size: 0.9rem; }
+
+/* Brand constellation — a delayed, non-interactive knowledge-network
+   animation that expands from the small navbar mark. */
+.brand-constellation {
+  position: fixed;
+  inset: 0;
+  z-index: 500;
+  display: grid;
+  place-items: center;
+  pointer-events: none;
+}
+body.brand-constellation-active,
+body.brand-constellation-active * {
+  cursor: none !important;
+}
+.brand-constellation-backdrop {
+  position: absolute;
+  inset: 0;
+  background: rgba(10, 15, 28, 0.74);
+  -webkit-backdrop-filter: blur(8px);
+  backdrop-filter: blur(8px);
+}
+.brand-constellation-stage {
+  position: relative;
+  z-index: 1;
+  width: min(78vw, 680px);
+  aspect-ratio: 1;
+  filter: drop-shadow(0 22px 60px rgba(79, 70, 229, 0.2));
+}
+.brand-network {
+  display: block;
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+}
+.brand-network-halo {
+  fill: none;
+  stroke: color-mix(in srgb, var(--accent) 30%, transparent);
+  stroke-width: 2;
+  stroke-dasharray: 2 18;
+  animation: brand-network-orbit 18s linear infinite;
+  transform-origin: 500px 500px;
+}
+.brand-network-node {
+  opacity: 0;
+  transform-box: fill-box;
+  transform-origin: center;
+  animation: brand-network-node-in 560ms cubic-bezier(0.2, 0.8, 0.2, 1) var(--node-delay) forwards;
+}
+.brand-network-link {
+  fill: none;
+  stroke: color-mix(in srgb, var(--accent) 46%, transparent);
+  stroke-width: 3;
+  stroke-dasharray: 9 16;
+  animation: brand-network-transfer 1.8s linear infinite;
+}
+.brand-network-dot {
+  fill: color-mix(in srgb, var(--accent) 20%, var(--bg-soft));
+  stroke: var(--accent);
+  stroke-width: 3;
+}
+.brand-network-dot-core {
+  fill: var(--accent);
+  filter: drop-shadow(0 0 10px color-mix(in srgb, var(--accent) 80%, transparent));
+}
+.brand-network-particle {
+  fill: var(--accent-hover);
+  filter: drop-shadow(0 0 8px color-mix(in srgb, var(--accent-hover) 90%, transparent));
+}
+.brand-network-core {
+  /* Keep the central workspace opaque so links and particles stay behind it. */
+  fill: var(--bg-soft);
+  stroke: var(--accent);
+  stroke-width: 5;
+  filter: drop-shadow(0 0 28px color-mix(in srgb, var(--accent) 35%, transparent));
+  animation: brand-network-core-pulse 3.2s ease-in-out infinite;
+}
+.brand-network-logo {
+  filter: none;
+}
+:root[data-theme='dark'] .brand-network-logo {
+  filter: brightness(0) invert(1);
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme='light']) .brand-network-logo {
+    filter: brightness(0) invert(1);
+  }
+}
+
+@keyframes brand-network-node-in {
+  from { opacity: 0; transform: scale(0.45); }
+  to { opacity: 1; transform: scale(1); }
+}
+@keyframes brand-network-transfer {
+  to { stroke-dashoffset: -50; }
+}
+@keyframes brand-network-orbit {
+  to { transform: rotate(360deg); }
+}
+@keyframes brand-network-core-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 1; }
+}
+.brand-constellation-enter-active {
+  transition: opacity 420ms ease;
+}
+.brand-constellation-enter-active .brand-constellation-stage {
+  transition: transform 520ms cubic-bezier(0.2, 0.8, 0.2, 1), opacity 420ms ease;
+}
+.brand-constellation-enter-from {
+  opacity: 0;
+}
+.brand-constellation-enter-from .brand-constellation-stage {
+  opacity: 0;
+  transform: scale(0.72);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .brand-network-halo,
+  .brand-network-link,
+  .brand-network-core {
+    animation: none;
+  }
+  .brand-network-node {
+    animation: none;
+    opacity: 1;
+  }
+  .brand-constellation-enter-active,
+  .brand-constellation-enter-active .brand-constellation-stage {
+    transition: none;
+  }
+}
+
+/* (VS Code-style top menu bar removed — buttons were decorative and
+   non-functional. The vault's real navigation lives in the activity
+   bar, command palette (⌘P), and keyboard shortcuts.) */
+
+.nav-spacer {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+.nav-actions {
+  display: inline-flex;
+  align-items: center;
+  flex: 0 0 auto;
+  gap: 6px;            /* search and theme toggle sit close together as a unit */
+}
+.nav-search,
+.theme-toggle,
+.nav-actions .account-menu-root .ab-btn-account {
+  width: 28px;
+  height: 28px;
+  min-width: 28px;
+  box-sizing: border-box;
+  background: transparent;
+  border: 1px solid transparent;
+  color: var(--text-muted);
+  border-radius: 6px;
+  padding: 0;
+  line-height: 1;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: color 0.15s, border-color 0.15s, background 0.15s;
+}
+.nav-search:hover,
+.theme-toggle:hover {
+  color: var(--text-h);
+  border-color: var(--border);
+  background: var(--bg-soft);
+}
+.nav-actions :where(.nav-search, .theme-toggle, .account-menu-root .ab-btn-account, .left-panel-toggle, .right-rail-toggle, .view-toggle) .n-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  line-height: 1;
+}
+.nav-actions :where(.nav-search, .theme-toggle, .account-menu-root .ab-btn-account, .left-panel-toggle, .right-rail-toggle, .view-toggle) svg {
+  display: block;
+  width: 18px;
+  height: 18px;
+}
+.nav-actions .account-menu-root .ab-btn-account .ab-btn-icon { transform: translateY(0.5px); }
+.nav-actions :where(.nav-search, .theme-toggle, .account-menu-root .ab-btn-account) .n-button__content {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  height: 100%;
+  line-height: 1;
+}
+
+/* Scope navigation chips (note / diary / ledger).
+   Rendered in the navbar because the file tree's header is too narrow on
+   150px sidebars to fit three chips alongside the folder icon. In Vault the
+   chips filter content; Ledger also has a dedicated workspace route. Sits
+   between the brand and the nav-spacer and inherits the navbar palette. */
+.navbar .workspace-navigation {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin-left: 12px;
+}
+.navbar .scope-chips {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+.navbar .nav-workspace-link {
+  /* Icon + label + small count badge. Padding is a bit wider than the
+     icon-only nav actions to give the text room to breathe; the count
+     badge is absolute-positioned so it doesn't add to the row height. */
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  padding: 4px 8px;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  color: var(--text-muted);
+  cursor: pointer;
+  transition: color 0.15s, background 0.15s, border-color 0.15s;
+}
+.navbar .nav-workspace-link:hover {
+  color: var(--text-h);
+  background: var(--bg-soft);
+  border-color: var(--border);
+}
+/* A mouse click on a locked Diary opens the access dialog without changing
+   the active scope. Do not leave the clicked chip looking selected while it
+   retains ordinary focus; keyboard focus remains visibly outlined. */
+.navbar .nav-workspace-link:not(.active):focus:not(:focus-visible) {
+  color: var(--text-muted);
+  background: transparent;
+  border-color: transparent;
+}
+.navbar .nav-workspace-link.active {
+  /* Soft filled accent — matches the pressed state of mode-toggle
+     above so all "active" affordances in the navbar read the same. */
+  color: var(--accent);
+  background: var(--bg-soft);
+  border-color: var(--border);
+}
+.navbar .scope-chip-icon {
+  display: inline-flex;
+  width: 14px;
+  height: 14px;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+.navbar .scope-chip-icon :where(svg) {
+  width: 14px;
+  height: 14px;
+  display: block;
+}
+.navbar .scope-chip-label,
+.navbar .workspace-board-link-label {
+  /* Mono so the three names (inbox / literature / archive) feel like
+     route-like identifiers, matching the file-tree row visual language.
+     Truncates on very narrow viewports rather than wrapping. */
+  font-family: var(--mono);
+  font-size: 0.78rem;
+  line-height: 1;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-width: 0;
+}
+
+.navbar .workspace-board-link-icon {
+  display: inline-flex;
+  width: 14px;
+  height: 14px;
+}
+
+/* Layout */
+main.container {
+  padding-top: 32px;
+  padding-bottom: 64px;
+}
+main.container.auth-page-shell {
+  padding-top: 0;
+  padding-bottom: 0;
+}
+
+/* Post list */
+.post-list {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  margin-top: 20px;
+}
+.post-list .path {
+  display: block;
+  font-family: var(--mono);
+  font-size: 0.78rem;
+  color: var(--text-muted);
+  margin-top: 2px;
+}
+
+/* Article (rendered markdown) */
+.article :first-child { margin-top: 0; }
+.article img { max-width: 100%; height: auto; }
+
+/* ---------- Nuvyn notice cards: Alerts + Markdown Containers ----------
+   Alerts and custom containers have different Markdown syntax, but they share
+   one quiet pastel-card surface. Type names are fixed by their parsers; no
+   author value is interpolated into CSS. */
+.article .callout,
+.article .markdown-container {
+  --notice-bg: #f1f2f4;
+  box-sizing: border-box;
+  width: auto;
+  margin: 1rem 0;
+  padding: 0.75rem 1rem;
+  border: 0;
+  border-radius: 0.75rem;
+  background: var(--notice-bg);
+  box-shadow: none;
+  color: var(--vs-text-1, var(--text));
+  font-size: 0.875rem;
+  line-height: 1.5;
+}
+.article .callout-note,
+.article .markdown-container-info,
+.article .markdown-container-details {
+  --notice-bg: #f1f2f4;
+}
+.article .callout-tip,
+.article .markdown-container-tip {
+  --notice-bg: #eef0ff;
+}
+.article .callout-important {
+  --notice-bg: #f3edff;
+}
+.article .callout-warning,
+.article .markdown-container-warning {
+  --notice-bg: #fff7e3;
+}
+.article .callout-caution,
+.article .markdown-container-danger {
+  --notice-bg: #ffe9ec;
+}
+.article .callout-title,
+.article .markdown-container-title {
+  margin: 0 0 0.35rem;
+  color: var(--vs-text-1, var(--text-h));
+  font-size: 0.875rem;
+  font-weight: 700;
+  line-height: 1.4;
+}
+.article .callout-content { color: inherit; }
+.article .callout-content > :first-child { margin-top: 0; }
+.article .callout-content > :last-child { margin-bottom: 0; }
+.article .markdown-container > .markdown-container-title + :not(.markdown-container-title) {
+  margin-top: 0;
+}
+.article .markdown-container > :last-child { margin-bottom: 0; }
+.article .markdown-container-details > summary {
+  cursor: pointer;
+  list-style-position: inside;
+}
+.article .markdown-container-details:not([open]) > summary.markdown-container-title {
+  margin-bottom: 0;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme='light']) .article .callout-note,
+  :root:not([data-theme='light']) .article .markdown-container-info,
+  :root:not([data-theme='light']) .article .markdown-container-details {
+    --notice-bg: #24262b;
+  }
+  :root:not([data-theme='light']) .article .callout-tip,
+  :root:not([data-theme='light']) .article .markdown-container-tip {
+    --notice-bg: #22263a;
+  }
+  :root:not([data-theme='light']) .article .callout-important {
+    --notice-bg: #292338;
+  }
+  :root:not([data-theme='light']) .article .callout-warning,
+  :root:not([data-theme='light']) .article .markdown-container-warning {
+    --notice-bg: #30291d;
+  }
+  :root:not([data-theme='light']) .article .callout-caution,
+  :root:not([data-theme='light']) .article .markdown-container-danger {
+    --notice-bg: #352226;
+  }
+}
+:root[data-theme='dark'] .article .callout-note,
+:root[data-theme='dark'] .article .markdown-container-info,
+:root[data-theme='dark'] .article .markdown-container-details {
+  --notice-bg: #24262b;
+}
+:root[data-theme='dark'] .article .callout-tip,
+:root[data-theme='dark'] .article .markdown-container-tip {
+  --notice-bg: #22263a;
+}
+:root[data-theme='dark'] .article .callout-important {
+  --notice-bg: #292338;
+}
+:root[data-theme='dark'] .article .callout-warning,
+:root[data-theme='dark'] .article .markdown-container-warning {
+  --notice-bg: #30291d;
+}
+:root[data-theme='dark'] .article .callout-caution,
+:root[data-theme='dark'] .article .markdown-container-danger {
+  --notice-bg: #352226;
+}
+
+/* Nuvyn code groups keep every panel in the DOM. The small reader enhancer
+   only changes the selected tab/panel state; all visual state therefore
+   remains CSS-driven and survives theme changes without Markdown rerendering. */
+.article .nuvyn-code-group {
+  box-sizing: border-box;
+  margin: 1.1em 0;
+  border: 1px solid var(--vs-border, var(--border));
+  border-radius: 5px;
+  background: var(--vs-bg-1, var(--bg));
+  overflow: hidden;
+}
+.article .nuvyn-code-group-tabs {
+  display: flex;
+  gap: 0.15rem;
+  overflow-x: auto;
+  padding: 0.35rem 0.45rem 0;
+  border-bottom: 1px solid var(--vs-border, var(--border));
+  background: var(--vs-bg-2, var(--bg-soft));
+}
+.article .nuvyn-code-group-tab {
+  flex: 0 0 auto;
+  margin: 0;
+  padding: 0.4rem 0.7rem;
+  border: 0;
+  border-bottom: 2px solid transparent;
+  border-radius: 3px 3px 0 0;
+  background: transparent;
+  color: var(--vs-text-2, var(--text-muted));
+  font: 0.82rem/1.35 var(--mono);
+  cursor: pointer;
+  white-space: nowrap;
+}
+.article .nuvyn-code-group-tab:hover {
+  color: var(--vs-text-1, var(--text));
+  background: var(--vs-hover-bg, var(--bg-soft));
+}
+.article .nuvyn-code-group-tab.is-active {
+  border-bottom-color: var(--vs-accent, var(--accent));
+  color: var(--vs-text-1, var(--text-h));
+}
+.article .nuvyn-code-group-tab:focus-visible {
+  position: relative;
+  z-index: 1;
+}
+.article .nuvyn-code-group-panels {
+  min-width: 0;
+}
+.article .nuvyn-code-group-panel {
+  min-width: 0;
+}
+.article .nuvyn-code-group-panel:not(.is-active) {
+  display: none;
+}
+.article .nuvyn-code-group-panel.is-active {
+  display: block;
+}
+
+.empty {
+  color: var(--text-muted);
+  font-style: italic;
+}
+
+/* Vault: 3-pane layout */
+.vault {
+  display: grid;
+  grid-template-rows: 1fr;
+  gap: 0;
+  background: var(--border);
+  height: calc(100vh - var(--navbar-h, 56px));
+  outline: none;
+  /* Override Nuvyn tokens with VSCode-style tokens inside vault */
+  --vs-bg-1: #1e1e1e;
+  --vs-bg-2: #252526;
+  --vs-bg-3: #333333;
+  --vs-bg-4: #2d2d2d;
+  --vs-tabs-bg: #1a1a1a;
+  --vs-border: #3c3c3c;
+  --vs-text-1: #d4d4d4;
+  --vs-text-2: #858585;
+  --vs-text-3: #6a6a6a;
+  --vs-accent: #007acc;
+  --vs-accent-hover: #1f8ad2;
+  --vs-accent-bg: rgba(0, 122, 204, 0.2);
+  --vs-active-bg: #37373d;
+  --vs-tab-active-bg: #1e1e1e;
+  --vs-tab-inactive-bg: #373737;
+  --vs-hover-bg: #2a2d2e;
+  --vs-status-bg: #007acc;
+  --vs-status-fg: #ffffff;
+  /* Subtler border for table internals. Between --vs-bg-2 (#252526)
+     and --vs-border (#3c3c3c) so cell dividers read as quiet grid
+     lines instead of a heavy ruled table. */
+  --vs-table-border: #2e2e2e;
+}
+@media (prefers-color-scheme: light) {
+  .vault {
+    --vs-bg-1: #ffffff;
+    --vs-bg-2: #f3f3f3;
+    --vs-bg-3: #dddddd;
+    --vs-bg-4: #ececec;
+    --vs-tabs-bg: #f7f7f7;
+    --vs-border: #e0e0e0;
+    --vs-text-1: #1f1f1f;
+    --vs-text-2: #6f6f6f;
+    --vs-text-3: #6b6b6b;   /* was #999999 — that was 2.85:1 on white,
+                                failing WCAG AA (4.5:1). #6b6b6b is ~5.1:1. */
+    --vs-accent: #005fb8;
+    --vs-accent-hover: #0258a8;
+    --vs-accent-bg: rgba(0, 95, 184, 0.1);
+    --vs-active-bg: #e8e8e8;
+    --vs-tab-active-bg: #ffffff;
+    --vs-tab-inactive-bg: #ececec;
+    --vs-hover-bg: #ececec;
+    --vs-status-bg: #005fb8;
+    --vs-status-fg: #ffffff;
+    --vs-table-border: #d8d8d8;
+    --code-bg: #f3f4f6;
+  }
+}
+.vault {
+  /* Re-bind Nuvyn tokens to VSCode palette so existing components
+     (FileTree, EditorPane, ReadingPane) inherit VSCode colors. */
+  --text: var(--vs-text-1);
+  --text-h: var(--vs-text-1);
+  --text-muted: var(--vs-text-2);
+  --bg: var(--vs-bg-1);
+  --bg-soft: var(--vs-bg-2);
+  --border: var(--vs-border);
+  --code-bg: #2a2a2a; /* dark vault; overridden in light scheme below */
+  --accent: var(--vs-accent);
+  --accent-hover: var(--vs-accent-hover);
+  --accent-bg: var(--vs-accent-bg);
+}
+
+/* On compact screens Calendar Home uses the full content canvas. Ledger uses
+   the same compact App Shell navbar, while its body remains a normal
+   scrollable workspace; these rules only keep the shared scope navigation
+   compact on narrow screens. */
+@media (max-width: 900px) {
+  .navbar.is-vault.diary-calendar-mode .navbar-inner {
+    gap: 8px;
+    padding-left: 6px;
+    padding-right: 4px;
+  }
+
+  .navbar.is-vault.diary-calendar-mode .brand-wordmark,
+  .navbar.is-vault.diary-calendar-mode .scope-chip-label {
+    display: none;
+  }
+
+  .navbar.is-vault.diary-calendar-mode .scope-chips {
+    gap: 0;
+    margin-left: 0;
+  }
+
+  .navbar.is-vault.diary-calendar-mode .scope-chip {
+    padding-left: 5px;
+    padding-right: 5px;
+  }
+
+  .navbar.is-vault.diary-calendar-mode .nav-actions {
+    flex-shrink: 0;
+    gap: 2px;
+  }
+
+}
+
+/* The shared workspace navbar keeps the full set of navigation actions on
+   desktop, but its fixed-size controls cannot all coexist with text labels
+   at phone widths. Preserve each action and the Board route while switching
+   the low-priority labels to icon-only affordances. The right rail is already
+   hidden by the mobile native-document layout, so its navbar toggle has no
+   useful target in this range. */
+@media (max-width: 600px) {
+  .navbar.is-workspace .navbar-inner {
+    gap: 8px;
+    padding-left: 6px;
+    padding-right: 4px;
+  }
+
+  .navbar.is-workspace .brand-wordmark,
+  .navbar.is-workspace .scope-chip-label,
+  .navbar.is-workspace .workspace-board-link-label {
+    display: none;
+  }
+
+  .navbar.is-workspace .scope-chips {
+    gap: 0;
+    min-width: 0;
+  }
+
+  .navbar.is-workspace .workspace-navigation {
+    gap: 0;
+    margin-left: 0;
+  }
+
+  .navbar.is-workspace .nav-workspace-link {
+    padding-left: 5px;
+    padding-right: 5px;
+  }
+
+  .navbar.is-workspace .workspace-board-link {
+    display: inline-flex;
+    width: 28px;
+    min-width: 28px;
+    padding-left: 0;
+    padding-right: 0;
+  }
+
+  .navbar.is-workspace .workspace-board-link-icon {
+    display: inline-flex;
+  }
+
+  .navbar.is-workspace .nav-actions {
+    gap: 2px;
+  }
+
+  .navbar.is-vault.diary-calendar-mode .right-rail-toggle {
+    display: none;
+  }
+}
+
+/* Native Diary documents use the ordinary Vault chrome. On phone widths the
+   persisted desktop side+right-rail tracks cannot coexist without document
+   overflow, so keep the exact-context FileTree compact and temporarily hide
+   the right rail visually. Its open/collapsed state is not mutated and is
+   restored automatically when the viewport grows or Diary context ends.
+   `side-panel-open` mirrors the existing useVaultLayout state so a closed
+   Files/Tags/History panel does not retain phantom sidebar tracks. */
+@media (max-width: 600px) {
+  .vault.diary-native-document-mode.side-panel-open {
+    grid-template-columns: 40px minmax(136px, 42vw) 1px minmax(0, 1fr) !important;
+  }
+
+  .vault.diary-native-document-mode:not(.side-panel-open) {
+    grid-template-columns: 40px minmax(0, 1fr) !important;
+  }
+
+  .vault.diary-native-document-mode > .splitter-toc,
+  .vault.diary-native-document-mode > .right-rail-slot {
+    display: none !important;
+  }
+}
+
+/* Activity Bar */
+.activity-bar {
+  background: var(--vs-bg-3);
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  padding: 0;
+  gap: 0;
+  border-right: 1px solid var(--vs-border);
+}
+.account-menu-root {
+  position: relative;
+  z-index: 2;
+  flex: 0 0 36px;
+}
+.account-menu-root .ab-btn-account[aria-expanded='true'] {
+  color: var(--vs-text-1, var(--text-h));
+  background: var(--vs-hover-bg, var(--bg-soft));
+}
+.account-popover {
+  position: absolute;
+  left: calc(100% + 8px);
+  bottom: 8px;
+  width: 200px;
+  box-sizing: border-box;
+  padding: 6px;
+  color: var(--vs-text-1, var(--text-h));
+  background: var(--vs-bg-1, var(--bg));
+  border: 1px solid var(--vs-border, var(--border));
+  border-radius: 7px;
+  box-shadow: 0 10px 24px color-mix(in srgb, var(--vs-text-1, var(--text-h)) 20%, transparent);
+  z-index: 1000;
+}
+.account-menu-summary {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 0;
+  padding: 5px 8px 7px;
+}
+.account-menu-summary-label {
+  color: var(--vs-text-2, var(--text-muted));
+  font-size: 0.68rem;
+  line-height: 1.25;
+}
+.account-menu-username {
+  overflow: hidden;
+  color: var(--vs-text-1, var(--text-h));
+  font-size: 0.78rem;
+  line-height: 1.35;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.account-menu-divider {
+  height: 1px;
+  margin: 0 2px 4px;
+  background: var(--vs-border, var(--border));
+}
+.account-menu-item {
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 8px;
+  width: 100%;
+  min-height: 32px;
+  padding: 0 8px;
+  color: var(--vs-text-1, var(--text-h));
+  font: inherit;
+  font-size: 0.76rem;
+  text-align: left;
+  background: transparent;
+  border: 0;
+  border-radius: 5px;
+  cursor: pointer;
+}
+.account-menu-item:hover:not(:disabled) {
+  color: var(--vs-text-1, var(--text-h));
+  background: var(--vs-hover-bg, var(--bg-soft));
+}
+.account-menu-item[data-testid='account-logout']:hover:not(:disabled) {
+  color: var(--vs-danger, #d73a49);
+  background: color-mix(in srgb, var(--vs-danger, #d73a49) 10%, transparent);
+}
+.account-menu-item:disabled,
+.account-menu-root .ab-btn:disabled {
+  cursor: wait;
+  opacity: 0.6;
+}
+.account-menu-item-icon {
+  display: inline-flex;
+  flex: 0 0 14px;
+  align-items: center;
+  justify-content: center;
+}
+.account-menu-item-icon svg {
+  display: block;
+  width: 14px;
+  height: 14px;
+}
+
+/* In the global navbar AccountMenu behaves like the other 28px icon actions
+   rather than reserving the ActivityBar's former 36px column. */
+.nav-actions .account-menu-root {
+  flex: 0 0 28px;
+}
+.nav-actions .account-menu-root .ab-btn-account {
+  border-left: 1px solid transparent;
+  color: var(--text-muted);
+}
+.nav-actions .account-menu-root .ab-btn-account:hover {
+  color: var(--text-h);
+  border-color: var(--border);
+  background: var(--bg-soft);
+}
+.nav-actions .account-menu-root .account-popover {
+  top: calc(100% + 7px);
+  right: 0;
+  bottom: auto;
+  left: auto;
+}
+
+/* History is a commit-first timeline in the standard side-panel column. */
+.vault .side-panel-history {
+  display: flex;
+  flex-direction: column;
+  background: var(--vs-bg-1);
+  border-right: 1px solid var(--vs-border);
+  overflow: hidden;
+}
+.vault .side-panel-history .side-panel-header {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  padding: 0 10px;
+  height: 36px;
+  box-sizing: border-box;
+  font-size: 0.78rem;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  color: var(--vs-text-2);
+  background: var(--vs-bg-2);
+  border-bottom: 1px solid var(--vs-border);
+}
+
+/* === HistoryPanel (real, replaces the old placeholder) === */
+.history-panel {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  width: 100%;
+  min-height: 0;
+  min-width: 0;
+  background: var(--vs-bg-1);
+  overflow: hidden;
+  height: 100%;
+}
+.history-subtitle {
+  font-weight: 400;
+  color: var(--vs-text-3);
+  font-size: 0.7rem;
+  font-variant-numeric: tabular-nums;
+}
+.history-empty,
+.history-empty-inline {
+  padding: 14px 12px;
+  font-size: 0.8rem;
+  color: var(--vs-text-3);
+}
+.history-empty-inline {
+  font-style: italic;
+  background: color-mix(in srgb, var(--vs-bg-1) 88%, var(--vs-bg-2));
+}
+
+.history-error {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  flex-shrink: 0;
+  padding: 8px 12px;
+  background: color-mix(in srgb, #ef4444 12%, var(--vs-bg-1));
+  color: var(--vs-text-1);
+  font-size: 0.78rem;
+  border-top: 1px solid var(--vs-border);
+  border-left: 2px solid #ef4444;
+}
+.history-error button {
+  flex-shrink: 0;
+  min-height: 26px;
+  padding: 0 9px;
+  border: 1px solid color-mix(in srgb, var(--vs-border) 82%, transparent);
+  border-radius: 5px;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
+.history-error button:hover { background: var(--vs-hover-bg); }
+
+/* Commit-first History timeline. History remains one quiet, continuous sidebar. */
+.history-create-section {
+  box-sizing: border-box;
+  width: 100%;
+  min-height: 0;
+  min-width: 0;
+  border-bottom: 1px solid color-mix(in srgb, var(--vs-border) 78%, transparent);
+  background: var(--vs-bg-1);
+}
+.history-changes {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  min-width: 0;
+}
+.history-changes-header,
+.history-timeline-heading {
+  box-sizing: border-box;
+  width: 100%;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  min-height: 32px;
+  padding: 0 9px;
+  gap: 6px;
+  color: var(--vs-text-2);
+  font-size: 0.7rem;
+  font-weight: 600;
+}
+.history-changes-header h2 { margin: 0; font: inherit; }
+.history-changes-header { min-height: 35px; }
+.history-changes-header > span:not(.history-changes-actions) {
+  min-width: 18px;
+  padding: 1px 5px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--vs-text-3) 10%, transparent);
+  color: var(--vs-text-3);
+  font-size: 0.64rem;
+  font-variant-numeric: tabular-nums;
+  text-align: center;
+}
+.history-changes-actions { display: inline-flex; flex: 0 0 auto; gap: 2px; margin-left: auto; }
+.history-changes-actions button {
+  min-height: 24px;
+  padding: 0 5px;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--vs-text-2);
+  font: inherit;
+  cursor: pointer;
+}
+.history-changes-actions button:hover:not(:disabled) { background: var(--vs-hover-bg); color: var(--vs-text-1); }
+.history-changes-actions button:disabled { opacity: 0.45; cursor: default; }
+.history-changes-list {
+  box-sizing: border-box;
+  width: 100%;
+  max-height: 180px;
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  border-top: 1px solid color-mix(in srgb, var(--vs-border) 50%, transparent);
+  overflow-y: auto;
+  list-style: none;
+}
+.history-change-row {
+  display: flex;
+  flex-wrap: nowrap;
+  align-items: center;
+  position: relative;
+  box-sizing: border-box;
+  gap: 5px;
+  width: 100%;
+  min-height: 30px;
+  padding: 3px 8px;
+  color: var(--vs-text-1);
+  font: inherit;
+  font-size: 0.84rem;
+  line-height: 1.35;
+  overflow: hidden;
+}
+.history-change-row::before {
+  position: absolute;
+  z-index: 0;
+  inset: 0;
+  background: transparent;
+  content: '';
+  pointer-events: none;
+}
+.history-change-row:hover::before { background: var(--vs-hover-bg); }
+.history-change-row.active::before { background: var(--vs-active-bg); }
+.history-change-row > * { position: relative; z-index: 1; }
+.history-change-row input { flex: 0 0 auto; margin: 0; accent-color: var(--vs-accent); }
+.history-change-open {
+  display: flex;
+  align-items: center;
+  flex: 1 1 auto;
+  gap: 5px;
+  min-width: 0;
+  min-height: 24px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.history-change-open .n-button__content {
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+  width: 100%;
+  min-width: 0;
+}
+.history-change-open:focus-visible { outline: 1px solid color-mix(in srgb, var(--vs-accent) 72%, transparent); outline-offset: 2px; }
+.history-change-copy { display: flex; flex: 1 1 auto; min-width: 0; align-items: center; }
+.history-change-copy strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.history-change-copy strong { color: var(--vs-text-1); font-size: inherit; font-weight: 450; }
+.history-change-status {
+  flex: 0 0 auto;
+  padding: 2px 6px;
+  border: 1px solid transparent;
+  border-radius: 999px;
+  font-size: 0.62rem;
+  font-weight: 500;
+  line-height: 1.2;
+}
+.history-change-status.is-new {
+  border-color: color-mix(in srgb, #16a34a 24%, transparent);
+  background: color-mix(in srgb, #16a34a 10%, transparent);
+  color: color-mix(in srgb, #16a34a 82%, var(--vs-text-1));
+}
+.history-change-status.is-modified {
+  border-color: color-mix(in srgb, var(--vs-accent) 24%, transparent);
+  background: color-mix(in srgb, var(--vs-accent) 10%, transparent);
+  color: color-mix(in srgb, var(--vs-accent) 82%, var(--vs-text-1));
+}
+.history-change-status.is-deleted {
+  border-color: color-mix(in srgb, #ef4444 24%, transparent);
+  background: color-mix(in srgb, #ef4444 9%, transparent);
+  color: color-mix(in srgb, #ef4444 82%, var(--vs-text-1));
+}
+.history-changes-empty { padding: 7px 9px 11px; color: var(--vs-text-3); font-size: 0.74rem; }
+.history-version-composer {
+  box-sizing: border-box;
+  display: grid;
+  width: 100%;
+  min-width: 0;
+  gap: 7px;
+  padding: 9px 10px 11px;
+  border-top: 1px solid color-mix(in srgb, var(--vs-border) 62%, transparent);
+  background: color-mix(in srgb, var(--vs-bg-2) 22%, var(--vs-bg-1));
+}
+.history-version-message-field {
+  position: relative;
+  min-width: 0;
+}
+.history-version-composer textarea {
+  box-sizing: border-box;
+  width: 100%;
+  max-width: 100%;
+  min-height: 46px;
+  resize: vertical;
+  padding: 7px 8px;
+  border: 1px solid color-mix(in srgb, var(--vs-border) 88%, transparent);
+  border-radius: 5px;
+  background: var(--vs-bg-1);
+  color: var(--vs-text-1);
+  font: inherit;
+  font-size: 0.76rem;
+  line-height: 1.4;
+  transition: border-color 120ms ease, box-shadow 120ms ease;
+}
+.history-version-composer .history-version-message-input { padding-right: 76px; }
+.history-version-composer textarea::placeholder { color: var(--vs-text-3); opacity: 0.75; }
+.history-version-composer textarea:focus {
+  border-color: color-mix(in srgb, var(--vs-accent) 72%, var(--vs-border));
+  outline: none;
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--vs-accent) 14%, transparent);
+}
+.history-generate-message {
+  position: absolute;
+  top: 5px;
+  right: 5px;
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  min-height: 24px;
+  max-width: calc(100% - 10px);
+  padding: 0 5px;
+  border: 0;
+  border-radius: 4px;
+  background: color-mix(in srgb, var(--vs-bg-2) 72%, transparent);
+  color: var(--vs-text-2);
+  font: inherit;
+  font-size: 0.66rem;
+  cursor: pointer;
+}
+.history-generate-message-icon { display: inline-flex; flex: 0 0 14px; }
+.history-generate-message-icon :where(svg) { display: block; width: 14px; height: 14px; }
+.history-generate-message:hover:not(:disabled) { background: var(--vs-hover-bg); color: var(--vs-accent); }
+.history-generate-message:focus-visible { outline: 1px solid color-mix(in srgb, var(--vs-accent) 72%, transparent); outline-offset: 1px; }
+.history-generate-message:disabled { cursor: default; opacity: 0.5; }
+.history-create-version {
+  box-sizing: border-box;
+  width: 100%;
+  min-height: 30px;
+  border: 1px solid color-mix(in srgb, var(--vs-accent) 70%, var(--vs-border));
+  border-radius: 5px;
+  background: var(--vs-accent);
+  color: #fff;
+  font: inherit;
+  font-size: 0.74rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: filter 120ms ease, opacity 120ms ease;
+}
+.history-create-version:hover:not(:disabled) { filter: brightness(1.08); }
+.history-create-version:disabled {
+  border-color: color-mix(in srgb, var(--vs-border) 86%, transparent);
+  background: color-mix(in srgb, var(--vs-text-3) 12%, var(--vs-bg-2));
+  color: var(--vs-text-3);
+  cursor: default;
+  opacity: 1;
+}
+.history-commit-error { color: #ef4444; font-size: 0.7rem; line-height: 1.35; }
+.history-timeline-section { display: flex; width: 100%; min-height: 0; min-width: 0; overflow: hidden; flex-direction: column; }
+.history-timeline-heading {
+  min-height: 32px;
+  padding: 0 10px;
+  border-bottom: 1px solid color-mix(in srgb, var(--vs-border) 55%, transparent);
+  background: var(--vs-bg-1);
+}
+.history-timeline-heading h2 { margin: 0; font: inherit; }
+.history-timeline-heading:focus-visible {
+  outline: 1px solid color-mix(in srgb, var(--vs-accent) 72%, transparent);
+  outline-offset: -1px;
+}
+.history-file-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 16px;
+  width: 16px;
+  height: 16px;
+  color: var(--vs-text-2);
+}
+.history-file-icon :where(svg) {
+  display: block;
+  width: 16px;
+  height: 16px;
+}
+.history-timeline-scroll {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 0 0 12px;
+  scrollbar-width: thin;
+  scrollbar-color: transparent transparent;
+}
+.history-timeline-scroll:hover { scrollbar-color: var(--sb-thumb) transparent; }
+.history-timeline-scroll::-webkit-scrollbar { width: var(--sb-size); }
+.history-timeline-scroll::-webkit-scrollbar-track { background: transparent; }
+.history-timeline-scroll::-webkit-scrollbar-thumb {
+  border-radius: var(--sb-size);
+  background: transparent;
+}
+.history-timeline-scroll:hover::-webkit-scrollbar-thumb { background: var(--sb-thumb); }
+.history-timeline-scroll::-webkit-scrollbar-thumb:hover { background: var(--sb-thumb-hover); }
+.history-timeline-group-header,
+.history-commit-row,
+.history-file-commit-row,
+.history-file-row {
+  box-sizing: border-box;
+  width: 100%;
+  border: 0;
+  color: var(--vs-text-1);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.history-timeline-group-header {
+  display: flex;
+  align-items: center;
+  min-height: 30px;
+  padding: 3px 8px;
+  gap: 5px;
+  background: transparent;
+  transition: background 100ms, color 100ms;
+}
+.history-timeline-group-header:hover { background: var(--vs-hover-bg); }
+.history-timeline-group-header .n-button__content,
+.history-commit-row .n-button__content,
+.history-file-row .n-button__content {
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+  width: 100%;
+  min-width: 0;
+}
+.history-timeline-group-title {
+  flex: 1 1 auto;
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  overflow: hidden;
+  color: var(--vs-text-1);
+  font-size: 0.84rem;
+  font-weight: 550;
+  line-height: 1.35;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.history-timeline-count { flex: 0 0 auto; color: var(--vs-text-3); font-size: 0.62rem; font-weight: 500; }
+.history-disclosure {
+  display: inline-flex;
+  flex: 0 0 14px;
+  align-items: center;
+  justify-content: center;
+  color: var(--vs-text-3);
+  transition: transform 120ms ease;
+}
+.history-disclosure.expanded { transform: rotate(90deg); }
+.history-disclosure svg { display: block; }
+.history-timeline-group-items {
+  display: flex;
+  flex-direction: column;
+}
+.history-commit-row {
+  position: relative;
+  display: flex;
+  align-items: center;
+  min-height: 30px;
+  padding: 3px 8px 3px 19px;
+  gap: 5px;
+  background: transparent;
+  transition: background 100ms, color 100ms;
+}
+.history-commit-row::after {
+  position: absolute;
+  z-index: 1;
+  top: 3px;
+  bottom: 3px;
+  left: 8px;
+  width: 1px;
+  background: transparent;
+  content: '';
+  pointer-events: none;
+}
+.history-commit-row:hover::after,
+.history-commit-row:has(+ .history-file-list:hover)::after {
+  background: color-mix(in srgb, var(--vs-text-3) 32%, transparent);
+}
+.history-file-commit-row {
+  display: flex;
+  align-items: center;
+  min-height: 40px;
+  padding: 5px 12px;
+  gap: 7px;
+  background: transparent;
+}
+.history-file-commit-row:hover { background: var(--vs-hover-bg); }
+.history-file-commit-row.selected {
+  box-shadow: inset 2px 0 var(--vs-accent);
+  background: color-mix(in srgb, var(--vs-accent) 10%, var(--vs-bg-1));
+}
+.history-file-commit-row.selected .history-commit-marker { color: var(--vs-accent); }
+.history-commit-row:hover { background: var(--vs-hover-bg); }
+.history-commit-row .history-row-title {
+  flex: 1 1 auto;
+  min-width: 0;
+  font-size: 0.84rem;
+  font-weight: 550;
+  line-height: 1.35;
+}
+.history-commit-row .history-row-meta {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.history-file-commit-row .history-commit-marker {
+  display: inline-flex;
+  flex: 0 0 16px;
+  align-items: center;
+  justify-content: center;
+  color: var(--vs-text-3);
+}
+.history-file-list {
+  padding: 0;
+  background: transparent;
+}
+.history-file-row::after {
+  position: absolute;
+  z-index: 1;
+  top: 3px;
+  bottom: 3px;
+  left: 19px;
+  width: 1px;
+  background: transparent;
+  content: '';
+  pointer-events: none;
+}
+.history-file-row:hover::after {
+  background: color-mix(in srgb, var(--vs-text-3) 32%, transparent);
+}
+.history-file-row {
+  position: relative;
+  display: flex;
+  align-items: center;
+  width: 100%;
+  min-height: 30px;
+  padding: 3px 8px 3px 33px;
+  gap: 5px;
+  background: transparent;
+  font-size: 0.84rem;
+  line-height: 1.35;
+  cursor: pointer;
+  user-select: none;
+  transition: background 100ms, color 100ms;
+}
+.history-file-row:hover { background: var(--vs-hover-bg); }
+.history-file-row.active { background: var(--vs-active-bg); }
+.history-file-row.active .history-file-icon { color: var(--vs-text-1); }
+.history-file-chevron-spacer {
+  display: inline-flex;
+  flex: 0 0 14px;
+  width: 14px;
+  height: 14px;
+}
+.history-file-label {
+  display: flex;
+  flex: 1 1 auto;
+  align-items: baseline;
+  min-width: 0;
+  overflow: hidden;
+  gap: 6px;
+}
+.history-file-title {
+  flex: 1 1 0;
+  min-width: 0;
+  overflow: hidden;
+  font-size: 0.84rem;
+  font-weight: 450;
+  line-height: 1.35;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.history-file-path {
+  flex: 0 1 42%;
+  min-width: 0;
+  overflow: hidden;
+  color: var(--vs-text-3);
+  font-family: var(--mono, ui-monospace, SFMono-Regular, Menlo, monospace);
+  font-size: 0.66rem;
+  font-weight: 400;
+  line-height: 1.1;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.history-timeline-group-header:focus-visible,
+.history-commit-row:focus-visible,
+.history-file-commit-row:focus-visible {
+  position: relative;
+  z-index: 1;
+  outline: 2px solid color-mix(in srgb, var(--vs-accent) 72%, transparent);
+  outline-offset: -2px;
+}
+.history-file-row:focus-visible {
+  position: relative;
+  z-index: 2;
+  outline: 1px solid color-mix(in srgb, var(--vs-accent) 72%, transparent);
+  outline-offset: -1px;
+}
+.history-row-copy {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  flex: 1 1 auto;
+  gap: 1px;
+}
+.history-row-title {
+  overflow: hidden;
+  color: var(--vs-text-1);
+  font-size: 0.8rem;
+  font-weight: 500;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.history-row-meta {
+  color: var(--vs-text-3);
+  font-size: 0.66rem;
+  font-variant-numeric: tabular-nums;
+  line-height: 1.3;
+}
+.history-panel .history-empty-inline {
+  padding: 18px 10px;
+  background: transparent;
+  font-style: normal;
+}
+.history-file-heading {
+  flex: 0 0 auto;
+}
+.history-back-button {
+  flex: 0 0 auto;
+  min-height: 24px;
+  padding: 0 5px;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--vs-accent);
+  font: inherit;
+  font-size: 0.7rem;
+  cursor: pointer;
+}
+.history-back-button:hover { background: var(--vs-hover-bg); }
+.history-back-button:focus-visible {
+  outline: 2px solid color-mix(in srgb, var(--vs-accent) 72%, transparent);
+  outline-offset: 1px;
+}
+.history-file-heading h2 {
+  flex: 1 1 auto;
+  min-width: 0;
+  margin: 0;
+  overflow: hidden;
+  color: var(--vs-text-1);
+  font: inherit;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.history-skeleton {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px;
+}
+.history-skeleton-row {
+  display: block;
+  width: 72%;
+  height: 30px;
+  border-radius: 4px;
+  background: color-mix(in srgb, var(--vs-text-3) 10%, transparent);
+  animation: history-skeleton-pulse 1.2s ease-in-out infinite alternate;
+}
+.history-skeleton-row:nth-child(2n) { width: 58%; }
+@keyframes history-skeleton-pulse {
+  to { background: color-mix(in srgb, var(--vs-text-3) 18%, transparent); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .history-skeleton-row { animation: none; }
+}
+
+.history-viewer-header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 46px;
+  box-sizing: border-box;
+  padding: 7px 18px;
+  border-bottom: 1px solid color-mix(in srgb, var(--vs-border) 72%, transparent);
+}
+.history-viewer-heading {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  gap: 1px;
+}
+.history-viewer-heading h2 {
+  margin: 0;
+  color: var(--vs-text-1);
+  font-size: 0.78rem;
+  font-weight: 600;
+  letter-spacing: 0;
+}
+.history-viewer-heading h2:focus-visible {
+  outline: none;
+  color: var(--vs-accent);
+}
+.history-viewer-heading span {
+  overflow: hidden;
+  color: var(--vs-text-3);
+  font-size: 0.68rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.history-viewer-toolbar button {
+  min-height: 28px;
+  padding: 0 9px;
+  border: 1px solid color-mix(in srgb, var(--vs-border) 82%, transparent);
+  border-radius: 5px;
+  background: transparent;
+  color: var(--vs-text-2);
+  font: inherit;
+  font-size: 0.72rem;
+  cursor: pointer;
+}
+.history-viewer-toolbar button:hover:not(:disabled) {
+  border-color: color-mix(in srgb, var(--vs-accent) 45%, var(--vs-border));
+  background: var(--vs-hover-bg);
+  color: var(--vs-text-1);
+}
+.history-viewer-toolbar button:focus-visible {
+  outline: 1px solid color-mix(in srgb, var(--vs-accent) 72%, transparent);
+  outline-offset: 2px;
+}
+.history-viewer-meta {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 34px;
+  box-sizing: border-box;
+  padding: 5px 18px;
+  border-bottom: 1px solid color-mix(in srgb, var(--vs-border) 48%, transparent);
+  color: var(--vs-text-3);
+  font-size: 0.68rem;
+  font-variant-numeric: tabular-nums;
+}
+.history-diff-summary-text {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.history-readonly-badge {
+  flex-shrink: 0;
+  margin-left: auto;
+  padding: 1px 6px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--vs-text-3) 12%, transparent);
+  color: var(--vs-text-2);
+  font-size: 0.64rem;
+}
+.history-viewer-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-left: 0;
+}
+.history-viewer-toolbar button:disabled {
+  cursor: not-allowed;
+  opacity: 0.45;
+}
+.history-diff-state {
+  display: grid;
+  place-items: center start;
+  min-height: 0;
+  color: var(--vs-text-3);
+  font-size: 0.82rem;
+  text-align: left;
+}
+.history-diff-state.is-error { color: var(--vs-danger, #c94f4f); }
+.history-diff-error { gap: 10px; }
+.history-diff-error button {
+  min-height: 28px;
+  padding: 0 10px;
+  border: 1px solid color-mix(in srgb, var(--vs-border) 82%, transparent);
+  border-radius: 5px;
+  background: transparent;
+  color: var(--vs-text-2);
+  font: inherit;
+  cursor: pointer;
+}
+.history-diff-error button:hover {
+  background: var(--vs-hover-bg);
+  color: var(--vs-text-1);
+}
+.tab.diff .tab-title { color: var(--vs-text-2); }
+.tab.diff.active .tab-title { color: var(--vs-text-1); }
+
+.history-diff-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 32px;
+  box-sizing: border-box;
+  padding: 3px 12px;
+  border-bottom: 1px solid color-mix(in srgb, var(--vs-border) 72%, transparent);
+}
+.history-diff-title {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  min-width: 0;
+  flex: 1 1 auto;
+}
+.history-diff-title h2 {
+  min-width: 0;
+  overflow: hidden;
+  margin: 0;
+  color: var(--vs-text-1);
+  font-size: 0.76rem;
+  font-weight: 600;
+  line-height: 1.15;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.history-diff-title h2:focus-visible {
+  outline: none;
+  color: var(--vs-accent);
+}
+.history-diff-header-meta {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  margin-left: auto;
+}
+.history-pane-menu-trigger {
+  display: inline-grid;
+  place-items: center;
+  min-width: 22px;
+  min-height: 22px;
+  padding: 0 4px;
+  border: 1px solid color-mix(in srgb, var(--vs-border) 82%, transparent);
+  border-radius: 5px;
+  background: transparent;
+  color: var(--vs-text-2);
+  font: inherit;
+  font-size: 0.9rem;
+  line-height: 1;
+  cursor: pointer;
+}
+.history-pane-menu-trigger:hover { color: var(--vs-text-1); background: var(--vs-hover-bg); }
+.history-pane-menu-trigger:focus-visible {
+  outline: 1px solid color-mix(in srgb, var(--vs-accent) 72%, transparent);
+  outline-offset: 2px;
+}
+.history-pane-menu {
+  position: absolute;
+  top: calc(100% + 4px);
+  right: 0;
+  z-index: 60;
+  display: grid;
+  min-width: 200px;
+  padding: 4px;
+  border: 1px solid color-mix(in srgb, var(--vs-border) 82%, transparent);
+  border-radius: 6px;
+  background: var(--vs-bg-1);
+  color: var(--vs-text-1);
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.18);
+  font-size: 0.82rem;
+}
+.history-pane-menu button {
+  min-height: 30px;
+  padding: 0 12px;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.history-pane-menu button:hover:not(:disabled) { background: var(--vs-hover-bg); }
+.history-pane-menu button:focus-visible {
+  outline: 1px solid color-mix(in srgb, var(--vs-accent) 72%, transparent);
+  outline-offset: -1px;
+}
+.history-pane-menu button:disabled {
+  cursor: not-allowed;
+  opacity: 0.45;
+}
+.history-diff-summary {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 30px;
+  padding: 4px 18px;
+  border-bottom: 1px solid color-mix(in srgb, var(--vs-border) 48%, transparent);
+  color: var(--vs-text-3);
+  font-size: 0.72rem;
+}
+.history-diff-summary-date { font-variant-numeric: tabular-nums; }
+
+.history-comparison-pane {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  width: 100%;
+  height: 100%;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+  background: var(--vs-bg-1);
+}
+.history-comparison-pane.has-summary {
+  grid-template-rows: auto auto minmax(0, 1fr);
+}
+.history-comparison-pane > .unified-diff-scroll,
+.draft-recovery-pane > .unified-diff-scroll {
+  width: 100%;
+  min-height: 0;
+}
+.history-unchanged-view {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+}
+.history-unchanged-notice {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  min-height: 26px;
+  box-sizing: border-box;
+  padding: 4px 10px;
+  border-bottom: 1px solid color-mix(in srgb, var(--vs-border) 30%, transparent);
+  background: transparent;
+  color: var(--vs-text-3);
+  font-size: 0.72rem;
+  line-height: 1.2;
+}
+.history-unchanged-notice-icon {
+  color: color-mix(in srgb, var(--vs-success, #16a34a) 75%, var(--vs-text-1));
+  font-weight: 650;
+}
+
+.unified-diff-scroll,
+.history-unchanged-content {
+  --diff-gutter-width: calc(var(--diff-line-digits, 1) * 1ch + 16px);
+  box-sizing: border-box;
+  width: 100%;
+  min-width: 0;
+  min-height: 0;
+  overflow: auto;
+  background: var(--vs-bg-1);
+  color: var(--vs-text-1);
+  font-family: var(--mono);
+  font-size: 0.78rem;
+  line-height: 1.5;
+  scrollbar-width: thin;
+  scrollbar-color: var(--sb-thumb) transparent;
+}
+.history-unchanged-content {
+  background: transparent;
+}
+.unified-diff-scroll {
+  --diff-add-color: var(--vs-success, #16a34a);
+  --diff-remove-color: var(--vs-danger, #dc2626);
+}
+.unified-diff-scroll:focus-visible,
+.history-unchanged-content:focus-visible {
+  outline: 2px solid color-mix(in srgb, var(--vs-accent) 68%, transparent);
+  outline-offset: -2px;
+}
+.unified-diff-line,
+.history-unchanged-line {
+  display: grid;
+  grid-template-columns: var(--diff-gutter-width) var(--diff-gutter-width) 24px minmax(0, 1fr);
+  align-items: stretch;
+  width: 100%;
+  min-width: 100%;
+  background: var(--vs-bg-1);
+}
+.history-unchanged-line {
+  background: transparent;
+}
+.history-comparison-direction,
+.history-diff-stats {
+  display: inline-flex;
+  align-items: center;
+  flex: 0 0 auto;
+  gap: 5px;
+}
+.history-comparison-direction {
+  color: var(--vs-text-2);
+  font-size: 0.72rem;
+  line-height: 1.1;
+}
+.history-revision-chip {
+  padding: 2px 6px;
+  border: 1px solid color-mix(in srgb, var(--vs-border) 76%, transparent);
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--vs-bg-2) 72%, transparent);
+  color: var(--vs-text-2);
+}
+.history-diff-header .history-revision-chip {
+  padding: 1px 4px;
+  border-radius: 4px;
+  background: transparent;
+  font-size: inherit;
+  line-height: inherit;
+}
+.history-diff-stats {
+  margin-left: auto;
+  font-family: var(--mono);
+  font-size: 0.76rem;
+  font-weight: 600;
+  line-height: 1.1;
+}
+.history-diff-stats .is-added { color: color-mix(in srgb, var(--vs-success, #16a34a) 82%, var(--vs-text-1)); }
+.history-diff-stats .is-removed { color: color-mix(in srgb, var(--vs-danger, #dc2626) 82%, var(--vs-text-1)); }
+@media (max-width: 720px) {
+  .history-viewer-header,
+  .history-viewer-meta { padding-left: 12px; padding-right: 12px; }
+  .history-diff-summary-text { display: none; }
+  .history-diff-stats { margin-left: 0; }
+}
+
+.unified-diff-line.is-add {
+  background: color-mix(in srgb, var(--diff-add-color) 12%, var(--vs-bg-1));
+}
+.unified-diff-line.is-remove {
+  background: color-mix(in srgb, var(--diff-remove-color) 12%, var(--vs-bg-1));
+}
+.unified-diff-gutter,
+.unified-diff-marker {
+  display: block;
+  box-sizing: border-box;
+  min-height: 1.5em;
+  padding: 0 7px;
+  text-align: right;
+  color: var(--vs-text-3);
+  user-select: none;
+  font-variant-numeric: tabular-nums;
+}
+.unified-diff-gutter::before { content: attr(data-line); }
+.unified-diff-old { background: color-mix(in srgb, var(--vs-bg-2) 72%, transparent); }
+.unified-diff-new {
+  background: color-mix(in srgb, var(--vs-bg-2) 48%, transparent);
+  border-right: 1px solid color-mix(in srgb, var(--vs-border) 68%, transparent);
+}
+.unified-diff-marker { padding: 0 5px; text-align: center; font-weight: 700; }
+.unified-diff-marker::before { content: attr(data-marker); }
+.unified-diff-line.is-add .unified-diff-marker { color: var(--diff-add-color); }
+.unified-diff-line.is-remove .unified-diff-marker { color: var(--diff-remove-color); }
+.unified-diff-line.is-add .unified-diff-new {
+  color: color-mix(in srgb, var(--diff-add-color) 82%, var(--vs-text-1));
+  background: color-mix(in srgb, var(--diff-add-color) 16%, var(--vs-bg-2));
+}
+.unified-diff-line.is-remove .unified-diff-old {
+  color: color-mix(in srgb, var(--diff-remove-color) 82%, var(--vs-text-1));
+  background: color-mix(in srgb, var(--diff-remove-color) 16%, var(--vs-bg-2));
+}
+.unified-diff-content,
+.history-unchanged-line-content {
+  box-sizing: border-box;
+  display: block;
+  min-width: 0;
+  min-height: 1.5em;
+  margin: 0;
+  padding: 0 10px 0 7px;
+  overflow-wrap: anywhere;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  white-space: pre-wrap;
+  user-select: text;
+}
+.unified-diff-word { padding: 0; }
+.unified-diff-word-add {
+  border-radius: 2px;
+  background: color-mix(in srgb, var(--diff-add-color) 38%, transparent);
+}
+.unified-diff-word-remove {
+  border-radius: 2px;
+  background: color-mix(in srgb, var(--diff-remove-color) 38%, transparent);
+}
+.unified-diff-word-equal { background: transparent; }
+@media (max-width: 560px) {
+  .unified-diff-scroll,
+  .history-unchanged-content { --diff-gutter-width: calc(var(--diff-line-digits, 1) * 1ch + 10px); }
+  .unified-diff-gutter { padding: 0 4px; }
+  .unified-diff-line,
+  .history-unchanged-line { grid-template-columns: var(--diff-gutter-width) var(--diff-gutter-width) 18px minmax(0, 1fr); }
+  .unified-diff-marker { padding: 0 2px; }
+  .unified-diff-content,
+  .history-unchanged-line-content { padding-right: 6px; }
+}
+
+.ab-btn {
+  width: 100%;
+  height: 36px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: transparent;
+  border: 0;
+  color: var(--vs-text-2);
+  cursor: pointer;
+  border-left: 2px solid transparent;
+  transition: color 0.12s, background 0.12s;
+  position: relative;
+}
+.activity-bar .ab-btn-history { margin-top: auto; margin-bottom: 6px; }
+.ab-btn:hover { color: var(--vs-text-1); background: var(--vs-hover-bg); }
+.activity-bar .ab-btn.active,
+.activity-bar .ab-btn.active:hover {
+  position: relative;
+  color: var(--vs-text-1);
+  background: transparent;
+}
+.activity-bar .ab-btn.active::after {
+  position: absolute;
+  z-index: 0;
+  inset: 4px;
+  border-radius: 5px;
+  background: var(--vs-active-bg);
+  content: '';
+  pointer-events: none;
+}
+.activity-bar .ab-btn.active .n-button__content,
+.activity-bar .ab-btn.active .ab-status-dot {
+  z-index: 1;
+}
+/* Small change indicator anchored to the bottom-right of the activity-bar
+   button. The exact count remains available through the accessible label,
+   while the visual stays quiet at this narrow navigation size. */
+.ab-status-dot {
+  position: absolute;
+  right: 6px;
+  top: 6px;
+  width: 7px;
+  height: 7px;
+  box-sizing: border-box;
+  border: 2px solid var(--bg);
+  border-radius: 50%;
+  background: var(--vs-accent);
+  pointer-events: none;
+}
+
+/* === Settings modal ===
+   The modal is teleported to body, so it derives its layered surfaces
+   from the root theme tokens instead of relying on vault-scoped tokens. */
+
+.settings-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 9997;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-sizing: border-box;
+  padding: 32px;
+  overflow: hidden;
+  background: color-mix(in srgb, var(--bg) 28%, rgba(0, 0, 0, 0.36));
+  -webkit-backdrop-filter: saturate(120%) blur(6px);
+  backdrop-filter: saturate(120%) blur(6px);
+}
+
+/* Keep the transaction sheet's modal mask glassy without changing the
+   appearance of unrelated Naive UI dialogs. */
+body:has(.ledger-sheet-card) .n-modal-mask {
+  background: color-mix(in srgb, var(--bg) 24%, rgba(15, 23, 42, 0.38));
+  -webkit-backdrop-filter: saturate(125%) blur(8px);
+  backdrop-filter: saturate(125%) blur(8px);
+}
+
+body:has(.ledger-detail-sheet-card) .n-modal-mask {
+  background: color-mix(in srgb, var(--bg) 30%, rgba(15, 23, 42, 0.42));
+  -webkit-backdrop-filter: saturate(130%) blur(10px);
+  backdrop-filter: saturate(130%) blur(10px);
+}
+.settings-modal {
+  --settings-surface: color-mix(in srgb, var(--bg-soft) 78%, transparent);
+  --settings-sidebar: color-mix(in srgb, var(--bg-soft) 64%, transparent);
+  --settings-card: color-mix(in srgb, var(--bg-soft) 42%, transparent);
+  --settings-control: var(--bg-soft);
+  --settings-border: color-mix(in srgb, var(--border) 82%, transparent);
+  --settings-border-strong: color-mix(in srgb, var(--border) 94%, var(--text-muted));
+  --settings-text: var(--text-h);
+  --settings-muted: var(--text-muted);
+  --settings-accent: var(--accent);
+  --settings-accent-hover: var(--accent-hover);
+  --settings-danger: #dc4c4c;
+  --settings-success: #15803d;
+  --settings-warning: #d97706;
+  width: min(1180px, calc(100vw - 64px));
+  /* Keep every settings section on the same compact canvas. The detail
+     pane owns scrolling, so longer editor/metadata content cannot resize
+     the modal when switching tabs. */
+  height: min(760px, calc(100vh - 64px));
+  min-height: 0;
+  max-height: calc(100vh - 64px);
+  display: flex;
+  flex-direction: column;
+  color: var(--settings-text);
+  background:
+    linear-gradient(135deg, color-mix(in srgb, var(--accent) 4%, transparent), transparent 48%),
+    var(--settings-surface);
+  border: 1px solid var(--settings-border-strong);
+  border-radius: 12px;
+  box-shadow:
+    0 18px 48px rgba(0, 0, 0, 0.34),
+    inset 0 1px 0 color-mix(in srgb, var(--text-h) 9%, transparent);
+  -webkit-backdrop-filter: saturate(145%) blur(18px);
+  backdrop-filter: saturate(145%) blur(18px);
+  overflow: hidden;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme='light']) .settings-modal {
+    --settings-danger: #f87171;
+    --settings-success: #4ade80;
+    --settings-warning: #fbbf24;
+  }
+}
+:root[data-theme='dark'] .settings-modal {
+  --settings-danger: #f87171;
+  --settings-success: #4ade80;
+  --settings-warning: #fbbf24;
+}
+.settings-header {
+  flex: 0 0 64px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  box-sizing: border-box;
+  padding: 0 16px 0 24px;
+  border-bottom: 1px solid var(--settings-border);
+  background: color-mix(in srgb, var(--settings-surface) 92%, var(--settings-sidebar));
+}
+.settings-header h2 {
+  margin: 0;
+  color: var(--settings-text);
+  font-size: 1.3rem;
+  font-weight: 600;
+  letter-spacing: -0.005em;
+}
+.settings-icon-btn {
+  width: 32px;
+  height: 32px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  border: 0;
+  border-radius: 6px;
+  color: var(--settings-muted);
+  background: transparent;
+  cursor: pointer;
+  font: inherit;
+  font-size: 1.35rem;
+  font-weight: 300;
+  line-height: 1;
+  transition: color 0.15s ease, background 0.15s ease;
+}
+.settings-icon-btn:hover {
+  color: var(--settings-text);
+  background: color-mix(in srgb, var(--settings-muted) 12%, transparent);
+}
+.settings-body {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: grid;
+  grid-template-columns: 240px minmax(0, 1fr);
+  overflow: hidden;
+}
+.settings-nav {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  box-sizing: border-box;
+  padding: 18px 14px;
+  border-right: 1px solid var(--settings-border);
+  background: var(--settings-sidebar);
+  overflow-y: auto;
+}
+.settings-nav-item {
+  position: relative;
+  min-width: 0;
+  min-height: 40px;
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 8px;
+  box-sizing: border-box;
+  padding: 0 12px;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--settings-muted);
+  font: inherit;
+  font-size: 0.9rem;
+  font-weight: 500;
+  text-align: left;
+  cursor: pointer;
+  transition: color 0.15s ease, background 0.15s ease, border-color 0.15s ease;
+}
+.settings-nav-item::before {
+  content: '';
+  position: absolute;
+  top: 8px;
+  bottom: 8px;
+  left: -1px;
+  width: 3px;
+  border-radius: 0 2px 2px 0;
+  background: transparent;
+}
+.settings-nav-item:hover {
+  color: var(--settings-text);
+  background: color-mix(in srgb, var(--settings-muted) 9%, transparent);
+}
+.settings-nav-item.active {
+  color: color-mix(in srgb, var(--settings-accent) 68%, var(--settings-text));
+  border-color: color-mix(in srgb, var(--settings-accent) 48%, transparent);
+  background: color-mix(in srgb, var(--settings-accent) 14%, transparent);
+}
+.settings-nav-item.active::before {
+  background: var(--settings-accent);
+}
+.settings-nav-icon {
+  width: 18px;
+  height: 18px;
+  display: inline-flex;
+  flex: 0 0 18px;
+  align-items: center;
+  justify-content: center;
+}
+.settings-nav-icon svg {
+  width: 18px;
+  height: 18px;
+  display: block;
+}
+.settings-detail {
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  box-sizing: border-box;
+  padding: 32px 38px 36px;
+  overflow-x: hidden;
+  overflow-y: auto;
+  background: var(--settings-surface);
+  overscroll-behavior: contain;
+}
+.settings-section {
+  width: 100%;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+.settings-section-header {
+  min-width: 0;
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 14px;
+}
+.settings-section-header h3 {
+  margin: 0;
+  color: var(--settings-text);
+  font-size: 1.55rem;
+  font-weight: 600;
+  letter-spacing: -0.005em;
+  line-height: 1.2;
+}
+.settings-section-header p {
+  margin: 6px 0 0;
+  color: var(--settings-muted);
+  font-size: 0.9rem;
+  line-height: 1.4;
+}
+.settings-section-actions,
+.settings-warning-actions,
+.settings-metadata-actions {
+  display: flex;
+  align-items: center;
+  flex: 0 0 auto;
+  gap: 8px;
+}
+.settings-section-actions .btn,
+.settings-warning-actions .btn,
+.settings-metadata-actions .btn {
+  height: 32px;
+  min-height: 32px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  box-sizing: border-box;
+  padding: 0 14px;
+  border: 1px solid var(--settings-border-strong);
+  border-radius: 6px;
+  background: var(--settings-card);
+  color: var(--settings-text);
+  font-size: 13px;
+  font-weight: 500;
+  line-height: 1;
+  transition: color 0.15s ease, background 0.15s ease, border-color 0.15s ease, transform 0.15s ease;
+}
+.settings-section-actions .btn:hover:not(:disabled),
+.settings-warning-actions .btn:hover:not(:disabled),
+.settings-metadata-actions .btn:hover:not(:disabled) {
+  border-color: color-mix(in srgb, var(--settings-muted) 72%, transparent);
+  background: color-mix(in srgb, var(--settings-muted) 10%, var(--settings-card));
+}
+.settings-section-actions .btn:active:not(:disabled),
+.settings-warning-actions .btn:active:not(:disabled),
+.settings-metadata-actions .btn:active:not(:disabled) {
+  transform: translateY(1px);
+}
+.settings-section-actions .btn:disabled,
+.settings-warning-actions .btn:disabled,
+.settings-metadata-actions .btn:disabled {
+  cursor: not-allowed;
+  opacity: 0.58;
+}
+.settings-section-actions .btn.btn-primary {
+  min-width: 76px;
+  border-color: var(--settings-accent);
+  background: var(--settings-accent);
+  color: #fff;
+  box-shadow: none;
+}
+.settings-section-actions .btn.btn-primary:hover:not(:disabled) {
+  border-color: var(--settings-accent-hover);
+  background: var(--settings-accent-hover);
+}
+.settings-section-actions .settings-clear-key-btn,
+.settings-warning-actions .settings-danger-secondary {
+  border-color: color-mix(in srgb, var(--settings-danger) 72%, transparent);
+  background: transparent;
+  color: var(--settings-danger);
+}
+.settings-section-actions .settings-clear-key-btn:hover:not(:disabled),
+.settings-warning-actions .settings-danger-secondary:hover:not(:disabled) {
+  border-color: var(--settings-danger);
+  background: color-mix(in srgb, var(--settings-danger) 10%, transparent);
+}
+.settings-section-body {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.settings-card,
+.settings-warning-card {
+  min-width: 0;
+  box-sizing: border-box;
+  padding: 18px 20px 20px;
+  border: 1px solid var(--settings-border);
+  border-radius: 9px;
+  background: var(--settings-card);
+  box-shadow: 0 1px 0 rgba(255, 255, 255, 0.015);
+}
+.settings-card-title {
+  margin: 0 0 14px;
+  color: var(--settings-text);
+  font-size: 15px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+}
+.settings-connection-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+.settings-connection-header .settings-card-title {
+  margin-bottom: 0;
+}
+.settings-connection-btn {
+  flex: 0 0 auto;
+}
+.settings-connection-status {
+  min-width: 0;
+  display: flex;
+  align-items: flex-start;
+  gap: 9px;
+  margin-top: 14px;
+  color: var(--settings-muted);
+  font-size: 12px;
+  line-height: 1.45;
+}
+.settings-connection-dot {
+  width: 8px;
+  height: 8px;
+  flex: 0 0 8px;
+  margin-top: 4px;
+  border-radius: 50%;
+  background: var(--settings-muted);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--settings-muted) 14%, transparent);
+}
+.settings-connection-status.is-checking .settings-connection-dot {
+  background: var(--settings-accent);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--settings-accent) 18%, transparent);
+  animation: settings-connection-pulse 1.1s ease-in-out infinite;
+}
+.settings-connection-status.is-connected .settings-connection-dot {
+  background: var(--settings-success);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--settings-success) 16%, transparent);
+}
+.settings-connection-status.is-failed .settings-connection-dot {
+  background: var(--settings-danger);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--settings-danger) 16%, transparent);
+}
+.settings-connection-copy {
+  min-width: 0;
+}
+.settings-connection-copy strong {
+  color: var(--settings-text);
+  font-size: 13px;
+  font-weight: 500;
+}
+.settings-connection-status.is-checking .settings-connection-copy strong {
+  color: var(--settings-accent);
+}
+.settings-connection-status.is-connected .settings-connection-copy strong {
+  color: var(--settings-success);
+}
+.settings-connection-status.is-failed .settings-connection-copy strong {
+  color: var(--settings-danger);
+}
+.settings-connection-copy p {
+  margin: 2px 0 0;
+  overflow-wrap: anywhere;
+}
+@keyframes settings-connection-pulse {
+  0%, 100% { opacity: 0.55; transform: scale(0.85); }
+  50% { opacity: 1; transform: scale(1); }
+}
+.settings-field-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  row-gap: 14px;
+}
+.settings-field {
+  min-width: 0;
+  display: grid;
+  grid-template-columns: 128px minmax(0, 1fr);
+  column-gap: 16px;
+  row-gap: 6px;
+  align-items: start;
+}
+.settings-field-label {
+  grid-column: 1;
+  grid-row: 1;
+  align-self: start;
+  padding-top: 6px;
+  color: var(--settings-text);
+  font-size: 13px;
+  font-weight: 500;
+  line-height: 1.5;
+}
+.settings-field > .n-input,
+.settings-field > .n-input-number,
+.settings-field > .n-select,
+.settings-input-wrap {
+  grid-column: 2;
+  grid-row: 1;
+  min-width: 0;
+}
+.settings-input-wrap > .n-input {
+  width: 100%;
+  min-width: 0;
+}
+.settings-field > .n-input,
+.settings-field > .n-input-number,
+.settings-field > .n-select {
+  width: 100%;
+  min-width: 0;
+}
+.settings-input-wrap > .n-input input::placeholder {
+  color: color-mix(in srgb, var(--settings-muted) 82%, transparent);
+  opacity: 1;
+}
+.settings-input-wrap {
+  position: relative;
+  display: block;
+}
+.settings-key-status {
+  position: absolute;
+  top: 50%;
+  right: 12px;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: var(--settings-success);
+  font-size: 12px;
+  font-weight: 500;
+  line-height: 1;
+  pointer-events: none;
+  transform: translateY(-50%);
+}
+.settings-key-status-icon {
+  width: 13px;
+  height: 13px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  box-sizing: border-box;
+  border: 1px solid currentColor;
+  border-radius: 50%;
+  font-size: 0.6rem;
+  line-height: 1;
+}
+.settings-field-checkbox {
+  align-items: center;
+}
+.settings-field-checkbox > .settings-field-label {
+  padding-top: 0;
+}
+.settings-field-checkbox > .n-checkbox {
+  grid-column: 2;
+  grid-row: 1;
+}
+.settings-warning-card {
+  border-color: color-mix(in srgb, var(--settings-warning) 42%, var(--settings-border));
+  background: color-mix(in srgb, var(--settings-warning) 8%, var(--settings-card));
+}
+.settings-warning-heading {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  color: var(--settings-text);
+  font-size: 0.76rem;
+  line-height: 1.4;
+}
+.settings-warning-icon {
+  width: 14px;
+  height: 14px;
+  display: inline-flex;
+  flex: 0 0 14px;
+  align-items: center;
+  justify-content: center;
+  color: var(--settings-warning);
+}
+.settings-warning-icon svg {
+  width: 14px;
+  height: 14px;
+}
+.settings-warning-content {
+  margin: 6px 0 0 21px;
+  color: var(--settings-muted);
+  font-size: 0.7rem;
+  line-height: 1.5;
+}
+.settings-warning-content p {
+  margin: 3px 0 0;
+}
+.settings-warning-actions {
+  margin: 9px 0 0 21px;
+  flex-wrap: wrap;
+}
+.settings-metadata-stats,
+.settings-cleanup-result {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+  padding: 8px;
+  border: 1px solid var(--settings-border);
+  border-radius: 5px;
+  background: var(--settings-control);
+  color: var(--settings-muted);
+  font-size: 0.68rem;
+}
+.settings-metadata-stats > span,
+.settings-cleanup-result > span {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.settings-metadata-stats strong,
+.settings-cleanup-result strong {
+  color: var(--settings-text);
+  font-size: 0.86rem;
+  font-weight: 600;
+  line-height: 1.2;
+}
+.settings-metadata-stats .danger,
+.settings-metadata-stats .danger strong {
+  color: var(--settings-danger);
+}
+.settings-metadata-actions {
+  flex-wrap: wrap;
+  margin-top: 9px;
+  padding-top: 9px;
+  border-top: 1px solid var(--settings-border);
+}
+.settings-metadata-actions .btn-danger {
+  border-color: color-mix(in srgb, var(--settings-danger) 72%, transparent);
+  background: var(--settings-danger);
+  color: #fff;
+}
+.settings-metadata-actions .btn-danger:hover:not(:disabled) {
+  border-color: var(--settings-danger);
+  background: color-mix(in srgb, var(--settings-danger) 86%, #000);
+}
+
+@media (max-width: 960px) {
+  .settings-backdrop { padding: 16px; }
+  .settings-modal {
+    width: min(960px, calc(100vw - 32px));
+    height: min(720px, calc(100vh - 32px));
+    max-height: calc(100vh - 32px);
+  }
+  .settings-body { grid-template-columns: 220px minmax(0, 1fr); }
+  .settings-nav { padding: 16px 12px; }
+  .settings-detail { padding: 28px 30px 32px; }
+}
+@media (max-width: 700px) {
+  .settings-body { grid-template-columns: 196px minmax(0, 1fr); }
+  .settings-detail { padding: 24px 22px 28px; }
+  .settings-section-header { gap: 14px; }
+  .settings-card,
+  .settings-warning-card { padding: 18px 18px 20px; }
+  .settings-field {
+    grid-template-columns: minmax(0, 1fr);
+    row-gap: 5px;
+  }
+  .settings-field-label {
+    grid-column: 1;
+    grid-row: auto;
+    padding-top: 0;
+  }
+  .settings-field > .n-input,
+  .settings-field > .n-input-number,
+  .settings-field > .n-select,
+  .settings-input-wrap {
+    grid-column: 1;
+    grid-row: auto;
+  }
+  .settings-field-checkbox {
+    grid-template-columns: 22px minmax(0, 1fr);
+    column-gap: 10px;
+  }
+  .settings-field-checkbox > .n-checkbox {
+    grid-column: 1;
+    grid-row: 1;
+  }
+  .settings-field-checkbox > .settings-field-label {
+    grid-column: 2;
+    grid-row: 1;
+  }
+}
+@media (max-width: 600px) {
+  .settings-backdrop { padding: 8px; }
+  .settings-modal {
+    width: calc(100vw - 16px);
+    height: min(680px, calc(100vh - 16px));
+    max-height: calc(100vh - 16px);
+    border-radius: 10px;
+  }
+  .settings-header {
+    flex-basis: 54px;
+    padding: 0 12px 0 18px;
+  }
+  .settings-header h2 { font-size: 1.1rem; }
+  .settings-body {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: auto minmax(0, 1fr);
+  }
+  .settings-nav {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 6px;
+    padding: 10px;
+    border-right: 0;
+    border-bottom: 1px solid var(--settings-border);
+    overflow: visible;
+  }
+  .settings-nav-item {
+    min-height: 40px;
+    gap: 7px;
+    padding: 0 8px;
+    font-size: 0.78rem;
+    white-space: nowrap;
+  }
+  .settings-nav-item > span:last-child {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .settings-nav-icon,
+  .settings-nav-icon svg {
+    width: 16px;
+    height: 16px;
+  }
+  .settings-nav-icon { flex-basis: 16px; }
+  .settings-detail { padding: 20px 16px 24px; }
+}
+@media (max-width: 480px) {
+  .settings-section { gap: 14px; }
+  .settings-section-header {
+    flex-direction: column;
+    align-items: stretch;
+  }
+  .settings-section-header h3 { font-size: 1.25rem; }
+  .settings-section-actions { width: 100%; }
+  .settings-section-actions .btn { flex: 1 1 0; }
+  .settings-card,
+  .settings-warning-card { padding: 16px; }
+  .settings-card-title { margin-bottom: 14px; }
+  .settings-field-grid { row-gap: 12px; }
+  .settings-metadata-stats,
+  .settings-cleanup-result { grid-template-columns: minmax(0, 1fr); }
+  .settings-warning-content,
+  .settings-warning-actions { margin-left: 0; }
+}
+
+/* FileTree: scope token names so it picks up VSCode palette.
+   Surface tokens (background/color/display/flex-direction/overflow)
+   are owned by the shared `.vault .file-tree, .vault .tag-panel` rule
+   above so the two sidebars always render the same surface. The
+   right-side seam is drawn by the splitter to the right of this
+   panel, not by this panel itself, so it doesn't get reflowed when
+   the user drags the handle. */
+.vault .file-tree header {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  padding: 0;
+  /* Match .tabs row height (36px) exactly so the search bar aligns
+     with the editor tabs above it. No border-bottom here — the
+     divider lives on .search below so it tracks the search row
+     even when chips wrap and the row grows. */
+  height: 36px;
+  min-height: 36px;
+  box-sizing: border-box;
+  background: var(--vs-bg-1);
+}
+/* Shared sidebar surface tokens. Both .file-tree and .tag-panel
+   share the same VSCode-palette text color + flex column layout
+   so the two sidebars read as the same surface when the user
+   switches between Files and Tags. The canonical background is
+   owned by `.vault > .file-tree, .vault > .tag-panel` further down
+   (which pins it to `var(--bg)` = `--vs-bg-1`, the same token
+   used by the activity-bar and splitter columns). Anything that
+   genuinely differs lives in a per-panel override below. */
+.vault .file-tree,
+.vault .tag-panel {
+  color: var(--vs-text-1);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+/* Always-on search input (Files) / tag filter input (Tags). Both
+   rows are 36px tall to match the activity-bar (.ab-btn) and the
+   editor .tabs row, so all three top strips sit on the same
+   baseline. Divider lives on the row itself so it tracks the row
+   even when chips wrap and the row grows. Shared selector list
+   keeps the two sidebars visually identical — only the chips/
+   count slot differs (FileTree: inlined tag chips, TagPanel:
+   visible/total count). */
+.vault .file-tree header .search,
+.vault .tag-panel .tag-filter {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  height: 36px;
+  min-height: 36px;
+  box-sizing: border-box;
+  padding: 0 12px;
+  border-bottom: 1px solid var(--vs-border);
+  background: var(--vs-bg-1);
+}
+.vault .file-tree header .exact-path-context {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  height: 36px;
+  min-height: 36px;
+  min-width: 0;
+  box-sizing: border-box;
+  padding: 0 8px 0 12px;
+  border-bottom: 1px solid var(--vs-border);
+  background: var(--vs-bg-1);
+}
+.vault .file-tree header .exact-path-context-label {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  color: var(--vs-text-1);
+  font-size: 0.78rem;
+  font-variant-numeric: tabular-nums;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.vault .file-tree header .exact-path-context-action {
+  flex: 0 0 auto;
+  min-height: 28px;
+  padding: 0 7px;
+  border: 1px solid transparent;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--vs-text-2);
+  font: inherit;
+  font-size: 0.72rem;
+  cursor: pointer;
+}
+.vault .file-tree header .exact-path-context-action:hover {
+  border-color: var(--vs-border);
+  background: var(--vs-hover-bg);
+  color: var(--vs-text-1);
+}
+.vault .file-tree header .exact-path-context-action:focus-visible {
+  outline: 2px solid var(--vs-focus-border, var(--accent));
+  outline-offset: 1px;
+}
+.vault .file-tree header .search-icon,
+.vault .tag-panel .tag-filter-icon {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  color: var(--vs-text-3);
+  transition: color 100ms;
+}
+/* Both sidebar filters pick up the accent on focus-within so the active
+   search surface is equally clear in Tags and FileTree. */
+.vault .file-tree header .search:focus-within .search-icon,
+.vault .tag-panel .tag-filter:focus-within .tag-filter-icon {
+  color: var(--vs-accent);
+}
+/* Narrow-width hardening for the TagPanel search row. The shared
+   rule above sets `flex-wrap: wrap` so FileTree's tag-filter chips
+   can spill to a second line — but TagPanel has no chips, only
+   icon + input + clear-x + count, so wrapping would either get
+   clipped by the fixed 36px row height or push the count onto a
+   new line and break the layout. `flex-wrap: nowrap` + the input's
+   `flex: 1 1 0` override (defined alongside the shared input rule)
+   let the input shrink to whatever space remains while keeping
+   the clear-x and the visible/total count pinned at their natural
+   size. `min-width: 0` lets the row itself shrink below its
+   intrinsic content width inside its flex-column parent (.tag-panel)
+   when the sidebar is squeezed below 150px. */
+.vault .tag-panel .tag-filter {
+  flex-wrap: nowrap;
+  min-width: 0;
+}
+.vault .file-tree header .search-input,
+.vault .tag-panel .tag-filter-input {
+  /* `flex: 1 1 120px` keeps the input filling the row when there
+     are no chips. The explicit `height: 100%` makes the input fill
+     the 36px row vertically — combined with `padding: 0` and
+     `border: 0` it contributes no extra height to the search bar.
+     `min-width: 0` is required for the flex item to shrink below
+     its intrinsic size so chips can push the input to a second
+     flex line instead of squeezing it. */
+  flex: 1 1 120px;
+  min-width: 0;
+  background: transparent;
+  border: 0;
+  outline: none;
+  color: var(--vs-text-1);
+  font: inherit;
+  font-size: 0.8rem;
+  padding: 0;
+  height: 100%;
+  line-height: normal;
+  box-sizing: border-box;
+}
+.vault .file-tree header .search-input-control {
+  flex: 1 1 120px;
+  min-width: 0;
+}
+/* TagPanel search input prefers a 0px flex-basis so the input can
+   shrink all the way down on narrow sidebars (≈150px) without
+   squeezing out the clear-x button or the visible/total count.
+   FileTree keeps the 120px basis so the chips still have a useful
+   minimum to coexist with. */
+.vault .tag-panel .tag-filter-input {
+  flex: 1 1 0;
+}
+.vault .tag-panel .tag-filter-control {
+  flex: 1 1 0;
+  min-width: 0;
+}
+.vault .file-tree header .search-input::placeholder,
+.vault .tag-panel .tag-filter-input::placeholder {
+  color: var(--vs-text-3);
+}
+.vault .file-tree header .search-clear-x,
+.vault .tag-panel .tag-filter-clear-x {
+  flex-shrink: 0;
+  width: 16px;
+  height: 16px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--vs-text-2);
+  font-size: 0.9rem;
+  line-height: 1;
+  cursor: pointer;
+  border-radius: 50%;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  transition: background 100ms, color 100ms;
+}
+/* Push the filter clear button to the right edge of the filter row.
+   Previously the rightward push came from `.tag-filter-count`'s
+   `margin-left: auto`; with the count removed the clear button needs
+   to claim that role or it would sit flush against the input. */
+.vault .tag-panel .tag-filter-clear-x {
+  margin-left: auto;
+}
+.vault .file-tree header .search-clear-x:hover,
+.vault .tag-panel .tag-filter-clear-x:hover {
+  background: var(--vs-hover-bg);
+  color: var(--vs-text-1);
+}
+/* The old `.file-tree li` / `.file-tree li.active` / `.file-tree li:hover`
+   / `.entry` / `.entry-date` block was deleted: it predated the
+   recursive `.tree-row` structure and targeted every `<li>` inside the
+   file tree with a flat-list background and a hover that painted the
+   whole `<li>` — including any nested `.tree-children`. The current
+   structure is `.tree-row` (flex container) → `.row-line` (visible
+   line) + `.tree-children` (nested list, on a separate flex line).
+   The active / hover backgrounds now live on `.row-line::before`
+   (see further down), so the `<li>`-level rules would only ever
+   re-introduce the bleed they were originally causing. No `.entry`
+   class is rendered anywhere; that whole section was dead code
+   left behind when the flat list was replaced. */
+.vault .file-tree .actions button {
+  color: var(--vs-text-2);
+  background: transparent;
+  border: 0;
+  cursor: pointer;
+  padding: 2px 6px;
+  border-radius: 3px;
+  font-size: 0.85rem;
+}
+.vault .file-tree .actions button:hover {
+  background: var(--vs-bg-3);
+  color: var(--vs-text-1);
+}
+/* New recursive tree structure: TreeRow / tree-children / drop targets */
+.vault .file-tree .tree {
+  list-style: none; padding: 0; margin: 0;
+  overflow-x: auto; overflow-y: auto; flex: 1;
+  /* Keep long paths horizontally scrollable without leaving a visible
+     scrollbar in the compact tree. Firefox uses the transparent thumb;
+     WebKit gets an axis-specific zero-height scrollbar below. */
+  scrollbar-color: transparent transparent;
+}
+.vault .file-tree .tree::-webkit-scrollbar {
+  height: 0;
+}
+.vault .file-tree .tree-children {
+  list-style: none; padding: 0; margin: 0;
+  flex-basis: 100%;          /* force a new line in the flex parent */
+  min-width: 100%;
+  /* Only the root .tree owns scrolling. A broad `ul { overflow-y: auto }`
+     makes overflow-x compute to auto too, so every expanded subtree gets
+     its own native horizontal scrollbar on Windows. Let nested content
+     contribute to the root tree's scroll area instead. */
+  overflow: visible;
+}
+.vault .file-tree .tree-row {
+  display: flex; flex-wrap: wrap; align-items: stretch; gap: 0;
+  cursor: default; user-select: none;
+  position: relative;
+  color: var(--vs-text-1);
+  font-size: 0.84rem;
+  line-height: 1.35;
+  outline: none;
+}
+/* `.row-line` is the visible row strip (chevron + icon + name/rename
+   input). It's a sibling of `.tree-children` inside `.tree-row`, NOT
+   a parent. The hover / active / drop-target background paints here,
+   not on `.tree-row` itself, so hovering an expanded folder row
+   highlights ONLY the line — the children <ul> below stays neutral
+   (its own rows highlight when the user hovers them directly). The
+   `.tree-row > *` rule that previously promoted direct children to
+   `position: relative; z-index: 1` so they'd paint above the
+   `::before` has been split: `.row-line > *` now does the same for
+   line-internal content, and `.tree-children` is at z-index 0 by
+   default (it doesn't need to be above the line's `::before` — they
+   don't overlap). */
+.vault .file-tree .row-line {
+  display: flex; flex-wrap: nowrap; align-items: center; gap: 5px;
+  flex: 1 1 auto;
+  position: relative;
+  min-height: 30px;
+  box-sizing: border-box;
+  padding: 3px 8px 3px calc(6px + var(--depth, 0) * 10px);
+  /* No `min-width: 0` here — that would let `.row-line` shrink to 0,
+     which combined with `flex: 1` (basis 0%) lets it sit on the same
+     flex line as `.tree-children` (basis 100%) without wrapping.
+     With the default `min-width: auto`, `.row-line`'s hypothetical
+     main size is its content width, the sum with `.tree-children`
+     overflows the line, and flex-wrap pushes `.tree-children` down
+     to a second line — exactly what we want. */
+}
+/* Files render two stacked lines (title + slug). The default
+   `align-items: center` on .row-line would put the icon at the
+   visual midpoint of the whole two-line block — i.e. between the
+   title and the slug — which reads as off-center next to the
+   title glyph. Switch to `flex-start` so the icon aligns with the
+   first line (title) instead. Folders keep center alignment since
+   they only have a single line of content. */
+.vault .file-tree .tree-row:not(.folder) > .row-line {
+  align-items: center;
+  /* The icon is 14px tall vs the title's ~15px line-box. With
+     flex-start the icon sits ~2px higher than the title's
+     optical center; this nudge keeps the two visually balanced. */
+}
+.vault .file-tree .tree-row:not(.folder) > .row-line .row-icon {
+  margin-top: 0;
+}
+/* Full-width hover/active background that extends through the indent
+   area on the left, so deep rows don't show a gap between the
+   file-tree's edge and the active highlight. The background spans
+   the full row width of the LINE (not the children <ul> below it). */
+.vault .file-tree .row-line::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: transparent;
+  pointer-events: none;
+  z-index: 0;
+}
+.vault .file-tree .row-line:hover::before { background: var(--vs-hover-bg); }
+.vault .file-tree .tree-row.active .row-line::before { background: var(--vs-active-bg); }
+.vault .file-tree .tree-row.focused > .row-line {
+  outline: 1px solid color-mix(in srgb, var(--vs-accent) 72%, transparent);
+  outline-offset: -1px;
+}
+.vault .file-tree .tree-row:not(.top-level):hover > .row-line::after {
+  content: '';
+  position: absolute;
+  z-index: 1;
+  top: 3px;
+  bottom: 3px;
+  left: calc(8px + (var(--depth, 0) - 1) * 11px + 5px);
+  width: 1px;
+  background: color-mix(in srgb, var(--vs-text-3) 32%, transparent);
+  pointer-events: none;
+}
+/* Folder vs file weight:
+   - top folder (depth 0): 650
+   - nested folder (depth ≥ 1): 550
+   - file: 450 (lighter than folders, so the eye picks folders first)
+   The previous rule weighted top-level files at 620, which made them
+   read like folders. Splitting the rule by .folder keeps the row
+   type visible at a glance. */
+.vault .file-tree .tree-row.top-level.folder > .row-line .row-name-text {
+  font-weight: 650;
+}
+.vault .file-tree .tree-row.folder:not(.top-level) > .row-line .row-name-text {
+  font-weight: 550;
+}
+.vault .file-tree .tree-row:not(.folder) > .row-line .row-title {
+  font-weight: 450;
+}
+.vault .file-tree .row-line > * { position: relative; z-index: 1; }
+.vault .file-tree .tree-row[draggable] { cursor: grab; }
+.vault .file-tree .tree-row.dragging { opacity: 0.4; }
+.vault .file-tree .tree-row.drop-target > .row-line {
+  outline: 1px solid var(--vs-accent);
+  outline-offset: -1px;
+}
+.vault .file-tree .tree-row.drop-target > .row-line::before { background: var(--vs-active-bg); }
+.vault .file-tree.drop-target-root {
+  box-shadow: inset 0 2px 0 0 var(--vs-accent);
+}
+.vault .file-tree .chevron, .vault .file-tree .chevron-spacer {
+  width: 14px; height: 14px; display: inline-flex; align-items: center; justify-content: center;
+  color: var(--vs-text-3); flex-shrink: 0;
+}
+.vault .file-tree .chevron { cursor: pointer; transition: transform 120ms; }
+.vault .file-tree .chevron.expanded { transform: rotate(90deg); }
+.vault .file-tree .row-icon {
+  display: inline-flex; width: 16px; height: 16px; flex-shrink: 0;
+  color: var(--vs-text-2);
+}
+.vault .file-tree .tree-row.folder .row-icon { color: var(--vs-folder, #c8a96a); }
+.vault .file-tree .row-label {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  max-height: 18px;
+  transition: max-height 120ms ease;
+}
+.vault .file-tree .row-name {
+  display: block;
+  max-width: 100%;
+  overflow: hidden;
+  text-decoration: none; color: inherit;
+  /* Reset the native <button> chrome — the row name is a plain text
+     label that lives inside a clickable row. */
+  text-align: left;
+  background: transparent;
+  border: 0;
+  padding: 0;
+  font: inherit;
+  cursor: inherit;
+}
+.vault .file-tree .row-title,
+.vault .file-tree .row-name-text,
+.vault .file-tree .row-file-name,
+.vault .file-tree .row-path-hint {
+  display: block;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.vault .file-tree .row-file-name {
+  color: var(--vs-text-3);
+  font-family: var(--mono, ui-monospace, SFMono-Regular, Menlo, monospace);
+  font-size: 0.66rem;
+  line-height: 1.1;
+  margin-top: 0;
+}
+.vault .file-tree .row-label:has(.row-path-hint) { max-height: 31px; }
+.vault .file-tree .row-file-name-hidden { display: none; }
+.vault .file-tree .row-path-hint {
+  margin-top: 0;
+  color: var(--vs-text-3);
+  font-family: var(--mono, ui-monospace, SFMono-Regular, Menlo, monospace);
+  font-size: 0.66rem;
+  line-height: 1.1;
+}
+.vault .file-tree .drop-hint {
+  flex: 0 0 auto;
+  color: var(--vs-accent);
+  font-size: 0.7rem;
+  white-space: nowrap;
+}
+/* Right-click context menu — teleported to <body>, outside .vault,
+   so the .vault-scoped --vs-* tokens are not available here.
+   Use :root-level tokens with dark fallbacks (the vault is dark by default). */
+.tree-context-menu,
+.tab-context-menu,
+.history-context-menu {
+  position: fixed; z-index: 9999;
+  min-width: 180px;
+  padding: 4px;
+  background: var(--bg-soft, #252526);
+  color: var(--text-h, #ddd);
+  border: 1px solid var(--border, #3c3c3c);
+  border-radius: 6px;
+  box-shadow: 0 4px 16px rgba(0,0,0,0.45);
+  display: flex; flex-direction: column;
+}
+.tab-context-menu {
+  box-sizing: border-box;
+  max-width: calc(100vw - 16px);
+  max-height: calc(100vh - 16px);
+  overflow-y: auto;
+  z-index: 10001;
+}
+.tree-context-menu button,
+.tab-context-menu button,
+.history-context-menu button {
+  background: transparent; border: 0; color: inherit;
+  padding: 5px 10px; border-radius: 4px; cursor: pointer; font: inherit;
+  font-size: 0.85rem; text-align: left;
+}
+.tab-context-menu button {
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+  min-height: 32px;
+  width: 100%;
+  overflow-wrap: anywhere;
+}
+.tree-context-menu button {
+  display: grid;
+  grid-template-columns: 16px minmax(0, 1fr) auto;
+  align-items: center;
+  column-gap: 8px;
+  min-height: 28px;
+}
+.tree-context-menu .menu-icon {
+  display: inline-flex;
+  width: 14px;
+  height: 14px;
+  color: var(--text-muted, #858585);
+}
+.tree-context-menu kbd {
+  color: var(--text-muted, #858585);
+  font: inherit;
+  font-size: 0.72rem;
+  margin-left: 16px;
+}
+.tree-context-menu .tree-menu-label {
+  padding: 5px 8px 2px;
+  color: var(--text-muted, #858585);
+  font-size: 0.68rem;
+  font-weight: 650;
+  letter-spacing: 0;
+}
+.tree-context-menu .tree-menu-label:not(:first-child) {
+  margin-top: 4px;
+  border-top: 1px solid var(--border, rgba(255,255,255,0.08));
+}
+.tree-context-menu button:hover,
+.tab-context-menu button:hover,
+.history-context-menu button:hover {
+  background: var(--border, rgba(255,255,255,0.08));
+}
+.tab-context-menu button:focus-visible {
+  outline: 1px solid var(--accent, #6aa9ff);
+  outline-offset: -1px;
+  background: var(--border, rgba(255,255,255,0.08));
+}
+.tree-context-menu button:disabled,
+.tab-context-menu button:disabled,
+.history-context-menu button:disabled {
+  color: var(--text-muted, #666);
+  cursor: not-allowed;
+  background: transparent;
+}
+.tree-context-menu button.danger:hover,
+.history-context-menu button.danger:hover {
+  background: rgba(220, 60, 60, 0.18);
+  color: #e06060;
+}
+.history-context-menu button.danger { color: #e06060; }
+.history-context-menu button:focus-visible {
+  outline: 1px solid var(--accent, #6aa9ff);
+  outline-offset: -1px;
+}
+.tree-context-menu hr,
+.tab-context-menu hr,
+.history-context-menu hr {
+  border: 0; border-top: 1px solid var(--border, rgba(255,255,255,0.08));
+  margin: 4px 0;
+}
+.tab-context-menu [role="separator"] {
+  border-top: 1px solid var(--border, rgba(255,255,255,0.08));
+  margin: 4px 0;
+}
+
+.vault .file-tree .empty {
+  padding: 12px; color: var(--vs-text-3); font-size: 0.85rem;
+}
+
+/* Active-tag chip. Now lives inside the header search row (between
+   the icon and the input), wrapping to a second line when many tags
+   are active. The × removes that single tag from the active set. */
+.vault .file-tree .tag-filter-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 4px 2px 8px;
+  background: var(--vs-active-bg);
+  border: 1px solid var(--vs-accent);
+  border-radius: 10px;
+  font-family: var(--mono);
+  font-size: 0.75rem;
+  color: var(--vs-text-1);
+  line-height: 1.4;
+}
+.vault .file-tree .tag-filter-chip-x {
+  width: 16px;
+  height: 16px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--vs-text-2);
+  font-size: 0.9rem;
+  line-height: 1;
+  cursor: pointer;
+  border-radius: 50%;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+.vault .file-tree .tag-filter-chip-x:hover {
+  background: var(--vs-hover-bg);
+  color: var(--vs-text-1);
+}
+
+/* TagPanel: shares the file-tree column in the vault. Layout is a
+   vertical stack: header (label + count pill), filter row (search icon
+   + input + clear), tag list (flex: 1), and an optional results section
+   capped at 55% so the picker never gets squeezed. Surface tokens
+   (background/color/display/flex-direction/overflow) are owned by the
+   shared `.vault .file-tree, .vault .tag-panel` rule above, so the two
+   sidebars always render the same surface — only the inner
+   substructure differs. */
+.vault .tag-panel > header {
+  /* Mirrors .vault .file-tree header: a column container that holds
+     one row (.tag-filter) at exactly 36px so it sits flush with the
+     editor .tabs row above it. The border-bottom lives on .tag-filter
+     below, not on the header, so the divider tracks the row. */
+  display: flex;
+  flex-direction: column;
+  height: 36px;
+  min-height: 36px;
+  box-sizing: border-box;
+  background: var(--vs-bg-1);
+}
+/* Inside the vault the panel's <ul> is a flex item of the column
+   panel — `display: block` here gives the list intrinsic row height
+   and lets it scroll independently inside the column, instead of
+   stretching every row to fill vertical space. */
+.vault .tag-panel ul {
+  display: block;
+  overflow-y: auto;
+  flex: 1 1 auto;
+  min-height: 0;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.vault .tag-panel li { border-bottom: 0; }
+
+/* Filter input row. Same chrome as .vault .file-tree header .search:
+   fixed 36px height + border-bottom at the row itself, so the divider
+   is at the same y as the editor .tabs border. Four flex children:
+   magnifier icon (turns accent on focus-within), the bare text input
+   that fills the row, a × clear button (only when filter has text),
+   and a small count badge pinned to the far right. The input drops
+   its own border/background — the icon + clear button + count
+   provide the visual affordance. */
+.vault .tag-panel .tag-filter {
+  display: flex;
+  align-items: center;
+  gap: 6px; /* Match FileTree header .search gap */
+  height: 36px;
+  min-height: 36px;
+  box-sizing: border-box;
+  padding: 0 12px;
+  border-bottom: 1px solid var(--vs-border);
+  background: var(--vs-bg-1);
+}
+
+/* Tag chips. Equal-width pill-shaped buttons laid out by the
+   `auto-fill / minmax(110px, 1fr)` grid on `.tag-list`. Every chip
+   fills its grid cell so the column rhythm stays stable; the
+   `.tag-name` and `.tag-count` children are pushed to opposite
+   edges via `margin-left: auto` on the count, so a chip reads
+   visually as `#java … 12` regardless of label length.
+
+   `border-radius: 999px` + `border: 1px solid var(--vs-border)`
+   produces the neutral pill. Default background is the existing
+   `--vs-bg-2` token (already used by `.tag-filter`), which keeps
+   the chip visually subordinate to the active accent state.
+   `.tag-label` truncates with ellipsis and the existing `title`
+   attribute shows the full name on hover. */
+.vault .tag-panel .tag-entry {
+  display: inline-flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+  width: 100%;
+  min-width: 0;
+  height: 26px;
+  padding: 0 10px;
+  font-size: 0.78rem;
+  line-height: 1;
+  color: var(--vs-text-1);
+  text-decoration: none;
+  background: var(--vs-bg-2);
+  border: 1px solid var(--vs-border);
+  border-radius: 999px;
+  cursor: pointer;
+  text-align: left;
+  font-family: inherit;
+  transition: background 100ms, color 100ms, border-color 100ms;
+}
+/* NButton wraps the two tag slots in its content element. Keep the
+   original tag layout contract explicit at that layer so the name stays
+   on the left and the count stays on the right of every pill. */
+.vault .tag-panel .tag-entry .n-button__content {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+  min-width: 0;
+}
+.vault .tag-panel .tag-entry:hover {
+  background: var(--vs-hover-bg);
+  color: var(--vs-text-1);
+}
+.vault .tag-panel .tag-entry.active {
+  /* Accent-tinted pill for the selected tag. Tinted background plus
+     accent border keeps the active chip unmistakable against the
+     neutral default chips without an over-saturated fill. */
+  background: color-mix(in srgb, var(--vs-accent) 18%, transparent);
+  color: var(--vs-text-1);
+  border-color: var(--vs-accent);
+  font-weight: 500;
+}
+.vault .tag-panel .tag-entry.active:hover {
+  background: color-mix(in srgb, var(--vs-accent) 24%, transparent);
+}
+.vault .tag-panel .tag-entry:focus-visible {
+  outline: 2px solid var(--vs-accent);
+  outline-offset: 2px;
+}
+.vault .tag-panel .tag-name {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  /* Inherit font family from row so the label reads as plain prose,
+     not as a mono ID. */
+  font-family: inherit;
+}
+.vault .tag-panel .tag-hash {
+  /* `#` glyph sized to the chip's 0.78rem label so the chip reads as
+     one typographic unit (no oversized icon cell like the file-tree
+     rows). Same muted color as before. */
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: auto;
+  height: auto;
+  flex-shrink: 0;
+  color: var(--vs-text-3);
+  font-family: var(--mono);
+  font-size: 0.78rem;
+  line-height: 1;
+  font-weight: 400;
+}
+.vault .tag-panel .tag-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+}
+.vault .tag-panel .tag-count {
+  font-size: 0.7rem;
+  font-variant-numeric: tabular-nums;
+  color: var(--vs-text-3);
+  flex-shrink: 0;
+  margin-left: auto;
+  transition: color 100ms;
+}
+.vault .tag-panel .tag-entry:hover .tag-count { color: var(--vs-text-2); }
+.vault .tag-panel .tag-entry.active .tag-count { color: var(--vs-text-1); }
+/* Empty state inside the tag list. Same chrome as .vault .file-tree .empty
+   — no italic, same 12px padding, same muted color — so both sidebars
+   fall back to the same "nothing here" treatment. */
+.vault .tag-panel .empty {
+  padding: 12px;
+  color: var(--vs-text-3);
+  font-size: 0.85rem;
+}
+
+/* Results section. When a tag is selected, the list owns the remaining
+   height of the panel (composed with `.tag-list-region` which shrinks
+   to `flex: 0 1 42%` / `min-height: 100px`). No max-height so the
+   detail region can grow as large as the splitter-driven layout
+   allows. `border-top` uses the project-wide `--vs-border` token so
+   the seam reads as the same hairline the file-tree uses everywhere. */
+.vault .tag-panel .results {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  border-top: 1px solid var(--vs-border);
+  flex: 1 1 58%;
+  min-height: 0;
+  max-height: none;
+}
+/* Header aligns with FileTree's row rhythm: `padding-left: 26px`
+   makes the active-tag title (which renders `#` + tag-name via
+   `.results-title`'s 16px hash-icon + 4px gap) start at the same
+   x position as a FileTree first-level node name. The count line
+   below the title inherits the same 26px inset so the two lines
+   share the same reading edge. Sticky so the title stays visible
+   while the notes list scrolls underneath. Two-line column layout
+   (title + count) keeps the count from crowding the title on
+   narrow sidebars. */
+.vault .tag-panel .results-header {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+  min-height: 30px;
+  padding: 8px 14px;
+  flex: 0 0 auto;
+  background: transparent;
+  border-bottom: 1px solid var(--vs-border);
+  color: var(--vs-text-2);
+}
+.vault .tag-panel .results-title {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--vs-text-1);
+  font-size: 0.78rem;
+  font-weight: 500;
+  letter-spacing: 0;
+  font-family: var(--sans);
+}
+.vault .tag-panel .results-sep {
+  color: var(--vs-text-3);
+  margin: 0 2px;
+  font-weight: 400;
+  opacity: 0.7;
+}
+/* Inline note count uses the same muted-text + tabular-nums
+   treatment as the file-tree's path hints so both sidebars render
+   "N items" in the same visual weight. */
+.vault .tag-panel .results-count {
+  font-weight: 400;
+  font-size: 0.7rem;
+  color: var(--vs-text-3);
+  background: transparent;
+  border-radius: 0;
+  padding: 0;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0;
+  text-transform: none;
+  line-height: 1.4;
+  flex-shrink: 0;
+}
+.vault .tag-panel .results-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  overflow-y: auto;
+  flex: 1 1 auto;
+  min-height: 0;
+}
+/* Document row — canonical definition lives here (not duplicated
+   per-component). Both the file-tree's history rows and the
+   tag-panel's results list bind to `.document-row`, so any future
+   tweak to the document surface happens in one place. Hover and
+   active use the same `--vs-hover-bg` / `--vs-active-bg` as the
+   file-tree row-line, so the two sidebars read as one system.
+
+   `padding-left: 6px` aligns the row's text-start x position with
+   FileTree depth=0 file rows: 6px padding + 14px chevron + 5px
+   gap + 16px icon + 5px gap = 46px to text-start, matching
+   `.row-line` at depth 0. The history rows override padding
+   completely (`.history-panel .history-document-row { padding: 5px
+   7px }`) so this base padding only affects the tag-panel's
+   `.result-entry` row, which is exactly what we want. */
+.vault .document-row,
+.vault .tag-panel .result-entry {
+  display: flex;
+  flex-wrap: nowrap;
+  align-items: center;
+  gap: 5px;
+  width: 100%;
+  min-height: 30px;
+  box-sizing: border-box;
+  padding: 3px 8px 3px 6px;
+  background: transparent;
+  border: 0;
+  color: var(--vs-text-1);
+  font: inherit;
+  font-size: 0.84rem;
+  line-height: 1.35;
+  user-select: none;
+  position: relative;
+  text-align: left;
+  cursor: pointer;
+  transition: background 100ms, color 100ms;
+}
+.vault .document-row:hover,
+.vault .tag-panel .result-entry:hover { background: var(--vs-hover-bg); }
+.vault .document-row.active,
+.vault .tag-panel .result-entry.active { background: var(--vs-active-bg); }
+.vault .tag-panel .result-entry .n-button__content {
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+  width: 100%;
+  min-width: 0;
+}
+.vault .document-row:focus-visible,
+.vault .tag-panel .result-entry:focus-visible {
+  outline: 1px solid color-mix(in srgb, var(--vs-accent) 72%, transparent);
+  outline-offset: -1px;
+}
+/* Chevron-spacer + icon sized to match the file-tree's row chevron
+   and row icon exactly (14×14 chevron, 16×16 icon, --vs-text-2). */
+.vault .tag-panel .result-chevron-spacer {
+  width: 14px;
+  height: 14px;
+  display: inline-flex;
+  flex-shrink: 0;
+}
+.vault .tag-panel .result-icon {
+  display: inline-flex;
+  width: 16px;
+  height: 16px;
+  flex-shrink: 0;
+  color: var(--vs-text-2);
+}
+.vault .tag-panel .result-label {
+  flex: 1;
+  min-width: 0;
+  max-height: 18px;
+  overflow: hidden;
+}
+/* Title weight mirrors a file-tree document row (font-weight: 450),
+   so the two sidebars' document items read at the same visual weight. */
+.vault .tag-panel .result-title {
+  display: block;
+  min-width: 0;
+  font-size: 0.84rem;
+  font-weight: 450;
+  color: var(--vs-text-1);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 100%;
+}
+/* Tags navigation and selected-tag details are separate scroll regions. */
+.vault .tag-panel {
+  min-height: 0;
+}
+.vault .tag-panel .tag-list-region {
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: hidden;
+}
+.vault .tag-panel.has-results .tag-list-region {
+  flex: 0 1 42%;
+  min-height: 100px;
+}
+.vault .tag-panel .tag-list {
+  flex: 1 1 auto;
+  min-height: 0;
+  /* Equal-width chip grid. auto-fill + minmax(110px, 1fr) lets the
+     column count scale with the sidebar width — typically 2 columns,
+     falling back to 1 column when the sidebar narrows and growing
+     to 3+ when it widens. Padding separates the row from the filter
+     row above and the results header below; overflow-y: auto keeps
+     vertical scrolling on long lists. */
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(110px, 1fr));
+  align-content: start;
+  gap: 6px;
+  padding: 8px 12px;
+  overflow-y: auto;
+}
+
+/* The duplicate `.tag-name` / `.tag-hash` / `.tag-label` /
+   `.results` / `.results-header` / `.results-title` /
+   `.results-count` rules that used to live below this block were
+   removed: every property they set is already owned by the
+   consolidated rules above (so both sidebars read as one system).
+   The behavior they carried — sticky results header, 58/42 split
+   between the results region and the tag list when a tag is
+   selected, sans-serif results title — is preserved in the
+   consolidated block above. */
+
+/* Editor Area */
+.editor-area {
+  /* Status bar used to live here as a 3rd row, but it now spans the
+     full vault width at the bottom (see .status-bar) and absorbs
+     the document path that used to live in its own breadcrumb row
+     above the content. The remaining rows are tabs and the
+     editor surface; the 1fr row gets the ~22px the breadcrumb
+     used to occupy. */
+  display: grid;
+  grid-template-rows: 36px minmax(0, 1fr);
+  background: var(--vs-bg-1);
+  color: var(--vs-text-1);
+  min-width: 0;
+  min-height: 0;
+  height: 100%;
+  overflow: hidden;
+}
+/* Empty-tabs state: no files are open, so EditorTabs is v-if'd out
+   in VaultView. Without this override the base 36px tab row would
+   leave a blank strip above the EmptyState card — collapsing the
+   grid to one row makes the centered empty card fill the editor
+   area, which reads as a deliberate full-bleed empty surface
+   rather than a half-rendered layout. The .is-read branch below
+   composes with this (both can apply when the user has no tabs and
+   switches to read mode). */
+.editor-area.is-empty {
+  grid-template-rows: minmax(0, 1fr);
+}
+
+/* Diary Home can be primary while backing document tabs remain mounted for
+   the existing lifecycle. Collapse the hidden tab row without treating the
+   workspace as document-empty or mutating its tabs. */
+.editor-area.is-diary-home {
+  grid-template-rows: minmax(0, 1fr);
+}
+
+/* Tabs */
+.editor-tabs-shell {
+  display: flex;
+  width: 100%;
+  height: 36px;
+  min-width: 0;
+  min-height: 0;
+  overflow: visible;
+  background: var(--vs-tabs-bg, var(--vs-bg-3));
+}
+.editor-tabs-context-actions {
+  position: relative;
+  z-index: 3;
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  min-width: 0;
+  padding: 0 8px;
+  border-bottom: 1px solid var(--vs-border);
+  border-left: 1px solid var(--vs-border);
+  background: var(--vs-tabs-bg, var(--vs-bg-3));
+}
+.tabs {
+  display: flex;
+  flex: 1 1 auto;
+  min-width: 0;
+  background: var(--vs-tabs-bg, var(--vs-bg-3));
+  border-bottom: 1px solid var(--vs-border);
+  overflow-x: auto;
+  overflow-y: hidden;
+}
+.tab {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  padding: 0 10px;
+  height: 36px;
+  font-size: 0.8rem;
+  color: var(--vs-text-3);
+  background: transparent;
+  cursor: pointer;
+  user-select: none;
+  position: relative;
+  /* Fixed 100px width so all tabs are visually uniform — long titles
+     truncate with ellipsis (.tab-title below) instead of stretching
+     the tab. 9 tabs × 100px = 900px fits in the typical editor column
+     on 1280px+ viewports without horizontal scroll; opening more than
+     9 is blocked by useEditorTabs' hard cap (TAB_HARD_LIMIT). */
+  flex: 0 0 100px;
+  min-width: 100px;
+  /* 1px right border + 1px left padding tweak keeps the divider
+     visually centered between adjacent tabs, so the bar reads as
+     "separate tabs" instead of a continuous strip. The rightmost tab
+     hides the divider with box-shadow to keep the bar edge clean. */
+  border-right: 1px solid var(--vs-border);
+}
+.tab:last-child { border-right: 0; }
+.tab:hover { color: var(--vs-text-1); }
+.tab.dragging { opacity: 0.48; }
+.tab.drop-before::after,
+.tab.drop-after::after {
+  content: '';
+  position: absolute;
+  z-index: 2;
+  top: 3px;
+  bottom: 3px;
+  width: 3px;
+  border-radius: 2px;
+  background: var(--vs-accent);
+  box-shadow: 0 0 0 1px var(--vs-bg-1);
+  pointer-events: none;
+}
+.tab.drop-before::after { left: -2px; }
+.tab.drop-after::after { right: -2px; }
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+.tab.active {
+  background: var(--vs-tab-active-bg);
+  color: var(--vs-text-1);
+}
+.tab.active::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 2px;
+  background: var(--vs-accent);
+}
+/* Dirty marker — independent of the save-status indicator so a
+   dirty buffer stays visible when error / offline / external paint
+   their own glyph next to it. Solid filled circle with the accent
+   color; when a save is in-flight AND the user has edited past the
+   saved baseline, an outer ring is added so the "saving but newer
+   changes pending" state is distinguishable from a plain dirty. */
+.tab-dirty-indicator {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--vs-accent);
+  flex-shrink: 0;
+  box-sizing: border-box;
+}
+.tab-dirty-indicator[data-newer-changes="true"] {
+  /* outer ring for "saving-dirty" — the dirty fill plus an outline */
+  box-shadow: 0 0 0 1px var(--vs-text-1, #ddd);
+}
+
+/* Save-status indicator — distinct shape per kind so the user can
+   tell saving / error / offline / external apart by silhouette, not
+   only by color (the old color-only approach failed the
+   color-is-not-the-only-channel accessibility check). Width / height
+   match the dirty marker (6×6) so the row never grows wider when
+   the status changes. */
+.tab-status-indicator {
+  width: 8px;
+  height: 8px;
+  flex-shrink: 0;
+  box-sizing: border-box;
+  /* Default — overridden per kind below. */
+  background: transparent;
+}
+/* saving: 3/4 outline arc (rotates via animation below). */
+.tab-status-indicator[data-kind="saving"] {
+  border: 1.5px solid var(--vs-text-1, #ddd);
+  border-top-color: transparent;
+  border-radius: 50%;
+  animation: tab-status-spin 0.8s linear infinite;
+}
+/* error: outline diamond (square rotated 45°). */
+.tab-status-indicator[data-kind="error"] {
+  border: 1.5px solid var(--vs-error, #e06060);
+  background: transparent;
+  transform: rotate(45deg);
+  width: 7px;
+  height: 7px;
+  border-radius: 1px;
+}
+/* offline: X cross — two short diagonal strokes. */
+.tab-status-indicator[data-kind="offline"] {
+  position: relative;
+  width: 8px;
+  height: 8px;
+}
+.tab-status-indicator[data-kind="offline"]::before,
+.tab-status-indicator[data-kind="offline"]::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-left: 1.5px solid var(--vs-text-3, #888);
+  transform-origin: center;
+}
+.tab-status-indicator[data-kind="offline"]::before { transform: rotate(45deg); }
+.tab-status-indicator[data-kind="offline"]::after  { transform: rotate(-45deg); }
+/* external: two stacked horizontal arrows (up + down) — a conflict
+   marker that reads as "this changed both ways". */
+.tab-status-indicator[data-kind="external"] {
+  position: relative;
+  width: 9px;
+  height: 8px;
+}
+.tab-status-indicator[data-kind="external"]::before,
+.tab-status-indicator[data-kind="external"]::after {
+  content: '';
+  position: absolute;
+  left: 0;
+  right: 0;
+  height: 1.5px;
+  background: var(--vs-warning, #f0a040);
+  border-radius: 1px;
+}
+.tab-status-indicator[data-kind="external"]::before { top: 1px; }
+.tab-status-indicator[data-kind="external"]::after  { top: 5px; }
+.tab-status-indicator[data-kind="external"]::before { box-shadow: 0 2px 0 var(--vs-warning, #f0a040); }
+
+@keyframes tab-status-spin {
+  to { transform: rotate(360deg); }
+}
+
+.tab.save-attention .tab-title { text-decoration: underline dotted; text-underline-offset: 2px; }
+.tab-title {
+  /* flex: 1 + min-width: 0 so the title (not the close button) takes
+     the available slack and truncates with ellipsis. The close button
+     keeps its 16px and the dot keeps 6px via flex-shrink: 0. */
+  flex: 1;
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.tab-close {
+  background: transparent;
+  border: 0;
+  color: var(--vs-text-3);
+  cursor: pointer;
+  border-radius: 3px;
+  width: 16px;
+  height: 16px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.85rem;
+  line-height: 1;
+  flex-shrink: 0;
+  /* Hidden on inactive tabs — the × only appears on hover (so it
+     doesn't compete with the tab title for the limited 100px width).
+     The active tab's × is permanently visible (see .tab.active below)
+     so there's always one close affordance on screen at all times. */
+  opacity: 0;
+  transition: opacity 0.1s, background 0.1s, color 0.1s;
+}
+.tab:hover .tab-close,
+.tab.active .tab-close { opacity: 1; }
+.tab-close:hover { background: var(--vs-hover-bg); color: var(--vs-text-1); }
+
+/* Content area: editor surface */
+.content {
+  display: flex;
+  min-height: 0;
+  height: 100%;
+  /* `position: relative` so the empty state can absolute-fill the row
+     when no tabs are open (see .content-empty). */
+  position: relative;
+  overflow: hidden;
+  background: var(--vs-bg-1);
+}
+.editor-pane {
+  flex: 1 1 0;
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  background: var(--vs-bg-1);
+}
+.content-empty {
+  /* Absolute-fill the parent (.content) so the card is always
+     centered in the row regardless of how the surrounding flex /
+     grid sizing decides to resolve. The previous `flex: 1` and
+     `margin: auto` attempts both failed in this nested layout
+     (grid → flex → flex-item), so we just sidestep the whole
+     question by pulling the empty state out of normal flow. */
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--vs-text-3);
+  background: var(--vs-bg-1);
+}
+
+/* Shared empty-state family. Used by VaultView (main pane) and
+   HistoryPanel (git missing / repo not initialized). Both used to
+   ship their own `.empty-title` rule with subtly different colors;
+   collapsing into one block here keeps them in lockstep.
+
+   The two sizes share `.empty-state-title` / `.empty-state-hint`
+   rules; only font-size and spacing differ between normal and
+   compact. (Earlier revisions had an `icon` slot and a card frame;
+   both were removed when the empty state was simplified down to
+   "title + hint" so it doesn't compete with the surrounding vault
+   surface for attention.)
+
+   The hint pattern is modeled on the VS Code Welcome tab: left-aligned
+   "label + shortcut" rows, kbd chips pill-shaped and right-aligned in
+   their own column. The grid is left-aligned (no centering) so the
+   empty state reads as a list of next actions, not as a centered
+   splash.
+
+   `font-style: normal` on the title/hint overrides the global
+   `.empty { font-style: italic }` rule (style.css:388) which would
+   otherwise italicize the text. */
+.empty-state {
+  /* No padding / max-width on the host — the hint grid sizes itself.
+     Left-aligned by default (no text-align: center) so the label
+     column anchors to the surface's reading edge. */
+  color: var(--vs-text-3);
+  font-size: 0.85rem;
+}
+.empty-state-title {
+  font-weight: 600;
+  color: var(--vs-text-1);
+  margin-bottom: 8px;
+  font-style: normal;
+}
+.empty-state-hint {
+  font-size: 0.78rem;
+  color: var(--vs-text-2);
+  font-style: normal;
+  /* Left-aligned two-column grid: column 1 grows to fit the longest
+     label so all kbd chips share the same right edge; column 2 holds
+     the kbd and right-aligns its content within the cell. Row-gap
+     keeps the action lines visually separate. */
+  display: grid;
+  grid-template-columns: 1fr auto;
+  column-gap: 24px;
+  row-gap: 6px;
+}
+/* `display: contents` makes the row's label + kbd participate in the
+   parent grid as direct cells, while still letting callers write a
+   single `<span class="hint-row">` per action. */
+.empty-state-hint .hint-row {
+  display: contents;
+}
+/* Label sits in column 1; kbd sits in column 2 (right-aligned by
+   grid auto-flow + `justify-self`). No special alignment needed on
+   the label cell beyond default. */
+.empty-state-hint .hint-kbd {
+  justify-self: end;
+}
+/* Pill-style kbd chip, modeled on VS Code's welcome page chips.
+   Rounder corners, more horizontal padding, a soft background that
+   reads as a discrete key rather than a button border. */
+.empty-state kbd {
+  display: inline-block;
+  font-family: var(--mono);
+  font-size: 0.72rem;
+  padding: 2px 7px;
+  border: 1px solid var(--vs-border);
+  border-radius: 6px;
+  background: var(--vs-bg-2);
+  color: var(--vs-text-1);
+  line-height: 1.4;
+  white-space: nowrap;
+  /* Match the row's vertical center. */
+  vertical-align: middle;
+}
+
+/* Compact variant for narrow side-pane wrappers such as HistoryPanel.
+   Slightly smaller font + tighter row spacing keeps the empty state
+   inside the surrounding list rhythm without commanding attention. */
+.empty-state--compact .empty-state-title {
+  font-size: 0.85rem;
+  margin-bottom: 6px;
+}
+.empty-state--compact .empty-state-hint {
+  font-size: 0.75rem;
+  column-gap: 16px;
+  row-gap: 4px;
+}
+.empty-state--compact kbd {
+  font-size: 0.68rem;
+  padding: 1px 6px;
+}
+
+/* Splitters inside vault — the visual rule is exactly 1px (the
+   splitter's own right edge, painted via box-shadow: inset -1px 0 0)
+   so the line reads as the right-hand panel's left border and the
+   adjacent panels share the seam. To keep the splitter easy to
+   grab, the actual hit area is widened to 7px (3px on each side of
+   the 1px line) by a transparent ::before that overflows the
+   splitter's layout box. The line is on the right inner edge, so
+   the hit area extends slightly to the right of the seam (over the
+   right panel) — that matches the "grab the line, not the gap"
+   feel, since the cursor snaps to the panel edge and the line is
+   the visual guide for where to grab. */
+.vault .splitter {
+  background: transparent;
+  cursor: col-resize;
+  position: relative;
+  user-select: none;
+  touch-action: none;
+  width: 1px;
+  box-shadow: inset -1px 0 0 var(--vs-border);
+}
+.vault .splitter:hover,
+.vault .splitter:active {
+  box-shadow: inset -1px 0 0 var(--vs-accent);
+}
+.vault .splitter::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: -3px;
+  right: -3px;
+  /* pointer-events: auto is the default; the ::before exists solely
+     to enlarge the hit area, so leave it click-transparent visually. */
+}
+
+/* Monaco EditorPane inside vault */
+.vault .monaco-host { flex: 1; min-width: 0; min-height: 0; height: 100%; }
+.vault .monaco-host .monaco-scrollable-element > .scrollbar {
+  background: transparent !important;
+  box-shadow: none !important;
+}
+.vault .monaco-host .monaco-scrollable-element > .scrollbar > .slider {
+  background: var(--sb-thumb) !important;
+  border-radius: var(--sb-radius);
+  transition: background 0.15s;
+}
+.vault .monaco-host:hover .monaco-scrollable-element > .scrollbar > .slider,
+.vault .monaco-host .monaco-scrollable-element > .scrollbar > .slider:hover {
+  background: var(--sb-thumb-hover) !important;
+}
+.vault .monaco-host .monaco-scrollable-element > .shadow,
+.vault .monaco-host .monaco-scrollable-element > .corner {
+  display: none !important;
+}
+.vault .monaco-host .decorationsOverviewRuler {
+  display: none !important;
+}
+/* Keep Monaco's floating Find/Replace widget inside the clipped editor area. */
+.vault .monaco-host .monaco-editor .find-widget.visible {
+  top: 30px !important;
+  right: 50px !important;
+}
+
+/* Reading pane owns its native scrolling; Monaco keeps its
+   custom scrollbar DOM. Shared tokens visually align both. */
+.vault .reading-pane {
+  scrollbar-width: thin;
+  scrollbar-color: transparent transparent;
+  transition: scrollbar-color 0.2s ease;
+}
+.vault .reading-pane:hover {
+  scrollbar-color: var(--sb-thumb) transparent;
+}
+.vault .reading-pane::-webkit-scrollbar {
+  width: var(--sb-size);
+  height: var(--sb-size);
+  background: transparent;
+}
+.vault .reading-pane::-webkit-scrollbar-track {
+  background: transparent !important;
+  box-shadow: none !important;
+}
+.vault .reading-pane::-webkit-scrollbar-thumb {
+  background: color-mix(in srgb, var(--sb-thumb) 45%, transparent) !important;
+  border-radius: var(--sb-size);
+  box-shadow: none !important;
+  transition: background 0.2s ease;
+}
+.vault .reading-pane:hover::-webkit-scrollbar-thumb,
+.vault .reading-pane::-webkit-scrollbar-thumb:hover {
+  background: var(--sb-thumb-hover) !important;
+}
+.vault .reading-pane::-webkit-scrollbar-button {
+  display: none;
+  width: 0;
+  height: 0;
+}
+.vault .reading-pane::-webkit-scrollbar-corner {
+  background: transparent;
+}
+.vault .editor-pane:has(> .monaco-host.focus-width) {
+  align-items: center;
+}
+.vault .monaco-host.focus-width { width: min(100%, 920px); }
+.vault .monaco-host .monaco-md-marker { color: var(--vs-accent) !important; }
+.vault .monaco-host .monaco-md-code { background: var(--vs-bg-2); color: var(--vs-text-1) !important; }
+.vault .monaco-host .monaco-md-strong { color: var(--vs-text-1) !important; font-weight: 700; }
+.vault .monaco-host .monaco-md-link { color: var(--vs-accent) !important; }
+.vault .monaco-host .monaco-md-link-invalid {
+  color: var(--vs-danger, #d73a49) !important;
+  text-decoration: underline wavy;
+  text-decoration-thickness: 1px;
+  text-underline-offset: 3px;
+}
+
+.vault .article {
+  --article-flow: 0.72em;
+  --article-heading-gap: 1.45em;
+  color: var(--vs-text-1);
+}
+.vault .article :where(h1, h2, h3, h4, h5, h6) {
+  color: var(--vs-text-1);
+  line-height: 1.3;
+  scroll-margin-top: 24px;
+}
+.vault .article h1 { font-size: 1.72rem; font-weight: 700; margin: 0 0 0.55em; }
+.vault .article h2 { font-size: 1.34rem; font-weight: 650; margin: var(--article-heading-gap) 0 0.5em; }
+.vault .article h3 { font-size: 1.12rem; font-weight: 600; margin: var(--article-heading-gap) 0 0.45em; }
+.vault .article h4 { font-size: 0.98rem; font-weight: 600; margin: var(--article-heading-gap) 0 0.4em; color: var(--vs-text-2); }
+.vault .article h5 { font-size: 0.92rem; font-weight: 600; margin: var(--article-heading-gap) 0 0.35em; color: var(--vs-text-2); }
+.vault .article h6 { font-size: 0.86rem; font-weight: 600; margin: var(--article-heading-gap) 0 0.35em; color: var(--vs-text-2); }
+.vault .article :where(p, ul, ol, blockquote, dl) { margin: var(--article-flow) 0; }
+.vault .article :where(ul, ol) { padding-left: 1.45em; }
+.vault .article li + li { margin-top: 0.3em; }
+
+/* Reading mode (vault read surface). Reuses the editor-area's grid
+   slot (where editor + preview normally live) and swaps the split
+   for a single centered column. The side panel, tabs, and status
+   bar (which carries the path) above/below are unchanged — only
+   the .content inside .editor-area differs. */
+.vault .content.reading-content {
+  background: var(--vs-bg-1);
+  color: var(--vs-text-1);
+}
+.vault .reading-slot {
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+}
+.vault .reading-pane {
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  overflow: auto;
+  padding: 40px 24px 80px;
+  box-sizing: border-box;
+}
+/* Single-column centered article. The page-nav (TOC) is now a
+   separate right-side vault grid column (RightRail.vue), not an
+   inline child of the reading layout. */
+.vault .reading-layout {
+  display: flex;
+  max-width: 720px;
+  margin: 0 auto;
+}
+
+/* Reading mode gets a touch more vertical air and slightly tighter
+   code blocks than the cramped split-pane preview, but stays within
+   the vault's existing --vs-* tokens. */
+
+/* Article column — soft 1.6rem baseline and 75ch measure feels more
+   like reading a long-form post than a docs page. */
+.vault .reading-pane .article.reading {
+  flex: 0 1 720px;
+  min-width: 0;
+  max-width: 75ch;
+  font-size: 1.02rem;
+  line-height: 1.75;
+  padding: 0;
+  color: var(--vs-text-1);
+  /* Slightly more space between sibling paragraphs and surrounding
+     content than the preview pane — the preview is reference material,
+     the reading pane is a long-form read. */
+  --article-flow: 1.05em;
+  --article-heading-gap: 1.85em;
+}
+/* markdown-it-anchor wraps heading text in <a class="header-anchor">.
+   The heading should read as plain prose in every article mode
+   (preview AND reading), so we drop the underline that
+   `.vault .article a` applies to regular links. Without this rule
+   the anchor inherits the body-link text-decoration and the
+   heading gets an unwanted underline that the reading pane's
+   TOC-free view doesn't have.
+
+   The rule is scoped to `.vault .article` headings specifically —
+   external links inside a heading's text content still get the
+   underline treatment because the descendant `a` they wrap is not
+   itself a `header-anchor`. */
+.vault .article :where(h1, h2, h3, h4, h5, h6) a.header-anchor {
+  color: inherit;
+  text-decoration: none;
+}
+.vault .article :where(h1, h2, h3, h4, h5, h6) a.header-anchor:hover {
+  color: inherit;
+  text-decoration: none;
+}
+/* Read mode keeps the heading non-clickable. Preview still allows
+   the click (jumps to / copies the anchor), but the visible
+   treatment matches. The heading's own `id` is still there so the
+   page-nav TOC can scroll to it; only the in-place click is
+   suppressed. */
+.vault .reading-pane .article.reading :where(h1, h2, h3, h4, h5, h6) a.header-anchor {
+  pointer-events: none;
+  cursor: text;
+}
+/* Vault code styling. The global `code` and `pre` defaults use
+   hardcoded gray chips and `--code-bg` — fine for the docs but
+   reads as "uncoded" against the vault's themed chrome. The
+   reading pane and the live preview pane both render the same
+   .article HTML, so we scope the vault look to `.vault .article`
+   and let the global default stick for the public reading view
+   (where the long-form typography already lives in a different
+   cascade). The 1px border on inline code is what makes the
+   reading mode's "chip" feel — applying it vault-wide keeps the
+   two views visually consistent. */
+.vault .article p code,
+.vault .article li code,
+.vault .article h1 code,
+.vault .article h2 code,
+.vault .article h3 code,
+.vault .article h4 code,
+.vault .article h5 code,
+.vault .article h6 code {
+  font-size: 0.88em;
+  padding: 1px 6px;
+  border-radius: 4px;
+  background: var(--vs-bg-2);
+  color: var(--vs-text-1);
+  border: 1px solid var(--vs-border);
+}
+.vault .article pre {
+  font-size: 0.9em;
+  line-height: 1.55;
+  margin: 1.3em 0;
+  background: var(--vs-bg-2);
+  border-color: var(--vs-border);
+}
+.vault .article blockquote {
+  border-left: 3px solid var(--vs-accent);
+  background: var(--vs-bg-2);
+  color: var(--vs-text-2);
+  padding: 0.6em 1em;
+  border-radius: 0 4px 4px 0;
+}
+.vault .article blockquote p { margin: 0.3em 0; }
+.vault .article a {
+  /* Inherits the global `a` color (--accent), but reading columns
+     benefit from a subtle underline that signals "this jumps" — the
+     preview pane's clean look reads as "this is rendered prose,"
+     the reading pane reads as "this is something I can follow." */
+  text-decoration: underline;
+  text-decoration-thickness: 1px;
+  text-underline-offset: 3px;
+  text-decoration-color: var(--vs-border);
+}
+.vault .article a:hover {
+  text-decoration-color: var(--vs-accent);
+  color: var(--vs-accent-hover);
+}
+
+/* Wiki links ([[…]] and [t](path.md)). Distinguished from regular
+   external links by the .wiki-link class the markdown-it plugin
+   emits in src/lib/wikiLinks.ts. The base .vault .article a style
+   already provides color + hover; here we add a subtle underline
+   that reads as "this jumps to another note" and a distinct
+   `wiki-link-missing` state for unresolved targets (dotted
+   underline + muted color so the user can tell at a glance that
+   the link is broken). The accent color is intentionally
+   preserved on hover so a broken link still feels interactive. */
+.vault .article a.wiki-link {
+  text-decoration: underline;
+  text-decoration-thickness: 1px;
+  text-underline-offset: 2px;
+  text-decoration-color: var(--vs-border);
+}
+.vault .article a.wiki-link:hover {
+  text-decoration-color: var(--vs-accent);
+  color: var(--vs-accent-hover);
+}
+.vault .article a.wiki-link-missing {
+  color: var(--vs-text-2);
+  text-decoration-style: dotted;
+  text-decoration-color: var(--vs-text-2);
+}
+.vault .article a.wiki-link-missing:hover {
+  color: var(--vs-text-1);
+  text-decoration-color: var(--vs-text-1);
+}
+.vault .article hr {
+  margin: 2.4em 0;
+  width: 100%;
+  border: 0;
+  border-top: 1px solid var(--vs-border);
+}
+.vault .article .table-scroll {
+  max-width: 100%;
+  margin: 1.15em 0;
+  overflow-x: auto;
+  overscroll-behavior-inline: contain;
+  border: 1px solid var(--vs-border);
+  border-radius: 6px;
+  background: var(--vs-bg-1);
+}
+.vault .article .table-scroll > table {
+  width: max-content;
+  min-width: 100%;
+  font-size: 0.9em;
+  line-height: 1.45;
+  border-collapse: collapse;
+  border: 0;
+  margin: 0;
+}
+.vault .article th,
+.vault .article td {
+  max-width: 32rem;
+  padding: 8px 12px;
+  border: 0;
+  border-right: 1px solid color-mix(in srgb, var(--vs-table-border) 50%, transparent);
+  border-bottom: 1px solid color-mix(in srgb, var(--vs-table-border) 50%, transparent);
+  text-align: left;
+  vertical-align: top;
+  overflow-wrap: anywhere;
+}
+.vault .article th {
+  background: var(--vs-bg-2);
+  color: var(--vs-text-1);
+  font-weight: 600;
+}
+.vault .article tbody tr:nth-child(even) {
+  background: color-mix(in srgb, var(--vs-bg-2) 42%, var(--vs-bg-1));
+}
+.vault .article tbody tr:hover {
+  background: var(--vs-hover-bg);
+}
+.vault .article tr > :last-child {
+  border-right: 0;
+}
+.vault .article tbody tr:last-child > td {
+  border-bottom: 0;
+}
+@media (max-width: 600px) {
+  .vault .article th,
+  .vault .article td { padding: 7px 9px; }
+}
+.vault .article img {
+  border-radius: 6px;
+  border: 1px solid var(--vs-border);
+  margin: 0.4em 0;
+}
+
+/* Status Bar — spans the full width of the vault (last grid row,
+   column 1 / -1). 24px tall, low-contrast neutral background so the
+   status text reads as a footer affordance, not a brand bar. The
+   saving/error states get a left-edge accent so the moment something
+   actually changes still pops. */
+.status-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  background: var(--bg-soft);
+  color: var(--text-muted);
+  font-size: 0.74rem;
+  padding: 0 12px;
+  user-select: none;
+  height: 24px;
+  grid-column: 1 / -1;
+  border-top: 1px solid var(--border);
+}
+.sb-left, .sb-right {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+}
+.sb-item { white-space: nowrap; }
+.sb-item:first-child { padding-left: 2px; }
+.sb-status { color: var(--text-muted); }
+.sb-status[data-status='dirty']  { color: #d97706; }
+.sb-status[data-status='saved']  { color: var(--text); }
+.sb-status[data-status='saving'] { color: var(--accent); }
+.sb-status[data-status='error']  { color: #dc2626; }
+/* The leading glyphs used to be CSS ::before content rules; they
+   moved into StatusBar.vue as ICON_STATUS_* SVG icons (see
+   statusIcon computed). The ::before rules were removed so the
+   icons render exactly once. The data-status colors above still
+   apply — the icons inherit currentColor and tint accordingly. */
+
+/* Empty / loading state inside vault */
+.vault .empty {
+  color: var(--vs-text-3);
+  font-style: italic;
+  padding: 16px 20px;
+}
+.vault .empty.error { color: #f48771; font-style: normal; }
+/* Direct-child vault columns. TagPanel must be in this list so its
+   surface matches FileTree's -- exactly the same `var(--bg)` token
+   (which the vault rebinds to `--vs-bg-1`) — otherwise TagPanel
+   silently falls through to `--vs-bg-2` and the two sidebars
+   render in different tones. Activity bar and splitter keep the
+   same treatment as before. */
+.vault > .activity-bar,
+.vault > .file-tree,
+.vault > .tag-panel,
+.vault > .splitter {
+  background: var(--bg);
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+.vault > .activity-bar { overflow: visible; }
+
+.preview { max-width: 100%; }
+.render-error {
+  color: #dc2626;
+  background: #fef2f2;
+  padding: 12px;
+  border-radius: 4px;
+  font-family: var(--mono);
+  font-size: 0.85rem;
+}
+
+/* ---------- Toast ---------- */
+/* Top of the modal stack — toasts are non-blocking feedback and
+   should sit above any confirm/prompt/picker. The host itself is
+   pointer-events: none, so it doesn't trap clicks. */
+.toast-host {
+  position: fixed;
+  bottom: 24px;
+  right: 24px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  z-index: 10000;
+  pointer-events: none;
+}
+.toast {
+  pointer-events: auto;
+  cursor: pointer;
+  min-width: 200px;
+  max-width: 360px;
+  padding: 10px 14px;
+  border-radius: 6px;
+  font-size: 0.875rem;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+  background: var(--bg-soft);
+  color: var(--text);
+  border-left: 3px solid var(--accent);
+}
+.toast-success { border-left-color: #10b981; }
+.toast-error   { border-left-color: #ef4444; }
+.toast-info    { border-left-color: var(--accent); }
+.toast-enter-active, .toast-leave-active { transition: all 0.18s ease; }
+.toast-enter-from { opacity: 0; transform: translateY(8px); }
+.toast-leave-to   { opacity: 0; transform: translateX(20px); }
+
+/* ---------- Confirm ---------- */
+/* confirm-host sits ABOVE prompt-host (9998) so a confirm opened
+   from inside a prompt is visible. The picker backdrop (9996) and
+   the prompt backdrop (9998) both stay below it. */
+.confirm-host { position: relative; z-index: 9999; }
+.confirm-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.35);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.confirm-dialog {
+  background: var(--bg);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 20px 22px;
+  min-width: 320px;
+  max-width: 480px;
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.25);
+}
+.confirm-message { font-size: 1rem; font-weight: 500; color: var(--text-h); }
+.confirm-detail  { margin-top: 6px; font-size: 0.875rem; color: var(--text-muted); white-space: pre-line; }
+.confirm-actions { display: flex; gap: 8px; justify-content: flex-end; margin-top: 18px; }
+
+/* ---------- Button (reused) ---------- */
+.btn {
+  font: inherit;
+  font-size: 0.875rem;
+  padding: 6px 14px;
+  border: 1px solid var(--border);
+  background: var(--bg-soft);
+  color: var(--text);
+  border-radius: 4px;
+  cursor: pointer;
+}
+.btn:hover { background: var(--code-bg); }
+.btn-primary {
+  background: var(--accent);
+  color: white;
+  border-color: var(--accent);
+}
+.btn-primary:hover { background: var(--accent-hover); border-color: var(--accent-hover); }
+.btn-danger {
+  color: #fff;
+  border-color: #b42318;
+  background: #b42318;
+}
+.btn-danger:hover { border-color: #912018; background: #912018; }
+
+/* ---------- Command palette ---------- */
+.palette-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.4);
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  padding-top: 12vh;
+  z-index: 9997;
+}
+.palette {
+  width: min(560px, 92vw);
+  background: var(--bg);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  box-shadow: 0 16px 48px rgba(0, 0, 0, 0.3);
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+.palette-input {
+  width: 100%;
+  box-sizing: border-box;
+  border-bottom: 1px solid var(--border);
+  background: transparent;
+}
+.palette-input input { font-size: 1rem; }
+.palette-list { list-style: none; margin: 0; padding: 0; max-height: 50vh; overflow-y: auto; }
+.palette-item {
+  padding: 8px 16px;
+  cursor: pointer;
+  border-left: 3px solid transparent;
+}
+.palette-item.active {
+  background: var(--bg-soft);
+  border-left-color: var(--accent);
+}
+.palette-row { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.palette-title { font-size: 0.9rem; color: var(--text-h); }
+.palette-snippet { font-size: 0.78rem; color: var(--text-muted); margin-top: 2px; }
+.palette-path { font-size: 0.72rem; font-family: var(--mono); color: var(--text-muted); margin-top: 2px; }
+.palette-badge {
+  font-size: 0.7rem;
+  text-transform: uppercase;
+  padding: 1px 6px;
+  border-radius: 3px;
+  background: var(--code-bg);
+  color: var(--text-muted);
+}
+.badge-body    { background: #fef3c7; color: #92400e; }
+.badge-title   { background: #dbeafe; color: #1e40af; }
+.badge-summary { background: #e0e7ff; color: #3730a3; }
+.badge-tag     { background: #dcfce7; color: #166534; }
+
+.palette-empty {
+  padding: 24px 16px;
+  text-align: left;
+  color: var(--text-muted);
+  font-size: 0.875rem;
+}
+.palette-new { margin-top: 12px; }
+
+.palette-foot {
+  display: flex;
+  gap: 14px;
+  padding: 8px 16px;
+  border-top: 1px solid var(--border);
+  font-size: 0.72rem;
+  color: var(--text-muted);
+  background: var(--bg-soft);
+}
+
+@media (prefers-color-scheme: dark) {
+  .badge-body    { background: #422006; color: #fbbf24; }
+  .badge-title   { background: #1e3a8a; color: #93c5fd; }
+  .badge-summary { background: #312e81; color: #c7d2fe; }
+  .badge-tag     { background: #14532d; color: #86efac; }
+}
+
+/* ---------- Article enhancements ---------- */
+.article .header-anchor {
+  color: inherit;
+  text-decoration: none;
+}
+.article pre { background: var(--code-bg); }
+.article .task-list-item { list-style: none; }
+.article .task-list-item input[type='checkbox'] { margin-right: 0.4em; }
+.article ul.contains-task-list { padding-left: 1.2em; }
+
+/* ---------- Math (KaTeX post-mount placeholders) ----------
+   Markdown emits only safe, encoded placeholders. KaTeX adds its own
+   markup after DOMPurify has finished, so these rules intentionally cover
+   only the article-level layout and error fallback. The official KaTeX
+   stylesheet is bundled from `katex/dist/katex.min.css`. */
+.article .math-inline {
+  display: inline;
+  color: inherit;
+}
+.article .math-block {
+  display: block;
+  max-width: 100%;
+  margin: 1.2em 0;
+  overflow-x: auto;
+  overflow-y: hidden;
+  text-align: center;
+  color: inherit;
+}
+.article .math-inline .katex,
+.article .math-block .katex { color: inherit; }
+.article .math-block .katex-display { margin: 0; }
+.article .math-mount.math-error {
+  color: var(--vs-danger, #d73a49);
+  white-space: pre-wrap;
+}
+
+/* ---------- Footnotes (markdown-it-footnote) ----------
+   The plugin emits: <sup class="footnote-ref">, then later
+   <hr class="footnotes-sep">, <section class="footnotes">,
+   <ol class="footnotes-list">, <li id="fnN" class="footnote-item">,
+   and a backref <a class="footnote-backref" href="#fnrefN">↩︎</a>.
+   Without these rules the inline ref renders at the same size as
+   the surrounding text and the footnote block looks like a stray
+   paragraph list. We anchor on .article (not .vault .article) so
+   both the preview pane and reading pane get the same treatment;
+   reading-pane-specific spacing tweaks live below. */
+.article .footnote-ref {
+  font-size: 0.75em;
+  line-height: 0;
+  margin-left: 0.15em;
+}
+.article .footnote-ref a {
+  /* Plugin already nests <a> inside <sup>, so the anchor is the
+     clickable target. Inherit color so the sup doesn't introduce
+     a new hue against the article body. */
+  color: inherit;
+  text-decoration: none;
+}
+.article .footnote-ref a:hover {
+  text-decoration: underline;
+}
+.article .footnotes-sep {
+  /* Plugin emits a bare <hr>; the project has no global .article hr
+     rule, so the browser default (1px inset) would clash with the
+     vault's flat border look. Force the same --vs-border hairline
+     used by article separators, while keeping this footnote divider
+     intentionally short so it marks supporting notes rather than a new
+     top-level section or a browser-default chrome artifact. */
+  width: 25%;
+  margin: 2em 0 1em;
+  border: 0;
+  border-top: 1px solid var(--vs-border);
+}
+.article .footnotes {
+  font-size: 0.85em;
+  /* Color is left to inherit — there's no --vs-fg-muted token in
+     this stylesheet, and the article text color reads fine at
+     0.85em without an extra mute step. */
+}
+.article .footnotes-list {
+  padding-left: 1.4em;
+  margin: 0;
+}
+.article .footnote-item {
+  /* Plugin's default puts the backref inside the same <p> as the
+     note text, separated by a space. No special layout needed;
+     the only override is to soften the spacing so the list reads
+     tight, not as a separate prose block. */
+  margin: 0.25em 0;
+}
+.article .footnote-item p { margin: 0; display: inline; }
+.article .footnote-backref {
+  margin-left: 0.25em;
+  text-decoration: none;
+}
+.article .footnote-backref:hover {
+  text-decoration: underline;
+}
+
+/* ---------- Definition lists (markdown-it-deflist) ----------
+   Plugin emits standard <dl>/<dt>/<dd> with multiple dd's as
+   siblings under one dt (HTML5 model — not nested). Without these
+   rules the browser default <dd> indent (~40px left padding) makes
+   glossary-style notes feel misaligned with the rest of the
+   article. We scope to .article so both preview and reading pane
+   get the same treatment. */
+.article dl {
+  margin: 0.8em 0;
+}
+.article dt {
+  /* Term is the "label" half — render it slightly bolder so it
+     reads as the heading of its definitions, not as a list bullet. */
+  font-weight: 600;
+  margin-top: 0.6em;
+}
+.article dt:first-child { margin-top: 0; }
+.article dd {
+  /* Pull definitions back to align under the term, not under a
+     40px browser-default gutter. 1.4em matches the list indent
+     used by .article ul / .article ol (see rule above) so dl
+     reads in the same column as the surrounding lists. */
+  margin: 0.2em 0 0.2em 1.4em;
+}
+
+/* ---------- Highlight (markdown-it-mark) ----------
+   ==text== → <mark>. The browser default is solid yellow, which
+   reads as a browser-system color and clashes with the vault's
+   flat look (see --vs-bg / --vs-border tokens above). We tone it
+   down to a translucent amber so the highlight still pops on both
+   light and dark backgrounds without dominating the line. The
+   padding keeps the highlight from sitting flush against the
+   text — solid yellow at zero padding makes adjacent characters
+   look smudged. */
+.article mark {
+  background-color: rgba(255, 213, 79, 0.45);
+  color: inherit;
+  padding: 0.05em 0.15em;
+  border-radius: 2px;
+}
+
+/* ---------- Markmap mount host ----------
+   The ```markmap``` fence in src/lib/markdown.ts emits a
+   `<div class="markmap-mount">` placeholder; useMarkmapMount replaces
+   it with a `<div class="markmap-widget-host">` and mounts a
+   full MarkMap widget (svg + toolbar) into that host. We isolate
+   the host from the article's typography (font-size: 0.9em) and
+   block-flow rules so the markmap's own SVG sizing isn't squeezed
+   by surrounding text. The widget's internal styles are scoped to
+   MarkMap.vue; this is just the bridge. */
+.article .markmap-widget-host {
+  display: block;
+  font-size: 1em;        /* undo the .article 0.9em */
+  line-height: normal;   /* undo .article line-height: 1.6 */
+  margin: 0;
+}
+.article .markmap-widget-host > * {
+  margin: 0;
+}
+/* The mount placeholder itself, in the brief window before
+   useMarkmapMount replaces it. We give it a min-height to avoid
+   layout shift when the SVG arrives, but no border / background —
+   the surrounding markmap-widget styling is also borderless
+   (floating on the article bg), so a frame here would flash. */
+.article .markmap-mount {
+  display: block;
+  min-height: 120px;
+  margin: 0;
+}
+
+/* ---------- Mermaid mount host ----------
+   The ```mermaid``` fence in src/lib/markdown.ts emits a
+   `<div class="mermaid-mount">` placeholder; useMermaidMount
+   replaces it with a `<div class="mermaid-widget-host">` and
+   mounts a full Mermaid widget (svg + error fallback) into that
+   host. Mirror of the markmap host rules above: undo the
+   article's typography overrides so mermaid's own font sizing
+   wins, and strip margins so the widget doesn't double-space with
+   the surrounding paragraphs. */
+.article .mermaid-widget-host {
+  display: block;
+  font-size: 1em;
+  line-height: normal;
+  margin: 0;
+}
+.article .mermaid-widget-host > * {
+  margin: 0;
+}
+.article .mermaid-mount {
+  display: block;
+  min-height: 80px;
+  margin: 0;
+}
+
+/* Vault: its workspace-local palette remains scoped here. The global Nuvyn
+   semantic palette and legacy aliases are authoritative in tokens.css. */
+
+:root[data-theme='light'] .vault {
+  --vs-bg-1: #ffffff;
+  --vs-bg-2: #f3f3f3;
+  --vs-bg-3: #dddddd;
+  --vs-bg-4: #ececec;
+  --vs-tabs-bg: #f7f7f7;
+  --vs-border: #e0e0e0;
+  --vs-table-border: #d8d8d8;
+  --vs-text-1: #1f1f1f;
+  --vs-text-2: #6f6f6f;
+  --vs-text-3: #999999;
+  --vs-accent: #005fb8;
+  --vs-accent-hover: #0258a8;
+  --vs-accent-bg: rgba(0, 95, 184, 0.1);
+  --vs-active-bg: #e8e8e8;
+  --vs-tab-active-bg: #ffffff;
+  --vs-tab-inactive-bg: #ececec;
+  --vs-hover-bg: #ececec;
+  --vs-status-bg: #005fb8;
+  --vs-status-fg: #ffffff;
+  --code-bg: #f3f4f6;
+  --text: var(--vs-text-1);
+  --text-h: var(--vs-text-1);
+  --text-muted: var(--vs-text-2);
+  --bg: var(--vs-bg-1);
+  --bg-soft: var(--vs-bg-2);
+  --border: var(--vs-border);
+  --accent: var(--vs-accent);
+  --accent-hover: var(--vs-accent-hover);
+  --accent-bg: var(--vs-accent-bg);
+}
+
+:root[data-theme='dark'] .vault {
+  --vs-bg-1: #1e1e1e;
+  --vs-bg-2: #252526;
+  --vs-bg-3: #333333;
+  --vs-bg-4: #2d2d2d;
+  --vs-tabs-bg: #1a1a1a;
+  --vs-border: #3c3c3c;
+  --vs-table-border: #2e2e2e;
+  --vs-text-1: #d4d4d4;
+  --vs-text-2: #858585;
+  --vs-text-3: #6a6a6a;
+  --vs-accent: #007acc;
+  --vs-accent-hover: #1f8ad2;
+  --vs-accent-bg: rgba(0, 122, 204, 0.2);
+  --vs-active-bg: #37373d;
+  --vs-tab-active-bg: #1e1e1e;
+  --vs-tab-inactive-bg: #373737;
+  --vs-hover-bg: #2a2d2e;
+  --vs-status-bg: #007acc;
+  --vs-status-fg: #ffffff;
+  --code-bg: #2a2a2a;
+  --text: var(--vs-text-1);
+  --text-h: var(--vs-text-1);
+  --text-muted: var(--vs-text-2);
+  --bg: var(--vs-bg-1);
+  --bg-soft: var(--vs-bg-2);
+  --border: var(--vs-border);
+  --accent: var(--vs-accent);
+  --accent-hover: var(--vs-accent-hover);
+  --accent-bg: var(--vs-accent-bg);
+}
+
+/* AI assistant inside the unified right rail: a compact session toolbar,
+   a flowing message
+   stream with avatar + plain text for assistant turns and a subtle
+   right-aligned bubble for user turns, and a single rounded composer
+   that hosts the textarea + send button as one focusable surface.
+
+   The left seam is drawn by the splitter to the left of this panel
+   (box-shadow: inset -1px 0 0 var(--vs-border)), not by the panel
+   itself, mirroring the .file-tree / .tag-panel convention. */
+
+.ai-panel {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  height: 100%;
+  background: var(--vs-bg-1);
+  color: var(--vs-text-1);
+  overflow: hidden;
+}
+
+.ai-panel .ai-header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  height: 32px;
+  box-sizing: border-box;
+  padding: 0 14px 0 20px;
+  background: transparent;
+  border-bottom: 1px solid color-mix(in srgb, var(--vs-border) 34%, transparent);
+  user-select: none;
+  flex: 0 0 auto;
+}
+
+.ai-panel .ai-title-session {
+  margin-right: auto;
+  min-width: 0;
+  max-width: calc(100% - 70px);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--vs-text-3);
+  font-size: 0.72rem;
+  font-weight: 500;
+}
+
+.ai-panel .ai-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  margin-left: auto;
+}
+
+/* Header icon buttons (history, new chat). Match the close button's
+   weight (22px square, transparent background, hover lifts to
+   --vs-hover-bg). The :focus-visible ring is a11y for keyboard nav. */
+.ai-panel .ai-header-btn {
+  background: transparent;
+  border: 0;
+  color: var(--vs-text-3);
+  cursor: pointer;
+  width: 26px;
+  height: 26px;
+  border-radius: 4px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  opacity: 0.7;
+  transition: background 0.12s, color 0.12s, opacity 0.12s;
+}
+.ai-panel .ai-header-btn:hover {
+  background: var(--vs-hover-bg);
+  color: var(--vs-text-1);
+  opacity: 1;
+}
+.ai-panel .ai-header-btn:focus-visible {
+  outline: 1px solid var(--vs-accent);
+  outline-offset: 1px;
+}
+.ai-panel .ai-header-btn[aria-pressed='true'] {
+  background: color-mix(in srgb, var(--vs-accent) 14%, var(--vs-active-bg));
+  color: var(--vs-text-1);
+  opacity: 1;
+}
+.ai-panel .ai-header-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+/* The icon SVGs come from v-html inside a wrapping <span>, so without
+   this rule the inline SVG sits on the text baseline and the flex
+   `align-items: center` on the button leaves it visibly off-center.
+   `display: block` removes the baseline; explicit size wins over the
+   inline width/height attrs (which are 14×14 here). */
+.ai-panel .ai-header-btn :where(svg) {
+  display: block;
+  width: 14px;
+  height: 14px;
+}
+
+.ai-panel .ai-close {
+  background: transparent;
+  border: 0;
+  color: var(--vs-text-3);
+  cursor: pointer;
+  font-size: 1rem;
+  line-height: 1;
+  width: 22px;
+  height: 22px;
+  border-radius: 4px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  transition: background 0.1s, color 0.1s;
+}
+.ai-panel .ai-close:hover {
+  background: var(--vs-hover-bg);
+  color: var(--vs-text-1);
+}
+
+/* Message stream. Each turn is a row: avatar (left) + text for
+   assistant, right-aligned bubble for user. Generous gap so the
+   stream reads as a chat, not a tight list. */
+.ai-panel .ai-messages {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 12px 12px 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.ai-panel .ai-message {
+  display: flex;
+  gap: 7px;
+  align-items: flex-start;
+  min-width: 0;
+}
+.ai-panel .ai-message.user { flex-direction: row-reverse; }
+
+/* Assistant avatar: 22×22 square with the AI sparkle, accent-tinted.
+   Sized to anchor the message visually without competing with the
+   text. The fill uses `currentColor` so swapping the icon re-tints
+   the whole glyph uniformly. */
+.ai-panel .ai-avatar {
+  display: inline-flex;
+  width: 20px;
+  height: 20px;
+  flex-shrink: 0;
+  align-items: center;
+  justify-content: center;
+  color: color-mix(in srgb, var(--vs-accent) 78%, var(--vs-text-2));
+  background: color-mix(in srgb, var(--vs-accent) 9%, transparent);
+  border-radius: 5px;
+}
+.ai-panel .ai-avatar :where(svg) { width: 13px; height: 13px; display: block; }
+
+/* Assistant text is plain (no background, no padding) so the message
+   stream reads as continuous prose, like a chat transcript, rather
+   than a stack of UI cards. User turns get a subtle bubble so they
+   read as "from me". */
+.ai-panel .ai-bubble {
+  font-size: 0.84rem;
+  line-height: 1.5;
+  color: var(--vs-text-1);
+  word-wrap: break-word;
+  white-space: pre-wrap;
+  min-width: 0;
+  max-width: calc(100% - 30px);
+}
+.ai-panel .ai-message.assistant .ai-bubble {
+  background: transparent;
+  padding: 1px 0;
+}
+.ai-panel .ai-message.user .ai-bubble {
+  background: color-mix(in srgb, var(--vs-accent, var(--accent)) 9%, transparent);
+  padding: 5px 9px;
+  border-radius: 6px;
+  border-bottom-right-radius: 2px;
+  border: 0;
+  max-width: 88%;
+}
+
+/* Composer — two-layer card. The input sits on top as a clean
+   text field; the toolbar (slash shortcut, current-note context,
+   send button) sits below as a separate row, divided from the
+   input by a thin top border. Matches the Claude Code CLI
+   composer where the file/action/send row is visually
+   independent of the input area. The whole card lights up on
+   focus-within via the same accent ring used by other vault inputs. */
+.ai-panel .ai-composer {
+  flex: 0 0 auto;
+  padding: 7px 8px 8px;
+  background: transparent;
+}
+
+.ai-panel .ai-composer-card {
+  display: flex;
+  flex-direction: column;
+  background: var(--vs-bg-2);
+  border: 1px solid color-mix(in srgb, var(--vs-border) 22%, transparent);
+  border-radius: 8px;
+  overflow: hidden;
+  box-shadow: 0 2px 8px color-mix(in srgb, var(--vs-border) 35%, transparent);
+  transition: border-color 0.15s, box-shadow 0.15s, background 0.15s;
+}
+.ai-panel .ai-composer-card:focus-within {
+  background: color-mix(in srgb, var(--vs-bg-2) 88%, var(--vs-bg-1));
+  border-color: color-mix(in srgb, var(--vs-accent) 62%, var(--vs-border));
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--vs-accent) 13%, transparent),
+    0 5px 14px color-mix(in srgb, var(--vs-border) 42%, transparent);
+}
+.ai-panel .ai-context-paths {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  padding: 6px 8px 0;
+}
+.ai-panel .ai-context-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  min-width: 0;
+  max-width: 100%;
+  padding: 2px 4px 2px 6px;
+  border-radius: 4px;
+  background: color-mix(in srgb, var(--vs-accent) 9%, transparent);
+  color: var(--vs-text-2);
+  font-family: var(--mono);
+  font-size: 0.66rem;
+  line-height: 1.3;
+}
+.ai-panel .ai-context-chip-path {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.ai-panel .ai-context-chip-remove {
+  flex: 0 0 auto;
+  width: 16px;
+  height: 16px;
+  padding: 0;
+  border: 0;
+  border-radius: 3px;
+  background: transparent;
+  color: var(--vs-text-3);
+  font-size: 0.9rem;
+  line-height: 1;
+  cursor: pointer;
+}
+.ai-panel .ai-context-chip-remove:hover {
+  background: color-mix(in srgb, var(--vs-accent) 14%, transparent);
+  color: var(--vs-text-1);
+}
+.ai-panel .ai-input {
+  display: block;
+  width: 100%;
+  box-sizing: border-box;
+  /* JS in AiPanel.vue resizes this textarea to fit its content
+     (autoresize() in the component). min-height is the empty-
+     state floor — matches the toolbar row so the two halves read
+     as equal-weight layers. autoresize() writes an inline height
+     that overrides this as content grows, capped at INPUT_MAX_H
+     (160px ≈ 6 lines); at the cap the field flips to
+     overflow-y:auto with a transparent scrollbar so a huge paste
+     is still scrollable inside, but the panel reads as scrollbar-
+     free at a glance. */
+  resize: none;
+  background: transparent;
+  border: 0;
+  /* Padding is asymmetric — extra horizontal so long words have
+     breathing room from the card edges, generous vertical so the
+     placeholder sits centered with breathing room. */
+  padding: 9px 10px 8px;
+  font-family: var(--sans);
+  font-size: 0.85rem;
+  color: var(--vs-text-1);
+  line-height: 1.4;
+  outline: none;
+  min-height: 46px;
+  overflow-y: hidden;
+  scrollbar-width: thin;
+  scrollbar-color: transparent transparent;
+}
+.ai-panel .ai-input-control {
+  width: 100%;
+  min-width: 0;
+}
+.ai-panel .ai-input::-webkit-scrollbar { width: 0; background: transparent; }
+.ai-panel .ai-input::placeholder { color: var(--vs-text-3); }
+
+/* Toolbar — the action row below the input. Two layers reading
+   as one card: the thin top border (inherited from the card's
+   own divider logic below) separates the input from the toolbar
+   without adding a second visual surface. height matches .ai-input
+   so the two halves read as exactly equal-height layers. */
+.ai-panel .ai-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+  padding: 4px 5px 5px 8px;
+  border-top: 1px solid color-mix(in srgb, var(--vs-border) 58%, transparent);
+  min-height: 32px;
+  box-sizing: border-box;
+}
+.ai-panel .ai-toolbar-left {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  flex: 1 1 auto;
+  overflow: hidden;
+}
+.ai-panel .ai-toolbar-right {
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  flex: 0 0 auto;
+}
+
+.ai-panel .ai-mode-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  color: var(--vs-text-3);
+  font-size: 0.64rem;
+  line-height: 1;
+  white-space: nowrap;
+}
+.ai-panel .ai-mode-dot {
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: #51b87a;
+  box-shadow: 0 0 0 2px color-mix(in srgb, #51b87a 14%, transparent);
+}
+
+/* The add-context control keeps the toolbar compact while remaining quiet
+   until the user opens the document picker. */
+.ai-panel .ai-tool-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 23px;
+  height: 23px;
+  padding: 0;
+  border: 1px solid transparent;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--vs-text-3);
+  font-size: 1rem;
+  line-height: 1;
+  opacity: 0.8;
+  cursor: pointer;
+}
+.ai-panel .ai-tool-button:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--vs-accent) 10%, transparent);
+  color: var(--vs-text-1);
+}
+.ai-panel .ai-tool-button:disabled {
+  opacity: 0.38;
+  cursor: default;
+}
+.ai-panel .ai-tool-plus {
+  margin-top: -1px;
+  font-weight: 300;
+}
+.ai-panel .ai-send {
+  flex: 0 0 auto;
+  width: 24px;
+  height: 24px;
+  border-radius: 5px;
+  border: 0;
+  background: var(--vs-accent);
+  color: #fff;
+  font-size: 0.9rem;
+  line-height: 1;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  transition: background 0.12s, transform 0.12s, box-shadow 0.12s;
+  /* Slight outer glow so the button lifts off the muted card
+     surface. Box-shadow instead of border because border eats
+     into the compact box and shifts the icon. */
+  box-shadow: 0 1px 2px color-mix(in srgb, var(--vs-accent) 35%, transparent);
+}
+.ai-panel .ai-send:disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
+  box-shadow: none;
+}
+.ai-panel .ai-send:hover:not(:disabled) {
+  background: var(--vs-accent-hover);
+  transform: translateY(-1px);
+  box-shadow: 0 2px 5px color-mix(in srgb, var(--vs-accent) 40%, transparent);
+}
+.ai-panel .ai-send:active:not(:disabled) {
+  transform: translateY(0);
+  box-shadow: 0 1px 2px color-mix(in srgb, var(--vs-accent) 35%, transparent);
+}
+/* The button doubles as Stop while a stream is in flight. A
+   slightly deeper red makes the destructive semantics obvious at
+   a glance, and ICON_STOP (filled square) is intentionally different
+   from ICON_SEND (paper plane) so a power user recognizes the
+   toggle from across the panel. */
+.ai-panel .ai-send.ai-send-busy {
+  background: #e85a4f;
+  box-shadow: 0 1px 2px rgba(232, 90, 79, 0.35);
+}
+.ai-panel .ai-send.ai-send-busy:hover {
+  background: #f06a5f;
+  box-shadow: 0 2px 5px rgba(232, 90, 79, 0.4);
+}
+
+/* NavBar panel toggles — compact controls with a soft-filled accent when
+   the corresponding panel is open. */
+.left-panel-toggle {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  background: transparent;
+  border: 1px solid transparent;
+  color: var(--text-muted);
+  border-radius: 6px;
+  cursor: pointer;
+  transition: background 0.1s, color 0.1s;
+}
+.left-panel-toggle:hover { background: var(--bg-soft); border-color: var(--border); color: var(--text-h); }
+.left-panel-toggle[aria-pressed='true'] {
+  background: color-mix(in srgb, var(--accent) 18%, transparent);
+  color: var(--accent);
+}
+.left-panel-toggle .left-panel-toggle-icon { display: inline-flex; line-height: 0; }
+
+.right-rail-toggle {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  background: transparent;
+  border: 1px solid transparent;
+  color: var(--text-muted);
+  border-radius: 6px;
+  cursor: pointer;
+  transition: background 0.1s, color 0.1s;
+}
+.right-rail-toggle:hover { background: var(--bg-soft); border-color: var(--border); color: var(--text-h); }
+.right-rail-toggle[aria-pressed='true'] {
+  background: color-mix(in srgb, var(--accent) 18%, transparent);
+  color: var(--accent);
+}
+.right-rail-toggle .right-rail-toggle-icon { display: inline-flex; line-height: 0; }
+
+/* NavBar view-mode toggle — single button that switches between
+   edit and read. Matches the AI / theme toggles next to it
+   (same 28×28 icon button, soft-filled on hover, accent-tinted
+   when read mode is active). Cmd/Ctrl+E is the keyboard twin
+   (wired in useEditorShortcuts) and calls the same viewModeApi.toggle(). */
+.view-toggle {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  background: transparent;
+  border: 1px solid transparent;
+  color: var(--text-muted);
+  border-radius: 6px;
+  font: inherit;
+  cursor: pointer;
+  transition: color 0.15s, border-color 0.15s, background 0.15s;
+}
+.view-toggle:hover {
+  color: var(--text-h);
+  border-color: var(--border);
+  background: var(--bg-soft);
+}
+/* The button represents the "switch to opposite mode" affordance,
+   so the read state is the one that should feel selected. */
+.view-toggle.is-read {
+  background: color-mix(in srgb, var(--accent) 18%, transparent);
+  color: var(--accent);
+}
+.view-toggle .view-toggle-icon {
+  display: inline-flex;
+  align-items: center;
+  line-height: 0;
+}
+
+/* Clickable session title in the AI panel header. The whole
+   "Claude · {title}" is a button so the user can open the
+   session picker. Inherits the same colors as the rest of the
+   header text; hover gives a subtle background like the close
+   button. */
+.ai-panel .ai-title-sep { color: var(--vs-text-3); font-weight: 400; }
+
+/* LLM integration additions (spec §5) */
+.ai-panel .ai-no-key-banner {
+  background: color-mix(in srgb, var(--vs-accent) 8%, var(--vs-bg-1));
+  color: color-mix(in srgb, var(--vs-text-2) 82%, var(--vs-text-1));
+  font-size: 0.76rem;
+  padding: 6px 10px;
+  line-height: 1.4;
+  border-bottom: 1px solid color-mix(in srgb, var(--vs-accent) 18%, var(--vs-border));
+}
+
+.ai-panel .ai-no-key-banner code {
+  font-family: var(--mono);
+  background: var(--vs-bg-2);
+  padding: 1px 4px;
+  border-radius: 3px;
+  font-size: 0.78rem;
+}
+
+.ai-panel .ai-note-chip {
+  font-size: 0.75rem;
+  color: var(--vs-text-2);
+  background: var(--vs-bg-2);
+  padding: 2px 8px;
+  border-radius: 4px;
+  max-width: 200px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ai-panel .ai-message.assistant.ai-streaming .ai-bubble::after {
+  content: '▍';
+  display: inline-block;
+  margin-left: 1px;
+  color: var(--vs-accent);
+  animation: ai-cursor-blink 1s steps(2) infinite;
+}
+
+@keyframes ai-cursor-blink {
+  to { opacity: 0; }
+}

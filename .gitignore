@@ -1,0 +1,58 @@
+# Logs
+logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+lerna-debug.log*
+
+node_modules/
+dist/
+dist-ssr
+test-results/
+playwright-report/
+coverage/
+*.local
+
+# Databases, runtime secrets, and generated local state
+*.db
+*.db-wal
+*.db-shm
+*.sqlite
+*.sqlite3
+*.key
+master-key
+master.key
+.nuvyn-master-key
+.nuvyn-*
+
+# Editor directories and files
+.vscode/*
+!.vscode/extensions.json
+.idea
+.DS_Store
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
+
+# Local data directory (SQLite DB lives here at runtime)
+data/
+
+# Vault — user's notes, not Nuvyn project code. Nuvyn 仓库不跟踪
+# vault 内的任何文件：vault 自己的版本历史走它自己的 git 仓库（见
+# server/history/），生产部署下 vault 通常在 bind mount 的宿主机目录
+# 里，独立于 Nuvyn 仓库的生命周期。代码层仍然以 ./src/content 作为
+# dev 默认 vault 路径（见 server/paths.ts 的 resolveInitialContentDir），
+# 所以这条 ignore 是"git 不跟踪"而不是"代码不读取"。
+src/content/
+
+# Per-developer secrets (see .env.example for the template)
+.env
+.env.*
+!.env.example
+.env.local
+.env-bak
+*.tsbuildinfo

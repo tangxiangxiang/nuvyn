@@ -1,0 +1,148 @@
+/*
+ * Nuvyn global semantic token authority.
+ *
+ * Keep the validated light/dark palette here. `src/style.css` consumes these
+ * variables but must not redefine this global base palette or its aliases.
+ * Workspace-local systems such as --vs-* and --ledger-* remain outside this
+ * file until their own migration phases.
+ */
+:root {
+  /* Global semantic palette — validated light values from the existing app. */
+  --nuvyn-bg: #ffffff;
+  --nuvyn-surface-1: #f9fafb;
+  --nuvyn-surface-2: #f3f4f6;
+
+  --nuvyn-text-1: #111827;
+  --nuvyn-text-2: #4b5563;
+  --nuvyn-text-3: #6b7280;
+
+  --nuvyn-border: #e5e7eb;
+  --nuvyn-divider: #e5e7eb;
+
+  --nuvyn-accent: #6366f1;
+  --nuvyn-accent-hover: #4f46e5;
+  --nuvyn-accent-pressed: #4338ca;
+
+  /* These semantic status values preserve existing Nuvyn status usage where
+     one exists; the remaining values are reserved for the foundation. */
+  --nuvyn-positive: #15803d;
+  --nuvyn-negative: #b42318;
+  --nuvyn-warning: #d97706;
+  --nuvyn-info: #005fb8;
+
+  --nuvyn-radius-sm: 4px;
+  --nuvyn-radius-md: 8px;
+  --nuvyn-radius-lg: 12px;
+
+  --nuvyn-space-1: 4px;
+  --nuvyn-space-2: 8px;
+  --nuvyn-space-3: 12px;
+  --nuvyn-space-4: 16px;
+  --nuvyn-space-5: 24px;
+  --nuvyn-space-6: 32px;
+
+  --nuvyn-font-size-xs: 0.75rem;
+  --nuvyn-font-size-sm: 0.875rem;
+  --nuvyn-font-size-md: 1rem;
+  --nuvyn-font-size-lg: 1.125rem;
+
+  /* Existing global consumers that do not yet have a public semantic group. */
+  --nuvyn-code-bg: #f3f4f6;
+  --nuvyn-navbar-vault-bg: #f4f6fa;
+  --nuvyn-navbar-vault-border: #dbe2ea;
+
+  /* Compatibility aliases stay until the Cleanup phase. */
+  --bg: var(--nuvyn-bg);
+  --bg-soft: var(--nuvyn-surface-1);
+  --text-h: var(--nuvyn-text-1);
+  --text: var(--nuvyn-text-2);
+  --text-muted: var(--nuvyn-text-3);
+  --border: var(--nuvyn-border);
+  --code-bg: var(--nuvyn-code-bg);
+  --accent: var(--nuvyn-accent);
+  --accent-hover: var(--nuvyn-accent-hover);
+  --navbar-vault-bg: var(--nuvyn-navbar-vault-bg);
+  --navbar-vault-border: var(--nuvyn-navbar-vault-border);
+}
+
+/* OS preference is only a fallback before Nuvyn has an explicit theme state. */
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme]) {
+    --nuvyn-bg: #1e1e1e;
+    --nuvyn-surface-1: #252526;
+    --nuvyn-surface-2: #333333;
+
+    --nuvyn-text-1: #f9fafb;
+    --nuvyn-text-2: #d1d5db;
+    --nuvyn-text-3: #9ca3af;
+
+    --nuvyn-border: #374151;
+    --nuvyn-divider: #374151;
+
+    --nuvyn-accent: #818cf8;
+    --nuvyn-accent-hover: #a5b4fc;
+    --nuvyn-accent-pressed: #c7d2fe;
+
+    --nuvyn-positive: #4ade80;
+    --nuvyn-negative: #f87171;
+    --nuvyn-warning: #fbbf24;
+    --nuvyn-info: #60a5fa;
+
+    --nuvyn-code-bg: #1f2937;
+    --nuvyn-navbar-vault-bg: #181818;
+    --nuvyn-navbar-vault-border: #2b2b2b;
+  }
+}
+
+/* Explicit Nuvyn state always wins over the OS preference. */
+:root[data-theme='light'] {
+  --nuvyn-bg: #ffffff;
+  --nuvyn-surface-1: #f9fafb;
+  --nuvyn-surface-2: #f3f4f6;
+
+  --nuvyn-text-1: #111827;
+  --nuvyn-text-2: #4b5563;
+  --nuvyn-text-3: #6b7280;
+
+  --nuvyn-border: #e5e7eb;
+  --nuvyn-divider: #e5e7eb;
+
+  --nuvyn-accent: #6366f1;
+  --nuvyn-accent-hover: #4f46e5;
+  --nuvyn-accent-pressed: #4338ca;
+
+  --nuvyn-positive: #15803d;
+  --nuvyn-negative: #b42318;
+  --nuvyn-warning: #d97706;
+  --nuvyn-info: #005fb8;
+
+  --nuvyn-code-bg: #f3f4f6;
+  --nuvyn-navbar-vault-bg: #f4f6fa;
+  --nuvyn-navbar-vault-border: #dbe2ea;
+}
+
+:root[data-theme='dark'] {
+  --nuvyn-bg: #1e1e1e;
+  --nuvyn-surface-1: #252526;
+  --nuvyn-surface-2: #333333;
+
+  --nuvyn-text-1: #f9fafb;
+  --nuvyn-text-2: #d1d5db;
+  --nuvyn-text-3: #9ca3af;
+
+  --nuvyn-border: #374151;
+  --nuvyn-divider: #374151;
+
+  --nuvyn-accent: #818cf8;
+  --nuvyn-accent-hover: #a5b4fc;
+  --nuvyn-accent-pressed: #c7d2fe;
+
+  --nuvyn-positive: #4ade80;
+  --nuvyn-negative: #f87171;
+  --nuvyn-warning: #fbbf24;
+  --nuvyn-info: #60a5fa;
+
+  --nuvyn-code-bg: #1f2937;
+  --nuvyn-navbar-vault-bg: #181818;
+  --nuvyn-navbar-vault-border: #2b2b2b;
+}

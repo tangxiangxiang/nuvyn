@@ -1,0 +1,121 @@
+# Nuvyn —— 生产部署。
+#
+#   docker compose up -d --build
+#
+# 持久化策略按数据本质拆开：
+#   - 笔记库 (./src/content) 走 bind mount —— 它是你的第二大脑,是独立于 Nuvyn
+#     的资产,需要用本地编辑器直读直写,需要随 rsync/Syncthing/rclone 备份。
+#   - SQLite 使用命名卷 nuvyn-data —— 它包含 settings、加密后的 AI 凭据、会话历史
+#     和应用元数据,以及 SQLite 外的 .nuvyn-master-key,必须一起保护和备份。
+#
+# AI API key 在应用 Settings 面板中配置并写入 SQLite；加密主密钥从
+# NUVYN_MASTER_KEY / NUVYN_MASTER_KEY_FILE 或 data/.nuvyn-master-key 解析,
+# 绝不写入 SQLite。
+
+services:
+  nuvyn:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: nuvyn:latest
+    container_name: nuvyn
+    restart: unless-stopped
+
+    # SPA 和 /api/* 走同一个端口。Hono 产线入口（server/prod.ts）把 /api/* 路由到 app，
+    # 其它路径回落到 index.html（SPA history 模式需要）。
+    ports:
+      - "${NUVYN_BIND_ADDRESS:-127.0.0.1}:${NUVYN_PORT:-3000}:3000"
+
+    environment:
+      NODE_ENV: production
+      PORT: "3000"
+      HOST: "0.0.0.0"
+      # NUVYN_PUBLIC_ORIGIN is the browser-facing security authority. The
+      # container listener stays 0.0.0.0:3000; the default follows the host
+      # published port so same-origin mutation checks work with NUVYN_PORT.
+      NUVYN_PUBLIC_ORIGIN: ${NUVYN_PUBLIC_ORIGIN:-http://127.0.0.1:${NUVYN_PORT:-3000}}
+      NUVYN_SETUP_TOKEN: ${NUVYN_SETUP_TOKEN:-}
+      NUVYN_AUTH_REVOKE_SESSIONS_ON_START: ${NUVYN_AUTH_REVOKE_SESSIONS_ON_START:-0}
+      # 容器内部需要监听所有接口,但宿主机端口默认只绑定 localhost。
+      NUVYN_MASTER_KEY: ${NUVYN_MASTER_KEY:-}
+      NUVYN_MASTER_KEY_FILE: ${NUVYN_MASTER_KEY_FILE:-}
+      # Git author identity used by the vault history feature when the
+      # vault repo has no user.name / user.email set yet (typical for
+      # a fresh `git init` in a brand-new vault). Both default to
+      # "nuvyn" / "nuvyn@localhost" if unset, which is fine for a
+      # personal single-user vault. Operators who want their own
+      # identity (e.g. on a shared server with multiple users) should
+      # set these in .env so the per-host identity persists across
+      # container recreations. Identities already configured inside
+      # the vault's local git config (e.g. a repo cloned from another
+      # machine) are always preserved — we never overwrite.
+      GIT_AUTHOR_NAME: ${GIT_AUTHOR_NAME:-nuvyn}
+      GIT_AUTHOR_EMAIL: ${GIT_AUTHOR_EMAIL:-nuvyn@localhost}
+
+    volumes:
+      # SQLite 数据库 + WAL/SHM 走命名卷。Docker 自动管理权限,容器以 uid 1000
+      # 跑也能写。这里不只是聊天记录,还包含 settings、加密凭据和应用元数据。
+      - nuvyn-data:/app/data
+      # 笔记库 bind mount 到宿主机 ./src/content —— 这是用户的核心资产,需要
+      # 走宿主机的备份管道(rsync / rclone / Btrfs snapshot 都能直接吃到)。
+      # 在 NAS 上,你可以通过 SMB / NFS / SSH 直接编辑这个目录,容器里的 Nuvyn
+      # 会通过 server/linkIndex.ts 的失效机制在下一次请求时重建索引。
+      - ./src/content:/app/src/content:rw
+
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3000/api/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
+
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+    # 多重加固：降权、把根 FS 设成只读（除了那两条可写路径），再把可写路径重新打开。
+    security_opt:
+      - no-new-privileges:true
+    read_only: true
+    tmpfs:
+      - /tmp
+    user: "1000:1000"
+
+volumes:
+  nuvyn-data:
+    name: nuvyn-data
+    # 数据库是命名卷,不在宿主机暴露路径。如果想一次性备份:
+    #   docker run --rm -v nuvyn-data:/d -v $(pwd):/b \
+    #     alpine tar czf /b/nuvyn-data-$(date +%F).tgz -C /d .
+    # 恢复:
+    #   docker run --rm -v nuvyn-data:/d -v $(pwd):/b \
+    #     alpine tar xzf /b/nuvyn-data-2026-06-25.tgz -C /d
+    #
+    # 为什么不放 SSD 上(docker volume create --driver local --opt type=ssd ...)？
+    # SQLite 的随机写对 SSD 寿命不是事,聊天记录量小,不值得为这点性能引入
+    # driver 配置的复杂度。命名卷用 NAS 主盘即可。
+
+# ---------------------------------------------------------------------------
+# 部署前置（NAS / Linux 主机）
+# ---------------------------------------------------------------------------
+# 容器以 uid 1000 运行（和 compose 里的 user: "1000:1000" 对应），bind mount 进去的
+# vault 目录必须可被这个 uid 写。Windows 宿主机上 Docker Desktop 会自动处理权限,
+# 但在绿联这类 Linux NAS 上首次部署前需要:
+#
+#     mkdir -p ./src/content
+#     chown -R 1000:1000 ./src/content
+#
+# 现有的 ./src/content 里如果已经有 inbox / literature / archive + 一个
+# .git/(vault 的本地 history),直接保留即可。如果从空目录部署,生产服务会通过
+# `server/seed.ts` 补齐三个根目录；vault Git 则在首次使用 History 时延迟初始化。
+#
+# 注意:src/content/ **不**在 Nuvyn 的 git 仓库里 —— 它是用户的笔记
+# 资产,工具仓库只跟踪源码 / 配置 / 文档。clone Nuvyn 仓库后看到的
+# ./src/content/ 是你自己之前留下的,或者全新部署时是空的;deploy
+# 脚本不依赖仓库里有什么笔记文件。vault 自己的版本历史走它自己的
+# .git/(server/history/ 维护),与 Nuvyn 仓库独立。
+#
+# 数据库用命名卷,不需要在宿主机创建目录 —— `docker compose up` 会自动建卷。
+# ---------------------------------------------------------------------------

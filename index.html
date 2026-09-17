@@ -1,0 +1,31 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <link rel="icon" type="image/png" sizes="48x48" href="/logo-48.png" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="description" content="Nuvyn is a Personal OS for your digital life." />
+    <title>Nuvyn — Personal OS</title>
+    <script>
+      // Apply persisted theme before Vue mounts to avoid a flash of
+      // the wrong palette. Mirrors the storage key in useTheme.ts.
+      (function () {
+        try {
+          // Legacy compatibility bootstrap: import the old theme key once,
+          // then canonicalize it under Nuvyn.
+          var t = localStorage.getItem('nuvyn.theme') || localStorage.getItem('nuvyn.theme');
+          if (localStorage.getItem('nuvyn.theme') === null && t !== null) {
+            try { localStorage.setItem('nuvyn.theme', t); } catch (e) { /* best effort */ }
+          }
+          if (t === 'light' || t === 'dark') {
+            document.documentElement.setAttribute('data-theme', t);
+          }
+        } catch (e) { /* private mode / storage blocked — let CSS media query decide */ }
+      })();
+    </script>
+  </head>
+  <body>
+    <div id="app"></div>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>

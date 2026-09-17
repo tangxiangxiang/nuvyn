@@ -1,0 +1,262 @@
+/* Shiki's class transformer emits trusted theme variables on the root
+   `.shiki` element and on token spans. This file is the small static bridge
+   that turns those variables into the active reader palette. Generic code
+   layout remains owned by style.css. */
+
+.shiki,
+.article pre.shiki {
+  color: var(--shiki-light);
+  background-color: var(--shiki-light-bg);
+}
+
+.shiki span {
+  color: var(--shiki-light);
+}
+
+/* With no explicit Nuvyn theme, follow the OS only for the initial/CSS
+   fallback path. An explicit light attribute is excluded so it wins over
+   OS dark. */
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme='light']) .shiki,
+  :root:not([data-theme='light']) .article pre.shiki,
+  :root:not([data-theme='light']) .shiki span {
+    color: var(--shiki-dark);
+  }
+
+  :root:not([data-theme='light']) .shiki,
+  :root:not([data-theme='light']) .article pre.shiki {
+    background-color: var(--shiki-dark-bg);
+  }
+}
+
+/* Explicit Nuvyn choices are ordered after the media fallback so they win
+   at equal specificity when the operating system prefers the other palette. */
+:root[data-theme='light'] .shiki,
+:root[data-theme='light'] .article pre.shiki,
+:root[data-theme='light'] .shiki span {
+  color: var(--shiki-light);
+}
+
+:root[data-theme='light'] .shiki,
+:root[data-theme='light'] .article pre.shiki {
+  background-color: var(--shiki-light-bg);
+}
+
+:root[data-theme='dark'] .shiki,
+:root[data-theme='dark'] .article pre.shiki,
+:root[data-theme='dark'] .shiki span {
+  color: var(--shiki-dark);
+}
+
+:root[data-theme='dark'] .shiki,
+:root[data-theme='dark'] .article pre.shiki {
+  background-color: var(--shiki-dark-bg);
+}
+
+/* These MD-EXT-4 spans are structural wrappers, not syntax tokens, so they
+   stay transparent and expose the semantic annotation background owned by
+   `.line`. */
+.article pre.shiki.nuvyn-line-numbers .nuvyn-line-number,
+.article pre.shiki.nuvyn-line-numbers .nuvyn-line-content {
+  background-color: transparent;
+}
+
+/* Unknown/empty/unavailable fences have no Shiki theme variables. Keep the
+   existing Nuvyn text and code-surface tokens instead of resolving undefined
+   Shiki variables. */
+:root .article pre.shiki.nuvyn-shiki-plain {
+  color: var(--text);
+  background-color: var(--code-bg);
+}
+
+/* MD-EXT-3 source-notation classes are structural annotations, not a second
+   token-color system. Keep the trusted Shiki token foreground/background
+   variables intact and use line-level backgrounds/borders as the visual cue. */
+.article pre.shiki .line.highlighted {
+  background-color: rgba(255, 214, 10, 0.16);
+  box-shadow: inset 3px 0 0 #b78103;
+}
+
+.article pre.shiki .line.focused {
+  background-color: rgba(45, 129, 247, 0.14);
+  box-shadow: inset 3px 0 0 #2f81f7;
+}
+
+.article pre.shiki.has-focused .line:not(.focused) {
+  opacity: 0.58;
+}
+
+.article pre.shiki .line.diff.add {
+  position: relative;
+  background-color: rgba(16, 185, 129, 0.14);
+  box-shadow: none;
+}
+
+.article pre.shiki .line.diff.remove {
+  position: relative;
+  background-color: rgba(244, 63, 94, 0.14);
+  box-shadow: none;
+}
+
+.article pre.shiki .line.diff.add::before,
+.article pre.shiki .line.diff.remove::before {
+  position: absolute;
+  left: 1rem;
+  width: 1rem;
+  color: currentColor;
+  font: inherit;
+  font-weight: 500;
+  line-height: inherit;
+  text-align: center;
+  pointer-events: none;
+  user-select: none;
+}
+
+.article pre.shiki .line.diff.add::before {
+  content: '+';
+  color: #18794e;
+}
+
+.article pre.shiki .line.diff.remove::before {
+  content: '-';
+  color: #b91c1c;
+}
+
+.article pre.shiki .line.warning {
+  background-color: rgba(234, 179, 8, 0.14);
+  box-shadow: none;
+}
+
+.article pre.shiki .line.error {
+  background-color: rgba(244, 63, 94, 0.14);
+  box-shadow: none;
+}
+
+.article pre.shiki .line.info {
+  background-color: rgba(47, 129, 247, 0.14);
+  box-shadow: inset 3px 0 0 #2f81f7;
+}
+
+/* Give ordinary highlighted lines a full code-row surface. Numbered and
+   plain fallback fences keep their existing layout contracts below. */
+.article pre.shiki:not(.nuvyn-line-numbers):not(.nuvyn-shiki-plain) .line {
+  display: inline-block;
+  width: 100%;
+  min-width: 100%;
+}
+
+/* Vault reading uses the compact VitePress-like code surface. The language
+   label is generated as escaped text by the Markdown renderer; all code
+   backgrounds still belong to the pre surface, not token spans. */
+:root .vault:not(.pdf-document) .article pre.shiki:not(.nuvyn-shiki-plain) {
+  position: relative;
+  margin: 1rem 0;
+  padding: 1rem 2rem;
+  border: 0;
+  border-radius: 8px;
+  background-color: var(--vs-bg-2, var(--code-bg));
+}
+
+/* A code-group already owns the outer frame and tab-to-panel spacing. Do not
+   let the generic fence margin/border create a second floating card with
+   large blank bands inside that frame. */
+:root .vault:not(.pdf-document) .article .nuvyn-code-group .nuvyn-code-group-panel > pre.shiki {
+  margin: 0;
+  border: 0;
+  border-radius: 0;
+}
+
+:root .vault:not(.pdf-document) .article pre.shiki:not(.nuvyn-line-numbers):not(.nuvyn-shiki-plain) > code {
+  display: block;
+  line-height: 0;
+}
+
+:root .vault:not(.pdf-document) .article pre.shiki:not(.nuvyn-shiki-plain)[data-language]::after {
+  content: attr(data-language);
+  position: absolute;
+  top: 0.75rem;
+  right: 1rem;
+  color: var(--vs-text-3, var(--text-muted));
+  font: 0.75rem/1 var(--mono);
+  pointer-events: none;
+  user-select: none;
+}
+
+:root .vault:not(.pdf-document) .article pre.shiki:not(.nuvyn-line-numbers):not(.nuvyn-shiki-plain) .line {
+  display: block;
+  width: auto;
+  min-width: 100%;
+  box-sizing: border-box;
+  line-height: 1.55;
+  margin-right: -2rem;
+  margin-left: -2rem;
+  padding-right: 2rem;
+  padding-left: 2rem;
+}
+
+:root .vault:not(.pdf-document) .article pre.shiki .line.highlighted:not(.error):not(.warning):not(.info):not(.diff):not(.focused) {
+  background-color: rgba(142, 150, 170, 0.16);
+  box-shadow: none;
+}
+
+/* Focus mode follows VitePress semantics: the focused row stays on the normal
+   code surface, while the surrounding rows are softened. `focus` is distinct
+   from `highlight`, whose line-level color remains above. PDF owns its own
+   printable palette. */
+:root .vault:not(.pdf-document) .article pre.shiki.has-focused .line.focused {
+  background-color: transparent;
+  box-shadow: none;
+  opacity: 1;
+}
+
+:root .vault:not(.pdf-document) .article pre.shiki.has-focused .line:not(.focused) {
+  filter: blur(0.095rem);
+  opacity: 0.4;
+  transition: filter 0.35s ease, opacity 0.35s ease;
+}
+
+:root .vault:not(.pdf-document) .article pre.shiki.has-focused:hover .line:not(.focused) {
+  filter: none;
+  opacity: 1;
+}
+
+/* MD-EXT-4 opt-in structural gutters. The default Shiki DOM is intentionally
+   untouched; only fences whose FenceMeta enables line numbers receive this
+   class and the grid/content wrappers below. */
+.article pre.shiki.nuvyn-line-numbers {
+  white-space: pre-wrap;
+}
+
+.article pre.shiki.nuvyn-line-numbers code {
+  display: block;
+  width: 100%;
+  min-width: 0;
+}
+
+.article pre.shiki.nuvyn-line-numbers .line {
+  display: grid;
+  grid-template-columns: max-content minmax(0, 1fr);
+  column-gap: 0.9rem;
+  align-items: start;
+  width: 100%;
+  min-width: 0;
+}
+
+.article pre.shiki.nuvyn-line-numbers .nuvyn-line-number {
+  display: block;
+  min-width: max-content;
+  padding-right: 0.75rem;
+  border-right: 1px solid var(--border, #d7dce2);
+  color: var(--text-muted, #6b7280);
+  text-align: right;
+  user-select: none;
+  white-space: pre;
+}
+
+.article pre.shiki.nuvyn-line-numbers .nuvyn-line-content {
+  display: block;
+  min-width: 0;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+  white-space: inherit;
+}
