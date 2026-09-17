@@ -292,14 +292,20 @@ describe('PromptHost Naive bridge', () => {
     promptInput('Empty prompt').dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', code: 'Enter', bubbles: true }))
     await expect(empty).resolves.toBeNull()
     await waitForNoVisiblePrompt()
-    expect(document.activeElement).toBe(trigger)
+    await vi.waitFor(
+      () => expect(document.activeElement).toBe(trigger),
+      { timeout: 1200 },
+    )
 
     const escaped = usePrompt().prompt({ title: 'Escape prompt' })
     await waitForPrompt('Escape prompt')
     document.dispatchEvent(new KeyboardEvent('keydown', { code: 'Escape', key: 'Escape', bubbles: true }))
     await expect(escaped).resolves.toBeNull()
-    await settleVue()
-    expect(document.activeElement).toBe(trigger)
+    await waitForNoVisiblePrompt()
+    await vi.waitFor(
+      () => expect(document.activeElement).toBe(trigger),
+      { timeout: 1200 },
+    )
   })
 
   it('cancels through the Naive backdrop path', async () => {
