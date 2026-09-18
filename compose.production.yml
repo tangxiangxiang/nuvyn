@@ -49,4 +49,4 @@ services:
 
 volumes:
   nuvyn-data:
-    name: nuvyn-data
+    name: ${NUVYN_DATA_VOLUME:-nuvyn-data}

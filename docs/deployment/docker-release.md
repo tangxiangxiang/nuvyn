@@ -17,6 +17,14 @@ and do not need the Nuvyn source tree, Node.js, npm, or a Docker build toolchain
 The production Compose file requires `NUVYN_IMAGE`; it never silently falls
 back to `latest`.
 
+## Persistent Volume Isolation
+
+The default persistent Docker volume is `nuvyn-data`, preserving the normal
+single-instance production behavior. Compose accepts `NUVYN_DATA_VOLUME` as an
+override for staging, smoke tests, and parallel instances; those environments
+must use a distinct volume name (for example, `nuvyn-alpha1-smoke-data`) and
+must never reuse the production volume.
+
 ## First Deploy
 
 Create a small deployment directory and place the tracked production Compose
