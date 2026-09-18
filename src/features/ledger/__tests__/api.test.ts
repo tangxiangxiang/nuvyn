@@ -59,6 +59,22 @@ describe('Ledger frontend API boundary', () => {
     expect(mockedAuthFetch).toHaveBeenCalledWith('/api/ledger/settings', {})
   })
 
+  it('accepts only null or a valid Settings object for the nullable bootstrap response', async () => {
+    mockedAuthFetch.mockResolvedValue(response(null))
+    await expect(getLedgerSettings()).resolves.toBeNull()
+
+    for (const body of [
+      [],
+      '',
+      123,
+      {},
+      { baseCurrency: 'CNY', timezone: 'Asia/Shanghai' },
+    ]) {
+      mockedAuthFetch.mockResolvedValueOnce(response(body))
+      await expect(getLedgerSettings()).rejects.toMatchObject({ code: 'ledger-malformed-response' })
+    }
+  })
+
   it('encodes query parameters and sends a stable idempotency key', async () => {
     mockedAuthFetch.mockResolvedValue(response({ id: 'tx-1', type: 'expense' }))
     await createLedgerTransaction({
@@ -143,6 +159,9 @@ describe('Ledger frontend API boundary', () => {
 
     mockedAuthFetch.mockResolvedValue(response({ hasCreatedAccount: false }))
     await expect(getLedgerSettings()).rejects.toMatchObject({ code: 'ledger-malformed-response' })
+
+    mockedAuthFetch.mockResolvedValue(response('', 404))
+    await expect(getLedgerSettings()).rejects.toMatchObject({ status: 404, code: 'ledger-http-404' })
   })
 
   it('always serializes scope and omits only anchorDate for canonical today', async () => {

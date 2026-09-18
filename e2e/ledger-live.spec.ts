@@ -45,16 +45,20 @@ async function ensurePeriodNavigationFixtures(request: APIRequestContext): Promi
 }> {
   let settingsResponse = await request.get('/api/ledger/settings')
   let timezone = 'Asia/Shanghai'
-  if (settingsResponse.status() === 404) {
+  expect(settingsResponse.status()).toBe(200)
+  let settings = await settingsResponse.json() as { timezone: string; baseCurrency: string } | null
+  if (settings === null) {
     const initialize = await request.post('/api/ledger/settings', {
       data: { baseCurrency: 'CNY', timezone },
       headers: { 'Idempotency-Key': `period-settings-${Date.now()}` },
     })
     expect(initialize.status(), await initialize.text()).toBe(201)
     settingsResponse = await request.get('/api/ledger/settings')
+    expect(settingsResponse.status()).toBe(200)
+    settings = await settingsResponse.json() as { timezone: string; baseCurrency: string }
   }
-  expect(settingsResponse.status()).toBe(200)
-  const settings = await settingsResponse.json() as { timezone: string; baseCurrency: string }
+  expect(settings).not.toBeNull()
+  if (settings === null) throw new Error('Ledger Settings remained uninitialized after setup')
   timezone = settings.timezone
 
   const categoriesResponse = await request.get('/api/ledger/categories?kind=expense')
@@ -119,8 +123,18 @@ function ledgerDateInput(page: Page, testId: string) {
 }
 
 test('real Ledger onboarding and expense survive dashboard refresh', async ({ page, request }) => {
+  const settingsResponsePromise = page.waitForResponse((response) => {
+    const url = new URL(response.url())
+    return response.request().method() === 'GET'
+      && url.pathname === '/api/ledger/settings'
+  })
   await page.goto('/ledger')
 
+  const settingsResponse = await settingsResponsePromise
+  expect(settingsResponse.status()).toBe(200)
+  expect(settingsResponse.headers()['content-type']).toContain('application/json')
+  expect(settingsResponse.headers()['cache-control']).toBe('no-store')
+  expect(await settingsResponse.json()).toBeNull()
   await expect(page.getByTestId('ledger-settings-form')).toBeVisible()
   await selectOptionContaining(page, '基础货币', 'CNY')
   await page.locator('#ledger-timezone').fill('Asia/Shanghai')

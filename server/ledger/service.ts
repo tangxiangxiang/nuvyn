@@ -81,6 +81,7 @@ export interface LedgerDeletedResponse {
 
 export interface LedgerService {
   getSettings(): LedgerSettingsDto
+  getSettingsOrNull(): LedgerSettingsDto | null
   createSettings(request: LedgerSettingsCreateRequest, idempotencyKey: string): LedgerReplayResult
   patchSettings(value: unknown): LedgerSettingsDto
 
@@ -340,6 +341,11 @@ export function createLedgerService(
     const settings = repository.getSettings()
     if (settings === null) notFound('Ledger Settings')
     return settings
+  }
+
+  function getSettingsOrNull(): LedgerSettingsDto | null {
+    const settings = repository.getSettings()
+    return settings === null ? null : toSettingsDto(settings)
   }
 
   function toAccountDto(account: LedgerAccount): LedgerAccountDto {
@@ -1674,6 +1680,7 @@ export function createLedgerService(
     getSettings(): LedgerSettingsDto {
       return toSettingsDto(requireSettings())
     },
+    getSettingsOrNull,
     createSettings,
     patchSettings,
     listAccounts,

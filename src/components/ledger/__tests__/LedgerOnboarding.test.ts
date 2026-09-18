@@ -1,7 +1,6 @@
 // @vitest-environment jsdom
 import { flushPromises, mount } from '@vue/test-utils'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { LedgerApiError } from '../../../features/ledger/ledgerErrors'
 import { resetLedgerStoreForTesting } from '../../../features/ledger/ledgerStore'
 import { LEDGER_PENDING_CREATE_STORAGE_KEY, createLedgerPendingIntent } from '../../../features/ledger/recovery'
 import type {
@@ -106,7 +105,7 @@ describe('Ledger initialization and first-account onboarding', () => {
   })
 
   it('shows an explicit settings step when the Ledger is uninitialized', async () => {
-    api.getLedgerSettings.mockRejectedValue(new LedgerApiError('missing', 404, 'ledger-not-found'))
+    api.getLedgerSettings.mockResolvedValue(null)
     const wrapper = mount(LedgerView)
 
     await flushPromises()
@@ -119,7 +118,7 @@ describe('Ledger initialization and first-account onboarding', () => {
 
   it('requires an explicit currency and timezone confirmation before moving to the account step', async () => {
     api.getLedgerSettings
-      .mockRejectedValueOnce(new LedgerApiError('missing', 404, 'ledger-not-found'))
+      .mockResolvedValueOnce(null)
       .mockResolvedValue(settings(false))
     api.listLedgerAccounts.mockResolvedValue([])
     api.listLedgerCategories.mockResolvedValue([])
@@ -205,7 +204,7 @@ describe('Ledger initialization and first-account onboarding', () => {
     }
     const lockedSettings: LedgerSettingsDto = { ...editedSettings, hasCreatedAccount: true, version: 3 }
     api.getLedgerSettings
-      .mockRejectedValueOnce(new LedgerApiError('missing', 404, 'ledger-not-found'))
+      .mockResolvedValueOnce(null)
       .mockResolvedValue(initialSettings)
     api.listLedgerAccounts.mockResolvedValue([])
     api.listLedgerCategories.mockResolvedValue([])

@@ -114,6 +114,10 @@ function settingsResponse(value: unknown): LedgerSettingsDto {
   return value as unknown as LedgerSettingsDto
 }
 
+function settingsOrNullResponse(value: unknown): LedgerSettingsDto | null {
+  return value === null ? null : settingsResponse(value)
+}
+
 function accountResponse(value: unknown): LedgerAccountDto {
   if (!isRecord(value)
     || typeof value.id !== 'string'
@@ -309,8 +313,8 @@ function queryString(query: Record<string, string | number | boolean | undefined
   return encoded ? `?${encoded}` : ''
 }
 
-export function getLedgerSettings(): Promise<LedgerSettingsDto> {
-  return request('/api/ledger/settings', {}, settingsResponse)
+export function getLedgerSettings(): Promise<LedgerSettingsDto | null> {
+  return request('/api/ledger/settings', {}, settingsOrNullResponse)
 }
 
 export function createLedgerSettings(

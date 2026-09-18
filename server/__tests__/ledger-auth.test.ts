@@ -111,7 +111,8 @@ describe('Ledger API auth inheritance', () => {
 
   it('allows the owner while preserving existing CSRF and JSON content-type checks', async () => {
     const uninitialized = await request('/api/ledger/settings', { cookie: auth.cookie })
-    expect(uninitialized.status).toBe(404)
+    expect(uninitialized.status).toBe(200)
+    expect(await uninitialized.json()).toBeNull()
 
     const crossOrigin = await request('/api/ledger/settings', {
       method: 'POST',

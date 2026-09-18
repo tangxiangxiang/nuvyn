@@ -32,6 +32,7 @@ function hydrate(config?: LedgerAccountIconConfig, version?: number): void {
 
 async function loadSettings(): Promise<void> {
   const settings = await getLedgerSettings()
+  if (settings === null) return
   const configuredIcons = settings.accountIcons
   const accidentalTestIcons = configuredIcons?.availableIcons.filter((icon) => (
     icon.startsWith('custom_') && configuredIcons.customIconNames[icon] === '测试'

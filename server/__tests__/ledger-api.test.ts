@@ -104,14 +104,16 @@ describe('Ledger API owner boundary and Settings', () => {
     expect(response.headers.get('cache-control')).toBe('no-store')
   })
 
-  it('fails closed before explicit Settings initialization', async () => {
+  it('returns a nullable Settings bootstrap response before explicit initialization', async () => {
     const settings = await authenticated('/api/ledger/settings')
     const accounts = await authenticated('/api/ledger/accounts')
     const categories = await authenticated('/api/ledger/categories')
-    expect(settings.status).toBe(404)
+    expect(settings.status).toBe(200)
+    expect(settings.headers.get('content-type')).toMatch(/application\/json/)
+    expect(settings.headers.get('cache-control')).toBe('no-store')
     expect(accounts.status).toBe(404)
     expect(categories.status).toBe(404)
-    expect(await json(settings)).toMatchObject({ code: 'ledger-not-found' })
+    expect(await json(settings)).toBeNull()
     expect(await json(accounts)).toMatchObject({ code: 'ledger-not-found' })
     expect(await json(categories)).toMatchObject({ code: 'ledger-not-found' })
   })
@@ -127,6 +129,16 @@ describe('Ledger API owner boundary and Settings', () => {
     expect(first.headers.get('cache-control')).toBe('no-store')
     expect(first.headers.get('content-type')).toMatch(/application\/json/)
     expect(JSON.parse(firstText)).toMatchObject({ hasCreatedAccount: false })
+
+    const initialized = await authenticated('/api/ledger/settings')
+    expect(initialized.status).toBe(200)
+    expect(await json(initialized)).toMatchObject({
+      baseCurrency: 'CNY',
+      currencyExponent: 2,
+      timezone: 'Asia/Shanghai',
+      hasCreatedAccount: false,
+      version: 1,
+    })
 
     const categories = await authenticated('/api/ledger/categories')
     expect(categories.status).toBe(200)

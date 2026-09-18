@@ -2,7 +2,8 @@ import { expect, test } from './fixtures/auth'
 
 test('uploaded category icon creates a category in the matching Settings list', async ({ page, request }) => {
   const settingsResponse = await request.get('/api/ledger/settings')
-  if (settingsResponse.status() === 404) {
+  expect(settingsResponse.status()).toBe(200)
+  if (await settingsResponse.json() === null) {
     const initialize = await request.post('/api/ledger/settings', {
       data: { baseCurrency: 'CNY', timezone: 'Asia/Shanghai' },
       headers: { 'Idempotency-Key': `settings-categories-${Date.now()}` },

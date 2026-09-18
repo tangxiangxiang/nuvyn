@@ -10,7 +10,7 @@ import {
 export function createSettingsRoutes(getService: LedgerServiceFactory): Hono {
   const routes = new Hono()
 
-  routes.get('/', (c) => withLedgerErrors(c, () => c.json(getService().getSettings())))
+  routes.get('/', (c) => withLedgerErrors(c, () => c.json(getService().getSettingsOrNull())))
 
   routes.post('/', (c) => withLedgerErrors(c, async () => {
     const request = parseSettingsCreateRequest(await readLedgerJson(c))

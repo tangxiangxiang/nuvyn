@@ -136,6 +136,43 @@ describe('Ledger feature-local state', () => {
     expect(store.workspaceState.value).toBe('NO_ACTIVE_ACCOUNT')
   })
 
+  it('enters the fresh Ledger onboarding state from a successful null Settings response', async () => {
+    api.getLedgerSettings.mockResolvedValue(null)
+    const store = useLedgerStore()
+
+    const result = await store.bootstrap()
+
+    expect(result).toBeUndefined()
+    expect(store.workspaceState.value).toBe('UNINITIALIZED')
+    expect(store.settings.value).toBeNull()
+    expect(store.accounts.value).toEqual([])
+    expect(store.categories.value).toEqual([])
+    expect(store.overview.value).toBeNull()
+    expect(store.workspaceError.value).toBeNull()
+    expect(api.listLedgerAccounts).not.toHaveBeenCalled()
+    expect(api.listLedgerCategories).not.toHaveBeenCalled()
+    expect(api.getLedgerOverview).not.toHaveBeenCalled()
+  })
+
+  it.each([
+    ['an empty-body HTTP 404', new LedgerApiError('not found', 404, 'ledger-http-404')],
+    ['the legacy ledger-not-found error', new LedgerApiError('missing', 404, 'ledger-not-found')],
+  ])('keeps %s in the recoverable error state instead of onboarding', async (_label, error) => {
+    api.getLedgerSettings.mockRejectedValue(error)
+    const store = useLedgerStore()
+
+    const result = await store.bootstrap()
+
+    expect(result).toMatchObject({ status: 'error', error })
+    expect(store.workspaceState.value).toBe('RECOVERABLE_ERROR')
+    expect(store.workspaceError.value).toBe(error)
+    expect(store.settings.value).toBeNull()
+    expect(store.accounts.value).toEqual([])
+    expect(store.categories.value).toEqual([])
+    expect(api.listLedgerAccounts).not.toHaveBeenCalled()
+    expect(api.listLedgerCategories).not.toHaveBeenCalled()
+  })
+
   it('assigns an initial Overview read failure to the Workspace recovery boundary', async () => {
     api.getLedgerSettings.mockResolvedValue(settings(true))
     api.listLedgerAccounts.mockResolvedValue([account('account-1')])

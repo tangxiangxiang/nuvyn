@@ -444,32 +444,31 @@ async function bootstrap(): Promise<LedgerOverviewRefreshResult | undefined> {
 
   const pendingRequest = (async (): Promise<LedgerOverviewRefreshResult | undefined> => {
     try {
-      let settings: LedgerSettingsDto
+      let settings: LedgerSettingsDto | null
       try {
         settings = await getLedgerSettings()
       } catch (error) {
         const normalized = normalizeLedgerError(error)
-        if (normalized.code === 'ledger-not-found') {
-          if (isWorkspaceCurrent(workspaceEpoch)) {
-            state.settings = null
-            state.accounts = []
-            state.categories = []
-            state.transactions = null
-            state.workspaceState = 'UNINITIALIZED'
-            state.workspaceError = null
-          }
-          if (isOverviewCurrent(overviewEpoch)) {
-            state.overview = null
-            state.overviewDataReady = false
-          }
-          return undefined
-        }
         if (!isWorkspaceCurrent(workspaceEpoch)) return staleOverviewResult(overviewEpoch, request)
         enterWorkspaceRecovery(normalized)
         if (isOverviewCurrent(overviewEpoch)) state.overviewDataReady = false
         return errorOverviewResult(overviewEpoch, request, normalized)
       }
       if (!isWorkspaceCurrent(workspaceEpoch)) return staleOverviewResult(overviewEpoch, request)
+
+      if (settings === null) {
+        state.settings = null
+        state.accounts = []
+        state.categories = []
+        state.transactions = null
+        state.workspaceState = 'UNINITIALIZED'
+        state.workspaceError = null
+        if (isOverviewCurrent(overviewEpoch)) {
+          state.overview = null
+          state.overviewDataReady = false
+        }
+        return undefined
+      }
 
       const currentState = await refreshCurrentState(workspaceEpoch, settings, recoveryGeneration)
       if (currentState.status === 'stale') return staleOverviewResult(overviewEpoch, request)

@@ -30,7 +30,9 @@ async function ensureLedgerFixture(request: APIRequestContext): Promise<LedgerTr
   const openingDate = '2026-01-01'
 
   let settingsResponse = await request.get('/api/ledger/settings')
-  if (settingsResponse.status() === 404) {
+  expect(settingsResponse.status()).toBe(200)
+  let settings = await settingsResponse.json() as LedgerSettings | null
+  if (settings === null) {
     const initialize = await request.post('/api/ledger/settings', {
       data: { baseCurrency: 'CNY', timezone: 'Asia/Shanghai' },
       headers: { 'Idempotency-Key': `closure-settings-${fixtureId}` },
@@ -40,9 +42,11 @@ async function ensureLedgerFixture(request: APIRequestContext): Promise<LedgerTr
       expect(initialize.status()).toBe(201)
       settingsResponse = await request.get('/api/ledger/settings')
     }
+    expect(settingsResponse.status()).toBe(200)
+    settings = await settingsResponse.json() as LedgerSettings
   }
-  expect(settingsResponse.status()).toBe(200)
-  const settings = await settingsResponse.json() as LedgerSettings
+  expect(settings).not.toBeNull()
+  if (settings === null) throw new Error('Ledger Settings remained uninitialized after setup')
 
   const createAccount = await request.post('/api/ledger/accounts', {
     data: {
