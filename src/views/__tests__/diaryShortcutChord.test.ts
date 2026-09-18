@@ -10,65 +10,109 @@ describe('createDiaryShortcutChord', () => {
   beforeEach(() => vi.useFakeTimers())
   afterEach(() => vi.useRealTimers())
 
-  it('closes a Diary document after D then C and prevents only the completed chord', async () => {
-    const close = vi.fn()
+  it('goes back from a Diary document after G then B and prevents only the completed chord', async () => {
+    const goBack = vi.fn()
     const chord = createDiaryShortcutChord({
       isDiaryDocument: () => true,
       isTextEntryContext: () => false,
       isBlocked: () => false,
-      closeDiaryDocument: close,
+      goBack,
     })
 
-    const d = keyboardEvent('D')
-    const c = keyboardEvent('c')
-    expect(chord.onKeydown(d)).toBe(false)
-    expect(d.defaultPrevented).toBe(false)
-    expect(chord.onKeydown(c)).toBe(true)
-    expect(c.defaultPrevented).toBe(true)
-    expect(close).toHaveBeenCalledOnce()
+    const g = keyboardEvent('G')
+    const b = keyboardEvent('b')
+    expect(chord.onKeydown(g)).toBe(false)
+    expect(g.defaultPrevented).toBe(false)
+    expect(chord.onKeydown(b)).toBe(true)
+    expect(b.defaultPrevented).toBe(true)
+    expect(goBack).toHaveBeenCalledOnce()
     await Promise.resolve()
   })
 
-  it('does not arm in text-entry, blocked, other-workspace, or modifier contexts', () => {
-    const close = vi.fn()
-    let inDiary = true
-    const chord = createDiaryShortcutChord({
-      isDiaryDocument: () => inDiary,
-      isTextEntryContext: (event) => event.key === 'd',
-      isBlocked: () => false,
-      closeDiaryDocument: close,
-    })
-    chord.onKeydown(keyboardEvent('d'))
-    chord.onKeydown(keyboardEvent('c'))
-    expect(close).not.toHaveBeenCalled()
-
-    chord.onKeydown(keyboardEvent('d', { metaKey: true }))
-    chord.onKeydown(keyboardEvent('c'))
-    expect(close).not.toHaveBeenCalled()
-
-    inDiary = false
-    chord.onKeydown(keyboardEvent('d'))
-    chord.onKeydown(keyboardEvent('c'))
-    expect(close).not.toHaveBeenCalled()
-  })
-
-  it('cancels on a wrong key and after the timeout', () => {
-    const close = vi.fn()
+  it('does not treat the replaced D then C chord as back', () => {
+    const goBack = vi.fn()
     const chord = createDiaryShortcutChord({
       isDiaryDocument: () => true,
       isTextEntryContext: () => false,
       isBlocked: () => false,
-      closeDiaryDocument: close,
+      goBack,
     })
-    chord.onKeydown(keyboardEvent('d'))
-    chord.onKeydown(keyboardEvent('x'))
-    chord.onKeydown(keyboardEvent('c'))
-    expect(close).not.toHaveBeenCalled()
 
     chord.onKeydown(keyboardEvent('d'))
-    vi.advanceTimersByTime(1001)
     chord.onKeydown(keyboardEvent('c'))
-    expect(close).not.toHaveBeenCalled()
+
+    expect(goBack).not.toHaveBeenCalled()
+  })
+
+  it('does not arm in text-entry, blocked, other-workspace, or modifier contexts', () => {
+    const goBack = vi.fn()
+    let inDiary = true
+    const chord = createDiaryShortcutChord({
+      isDiaryDocument: () => inDiary,
+      isTextEntryContext: (event) => event.key === 'g',
+      isBlocked: () => false,
+      goBack,
+    })
+    chord.onKeydown(keyboardEvent('g'))
+    chord.onKeydown(keyboardEvent('b'))
+    expect(goBack).not.toHaveBeenCalled()
+
+    chord.onKeydown(keyboardEvent('g', { metaKey: true }))
+    chord.onKeydown(keyboardEvent('b'))
+    expect(goBack).not.toHaveBeenCalled()
+
+    inDiary = false
+    chord.onKeydown(keyboardEvent('g'))
+    chord.onKeydown(keyboardEvent('b'))
+    expect(goBack).not.toHaveBeenCalled()
+  })
+
+  it('cancels on a wrong key and after the timeout', () => {
+    const goBack = vi.fn()
+    const chord = createDiaryShortcutChord({
+      isDiaryDocument: () => true,
+      isTextEntryContext: () => false,
+      isBlocked: () => false,
+      goBack,
+    })
+    chord.onKeydown(keyboardEvent('g'))
+    chord.onKeydown(keyboardEvent('x'))
+    chord.onKeydown(keyboardEvent('b'))
+    expect(goBack).not.toHaveBeenCalled()
+
+    chord.onKeydown(keyboardEvent('g'))
+    vi.advanceTimersByTime(1001)
+    chord.onKeydown(keyboardEvent('b'))
+    expect(goBack).not.toHaveBeenCalled()
+  })
+
+  it('does not go back while a text-entry element has focus', () => {
+    const goBack = vi.fn()
+    const chord = createDiaryShortcutChord({
+      isDiaryDocument: () => true,
+      isTextEntryContext: isDiaryTextEntryContext,
+      isBlocked: () => false,
+      goBack,
+    })
+    const elements = [
+      document.createElement('input'),
+      document.createElement('textarea'),
+      document.createElement('div'),
+      document.createElement('div'),
+    ]
+    elements[2]!.setAttribute('contenteditable', 'true')
+    elements[3]!.className = 'monaco-editor'
+
+    for (const element of elements) {
+      element.tabIndex = 0
+      document.body.appendChild(element)
+      element.focus()
+      chord.onKeydown(keyboardEvent('g'))
+      chord.onKeydown(keyboardEvent('b'))
+      element.remove()
+    }
+
+    expect(goBack).not.toHaveBeenCalled()
   })
 })
 
@@ -77,7 +121,7 @@ describe('Diary shortcut context guards', () => {
     const input = document.createElement('input')
     document.body.appendChild(input)
     input.focus()
-    expect(isDiaryTextEntryContext(keyboardEvent('d'))).toBe(true)
+    expect(isDiaryTextEntryContext(keyboardEvent('g'))).toBe(true)
     input.remove()
 
     const dialog = document.createElement('div')

@@ -198,11 +198,13 @@ or tab lifecycle code. Privacy restrictions may intentionally make a generic
 surface unavailable for a managed encrypted Diary; that is a guarded policy
 boundary, not a second Diary implementation.
 
-## 8. Diary `D → C` shortcut
+## 8. Diary `G → B` shortcut
 
-`D → C` is a Diary-only two-key chord named Diary Close. It is registered once
-by `VaultView.vue` through `createDiaryShortcutChord()` and is processed by the
-existing Vault keydown authority.
+`G → B` is a Diary-scoped two-key chord named Diary Back. It follows the
+global `go`/`back` meaning; the Board editor's separate route-scoped `G → B`
+handler remains unchanged. The Diary chord is registered once by `VaultView.vue`
+through `createDiaryShortcutChord()` and is processed by the existing Vault
+keydown authority.
 
 Current contract:
 
@@ -216,10 +218,11 @@ Current contract:
   timeout, and unmount reset pending state;
 - Calendar Home is a no-op because it has no active managed Diary document;
 - a completed chord calls the same `closeWorkspaceTab(activeId)` path used by
-  the tab close button.
+  the tab close button, returning the user to the Diary list or Calendar Home
+  according to the existing workspace fallback policy.
 
-The future `N → C` idea is not implemented and is not part of the current
-shortcut contract.
+Other global-navigation chords are not implemented and are not part of the
+current shortcut contract.
 
 ## 9. Privacy, encryption, and migration
 
@@ -261,7 +264,7 @@ Diary-specific authority is limited to:
 - Mood metadata and icon presentation;
 - Diary access/privacy and migration contracts;
 - Calendar Home/native-document presentation state;
-- Diary-scoped `D → C` shortcut policy.
+- Diary-scoped `G → B` shortcut policy.
 
 Diary must not copy or become the owner of the Vault editor, generic document
 tabs, save/dirty protocol, History, Recovery, draft store, filesystem safety,
@@ -281,7 +284,7 @@ The current test matrix protects these stable contracts:
 | Selection cleanup, retained month, scope and route handoff | lifecycle regression and responsive E2E |
 | Access sessions, encrypted body fail-closed behavior, and teardown | Diary access/body unit and integration tests |
 | Legacy migration ownership, recovery, consent, and platform states | migration service/route tests and CI integration lanes |
-| `D → C`, text-entry/overlay guards, timeout, and browser integration | `diaryShortcutChord` unit tests and the real Diary browser E2E |
+| `G → B`, text-entry/overlay guards, timeout, and browser integration | `diaryShortcutChord` unit tests and the real Diary browser E2E |
 | Release regressions and cross-platform compatibility | Diary release suite and the full CI matrix |
 
 The latest baseline CI run passed all required jobs. The final closure audit

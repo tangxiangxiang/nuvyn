@@ -295,6 +295,17 @@ describe('VaultView editor tab wiring', () => {
     expect(source).not.toContain('snapshots.value.push(activeTab')
   })
 
+  it('routes Diary G+B through the existing active workspace close path', () => {
+    const source = readFileSync(fileURLToPath(new URL('../VaultView.vue', import.meta.url)), 'utf8')
+    const diaryShortcut = source.match(/const diaryBackChord = createDiaryShortcutChord\([\s\S]*?\n\}\)/)?.[0]
+
+    expect(diaryShortcut).toBeDefined()
+    expect(diaryShortcut).toContain('goBack: () => {')
+    expect(diaryShortcut).toContain('return closeWorkspaceTab(activeId)')
+    expect(source).toContain('@close="closeWorkspaceTab"')
+    expect(source).not.toContain('window.history.back()')
+  })
+
   it('revalidates recovery identity after View Current opens the document', () => {
     const source = readFileSync(fileURLToPath(new URL('../VaultView.vue', import.meta.url)), 'utf8')
     const handler = source.match(

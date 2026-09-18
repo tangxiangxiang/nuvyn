@@ -603,13 +603,13 @@ test('Native DOCUMENT Cmd/Ctrl+W closes through the existing focus and dirty pol
   expect(state.consoleErrors).toEqual([])
 })
 
-test('Diary D C shortcut closes the active diary and returns to the same calendar month', async ({ page, request }) => {
+test('Diary G B shortcut returns from the active diary to the same calendar month', async ({ page, request }) => {
   const date = '2026-08-15'
   const diary = diaryPath(date)
   const state = await captureDiagnostics(page)
 
   try {
-    await seedDiary(request, date, `# D C close integration ${RUN_ID}\n`)
+    await seedDiary(request, date, `# G B back integration ${RUN_ID}\n`)
     await setDiaryMood(request, date, 'happy')
     await openDiaryHome(page)
     await moveToMonth(page, date)
@@ -632,6 +632,11 @@ test('Diary D C shortcut closes the active diary and returns to the same calenda
     await page.locator('.vault').focus()
     await page.keyboard.press('d')
     await page.keyboard.press('c')
+    await expect(diaryTab).toHaveCount(1)
+    await expect(diaryTab).toHaveAttribute('aria-selected', 'true')
+
+    await page.keyboard.press('g')
+    await page.keyboard.press('b')
 
     await expect(diaryTab).toHaveCount(0)
     await expect(page.getByTestId('diary-workspace-shell')).toHaveAttribute('data-presentation-mode', 'home')

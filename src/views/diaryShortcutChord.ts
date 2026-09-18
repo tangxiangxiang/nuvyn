@@ -2,7 +2,7 @@ export interface DiaryShortcutChordOptions {
   isDiaryDocument: () => boolean
   isTextEntryContext: (event: KeyboardEvent) => boolean
   isBlocked: (event: KeyboardEvent) => boolean
-  closeDiaryDocument: () => Promise<void> | void
+  goBack: () => Promise<void> | void
   timeoutMs?: number
 }
 
@@ -68,16 +68,16 @@ export function createDiaryShortcutChord(options: DiaryShortcutChordOptions) {
 
     const key = event.key.toLowerCase()
     if (!pending) {
-      if (key === 'd') arm()
+      if (key === 'g') arm()
       return false
     }
 
     reset()
-    if (key !== 'c' || closing) return false
+    if (key !== 'b' || closing) return false
 
     event.preventDefault()
     closing = true
-    void Promise.resolve(options.closeDiaryDocument()).finally(() => {
+    void Promise.resolve(options.goBack()).finally(() => {
       closing = false
     })
     return true

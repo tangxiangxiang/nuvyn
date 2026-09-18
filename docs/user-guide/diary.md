@@ -25,17 +25,19 @@ Opening a date takes you to a native Nuvyn document tab. The Diary document
 uses Nuvyn's normal Read and Edit surfaces, save behavior, and workspace tab
 controls.
 
-Close the active document with its tab close button, or use the Diary shortcut:
+Return from the active document with its tab close button, or use the Diary
+shortcut:
 
 ```text
-D, then C — close the current Diary document
+G, then B — return to Diary Calendar Home
 ```
 
 Press the two keys in order within a short interval; do not hold them at the
 same time. The shortcut works only while a Diary document is active. It does
 nothing on Calendar Home, in another workspace, or while focus is in a text
-editor/input context. Closing returns to Calendar Home, clears the old date
-selection, and keeps the visible month and Mood markers.
+editor/input context. It follows the same workspace-tab close and unsaved-change
+policy as the tab close button: returning to Calendar Home clears the old date
+selection and keeps the visible month and Mood markers.
 
 Unsaved changes continue to use Nuvyn's existing close confirmation/save policy.
 The shortcut does not bypass that protection.

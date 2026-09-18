@@ -1479,7 +1479,7 @@ async function revealWorkspaceTabInTree(path: string): Promise<void> {
 
 function onVaultKeydown(event: KeyboardEvent): void {
   if (isNuvynShortcutBlocked(event)) return
-  if (diaryCloseChord.onKeydown(event)) return
+  if (diaryBackChord.onKeydown(event)) return
 
   if (isDiaryPresentationPrimary.value) {
     // Diary Home may keep document tabs mounted for lifecycle continuity, but
@@ -1716,31 +1716,31 @@ const isDiaryCalendarVisible = computed(() => (
 ))
 const isDiaryPresentationPrimary = computed(() => isDiaryCalendarVisible.value)
 
-const diaryCloseChord = createDiaryShortcutChord({
+const diaryBackChord = createDiaryShortcutChord({
   isDiaryDocument: () => isDiaryScope.value
     && isDiaryDocumentMode.value
     && classifyDiaryPath(activePath.value ?? '') === 'managed',
   isTextEntryContext: isDiaryTextEntryContext,
   isBlocked: isDiaryShortcutBlocked,
-  closeDiaryDocument: () => {
+  goBack: () => {
     const activeId = activeWorkspaceTabId.value
     if (activeId) return closeWorkspaceTab(activeId)
   },
 })
 
 watch([isDiaryScope, isDiaryDocumentMode, activeWorkspaceTabId], () => {
-  diaryCloseChord.reset()
+  diaryBackChord.reset()
 }, { flush: 'sync' })
 
 onMounted(() => {
-  window.addEventListener('blur', diaryCloseChord.reset)
-  document.addEventListener('visibilitychange', diaryCloseChord.reset)
+  window.addEventListener('blur', diaryBackChord.reset)
+  document.addEventListener('visibilitychange', diaryBackChord.reset)
 })
 
 onBeforeUnmount(() => {
-  window.removeEventListener('blur', diaryCloseChord.reset)
-  document.removeEventListener('visibilitychange', diaryCloseChord.reset)
-  diaryCloseChord.dispose()
+  window.removeEventListener('blur', diaryBackChord.reset)
+  document.removeEventListener('visibilitychange', diaryBackChord.reset)
+  diaryBackChord.dispose()
 })
 
 const routeSidebarVisible = computed(() => route.meta.sidebar !== false)
