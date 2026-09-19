@@ -173,6 +173,22 @@ describe('Ledger historical period route coordination', () => {
     for (const wrapper of wrappers.splice(0)) wrapper.unmount()
   })
 
+  it('opens transaction history filtered by the clicked category', async () => {
+    api.getLedgerOverview.mockResolvedValue({
+      ...overviewFor({ scope: 'month', anchorDate: undefined }),
+      categoryBreakdown: {
+        income: [],
+        expense: [{ categoryId: 'food', name: '餐饮', kind: 'expense', amountMinor: 3_800 }],
+      },
+    })
+    const { router, wrapper } = await mountAt('/ledger')
+
+    await wrapper.get('[data-testid="ledger-category-row-food"]').trigger('click')
+    await flushPromises()
+
+    expect(router.currentRoute.value.fullPath).toBe('/ledger/transactions?categoryId=food')
+  })
+
   it('loads an anchored route, exposes the requested date, and keeps current snapshot wording', async () => {
     const { router, wrapper } = await mountAt('/ledger?date=2026-08-20')
 

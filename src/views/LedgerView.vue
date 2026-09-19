@@ -140,8 +140,12 @@ function retry(): void {
   void store.bootstrap()
 }
 
-function openTransactions(): void {
-  if (router) void router.push({ name: 'ledger-transactions' })
+function openTransactions(categoryId?: string): void {
+  if (!router) return
+  void router.push({
+    name: 'ledger-transactions',
+    ...(categoryId ? { query: { categoryId } } : {}),
+  })
 }
 
 function inspectTransaction(transaction: LedgerTransactionDto): void {

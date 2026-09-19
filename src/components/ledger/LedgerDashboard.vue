@@ -23,7 +23,7 @@ import LedgerAccountIcon from './LedgerAccountIcon.vue'
 
 const emit = defineEmits<{
   record: []
-  viewTransactions: []
+  viewTransactions: [categoryId?: string]
   inspectTransaction: [transaction: LedgerTransactionDto]
 }>()
 const store = useLedgerStore()
@@ -293,6 +293,16 @@ function presentationKind(transaction: LedgerTransactionDto): string {
 
 function inspectTransaction(transaction: LedgerTransactionDto): void {
   emit('inspectTransaction', transaction)
+}
+
+function openCategoryTransactions(categoryId: string): void {
+  emit('viewTransactions', categoryId)
+}
+
+function onCategoryRowKeydown(event: KeyboardEvent, categoryId: string): void {
+  if (event.key !== 'Enter' && event.key !== ' ') return
+  event.preventDefault()
+  openCategoryTransactions(categoryId)
 }
 
 function recentTransactionRowProps(transaction: LedgerTransactionDto) {
@@ -766,7 +776,15 @@ function animatedMoneyParts(minor: number, currency: string, key: MetricKey): { 
               <div v-if="selectedPeriods.income.length" class="ledger-breakdown-list-viewport" data-testid="ledger-income-breakdown-viewport" @scroll="showScrollbarWhileScrolling">
                 <NList class="ledger-breakdown-list" :show-divider="false">
                   <NListItem v-for="item in selectedPeriods.income" :key="item.categoryId" class="ledger-breakdown-list-item">
-                    <div class="ledger-breakdown-row">
+                    <div
+                      class="ledger-breakdown-row"
+                      role="button"
+                      tabindex="0"
+                      :data-testid="`ledger-category-row-${item.categoryId}`"
+                      :aria-label="`查看${item.name}分类交易`"
+                      @click="openCategoryTransactions(item.categoryId)"
+                      @keydown="onCategoryRowKeydown($event, item.categoryId)"
+                    >
                       <span class="ledger-breakdown-label">
                         <span class="ledger-breakdown-name">{{ item.name }}</span>
                         <span class="ledger-breakdown-share">{{ categoryShare(selectedPeriods.income, item.amountMinor) }}</span>
@@ -789,7 +807,15 @@ function animatedMoneyParts(minor: number, currency: string, key: MetricKey): { 
               <div v-if="selectedPeriods.expense.length" class="ledger-breakdown-list-viewport" data-testid="ledger-expense-breakdown-viewport" @scroll="showScrollbarWhileScrolling">
                 <NList class="ledger-breakdown-list" :show-divider="false">
                   <NListItem v-for="item in selectedPeriods.expense" :key="item.categoryId" class="ledger-breakdown-list-item">
-                    <div class="ledger-breakdown-row">
+                    <div
+                      class="ledger-breakdown-row"
+                      role="button"
+                      tabindex="0"
+                      :data-testid="`ledger-category-row-${item.categoryId}`"
+                      :aria-label="`查看${item.name}分类交易`"
+                      @click="openCategoryTransactions(item.categoryId)"
+                      @keydown="onCategoryRowKeydown($event, item.categoryId)"
+                    >
                       <span class="ledger-breakdown-label">
                         <span class="ledger-breakdown-name">{{ item.name }}</span>
                         <span class="ledger-breakdown-share">{{ categoryShare(selectedPeriods.expense, item.amountMinor) }}</span>
@@ -1568,6 +1594,7 @@ function animatedMoneyParts(minor: number, currency: string, key: MetricKey): { 
   align-items: center;
   gap: 7px 12px;
   font-size: .77rem;
+  cursor: pointer;
 }
 
 .ledger-breakdown-label {
