@@ -223,7 +223,7 @@ describe('Ledger transaction query projections', () => {
   it('uses literal search matching and excludes deleted rows by default', () => {
     const fixture = freshFixture()
     const asset = account(fixture, 'search-account')
-    const expenseCategory = firstCategory(fixture, 'expense')
+    const expenseCategory = category(fixture, 'search-category', { name: '搜索分类' })
     const percent = transaction(fixture, 'percent', {
       type: 'expense', amountMinor: 1, accountId: asset.id, categoryId: expenseCategory.id,
       payee: '100%', occurredAt: TEST_NOW - 3_000,
@@ -244,6 +244,8 @@ describe('Ledger transaction query projections', () => {
     expect(fixture.projections.listTransactions(query({ search: 'c\\d' })).transactions)
       .toEqual([slash])
     expect(fixture.projections.listTransactions(query({ search: 'Projection account' })).transactions)
+      .toEqual([slash, underscore, percent])
+    expect(fixture.projections.listTransactions(query({ search: '搜索分类' })).transactions)
       .toEqual([slash, underscore, percent])
     expect(fixture.projections.listTransactions(query({ search: '   ' })).transactions)
       .toHaveLength(3)

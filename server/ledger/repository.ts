@@ -972,6 +972,12 @@ function transactionQueryFilter(
         WHERE ledger_accounts.name LIKE @searchPattern ESCAPE '\\' COLLATE NOCASE
           AND ledger_accounts.id IN (account_id, from_account_id, to_account_id)
       )
+      OR EXISTS (
+        SELECT 1
+        FROM ledger_categories
+        WHERE ledger_categories.name LIKE @searchPattern ESCAPE '\\' COLLATE NOCASE
+          AND ledger_categories.id = category_id
+      )
     )`)
   }
 

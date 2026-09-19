@@ -550,7 +550,7 @@ const transactionColumns: DataTableColumns<LedgerTransactionDto> = [
             class="ledger-search-input"
             size="small"
             clearable
-            placeholder="搜索交易对象、地点或备注"
+            placeholder="搜索交易"
             aria-label="搜索交易"
             :input-props="{ id: 'ledger-filter-search', name: 'search', autocomplete: 'off' }"
             @update:value="scheduleSearch"
