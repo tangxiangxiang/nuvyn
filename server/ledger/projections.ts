@@ -203,30 +203,26 @@ function exclusiveInstant(instantMs: number): number {
 }
 
 function cashflowForTransactions(transactions: readonly LedgerTransaction[]): LedgerCashflowSummary {
-  const incomeMinor = checkedSumMinor(
-    transactions
-      .filter((transaction) => transaction.type === 'income')
-      .map((transaction) => transaction.amountMinor),
-  )
-  const expenseMinor = checkedSumMinor(
-    transactions
-      .filter((transaction) => transaction.type === 'expense')
-      .map((transaction) => transaction.amountMinor),
-  )
+  let incomeMinor = 0
+  let expenseMinor = 0
+  let repaymentMinor = 0
+
+  for (const transaction of transactions) {
+    if (transaction.type === 'income') {
+      incomeMinor = checkedAddMinor(incomeMinor, transaction.amountMinor)
+    } else if (transaction.type === 'expense') {
+      expenseMinor = checkedAddMinor(expenseMinor, transaction.amountMinor)
+    } else if (transaction.type === 'transfer' && transaction.transferKind === 'repayment') {
+      repaymentMinor = checkedAddMinor(repaymentMinor, transaction.amountMinor)
+    }
+  }
+
   return {
     incomeMinor,
     expenseMinor,
+    repaymentMinor,
     balanceMinor: checkedSubMinor(incomeMinor, expenseMinor),
   }
-}
-
-/** Repayment trend data tracks principal only; companion interest remains expense. */
-function repaymentForTransactions(transactions: readonly LedgerTransaction[]): number {
-  return checkedSumMinor(
-    transactions
-      .filter((transaction) => transaction.type === 'transfer' && transaction.transferKind === 'repayment')
-      .map((transaction) => transaction.amountMinor),
-  )
 }
 
 function categorySlicesForTransactions(
@@ -376,7 +372,6 @@ function trendForRanges(
       startAt: range.startMs,
       endAt: range.endMs,
       ...cashflowForTransactions(monthTransactions),
-      repaymentMinor: repaymentForTransactions(monthTransactions),
     }
   })
 }

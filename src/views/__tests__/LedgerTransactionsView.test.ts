@@ -233,7 +233,7 @@ const overview: LedgerOverviewDto = {
   liabilityTotalMinor: 0,
   netWorthMinor: 1_000_000,
   accounts: [],
-  cashflow: { incomeMinor: 20_000, expenseMinor: 3_800, balanceMinor: 16_200 },
+  cashflow: { incomeMinor: 20_000, expenseMinor: 3_800, repaymentMinor: 0, balanceMinor: 16_200 },
   categoryBreakdown: { income: [], expense: [] },
   periods: [],
   trend: [],
@@ -371,11 +371,11 @@ describe('Ledger live transaction history workspace', () => {
   it('requests the selected server-side page with the correct offset', async () => {
     const firstPage: LedgerTransactionPageDto = {
       transactions: Array.from({ length: 25 }, (_, index) => ({ ...expense, id: index === 0 ? expense.id : `tx-expense-${index}` })),
-      page: { nextCursor: 'cursor-1', total: 26, incomeMinor: income.amountMinor, expenseMinor: expense.amountMinor * 25 },
+      page: { nextCursor: 'cursor-1', total: 26, incomeMinor: income.amountMinor, expenseMinor: expense.amountMinor * 25, repaymentMinor: 10_000 },
     }
     const secondPage: LedgerTransactionPageDto = {
       transactions: [income],
-      page: { nextCursor: null, total: 26, incomeMinor: income.amountMinor, expenseMinor: expense.amountMinor * 25 },
+      page: { nextCursor: null, total: 26, incomeMinor: income.amountMinor, expenseMinor: expense.amountMinor * 25, repaymentMinor: 10_000 },
     }
     api.listLedgerTransactions.mockReset()
     api.listLedgerTransactions
@@ -395,6 +395,9 @@ describe('Ledger live transaction history workspace', () => {
       expect(wrapper.get('[data-testid="ledger-transaction-list"]').text()).not.toContain('午餐')
     })
     expect(wrapper.text()).toContain('共 26 条')
+    await vi.waitFor(() => {
+      expect(wrapper.get('.ledger-history-summary').text()).toContain('还款 ¥100.00')
+    }, { timeout: 2500 })
     expect(wrapper.findComponent(NPagination).props('page')).toBe(2)
     expect(wrapper.findComponent(NPagination).props('itemCount')).toBe(26)
     expect(wrapper.findComponent(NPagination).props('showSizePicker')).toBe(true)
@@ -405,6 +408,26 @@ describe('Ledger live transaction history workspace', () => {
       expect(wrapper.get('[data-testid="ledger-transaction-list"]').text()).toContain('午餐')
     })
     expect(wrapper.get('[data-testid="ledger-transaction-list"]').text()).not.toContain('工资')
+  })
+
+  it('uses the repayment summary from the full query and presents repayment rows in purple', async () => {
+    setup(
+      {
+        transactions: [repayment],
+        page: { nextCursor: null, total: 3, incomeMinor: 20_000, expenseMinor: 3_800, repaymentMinor: repayment.amountMinor },
+      },
+      [activeAccount, liabilityAccount],
+    )
+    const wrapper = await mountView()
+
+    await vi.waitFor(() => {
+      expect(wrapper.get('.ledger-history-summary').text()).toContain('收入 ¥200.00')
+      expect(wrapper.get('.ledger-history-summary').text()).toContain('支出 ¥38.00')
+      expect(wrapper.get('.ledger-history-summary').text()).toContain('还款 ¥100.00')
+    }, { timeout: 2500 })
+    expect(wrapper.get('[data-testid="ledger-transaction-row-tx-repayment"] .ledger-transaction-type').classes()).toContain('is-repayment')
+    expect(wrapper.get('[data-testid="ledger-transaction-row-tx-repayment"] .ledger-transaction-amount').classes()).toContain('is-repayment')
+    expect(wrapper.get('[data-testid="ledger-transaction-row-tx-repayment"] .ledger-transaction-type').classes()).not.toContain('is-transfer')
   })
 
   it('shows a purposeful empty state for a filtered result', async () => {

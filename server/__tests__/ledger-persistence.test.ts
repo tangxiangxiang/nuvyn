@@ -186,7 +186,7 @@ describe('Ledger persistent idempotency replay', () => {
       assetTotalMinor: 375,
       liabilityTotalMinor: 0,
       netWorthMinor: 375,
-      cashflow: { incomeMinor: 0, expenseMinor: 125, balanceMinor: -125 },
+      cashflow: { incomeMinor: 0, expenseMinor: 125, repaymentMinor: 0, balanceMinor: -125 },
     })
 
     database.close()
@@ -222,7 +222,7 @@ describe('Ledger persistent idempotency replay', () => {
       assetTotalMinor: 375,
       liabilityTotalMinor: 0,
       netWorthMinor: 375,
-      cashflow: { incomeMinor: 0, expenseMinor: 125, balanceMinor: -125 },
+      cashflow: { incomeMinor: 0, expenseMinor: 125, repaymentMinor: 0, balanceMinor: -125 },
     })
 
     const replay = serviceB.createTransaction(transactionRequest, 'reopen-service-transaction')

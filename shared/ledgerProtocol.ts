@@ -298,6 +298,8 @@ export interface LedgerPageInfo {
   readonly incomeMinor?: number
   /** Matching expense total before pagination. Present on the global transaction list. */
   readonly expenseMinor?: number
+  /** Matching repayment principal before pagination. Present on the global transaction list. */
+  readonly repaymentMinor?: number
 }
 
 /** The decoded keyset position used by the Ledger transaction query. */
@@ -332,6 +334,9 @@ export interface LedgerPeriodSummary {
   readonly endAt: number
   readonly incomeMinor: number
   readonly expenseMinor: number
+  /** Repayment principal is shown separately and is not part of expenseMinor. */
+  readonly repaymentMinor: number
+  /** Cashflow balance remains income minus expense; repayment stays separate. */
   readonly balanceMinor: number
 }
 
@@ -357,6 +362,9 @@ export interface LedgerCategorySlice {
 export interface LedgerCashflowSummary {
   readonly incomeMinor: number
   readonly expenseMinor: number
+  /** Repayment principal is shown separately and is not part of expenseMinor. */
+  readonly repaymentMinor: number
+  /** Cashflow balance remains income minus expense; it does not subtract repaymentMinor. */
   readonly balanceMinor: number
 }
 

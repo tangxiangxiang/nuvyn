@@ -731,7 +731,7 @@ describe('Ledger Overview and trend projections', () => {
     expect(overview.assetTotalMinor).toBe(1_030)
     expect(overview.liabilityTotalMinor).toBe(220)
     expect(overview.netWorthMinor).toBe(810)
-    expect(overview.cashflow).toEqual({ incomeMinor: 100, expenseMinor: 90, balanceMinor: 10 })
+    expect(overview.cashflow).toEqual({ incomeMinor: 100, expenseMinor: 90, repaymentMinor: 0, balanceMinor: 10 })
     expect(overview.categoryBreakdown.expense).toEqual(expect.arrayContaining([
       expect.objectContaining({ categoryId: expenseCategory.id, amountMinor: 90 }),
     ]))
@@ -765,9 +765,9 @@ describe('Ledger Overview and trend projections', () => {
       expect(candidate.trend).toEqual(all.trend)
       expect(candidate.recentTransactions).toEqual(all.recentTransactions)
     }
-    expect(today.cashflow).toEqual({ incomeMinor: 0, expenseMinor: 10, balanceMinor: -10 })
+    expect(today.cashflow).toEqual({ incomeMinor: 0, expenseMinor: 10, repaymentMinor: 0, balanceMinor: -10 })
     expect(month.cashflow).toEqual(today.cashflow)
-    expect(all.cashflow).toEqual({ incomeMinor: 100, expenseMinor: 10, balanceMinor: 90 })
+    expect(all.cashflow).toEqual({ incomeMinor: 100, expenseMinor: 10, repaymentMinor: 0, balanceMinor: 90 })
   })
 
   it('anchors complete natural periods while keeping the Current Snapshot on NOW semantics', () => {
@@ -808,7 +808,7 @@ describe('Ledger Overview and trend projections', () => {
       isToday: false,
       scope: 'month',
     })
-    expect(overview.cashflow).toEqual({ incomeMinor: 100, expenseMinor: 55, balanceMinor: 45 })
+    expect(overview.cashflow).toEqual({ incomeMinor: 100, expenseMinor: 55, repaymentMinor: 0, balanceMinor: 45 })
     expect(overview.categoryBreakdown.expense).toEqual(expect.arrayContaining([
       expect.objectContaining({ categoryId: expenseCategory.id, amountMinor: 55 }),
     ]))
@@ -836,7 +836,7 @@ describe('Ledger Overview and trend projections', () => {
       scope: 'all',
       anchorDate: '2026-08-20',
     })
-    expect(all.cashflow).toEqual({ incomeMinor: 0, expenseMinor: 15, balanceMinor: -15 })
+    expect(all.cashflow).toEqual({ incomeMinor: 0, expenseMinor: 15, repaymentMinor: 0, balanceMinor: -15 })
     expect(all.context.scope).toBe('all')
   })
 
@@ -918,7 +918,7 @@ describe('Ledger Overview and trend projections', () => {
     fixture.service.deleteTransaction(expense.id, { expectedVersion: 1 })
     const deleted = fixture.projections.getOverview({ scope: 'all', anchorDate: undefined })
     expect(deleted.accounts[0].currentBalanceMinor).toBe(35)
-    expect(deleted.cashflow).toEqual({ incomeMinor: 0, expenseMinor: 0, balanceMinor: 0 })
+    expect(deleted.cashflow).toEqual({ incomeMinor: 0, expenseMinor: 0, repaymentMinor: 0, balanceMinor: 0 })
     expect(deleted.recentTransactions.map((row) => row.id)).toEqual([adjustmentRow!.id])
   })
 
@@ -938,12 +938,12 @@ describe('Ledger Overview and trend projections', () => {
     expect(afterExpense.netWorthMinor).toBe(before.netWorthMinor - 20)
     const beforeTransfer = afterExpense.netWorthMinor
     transaction(fixture, 'card-repayment', {
-      type: 'transfer', amountMinor: 30, fromAccountId: bank.id, toAccountId: card.id,
+      type: 'transfer', transferKind: 'repayment', amountMinor: 30, fromAccountId: bank.id, toAccountId: card.id,
       occurredAt: TEST_NOW - 1_000,
     })
     const afterTransfer = fixture.projections.getOverview({ scope: 'all', anchorDate: undefined })
     expect(afterTransfer.netWorthMinor).toBe(beforeTransfer)
-    expect(afterTransfer.cashflow).toEqual({ incomeMinor: 0, expenseMinor: 20, balanceMinor: -20 })
+    expect(afterTransfer.cashflow).toEqual({ incomeMinor: 0, expenseMinor: 20, repaymentMinor: 30, balanceMinor: -20 })
   })
 
   it('projects a grouped transfer as one row while retaining the charge in expense totals', () => {
@@ -966,6 +966,7 @@ describe('Ledger Overview and trend projections', () => {
     expect(legacyRepaymentFee.payee).toBe(`${loan.name}还款利息`)
 
     const overview = fixture.projections.getOverview({ scope: 'all', anchorDate: undefined })
+    expect(overview.cashflow).toEqual({ incomeMinor: 0, expenseMinor: 300, repaymentMinor: 5_000, balanceMinor: -300 })
     expect(overview.trend.at(-1)).toMatchObject({
       month: '2026-09',
       incomeMinor: 0,
@@ -983,7 +984,7 @@ describe('Ledger Overview and trend projections', () => {
       groupId: repayment.groupId,
       bundle: { chargeMinor: 300, totalMinor: 5_300 },
     })
-    expect(page.page).toMatchObject({ total: 2, incomeMinor: 0, expenseMinor: 300 })
+    expect(page.page).toMatchObject({ total: 2, incomeMinor: 0, expenseMinor: 300, repaymentMinor: 5_000 })
 
     const grouped = fixture.projections.listTransactions(query({ groupId: repayment.groupId }))
     expect(grouped.transactions.map((row) => row.type).sort()).toEqual(['expense', 'transfer'])

@@ -186,13 +186,13 @@ const overview = (): LedgerOverviewDto => ({
   liabilityTotalMinor: 0,
   netWorthMinor: 996_200,
   accounts: [accountSummary],
-  cashflow: { incomeMinor: 0, expenseMinor: 3_800, balanceMinor: -3_800 },
+  cashflow: { incomeMinor: 0, expenseMinor: 3_800, repaymentMinor: 0, balanceMinor: -3_800 },
   categoryBreakdown: { income: [], expense: [{ categoryId: 'food', name: '餐饮', kind: 'expense', amountMinor: 3_800 }] },
   periods: [
-    { period: 'today', startAt: instantFromLocalDateTime('2026-09-05T00:00', 'Asia/Shanghai'), endAt: instantFromLocalDateTime('2026-09-06T00:00', 'Asia/Shanghai'), incomeMinor: 0, expenseMinor: 3_800, balanceMinor: -3_800 },
-    { period: 'week', startAt: instantFromLocalDateTime('2026-08-31T00:00', 'Asia/Shanghai'), endAt: instantFromLocalDateTime('2026-09-07T00:00', 'Asia/Shanghai'), incomeMinor: 0, expenseMinor: 3_800, balanceMinor: -3_800 },
-    { period: 'month', startAt: instantFromLocalDateTime('2026-09-01T00:00', 'Asia/Shanghai'), endAt: instantFromLocalDateTime('2026-10-01T00:00', 'Asia/Shanghai'), incomeMinor: 0, expenseMinor: 3_800, balanceMinor: -3_800 },
-    { period: 'year', startAt: instantFromLocalDateTime('2026-01-01T00:00', 'Asia/Shanghai'), endAt: instantFromLocalDateTime('2027-01-01T00:00', 'Asia/Shanghai'), incomeMinor: 0, expenseMinor: 3_800, balanceMinor: -3_800 },
+    { period: 'today', startAt: instantFromLocalDateTime('2026-09-05T00:00', 'Asia/Shanghai'), endAt: instantFromLocalDateTime('2026-09-06T00:00', 'Asia/Shanghai'), incomeMinor: 0, expenseMinor: 3_800, repaymentMinor: 0, balanceMinor: -3_800 },
+    { period: 'week', startAt: instantFromLocalDateTime('2026-08-31T00:00', 'Asia/Shanghai'), endAt: instantFromLocalDateTime('2026-09-07T00:00', 'Asia/Shanghai'), incomeMinor: 0, expenseMinor: 3_800, repaymentMinor: 0, balanceMinor: -3_800 },
+    { period: 'month', startAt: instantFromLocalDateTime('2026-09-01T00:00', 'Asia/Shanghai'), endAt: instantFromLocalDateTime('2026-10-01T00:00', 'Asia/Shanghai'), incomeMinor: 0, expenseMinor: 3_800, repaymentMinor: 0, balanceMinor: -3_800 },
+    { period: 'year', startAt: instantFromLocalDateTime('2026-01-01T00:00', 'Asia/Shanghai'), endAt: instantFromLocalDateTime('2027-01-01T00:00', 'Asia/Shanghai'), incomeMinor: 0, expenseMinor: 3_800, repaymentMinor: 0, balanceMinor: -3_800 },
   ],
   trend: sixMonthTrend,
   recentTransactions: [expense],
@@ -227,14 +227,14 @@ function deferred<T>(): { promise: Promise<T>; resolve: (value: T) => void; reje
   return { promise, resolve, reject }
 }
 
-function overviewFor(anchorDate: string, incomeMinor = 0, expenseMinor = 3_800): LedgerOverviewDto {
+function overviewFor(anchorDate: string, incomeMinor = 0, expenseMinor = 3_800, repaymentMinor = 0): LedgerOverviewDto {
   const base = overview()
   return {
     ...base,
     context: { ...base.context, anchorDate },
-    cashflow: { incomeMinor, expenseMinor, balanceMinor: incomeMinor - expenseMinor },
+    cashflow: { incomeMinor, expenseMinor, repaymentMinor, balanceMinor: incomeMinor - expenseMinor },
     periods: base.periods.map((period) => period.period === 'today'
-      ? { ...period, incomeMinor, expenseMinor, balanceMinor: incomeMinor - expenseMinor }
+      ? { ...period, incomeMinor, expenseMinor, repaymentMinor, balanceMinor: incomeMinor - expenseMinor }
       : period),
   }
 }
@@ -291,7 +291,8 @@ describe('Ledger live dashboard', () => {
     for (const period of ['today', 'week', 'month', 'year']) {
       expect(wrapper.get(`[data-testid="ledger-period-${period}"]`).text()).not.toMatch(/00:00|23:59/)
     }
-    expect(wrapper.get('[data-testid="ledger-period-month"]').text()).toContain('收支结余')
+    expect(wrapper.get('[data-testid="ledger-period-month"]').text()).toContain('结余')
+    expect(wrapper.get('[data-testid="ledger-period-month"]').text()).toContain('还款')
     expect(wrapper.get('[data-testid="ledger-period-month"]').text()).toContain('-¥38.00')
     expect(wrapper.text()).not.toContain('billsMockData')
   })
@@ -310,6 +311,36 @@ describe('Ledger live dashboard', () => {
     expect(detail.props('open')).toBe(true)
     expect(detail.props('transaction')).toEqual(expense)
     expect(document.body.querySelector('[data-testid="ledger-transaction-detail-sheet"]')).not.toBeNull()
+  })
+
+  it('shows repayment as a first-class dashboard metric and subtracts it only in the UI balance', async () => {
+    const repayment: LedgerTransactionDto = {
+      ...transferActiveToArchived,
+      id: 'tx-dashboard-repayment',
+      transferKind: 'repayment',
+    }
+    api.getLedgerOverview.mockResolvedValue({
+      ...overviewFor('2026-09-05', 10_000, 2_000, 3_000),
+      recentTransactions: [repayment],
+    })
+    const wrapper = mount(LedgerView)
+    wrappers.push(wrapper)
+    await flushPromises()
+
+    const cashflow = wrapper.get('[data-testid="ledger-dashboard-cashflow"]')
+    expect(cashflow.text()).toContain('收入')
+    expect(cashflow.text()).toContain('支出')
+    expect(cashflow.text()).toContain('还款')
+    expect(cashflow.text()).toContain('结余')
+    await vi.waitFor(() => {
+      expect(cashflow.text()).toContain('¥30.00')
+      expect(cashflow.text()).toContain('¥50.00')
+      expect(cashflow.text()).not.toContain('¥80.00')
+    }, { timeout: 2500 })
+    const repaymentRow = wrapper.get('[data-testid="ledger-recent-transaction-row-tx-dashboard-repayment"]')
+    expect(repaymentRow.get('.ledger-recent-icon').classes()).toContain('is-repayment')
+    expect(repaymentRow.get('.ledger-recent-icon').text()).toBe('↘')
+    expect(repaymentRow.get('.ledger-recent-amount').classes()).toContain('is-repayment')
   })
 
   it('hydrates local projections from the main overview without duplicate initial reads', async () => {
@@ -667,7 +698,7 @@ describe('Ledger live dashboard', () => {
     await flushPromises()
 
     expect(api.getLedgerOverview).toHaveBeenLastCalledWith({ scope: 'today', anchorDate: '2026-09-05' })
-    expect(wrapper.get('#ledger-dashboard-cashflow-title').text()).toBe('本月收支')
+    expect(wrapper.get('#ledger-dashboard-cashflow-title').text()).toBe('本月概览')
     expect(wrapper.get('#ledger-category-breakdown-title').text()).toBe('收支分类')
 
     const categoryPicker = wrapper.findAllComponents(LedgerDatePicker).find((picker) => picker.props('testId') === 'ledger-category-date')

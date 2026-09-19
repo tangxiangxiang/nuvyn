@@ -17,7 +17,7 @@ import {
   type SelectGroupOption,
   type SelectOption,
 } from 'naive-ui'
-import { ArrowDown, ArrowRight, ArrowUp, ArrowsVertical, Calendar, Search, Tag, Wallet } from '@vicons/tabler'
+import { ArrowDown, ArrowDownRight, ArrowRight, ArrowUp, ArrowsVertical, Calendar, Search, Tag, Wallet } from '@vicons/tabler'
 import { Temporal } from '@js-temporal/polyfill'
 import { useRoute } from 'vue-router'
 import type {
@@ -31,6 +31,7 @@ import LedgerPendingCreateGate from '../components/ledger/LedgerPendingCreateGat
 import LedgerTransactionSheet from '../components/ledger/LedgerTransactionSheet.vue'
 import { ledgerErrorMessage } from '../features/ledger/ledgerErrors'
 import { formatLedgerDateTime, formatLedgerTransactionDateTime, instantFromLedgerDate } from '../features/ledger/time'
+import { ledgerTransactionPresentationKind } from '../features/ledger/presentation'
 import { useLedgerStore } from '../features/ledger/ledgerStore'
 import { ledgerSelectNodeProps } from '../features/ledger/naiveControls'
 import LedgerDatePicker from '../components/ledger/LedgerDatePicker.vue'
@@ -101,6 +102,9 @@ const resultSummary = computed(() => ({
     .reduce((total, transaction) => total + transaction.amountMinor, 0),
   expenseMinor: page.value?.page.expenseMinor ?? transactions.value
     .filter((transaction) => transaction.type === 'expense')
+    .reduce((total, transaction) => total + transaction.amountMinor, 0),
+  repaymentMinor: page.value?.page.repaymentMinor ?? transactions.value
+    .filter((transaction) => ledgerTransactionPresentationKind(transaction) === 'repayment')
     .reduce((total, transaction) => total + transaction.amountMinor, 0),
 }))
 
@@ -218,7 +222,12 @@ function transactionAccount(transaction: LedgerTransactionDto): string {
 function transactionTypeIcon(type: string) {
   if (type === 'income') return ArrowUp
   if (type === 'expense') return ArrowDown
+  if (type === 'repayment') return ArrowDownRight
   return ArrowRight
+}
+
+function presentationKind(transaction: LedgerTransactionDto): string {
+  return ledgerTransactionPresentationKind(transaction)
 }
 
 function filterTypeLabel(value: string): string {
@@ -378,8 +387,8 @@ const transactionColumns: DataTableColumns<LedgerTransactionDto> = [
     width: 100,
     align: 'center',
     titleAlign: 'center',
-    render: (transaction) => h('span', { class: ['ledger-transaction-type', `is-${transaction.type}`] }, [
-      h(NIcon, { size: 14, 'aria-hidden': 'true' }, { default: () => h(transactionTypeIcon(transaction.type)) }),
+    render: (transaction) => h('span', { class: ['ledger-transaction-type', `is-${presentationKind(transaction)}`] }, [
+      h(NIcon, { size: 14, 'aria-hidden': 'true' }, { default: () => h(transactionTypeIcon(presentationKind(transaction))) }),
       ` ${typeLabel(transaction.type, transaction.type === 'transfer' ? transaction.transferKind : undefined)}`,
     ]),
   },
@@ -420,7 +429,7 @@ const transactionColumns: DataTableColumns<LedgerTransactionDto> = [
     align: 'right',
     render: (transaction) => {
       const amountMinor = transaction.type === 'expense' ? -transaction.amountMinor : transaction.amountMinor
-      return h('strong', { class: ['ledger-transaction-amount', `is-${transaction.type}`] }, [
+      return h('strong', { class: ['ledger-transaction-amount', `is-${presentationKind(transaction)}`] }, [
         h(LedgerAnimatedMoney, {
           minor: amountMinor,
           currency: store.settings.value?.baseCurrency ?? 'CNY',
@@ -552,6 +561,8 @@ const transactionColumns: DataTableColumns<LedgerTransactionDto> = [
           <span>收入 <strong class="is-income"><LedgerAnimatedMoney :minor="resultSummary.incomeMinor" :currency="store.settings.value?.baseCurrency ?? 'CNY'" animate-on-mount /></strong></span>
           <i aria-hidden="true" />
           <span>支出 <strong class="is-expense"><LedgerAnimatedMoney :minor="resultSummary.expenseMinor" :currency="store.settings.value?.baseCurrency ?? 'CNY'" animate-on-mount /></strong></span>
+          <i aria-hidden="true" />
+          <span>还款 <strong class="is-repayment"><LedgerAnimatedMoney :minor="resultSummary.repaymentMinor" :currency="store.settings.value?.baseCurrency ?? 'CNY'" animate-on-mount /></strong></span>
         </div>
       </div>
 
@@ -865,7 +876,7 @@ const transactionColumns: DataTableColumns<LedgerTransactionDto> = [
   grid-template-columns: minmax(0, 1fr);
   gap: 0;
 }
-.ledger-search-row { display: flex; align-items: center; gap: 12px; width: 390px; min-width: 0; }
+.ledger-search-row { display: flex; align-items: center; gap: 12px; width: 320px; min-width: 0; }
 .ledger-search-input { flex: 1 1 auto; min-width: 0; }
 .ledger-search-input :deep(.n-input) {
   border: 1px solid var(--ledger-border);
@@ -982,7 +993,7 @@ const transactionColumns: DataTableColumns<LedgerTransactionDto> = [
 }
 .ledger-history-tools {
   display: grid;
-  grid-template-columns: minmax(280px, 390px) 390px 320px;
+  grid-template-columns: minmax(240px, 320px) 320px 320px;
   align-items: center;
   gap: 18px;
   justify-content: space-between;
@@ -1004,6 +1015,7 @@ const transactionColumns: DataTableColumns<LedgerTransactionDto> = [
 .ledger-history-summary strong { color: var(--text-h); font-size: .84rem; font-variant-numeric: tabular-nums; }
 .ledger-history-summary strong.is-income { color: var(--ledger-income); }
 .ledger-history-summary strong.is-expense { color: var(--ledger-expense); }
+.ledger-history-summary strong.is-repayment { color: var(--ledger-repayment); }
 .ledger-history-summary i { width: 1px; height: 13px; background: var(--ledger-divider); }
 .ledger-animated-count { display: inline-block; animation: ledger-number-pop .42s ease-out both; }
 @keyframes ledger-number-pop {
@@ -1067,6 +1079,7 @@ const transactionColumns: DataTableColumns<LedgerTransactionDto> = [
 }
 .ledger-transaction-table :deep(.ledger-transaction-type.is-income) { background: color-mix(in srgb, var(--ledger-income) 12%, transparent); color: var(--ledger-income); }
 .ledger-transaction-table :deep(.ledger-transaction-type.is-expense) { background: color-mix(in srgb, var(--ledger-expense) 12%, transparent); color: var(--ledger-expense); }
+.ledger-transaction-table :deep(.ledger-transaction-type.is-repayment) { background: color-mix(in srgb, var(--ledger-repayment) 12%, transparent); color: var(--ledger-repayment); }
 .ledger-transaction-table :deep(.ledger-transaction-category),
 .ledger-transaction-table :deep(.ledger-transaction-account),
 .ledger-transaction-table :deep(.ledger-transaction-note),
@@ -1082,6 +1095,7 @@ const transactionColumns: DataTableColumns<LedgerTransactionDto> = [
 .ledger-transaction-table :deep(.ledger-transaction-amount) { color: var(--text-h); font-size: .82rem; font-variant-numeric: tabular-nums; }
 .ledger-transaction-table :deep(.ledger-transaction-amount.is-income) { color: var(--ledger-income); }
 .ledger-transaction-table :deep(.ledger-transaction-amount.is-expense) { color: var(--ledger-expense); }
+.ledger-transaction-table :deep(.ledger-transaction-amount.is-repayment) { color: var(--ledger-repayment); }
 .ledger-transaction-table th {
   padding: 13px 22px 11px;
   border-bottom: 1px solid var(--ledger-divider);
@@ -1133,12 +1147,14 @@ const transactionColumns: DataTableColumns<LedgerTransactionDto> = [
 }
 .ledger-transaction-type.is-income { background: color-mix(in srgb, var(--ledger-income) 12%, transparent); color: var(--ledger-income); }
 .ledger-transaction-type.is-expense { background: color-mix(in srgb, var(--ledger-expense) 12%, transparent); color: var(--ledger-expense); }
+.ledger-transaction-type.is-repayment { background: color-mix(in srgb, var(--ledger-repayment) 12%, transparent); color: var(--ledger-repayment); }
 .ledger-transaction-note { display: block; overflow: hidden; color: var(--text-muted); text-overflow: ellipsis; white-space: nowrap; }
 .ledger-transaction-location { display: block; overflow: hidden; margin-top: 2px; color: var(--text-muted); opacity: .75; text-overflow: ellipsis; white-space: nowrap; }
 .ledger-transaction-date { text-align: left; font-size: .73rem; }
 .ledger-transaction-amount { font-size: .82rem; font-variant-numeric: tabular-nums; }
 .ledger-transaction-amount.is-income { color: var(--ledger-income); }
 .ledger-transaction-amount.is-expense { color: var(--ledger-expense); }
+.ledger-transaction-amount.is-repayment { color: var(--ledger-repayment); }
 .ledger-transaction-pagination {
   justify-content: space-between;
   margin-top: auto;

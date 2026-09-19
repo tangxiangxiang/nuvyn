@@ -11,6 +11,7 @@ import type {
 } from '../../../shared/ledgerProtocol'
 import { getLedgerOverview, getLedgerTrend } from '../../features/ledger/api'
 import { currencyExponentFor, formatLedgerMoney, formatLedgerSignedMoney } from '../../features/ledger/money'
+import { ledgerPresentationBalanceMinor, ledgerTransactionPresentationKind } from '../../features/ledger/presentation'
 import { formatLedgerDate, formatLedgerDateTime, formatLedgerPeriodPickerLabel } from '../../features/ledger/time'
 import { ledgerSelectNodeProps } from '../../features/ledger/naiveControls'
 import { calendarDateFromNaivePickerTimestamp } from '../../features/ledger/naiveTemporal'
@@ -281,8 +282,13 @@ function transactionAmount(transaction: LedgerTransactionDto): string {
 function transactionMark(transaction: LedgerTransactionDto): string {
   if (transaction.type === 'income') return '↑'
   if (transaction.type === 'expense') return '↓'
+  if (transaction.type === 'transfer' && transaction.transferKind === 'repayment') return '↘'
   if (transaction.type === 'transfer') return '→'
   return '='
+}
+
+function presentationKind(transaction: LedgerTransactionDto): string {
+  return ledgerTransactionPresentationKind(transaction)
 }
 
 function inspectTransaction(transaction: LedgerTransactionDto): void {
@@ -603,7 +609,7 @@ function animatedMoneyParts(minor: number, currency: string, key: MetricKey): { 
       <NCard class="ledger-dashboard-section ledger-cashflow-section" :bordered="false" size="small" aria-labelledby="ledger-dashboard-cashflow-title">
         <NFlex class="ledger-section-heading ledger-period-heading" align="flex-start" justify="space-between" :size="18">
           <div class="ledger-period-heading-copy">
-            <h2 id="ledger-dashboard-cashflow-title">{{ selectedPeriodLabel }}收支</h2>
+            <h2 id="ledger-dashboard-cashflow-title">{{ selectedPeriodLabel }}概览</h2>
             <p v-if="historicalMode" class="ledger-historical-hint" role="note">
               {{ formatLedgerDate(dateInputValue, ledgerTimezone) }} · 账户余额为当前值
             </p>
@@ -640,8 +646,12 @@ function animatedMoneyParts(minor: number, currency: string, key: MetricKey): { 
             <span class="ledger-cashflow-copy"><span>支出</span><strong class="is-expense"><LedgerAnimatedMoney :minor="selectedPeriodSummary.expenseMinor" :currency="overview.currency" animate-on-mount /></strong></span>
           </div>
           <div>
+            <span class="ledger-cashflow-mark is-repayment" aria-hidden="true">↘</span>
+            <span class="ledger-cashflow-copy"><span>还款</span><strong class="is-repayment"><LedgerAnimatedMoney :minor="selectedPeriodSummary.repaymentMinor" :currency="overview.currency" animate-on-mount /></strong></span>
+          </div>
+          <div>
             <span class="ledger-cashflow-mark is-balance" aria-hidden="true">=</span>
-            <span class="ledger-cashflow-copy"><span>收支结余</span><strong class="is-balance"><LedgerAnimatedMoney :minor="selectedPeriodSummary.balanceMinor" :currency="overview.currency" animate-on-mount /></strong></span>
+            <span class="ledger-cashflow-copy"><span>结余</span><strong class="is-balance"><LedgerAnimatedMoney :minor="ledgerPresentationBalanceMinor(selectedPeriodSummary)" :currency="overview.currency" animate-on-mount /></strong></span>
           </div>
         </div>
       </NCard>
@@ -811,9 +821,9 @@ function animatedMoneyParts(minor: number, currency: string, key: MetricKey): { 
           <NList v-if="overview.recentTransactions.length" class="ledger-recent-list" data-testid="ledger-recent-transactions" :show-divider="false" hoverable>
             <NListItem v-for="transaction in overview.recentTransactions" :key="transaction.id">
               <div v-bind="recentTransactionRowProps(transaction)">
-                <span :class="['ledger-recent-icon', `is-${transaction.type}`]" aria-hidden="true">{{ transactionMark(transaction) }}</span>
+                <span :class="['ledger-recent-icon', `is-${presentationKind(transaction)}`]" aria-hidden="true">{{ transactionMark(transaction) }}</span>
                 <span class="ledger-recent-info"><strong>{{ transactionTitle(transaction) }}</strong><small>{{ transactionMeta(transaction) }} · {{ formatLedgerDateTime(transaction.occurredAt, store.settings.value?.timezone ?? 'UTC') }}</small></span>
-                <strong :class="['ledger-recent-amount', `is-${transaction.type}`]">{{ transactionAmount(transaction) }}</strong>
+                <strong :class="['ledger-recent-amount', `is-${presentationKind(transaction)}`]">{{ transactionAmount(transaction) }}</strong>
               </div>
             </NListItem>
           </NList>
@@ -853,7 +863,8 @@ function animatedMoneyParts(minor: number, currency: string, key: MetricKey): { 
             <div v-if="periodSummary(period)" class="ledger-period-values">
               <span>收入 <strong class="is-income"><LedgerAnimatedMoney :minor="periodSummary(period)!.incomeMinor" :currency="overview.currency" /></strong></span>
               <span>支出 <strong class="is-expense"><LedgerAnimatedMoney :minor="periodSummary(period)!.expenseMinor" :currency="overview.currency" /></strong></span>
-              <span>收支结余 <strong><LedgerAnimatedMoney :minor="periodSummary(period)!.balanceMinor" :currency="overview.currency" /></strong></span>
+              <span>还款 <strong class="is-repayment"><LedgerAnimatedMoney :minor="periodSummary(period)!.repaymentMinor" :currency="overview.currency" /></strong></span>
+              <span>结余 <strong class="is-balance"><LedgerAnimatedMoney :minor="ledgerPresentationBalanceMinor(periodSummary(period)!)" :currency="overview.currency" /></strong></span>
             </div>
             <div v-else-if="periodProjectionLoading(period)" class="ledger-period-local-state" :data-testid="`ledger-period-loading-${period}`" role="status" aria-live="polite">
               <NSpin size="small" />
@@ -1233,7 +1244,7 @@ function animatedMoneyParts(minor: number, currency: string, key: MetricKey): { 
 
 .ledger-cashflow-grid {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: 14px;
   margin-inline: -20px;
 }
@@ -1277,6 +1288,11 @@ function animatedMoneyParts(minor: number, currency: string, key: MetricKey): { 
   color: var(--ledger-expense);
 }
 
+.ledger-cashflow-mark.is-repayment {
+  background: color-mix(in srgb, var(--ledger-repayment) 13%, var(--bg));
+  color: var(--ledger-repayment);
+}
+
 .ledger-cashflow-mark.is-balance {
   background: color-mix(in srgb, var(--ledger-balance) 11%, var(--bg));
   color: var(--ledger-balance);
@@ -1305,6 +1321,7 @@ function animatedMoneyParts(minor: number, currency: string, key: MetricKey): { 
 
 .ledger-cashflow-grid .is-income { color: var(--ledger-income); }
 .ledger-cashflow-grid .is-expense { color: var(--ledger-expense); }
+.ledger-cashflow-grid .is-repayment { color: var(--ledger-repayment); }
 .ledger-cashflow-grid .is-balance { color: var(--ledger-balance); }
 
 .ledger-dashboard-account-viewport {
@@ -1663,6 +1680,11 @@ function animatedMoneyParts(minor: number, currency: string, key: MetricKey): { 
   color: var(--ledger-transfer);
 }
 
+.ledger-recent-icon.is-repayment {
+  background: color-mix(in srgb, var(--ledger-repayment) 11%, var(--bg));
+  color: var(--ledger-repayment);
+}
+
 .ledger-recent-info {
   display: grid;
   min-width: 0;
@@ -1694,6 +1716,7 @@ function animatedMoneyParts(minor: number, currency: string, key: MetricKey): { 
 
 .ledger-recent-amount.is-income { color: var(--ledger-income); }
 .ledger-recent-amount.is-expense { color: var(--ledger-expense); }
+.ledger-recent-amount.is-repayment { color: var(--ledger-repayment); }
 
 .ledger-period-grid {
   display: grid;
@@ -1828,11 +1851,22 @@ function animatedMoneyParts(minor: number, currency: string, key: MetricKey): { 
 
 .ledger-period-values strong.is-income { color: var(--ledger-income); }
 .ledger-period-values strong.is-expense { color: var(--ledger-expense); }
+.ledger-period-values strong.is-repayment { color: var(--ledger-repayment); }
+.ledger-period-values strong.is-balance { color: var(--ledger-balance); }
 
 @media (max-width: 960px) {
   .ledger-metric-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .ledger-metric-card.is-primary { grid-column: 1 / -1; }
   .ledger-dashboard-two-column { grid-template-columns: 1fr; row-gap: 14px; }
+  .ledger-cashflow-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .ledger-cashflow-grid > div:nth-child(odd) {
+    padding-left: 36px;
+    border-left: 0;
+  }
+  .ledger-cashflow-grid > div:nth-child(n + 3) {
+    border-top: 1px solid var(--ledger-divider);
+    padding-top: 14px;
+  }
   .ledger-period-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .ledger-period-card:nth-child(odd) {
     border-left: 0;

@@ -932,15 +932,15 @@ describe('Ledger query and projection API', () => {
       assetTotalMinor: 175,
       liabilityTotalMinor: 0,
       netWorthMinor: 175,
-      cashflow: { incomeMinor: 100, expenseMinor: 25, balanceMinor: 75 },
+      cashflow: { incomeMinor: 100, expenseMinor: 25, repaymentMinor: 0, balanceMinor: 75 },
     })
-    expect(today.cashflow).toEqual({ incomeMinor: 0, expenseMinor: 25, balanceMinor: -25 })
+    expect(today.cashflow).toEqual({ incomeMinor: 0, expenseMinor: 25, repaymentMinor: 0, balanceMinor: -25 })
     expect(historical.context).toMatchObject({
       anchorDate: '2026-08-20',
       scope: 'month',
       isToday: false,
     })
-    expect(historical.cashflow).toEqual({ incomeMinor: 0, expenseMinor: 0, balanceMinor: 0 })
+    expect(historical.cashflow).toEqual({ incomeMinor: 0, expenseMinor: 0, repaymentMinor: 0, balanceMinor: 0 })
     for (const key of [
       'currency', 'currencyExponent', 'assetTotalMinor', 'liabilityTotalMinor', 'netWorthMinor',
       'accounts', 'periods', 'trend', 'recentTransactions',

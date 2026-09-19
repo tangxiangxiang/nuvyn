@@ -489,6 +489,7 @@ export interface LedgerTransactionQuerySummary {
   readonly total: number
   readonly incomeMinor: number
   readonly expenseMinor: number
+  readonly repaymentMinor: number
 }
 
 export interface LedgerTransactionRangeOptions {
@@ -1305,21 +1306,27 @@ export function createLedgerRepository(db: DatabaseT): LedgerRepository {
         SELECT
           COUNT(*) AS total,
           COALESCE(SUM(CASE WHEN type = 'income' THEN amount_minor ELSE 0 END), 0) AS income_minor,
-          COALESCE(SUM(CASE WHEN type = 'expense' THEN amount_minor ELSE 0 END), 0) AS expense_minor
+          COALESCE(SUM(CASE WHEN type = 'expense' THEN amount_minor ELSE 0 END), 0) AS expense_minor,
+          COALESCE(SUM(CASE WHEN type = 'transfer' AND transfer_kind = 'repayment' THEN amount_minor ELSE 0 END), 0) AS repayment_minor
         FROM ledger_transactions
         ${clauses.length === 0 ? '' : `WHERE ${clauses.join('\n          AND ')}`}
-      `).get(params) as { total?: unknown; income_minor?: unknown; expense_minor?: unknown } | undefined
+      `).get(params) as { total?: unknown; income_minor?: unknown; expense_minor?: unknown; repayment_minor?: unknown } | undefined
 
       const total = row?.total
       const incomeMinor = row?.income_minor
       const expenseMinor = row?.expense_minor
-      if (!Number.isSafeInteger(total) || !Number.isSafeInteger(incomeMinor) || !Number.isSafeInteger(expenseMinor)) {
+      const repaymentMinor = row?.repayment_minor
+      if (!Number.isSafeInteger(total)
+        || !Number.isSafeInteger(incomeMinor)
+        || !Number.isSafeInteger(expenseMinor)
+        || !Number.isSafeInteger(repaymentMinor)) {
         throw new Error('Ledger transaction summary contains unsafe numeric values')
       }
       return {
         total: Number(total),
         incomeMinor: Number(incomeMinor),
         expenseMinor: Number(expenseMinor),
+        repaymentMinor: Number(repaymentMinor),
       }
     },
 

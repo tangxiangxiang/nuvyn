@@ -20,6 +20,7 @@ import LedgerTransactionDetailSheet from '../components/ledger/LedgerTransaction
 import { ledgerAccountTypeOptionsForNature } from '../features/ledger/accountPresentation'
 import { isLedgerApiError, ledgerErrorMessage } from '../features/ledger/ledgerErrors'
 import { formatLedgerMoney } from '../features/ledger/money'
+import { ledgerTransactionPresentationKind } from '../features/ledger/presentation'
 import { formatLedgerDateTime, formatLedgerTransactionDateTime } from '../features/ledger/time'
 import { useLedgerStore } from '../features/ledger/ledgerStore'
 import type {
@@ -250,6 +251,10 @@ function transactionTypeLabel(transaction: LedgerTransactionDto): string {
   if (transaction.type === 'expense') return '支出'
   if (transaction.type === 'transfer') return transaction.transferKind === 'repayment' ? '还款' : transaction.transferKind === 'withdrawal' ? '提现' : '转账'
   return '调整'
+}
+
+function presentationKind(transaction: LedgerTransactionDto): string {
+  return ledgerTransactionPresentationKind(transaction)
 }
 
 function transactionAmountMinor(transaction: LedgerTransactionDto): number | null {
@@ -576,10 +581,10 @@ const netMovement = computed(() => {
               <div class="ledger-recent-table-head"><span>日期</span><span>类型</span><span>分类</span><span>摘要</span><span>金额</span><span>余额</span></div>
               <div v-for="transaction in recentTransactions" :key="transaction.id" v-bind="recentTransactionRowProps(transaction)">
                 <time>{{ formatTransactionTimestamp(transaction.occurredAt) }}</time>
-                <span class="ledger-transaction-badge" :class="`is-${transaction.type}`">{{ transactionTypeLabel(transaction) }}</span>
+                <span class="ledger-transaction-badge" :class="`is-${presentationKind(transaction)}`">{{ transactionTypeLabel(transaction) }}</span>
                 <span class="ledger-transaction-category">{{ transactionCategory(transaction) }}</span>
                 <span class="ledger-transaction-summary">{{ transactionTitle(transaction) }}</span>
-                <strong :class="`is-${transaction.type}`">
+                <strong :class="`is-${presentationKind(transaction)}`">
                   <LedgerAnimatedMoney v-if="transactionAmountMinor(transaction) !== null" :minor="transactionAmountMinor(transaction)!" :currency="account.currency" signed :animate-on-mount="false" :animate-on-change="false" />
                   <span v-else>—</span>
                 </strong>
@@ -914,6 +919,7 @@ const netMovement = computed(() => {
 .ledger-transaction-badge { justify-self: start; padding: 3px 8px; border-radius: 999px; background: color-mix(in srgb, var(--accent) 10%, transparent); color: var(--accent); font-size: .68rem; white-space: nowrap; }
 .ledger-transaction-badge.is-income { background: color-mix(in srgb, #2da76e 13%, transparent); color: #168451; }
 .ledger-transaction-badge.is-expense { background: color-mix(in srgb, #d94a58 13%, transparent); color: #c43443; }
+.ledger-transaction-badge.is-repayment { background: color-mix(in srgb, var(--ledger-repayment) 13%, transparent); color: var(--ledger-repayment); }
 .ledger-transaction-badge.is-transfer { background: color-mix(in srgb, var(--nuvyn-info, #005fb8) 11%, transparent); color: var(--nuvyn-info, #005fb8); }
 .ledger-transaction-category,
 .ledger-transaction-summary,
@@ -933,6 +939,7 @@ const netMovement = computed(() => {
 .ledger-detail-note p { margin: 0; color: var(--text-muted); font-size: .82rem; line-height: 1.6; white-space: pre-wrap; }
 .is-positive { color: var(--nuvyn-positive, #15803d) !important; }
 .is-negative { color: var(--ledger-expense, #dc3f4d) !important; }
+.ledger-recent-row strong.is-repayment { color: var(--ledger-repayment); }
 @media (max-width: 1120px) {
   .ledger-detail-hero { grid-template-columns: minmax(270px, 1fr) minmax(180px, .75fr); }
 }

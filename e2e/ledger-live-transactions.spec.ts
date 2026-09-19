@@ -37,7 +37,7 @@ test('real Ledger onboarding and expense survive dashboard refresh', async ({ pa
   await expect(page.locator('.ledger-dashboard-actions')).toHaveCount(1)
   await expect(page.getByTestId('ledger-record-button')).toHaveCount(1)
   await expect(page.locator('.ledger-metric-card')).toHaveCount(3)
-  await expect(page.getByRole('heading', { name: '本月收支' })).toBeVisible()
+  await expect(page.getByRole('heading', { name: '本月概览' })).toBeVisible()
   await expect(ledgerDateInput(page, 'ledger-period-date')).toHaveValue(Temporal.Now.plainDateISO('Asia/Shanghai').toString())
   await expect(page.locator('[aria-label="选择收支期间"]')).toContainText('本月')
   const periodDateControl = page.getByTestId('ledger-period-date-control-today')

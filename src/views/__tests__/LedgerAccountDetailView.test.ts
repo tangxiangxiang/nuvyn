@@ -74,7 +74,7 @@ const overview = (): LedgerOverviewDto => ({
   liabilityTotalMinor: 0,
   netWorthMinor: 1_000_000,
   accounts: [],
-  cashflow: { incomeMinor: 0, expenseMinor: 0, balanceMinor: 0 },
+  cashflow: { incomeMinor: 0, expenseMinor: 0, repaymentMinor: 0, balanceMinor: 0 },
   categoryBreakdown: { income: [], expense: [] },
   periods: [],
   trend: [],
@@ -550,6 +550,9 @@ describe('Ledger account detail lifecycle', () => {
     expect(rows[0]!.text()).toContain('¥4,700.00')
     expect(rows[1]!.text()).toContain('-¥5,000.00')
     expect(rows[1]!.text()).toContain('¥5,000.00')
+    expect(rows[1]!.get('.ledger-transaction-badge').classes()).toContain('is-repayment')
+    expect(rows[1]!.get('strong').classes()).toContain('is-repayment')
+    expect(rows[1]!.get('.ledger-transaction-badge').classes()).not.toContain('is-transfer')
   })
 
   it('renders server-provided running balances for recent transactions', async () => {

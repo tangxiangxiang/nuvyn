@@ -85,7 +85,7 @@ const overview = (): LedgerOverviewDto => ({
   liabilityTotalMinor: 0,
   netWorthMinor: 0,
   accounts: [],
-  cashflow: { incomeMinor: 0, expenseMinor: 0, balanceMinor: 0 },
+  cashflow: { incomeMinor: 0, expenseMinor: 0, repaymentMinor: 0, balanceMinor: 0 },
   categoryBreakdown: { income: [], expense: [] },
   periods: [],
   trend: [],

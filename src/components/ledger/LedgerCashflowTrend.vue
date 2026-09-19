@@ -13,6 +13,7 @@ import type {
 import type { ComposeOption, ECharts } from 'echarts/core'
 import type { LedgerTrendPoint } from '../../../shared/ledgerProtocol'
 import { currencyExponentFor, formatLedgerMoney, formatLedgerSignedMoney } from '../../features/ledger/money'
+import { ledgerPresentationBalanceMinor, ledgerPresentationOutflowMinor } from '../../features/ledger/presentation'
 import { useTheme } from '../../composables/useTheme'
 
 use([BarChart, GridComponent, LegendComponent, TooltipComponent, CanvasRenderer])
@@ -46,24 +47,12 @@ function signedMoney(minor: number): string {
   return formatLedgerSignedMoney(minor, props.currency)
 }
 
-function checkedAddMinor(left: number, right: number): number {
-  const result = left + right
-  if (!Number.isSafeInteger(result)) throw new RangeError('minor amount sum must be a safe integer')
-  return result
-}
-
-function checkedSubMinor(left: number, right: number): number {
-  const result = left - right
-  if (!Number.isSafeInteger(result)) throw new RangeError('minor amount difference must be a safe integer')
-  return result
-}
-
 function outflowMinor(point: LedgerTrendPoint): number {
-  return checkedAddMinor(point.expenseMinor, point.repaymentMinor)
+  return ledgerPresentationOutflowMinor(point)
 }
 
 function balanceAfterOutflowMinor(point: LedgerTrendPoint): number {
-  return checkedSubMinor(point.incomeMinor, outflowMinor(point))
+  return ledgerPresentationBalanceMinor(point)
 }
 
 /**

@@ -92,7 +92,7 @@ test('historical period navigation keeps the route anchor while period cards ref
   await page.goto(`/ledger?date=${anchorDate}`)
   await expect(page).toHaveURL(new RegExp(`/ledger\\?date=${anchorDate}$`))
   await expect(page.getByTestId('ledger-dashboard')).toBeVisible()
-  await expect(page.getByRole('heading', { name: '所在月收支' })).toBeVisible()
+  await expect(page.getByRole('heading', { name: '所在月概览' })).toBeVisible()
   await expect(ledgerDateInput(page, 'ledger-period-date')).toHaveValue(anchorDate)
   await expect(page.getByTestId('ledger-period-month')).toContainText(`${anchor.year}-${String(anchor.month).padStart(2, '0')}`)
   await expect(page.getByTestId('ledger-period-month')).toContainText('¥114.00')

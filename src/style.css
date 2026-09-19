@@ -20,6 +20,19 @@ body.vault-mode {
 }
 body.vault-mode #app { height: 100%; }
 
+/* Ledger presentation token: repayment remains a transfer subtype in the
+   domain, but uses one stable accent everywhere it is surfaced in the UI. */
+:root {
+  --ledger-repayment: #7c3aed;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme]) { --ledger-repayment: #a78bfa; }
+}
+
+:root[data-theme='dark'] { --ledger-repayment: #a78bfa; }
+:root[data-theme='light'] { --ledger-repayment: #7c3aed; }
+
 /* Shared empty state for the document sidebar tabs. Each tab keeps its own
    content, but an unselected document should produce the same calm, compact
    surface everywhere. */
