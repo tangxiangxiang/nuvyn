@@ -116,7 +116,48 @@ search 在 repository / SQL 层完成，至少匹配持久化的 `location`、`p
 ## 11. Lifecycle
 
 - Settings 首次创建时同时生成默认 Category；第一个账户创建后 hasCreatedAccount 单调变为 true，base currency 和 timezone 锁定。
-- Account 创建校验 type/nature 配对和 currency；有历史后 type、nature、opening balance、opening date 不可改。没有任何交易引用的账户可以物理删除；只要存在历史引用（包括 soft-deleted transaction、transfer 的 from/to account 和 adjustment），账户 identity 就必须保留，DELETE 由服务端返回 `ledger-account-has-history`。归档不是删除：归档要求自然余额为 0，之后可以 restore；归档账户继续遵守同一套编辑和物理删除历史约束。
+- Account 创建校验 type/nature 配对和 currency；有历史后 type、nature、opening balance、opening date 不可改。账户的 UI lifecycle 与 backend domain safety rule 分开定义：
+
+### Account UI lifecycle
+
+Account Detail 的当前 UI 操作是：
+
+~~~text
+Active Account
+├─ Edit
+└─ Archive（currentBalanceMinor === 0）
+
+Archived Account
+├─ Restore
+└─ Delete（仅 hasHistory === false）
+~~~
+
+- Active account 可以编辑和归档，但不直接提供物理删除入口。要从 UI 删除账户，流程是 `Active → Archive → Archived → Delete`。因此无历史但余额非 0 的 active account 需要先编辑期初余额为 0，再归档，最后删除。
+- Archived account 的 Account Detail 不显示 Edit；需要先 Restore 才能继续使用编辑入口。服务端仍保留 archived account 的有限非财务字段 patch whitelist，但这不是当前详情页的编辑流程。
+- Archive 要求 `currentBalanceMinor === 0`。Archive 是可逆状态变更，不删除 Account，不删除 Transaction；历史记录继续保留，归档账户不能用于新的财务操作，之后可以 Restore。
+- UI 中的删除按钮文案是“删除账户”，但它执行的是不可逆的 physical / permanent delete，不是 Archive，也不是回收站。确认弹窗会明确说明操作无法撤销；Account lifecycle 没有 recycle bin。
+
+### Account domain safety rule
+
+物理删除最终由服务端根据账户是否存在任何持久化交易引用决定：
+
+~~~text
+repository.hasAccountHistory(accountId) === false
+→ 允许物理删除
+
+repository.hasAccountHistory(accountId) === true
+→ 必须保留 Account identity
+→ DELETE 返回 409 ledger-account-has-history
+~~~
+
+历史引用包括 income / expense / adjustment 的 `accountId`，以及 transfer 的 `fromAccountId` / `toAccountId`；soft-deleted transaction 也算历史。服务端的 `hasHistory` 是 `repository.hasAccountHistory(accountId)` 的 authoritative projection，不受最近流水分页、`includeDeleted` 默认值或当前页面是否显示交易影响。backend DELETE 不要求 `archivedAt !== null`；“先归档后删除”是 UI workflow，不是 backend 仅允许 archived account 删除的领域规则。
+
+如果账户已有历史，仍只能修改当前 backend 允许的资料字段，不能修改 type、nature、opening balance 或 opening date 等 financial interpretation fields。
+
+### Lifecycle consistency
+
+如果 Account Detail 初始显示无历史，但另一个页面或标签页随后创建了新的交易，删除请求会由 backend 拒绝并返回 `ledger-account-has-history`。Account Detail 随后重新读取 authoritative state，将 `hasHistory` 更新为 true 并隐藏删除入口；UI 不通过本地猜测覆盖服务端 projection。
+
 - Category 可创建、改名、换图标、移入回收站、恢复或永久删除；已有交易记录的分类不能移入回收站或永久删除，所有内置默认分类受保护。当前设置 UI 将无历史分类的删除操作放入回收站，并在回收站提供恢复和永久删除入口；服务端负责最终历史记录校验。旧版本误归档且已有历史的分类会在迁移时恢复。
 - Income、Expense、Transfer 可创建和 PATCH；Adjustment 只能通过 account adjust endpoint 产生。Transaction 删除是 terminal soft delete；带 groupId 的操作按 group 原子删除。
 - PATCH、archive、restore、delete 使用 expectedVersion 做乐观并发控制。
@@ -129,7 +170,7 @@ POST settings、accounts、categories 和 transactions 通过 operation scope、
 
 页面 canonical routes 是 /ledger、/ledger/transactions、/ledger/accounts 和 /ledger/accounts/:id。旧 /bills、/bills/transactions 只在 router 层重定向到相应 Ledger 页面。
 
-API 以 /api/ledger 为前缀，包含 settings、accounts、categories、transactions、overview 和 trend；账户还提供 /:id/transactions、/:id/balance-trend、/:id/adjust、archive 和 restore。账户详情的最近流水、服务端计算的逐笔余额、余额趋势和 `hasHistory` 由服务端 projection 提供。`hasHistory` 直接来自 `repository.hasAccountHistory(accountId)`，表示持久化交易表中是否曾经有任何交易引用该账户；它不受最近流水分页、`includeDeleted` 默认值或当前交易是否已 soft-delete 影响。Ledger route 统一使用 no-store，并继承服务端 owner-auth 边界。
+API 以 /api/ledger 为前缀，包含 settings、accounts、categories、transactions、overview 和 trend；账户还提供 /:id/transactions、/:id/balance-trend、/:id/adjust、archive 和 restore。账户详情的最近流水、服务端计算的逐笔余额、余额趋势和 `hasHistory` 由服务端 projection 提供。`hasHistory` 直接来自 `repository.hasAccountHistory(accountId)`，表示持久化交易表中是否曾经有任何交易引用该账户，包括 soft-deleted transaction；它不受最近流水分页、`includeDeleted` 默认值或当前页面是否为空影响。Ledger route 统一使用 no-store，并继承服务端 owner-auth 边界。
 
 ## 14. Schema Evolution
 
