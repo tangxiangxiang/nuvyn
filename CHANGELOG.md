@@ -3,6 +3,39 @@
 All notable changes to Nuvyn are documented in this file. Entries dated before
 the Nuvyn brand baseline may refer to Nuvyn as the historical product name.
 
+## Nuvyn v0.1.0-alpha.4 — 2026-09-20
+
+This release closes out a substantial Ledger increment with stronger financial
+presentation, responsive workspace behavior, transaction navigation, and
+browser E2E stability.
+
+### Ledger
+
+- Promoted repayment principal to a first-class financial presentation metric across the Dashboard overview, period summaries, cashflow trend, and transaction summaries. Repayment principal remains a `transfer`, is excluded from `expense`, interest remains an Expense, and displayed balance is `income - expense - repayment`.
+- Unified transaction detail access from Dashboard recent transactions, the transaction list, and account detail through the shared Transaction Detail Sheet, including shared edit, delete, archive/restore, composite-transaction, and refresh behavior.
+- Completed account lifecycle behavior: active accounts can be edited and archived, archived accounts can be restored, zero-balance archived accounts without any transaction history can be permanently deleted, and server-side `hasHistory` remains authoritative across soft-deleted transactions.
+- Expanded transaction search to include transaction object, location, note, linked account name, and category name. Income, expense, and repayment summaries continue to use the complete server result set rather than the current page.
+- Added category drill-down from Dashboard income and expense analysis into filtered transactions while preserving the authoritative day, week, month, year, or historical date range from the Ledger projection and timezone. All-time category navigation carries only the category condition.
+- Made Transactions and Accounts workspaces responsive on desktop. Transaction tables and Account Lists consume available workspace height, short desktop windows avoid bottom clipping, tall windows show more content, and mobile retains its constrained/single-column behavior.
+- Defaulted first-use Ledger onboarding to CNY and changed the Accounts list to show all asset and liability accounts by default with clearer visual distinction.
+
+### Diary
+
+- Replaced the Diary return shortcut `D → C` with `G → B` for the shared Go / Back navigation convention while preserving workspace-tab close and unsaved-content protection.
+
+### Reliability
+
+- Expanded Ledger browser regression coverage for fresh onboarding, idempotent create recovery, transaction detail geometry, mobile and desktop responsive layouts, Accounts workspace geometry, historical period navigation, and category drill-down date preservation.
+- Rebalanced application E2E coverage and isolated the Ledger responsive fixture from fresh onboarding state when sharing the application E2E SQLite database.
+
+### Compatibility
+
+- Validated across Linux, Windows, macOS, Node.js 22/24, Chromium application E2E, Docker production smoke, authentication smoke, and Vault writer lifecycle smoke.
+
+### Migration
+
+- No new Ledger database migration is required when upgrading from `v0.1.0-alpha.3`.
+
 ## Ledger archived category management — 2026-09-12
 
 - Added a collapsed settings section for restoring archived categories or permanently deleting categories without history; server-side history protection remains authoritative.
