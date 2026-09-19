@@ -12,6 +12,7 @@ import type {
 import { LedgerApiError } from '../../features/ledger/ledgerErrors'
 import { resetLedgerStoreForTesting } from '../../features/ledger/ledgerStore'
 import LedgerAccountDetailView from '../LedgerAccountDetailView.vue'
+import LedgerTransactionDetailSheet from '../../components/ledger/LedgerTransactionDetailSheet.vue'
 
 const api = vi.hoisted(() => ({
   getLedgerSettings: vi.fn(),
@@ -22,10 +23,13 @@ const api = vi.hoisted(() => ({
   getLedgerAccount: vi.fn(),
   getLedgerAccountBalanceTrend: vi.fn(),
   getLedgerAccountTransactions: vi.fn(),
+  getLedgerTransaction: vi.fn(),
   patchLedgerAccount: vi.fn(),
   archiveLedgerAccount: vi.fn(),
   restoreLedgerAccount: vi.fn(),
   deleteLedgerAccount: vi.fn(),
+  patchLedgerTransaction: vi.fn(),
+  deleteLedgerTransaction: vi.fn(),
 }))
 const confirm = vi.hoisted(() => vi.fn())
 
@@ -115,6 +119,24 @@ function setup(
   api.listLedgerTransactions.mockResolvedValue({ transactions: [], page: { nextCursor: null } })
 }
 
+function expenseTransaction(overrides: Partial<Extract<LedgerTransactionDto, { type: 'expense' }>> = {}): Extract<LedgerTransactionDto, { type: 'expense' }> {
+  return {
+    id: 'recent-expense',
+    type: 'expense',
+    amountMinor: 5_000,
+    accountId: 'bank-1',
+    categoryId: 'food',
+    occurredAt: 3,
+    payee: '午餐',
+    note: '',
+    deletedAt: null,
+    version: 1,
+    createdAt: 3,
+    updatedAt: 3,
+    ...overrides,
+  }
+}
+
 describe('Ledger account detail lifecycle', () => {
   beforeEach(() => {
     sessionStorage.clear()
@@ -125,6 +147,7 @@ describe('Ledger account detail lifecycle', () => {
 
   afterEach(() => {
     for (const wrapper of wrappers.splice(0)) wrapper.unmount()
+    document.body.querySelectorAll('.ledger-detail-sheet').forEach((element) => element.remove())
   })
 
   it('allows financial interpretation edits only before account history exists', async () => {
@@ -644,5 +667,153 @@ describe('Ledger account detail lifecycle', () => {
     expect(metrics[2]?.find('.ledger-metric-icon').classes()).toContain('is-income')
     expect(metrics[2]?.find('strong').classes()).toContain('is-income')
     expect(metrics[3]?.find('strong').classes()).toContain('is-expense')
+  })
+
+  it.each(['click', 'Enter', 'Space'] as const)('opens the shared transaction detail with %s from account recent transactions', async (activation) => {
+    const original = account()
+    const recent = expenseTransaction()
+    setup(original, [recent], [], true)
+    const nextRouter = createTestRouter()
+    await nextRouter.push('/ledger/accounts/bank-1')
+    await nextRouter.isReady()
+    const wrapper = mount(LedgerAccountDetailView, { global: { plugins: [nextRouter] } })
+    wrappers.push(wrapper)
+    await flushPromises()
+
+    const row = wrapper.get(`[data-testid="ledger-account-recent-transaction-row-${recent.id}"]`)
+    if (activation === 'click') await row.trigger('click')
+    else await row.trigger('keydown', { key: activation === 'Space' ? ' ' : activation })
+    await flushPromises()
+
+    const detail = wrapper.findComponent(LedgerTransactionDetailSheet)
+    expect(detail.props('open')).toBe(true)
+    expect(detail.props('transaction')).toEqual(recent)
+    expect(bodyWrapper().find('[data-testid="ledger-transaction-detail-sheet"]').exists()).toBe(true)
+  })
+
+  it('reloads the authoritative account projection after a transaction update', async () => {
+    const original = account({ currentBalanceMinor: 995_000 })
+    const recent = expenseTransaction()
+    const updated = expenseTransaction({ amountMinor: 7_000, version: 2, updatedAt: 4 })
+    setup(original, [recent], [{ transactionId: recent.id, balanceMinor: 995_000 }], true)
+    const nextRouter = createTestRouter()
+    await nextRouter.push('/ledger/accounts/bank-1')
+    await nextRouter.isReady()
+    const wrapper = mount(LedgerAccountDetailView, { global: { plugins: [nextRouter] } })
+    wrappers.push(wrapper)
+    await flushPromises()
+
+    await wrapper.get(`[data-testid="ledger-account-recent-transaction-row-${recent.id}"]`).trigger('click')
+    const detail = wrapper.findComponent(LedgerTransactionDetailSheet)
+    api.getLedgerAccountTransactions.mockResolvedValueOnce({
+      account: original,
+      hasHistory: true,
+      movement: { balanceIncreaseMinor: 0, balanceDecreaseMinor: 7_000 },
+      transactions: [updated],
+      transactionBalances: [{ transactionId: updated.id, balanceMinor: 993_000 }],
+      page: { nextCursor: null },
+    })
+    api.getLedgerAccountBalanceTrend.mockResolvedValueOnce({ range: 30, points: [] })
+
+    detail.vm.$emit('updated', updated)
+    await flushPromises()
+
+    expect(api.getLedgerAccountTransactions).toHaveBeenCalledTimes(2)
+    expect(api.getLedgerAccountBalanceTrend).toHaveBeenCalledTimes(2)
+    expect(wrapper.get(`[data-testid="ledger-account-recent-transaction-row-${updated.id}"]`).text()).toContain('-¥70.00')
+    await vi.waitFor(() => {
+      expect(wrapper.get('[data-testid="ledger-account-movement"]').text()).toContain('-¥70.00')
+    }, { timeout: 2500 })
+  })
+
+  it('removes a transaction that moves to another account after authoritative reload', async () => {
+    const original = account()
+    const recent = expenseTransaction()
+    const moved = expenseTransaction({ accountId: 'other-account', version: 2 })
+    setup(original, [recent], [], true)
+    const nextRouter = createTestRouter()
+    await nextRouter.push('/ledger/accounts/bank-1')
+    await nextRouter.isReady()
+    const wrapper = mount(LedgerAccountDetailView, { global: { plugins: [nextRouter] } })
+    wrappers.push(wrapper)
+    await flushPromises()
+
+    await wrapper.get(`[data-testid="ledger-account-recent-transaction-row-${recent.id}"]`).trigger('click')
+    const detail = wrapper.findComponent(LedgerTransactionDetailSheet)
+    api.getLedgerAccountTransactions.mockResolvedValueOnce({
+      account: original,
+      hasHistory: true,
+      movement: { balanceIncreaseMinor: 0, balanceDecreaseMinor: 0 },
+      transactions: [],
+      transactionBalances: [],
+      page: { nextCursor: null },
+    })
+    api.getLedgerAccountBalanceTrend.mockResolvedValueOnce({ range: 30, points: [] })
+
+    detail.vm.$emit('updated', moved)
+    await flushPromises()
+
+    expect(wrapper.find(`[data-testid="ledger-account-recent-transaction-row-${recent.id}"]`).exists()).toBe(false)
+  })
+
+  it('keeps hasHistory true after deleting the last visible transaction', async () => {
+    const original = account({ archivedAt: 20, currentBalanceMinor: 0 })
+    const recent = expenseTransaction()
+    setup(original, [recent], [], true)
+    const nextRouter = createTestRouter()
+    await nextRouter.push('/ledger/accounts/bank-1')
+    await nextRouter.isReady()
+    const wrapper = mount(LedgerAccountDetailView, { global: { plugins: [nextRouter] } })
+    wrappers.push(wrapper)
+    await flushPromises()
+
+    await wrapper.get(`[data-testid="ledger-account-recent-transaction-row-${recent.id}"]`).trigger('click')
+    const detail = wrapper.findComponent(LedgerTransactionDetailSheet)
+    api.getLedgerAccountTransactions.mockResolvedValueOnce({
+      account: original,
+      hasHistory: true,
+      movement: { balanceIncreaseMinor: 0, balanceDecreaseMinor: 0 },
+      transactions: [],
+      transactionBalances: [],
+      page: { nextCursor: null },
+    })
+    api.getLedgerAccountBalanceTrend.mockResolvedValueOnce({ range: 30, points: [] })
+
+    detail.vm.$emit('deleted', recent)
+    await flushPromises()
+
+    expect(wrapper.find(`[data-testid="ledger-account-recent-transaction-row-${recent.id}"]`).exists()).toBe(false)
+    expect(wrapper.find('[data-testid="ledger-account-permanent-delete"]').exists()).toBe(false)
+  })
+
+  it('refreshes account lifecycle controls after restoring an associated account', async () => {
+    const archived = account({ archivedAt: 20, currentBalanceMinor: 0 })
+    const restored = account({ archivedAt: null, currentBalanceMinor: 0, version: 4 })
+    const recent = expenseTransaction({ accountId: archived.id })
+    setup(archived, [recent], [], true)
+    const nextRouter = createTestRouter()
+    await nextRouter.push('/ledger/accounts/bank-1')
+    await nextRouter.isReady()
+    const wrapper = mount(LedgerAccountDetailView, { global: { plugins: [nextRouter] } })
+    wrappers.push(wrapper)
+    await flushPromises()
+
+    await wrapper.get(`[data-testid="ledger-account-recent-transaction-row-${recent.id}"]`).trigger('click')
+    const detail = wrapper.findComponent(LedgerTransactionDetailSheet)
+    api.getLedgerAccountTransactions.mockResolvedValueOnce({
+      account: restored,
+      hasHistory: true,
+      movement: { balanceIncreaseMinor: 0, balanceDecreaseMinor: 0 },
+      transactions: [recent],
+      transactionBalances: [],
+      page: { nextCursor: null },
+    })
+    api.getLedgerAccountBalanceTrend.mockResolvedValueOnce({ range: 30, points: [] })
+
+    detail.vm.$emit('updated', recent)
+    await flushPromises()
+
+    expect(wrapper.findAll('button').some((button) => button.text() === '编辑账户')).toBe(true)
+    expect(wrapper.findAll('button').some((button) => button.text() === '恢复账户')).toBe(false)
   })
 })

@@ -8,7 +8,9 @@ import LedgerFirstAccountForm from '../components/ledger/LedgerFirstAccountForm.
 import LedgerNoActiveAccountState from '../components/ledger/LedgerNoActiveAccountState.vue'
 import LedgerOnboarding from '../components/ledger/LedgerOnboarding.vue'
 import LedgerPendingCreateGate from '../components/ledger/LedgerPendingCreateGate.vue'
+import LedgerTransactionDetailSheet from '../components/ledger/LedgerTransactionDetailSheet.vue'
 import LedgerTransactionSheet from '../components/ledger/LedgerTransactionSheet.vue'
+import type { LedgerTransactionDto } from '../../shared/ledgerProtocol'
 import { ledgerWorkspaceReadErrorMessage } from '../features/ledger/ledgerErrors'
 import { useLedgerStore, type LedgerOverviewRefreshResult } from '../features/ledger/ledgerStore'
 import { parseLedgerRouteDate } from '../features/ledger/periodNavigation'
@@ -23,6 +25,8 @@ const route = useRoute() as RouteLocationNormalizedLoaded | undefined
 const store = useLedgerStore()
 const newAccountOpen = ref(false)
 const transactionSheetOpen = ref(false)
+const detailOpen = ref(false)
+const selectedTransaction = ref<LedgerTransactionDto | null>(null)
 
 // The Workspace lifecycle now completes independently of the Overview
 // request, so a period navigation can no longer strand it in BOOTSTRAPPING.
@@ -140,13 +144,33 @@ function openTransactions(): void {
   if (router) void router.push({ name: 'ledger-transactions' })
 }
 
+function inspectTransaction(transaction: LedgerTransactionDto): void {
+  selectedTransaction.value = transaction
+  detailOpen.value = true
+}
+
+function onTransactionUpdated(transaction: LedgerTransactionDto): void {
+  selectedTransaction.value = transaction
+}
+
+function onTransactionDeleted(): void {
+  detailOpen.value = false
+  selectedTransaction.value = null
+}
+
 function onRecoveryResolved(): void {
   transactionSheetOpen.value = false
+  detailOpen.value = false
+  selectedTransaction.value = null
   newAccountOpen.value = false
 }
 
 function closeTransactionSheet(): void {
   transactionSheetOpen.value = false
+}
+
+function closeTransactionDetail(): void {
+  detailOpen.value = false
 }
 </script>
 
@@ -184,9 +208,18 @@ function closeTransactionSheet(): void {
       v-else
       @record="transactionSheetOpen = true"
       @view-transactions="openTransactions"
+      @inspect-transaction="inspectTransaction"
     />
 
     <LedgerTransactionSheet v-if="!store.recoveryGateVisible.value" :open="transactionSheetOpen" @close="closeTransactionSheet" />
+    <LedgerTransactionDetailSheet
+      v-if="!store.recoveryGateVisible.value"
+      :open="detailOpen"
+      :transaction="selectedTransaction"
+      @close="closeTransactionDetail"
+      @updated="onTransactionUpdated"
+      @deleted="onTransactionDeleted"
+    />
   </main>
 </template>
 

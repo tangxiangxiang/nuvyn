@@ -23,6 +23,7 @@ import LedgerAccountIcon from './LedgerAccountIcon.vue'
 const emit = defineEmits<{
   record: []
   viewTransactions: []
+  inspectTransaction: [transaction: LedgerTransactionDto]
 }>()
 const store = useLedgerStore()
 const overview = computed(() => store.overview.value)
@@ -282,6 +283,27 @@ function transactionMark(transaction: LedgerTransactionDto): string {
   if (transaction.type === 'expense') return '↓'
   if (transaction.type === 'transfer') return '→'
   return '='
+}
+
+function inspectTransaction(transaction: LedgerTransactionDto): void {
+  emit('inspectTransaction', transaction)
+}
+
+function recentTransactionRowProps(transaction: LedgerTransactionDto) {
+  return {
+    class: 'ledger-recent-row',
+    'data-testid': `ledger-recent-transaction-row-${transaction.id}`,
+    role: 'button',
+    tabindex: 0,
+    'aria-label': `查看${transactionTitle(transaction)}交易详情`,
+    onClick: () => inspectTransaction(transaction),
+    onKeydown: (event: KeyboardEvent) => {
+      if (event.key === 'Enter' || event.key === ' ') {
+        event.preventDefault()
+        inspectTransaction(transaction)
+      }
+    },
+  }
 }
 
 function periodSummary(period: LedgerPeriodName) {
@@ -788,7 +810,7 @@ function animatedMoneyParts(minor: number, currency: string, key: MetricKey): { 
           </NFlex>
           <NList v-if="overview.recentTransactions.length" class="ledger-recent-list" data-testid="ledger-recent-transactions" :show-divider="false" hoverable>
             <NListItem v-for="transaction in overview.recentTransactions" :key="transaction.id">
-              <div class="ledger-recent-row">
+              <div v-bind="recentTransactionRowProps(transaction)">
                 <span :class="['ledger-recent-icon', `is-${transaction.type}`]" aria-hidden="true">{{ transactionMark(transaction) }}</span>
                 <span class="ledger-recent-info"><strong>{{ transactionTitle(transaction) }}</strong><small>{{ transactionMeta(transaction) }} · {{ formatLedgerDateTime(transaction.occurredAt, store.settings.value?.timezone ?? 'UTC') }}</small></span>
                 <strong :class="['ledger-recent-amount', `is-${transaction.type}`]">{{ transactionAmount(transaction) }}</strong>
@@ -1605,9 +1627,14 @@ function animatedMoneyParts(minor: number, currency: string, key: MetricKey): { 
   gap: 10px;
   min-height: 58px;
   border-bottom: 1px solid var(--ledger-divider);
+  border-radius: 7px;
+  cursor: pointer;
+  outline-offset: -1px;
 }
 
 .ledger-recent-row:last-child { border-bottom: 0; }
+.ledger-recent-row:hover { background: var(--ledger-row-hover); }
+.ledger-recent-row:focus-visible { outline: 1px solid color-mix(in srgb, var(--accent) 34%, transparent); }
 
 .ledger-recent-icon {
   display: grid;

@@ -16,6 +16,7 @@ import LedgerAnimatedMoney from '../components/ledger/LedgerAnimatedMoney.vue'
 import LedgerAccountIcon from '../components/ledger/LedgerAccountIcon.vue'
 import LedgerAccountEditForm from '../components/ledger/LedgerAccountEditForm.vue'
 import LedgerPendingCreateGate from '../components/ledger/LedgerPendingCreateGate.vue'
+import LedgerTransactionDetailSheet from '../components/ledger/LedgerTransactionDetailSheet.vue'
 import { ledgerAccountTypeOptionsForNature } from '../features/ledger/accountPresentation'
 import { isLedgerApiError, ledgerErrorMessage } from '../features/ledger/ledgerErrors'
 import { formatLedgerMoney } from '../features/ledger/money'
@@ -52,6 +53,8 @@ const movement = ref<LedgerMovementSummary | null>(null)
 const loading = ref(false)
 const editing = ref(false)
 const deleting = ref(false)
+const detailOpen = ref(false)
+const selectedTransaction = ref<LedgerTransactionDto | null>(null)
 const actionError = ref('')
 const trendRange = ref<7 | 30 | 90 | 365>(30)
 const trendOptions: Array<{ value: 7 | 30 | 90 | 365; label: string }> = [
@@ -188,6 +191,48 @@ async function permanentlyDelete(): Promise<void> {
 function onSaved(next: LedgerAccountDto): void {
   account.value = next
   editing.value = false
+}
+
+function inspectTransaction(transaction: LedgerTransactionDto): void {
+  selectedTransaction.value = transaction
+  detailOpen.value = true
+}
+
+async function onTransactionUpdated(transaction: LedgerTransactionDto): Promise<void> {
+  selectedTransaction.value = transaction
+  await load()
+}
+
+async function onTransactionDeleted(): Promise<void> {
+  detailOpen.value = false
+  selectedTransaction.value = null
+  await load()
+}
+
+function closeTransactionDetail(): void {
+  detailOpen.value = false
+}
+
+function onRecoveryResolved(): void {
+  detailOpen.value = false
+  selectedTransaction.value = null
+}
+
+function recentTransactionRowProps(transaction: LedgerTransactionDto) {
+  return {
+    class: 'ledger-recent-row',
+    'data-testid': `ledger-account-recent-transaction-row-${transaction.id}`,
+    role: 'button',
+    tabindex: 0,
+    'aria-label': `查看${transactionTitle(transaction)}交易详情`,
+    onClick: () => inspectTransaction(transaction),
+    onKeydown: (event: KeyboardEvent) => {
+      if (event.key === 'Enter' || event.key === ' ') {
+        event.preventDefault()
+        inspectTransaction(transaction)
+      }
+    },
+  }
 }
 
 function transactionTitle(transaction: LedgerTransactionDto): string {
@@ -437,7 +482,7 @@ const netMovement = computed(() => {
 
 <template>
   <main class="ledger-page ledger-account-page" data-testid="ledger-account-page">
-    <LedgerPendingCreateGate v-if="store.recoveryGateVisible.value" />
+    <LedgerPendingCreateGate v-if="store.recoveryGateVisible.value" @resolved="onRecoveryResolved" />
 
     <div v-else-if="loading" class="ledger-state-panel ledger-loading-state" data-testid="ledger-account-loading" role="status"><NSpin size="medium" description="正在加载账户…" /></div>
     <section v-else-if="!account" class="ledger-state-panel ledger-result-state" data-testid="ledger-account-error" role="alert">
@@ -529,7 +574,7 @@ const netMovement = computed(() => {
             <div class="ledger-section-heading"><h2 id="ledger-recent-title">最近交易</h2><RouterLink :to="{ name: 'ledger-transactions', query: { accountId: account.id } }">查看更多</RouterLink></div>
             <div v-if="recentTransactions.length" class="ledger-recent-table">
               <div class="ledger-recent-table-head"><span>日期</span><span>类型</span><span>分类</span><span>摘要</span><span>金额</span><span>余额</span></div>
-              <div v-for="transaction in recentTransactions" :key="transaction.id" class="ledger-recent-row">
+              <div v-for="transaction in recentTransactions" :key="transaction.id" v-bind="recentTransactionRowProps(transaction)">
                 <time>{{ formatTransactionTimestamp(transaction.occurredAt) }}</time>
                 <span class="ledger-transaction-badge" :class="`is-${transaction.type}`">{{ transactionTypeLabel(transaction) }}</span>
                 <span class="ledger-transaction-category">{{ transactionCategory(transaction) }}</span>
@@ -591,6 +636,15 @@ const netMovement = computed(() => {
         <LedgerAccountEditForm :account="account" :has-history="hasHistory" @saved="onSaved" @cancel="editing = false" />
       </NCard>
     </NModal>
+
+    <LedgerTransactionDetailSheet
+      v-if="!store.recoveryGateVisible.value"
+      :open="detailOpen"
+      :transaction="selectedTransaction"
+      @close="closeTransactionDetail"
+      @updated="onTransactionUpdated"
+      @deleted="onTransactionDeleted"
+    />
   </main>
 </template>
 
@@ -655,7 +709,9 @@ const netMovement = computed(() => {
 .ledger-movement-grid strong.is-negative, .ledger-recent-row strong.is-expense { color: var(--ledger-expense, #dc3f4d); }
 .ledger-recent-transactions { min-height: 250px; }
 .ledger-recent-list { display: grid; }
-.ledger-recent-row { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 12px 0; border-top: 1px solid color-mix(in srgb, var(--border) 70%, transparent); }
+.ledger-recent-row { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 12px 0; border-top: 1px solid color-mix(in srgb, var(--border) 70%, transparent); cursor: pointer; outline-offset: -1px; }
+.ledger-recent-row:hover { background: color-mix(in srgb, var(--accent) 4%, transparent); }
+.ledger-recent-row:focus-visible { outline: 1px solid color-mix(in srgb, var(--accent) 34%, transparent); }
 .ledger-recent-row > span { display: grid; gap: 4px; min-width: 0; }
 .ledger-recent-row strong { color: var(--text-h); font-size: .86rem; }
 .ledger-recent-row small { overflow: hidden; color: var(--text-muted); font-size: .74rem; text-overflow: ellipsis; white-space: nowrap; }

@@ -18,7 +18,7 @@ Ledger → What happens to my money
 - shared/ledgerProtocol.ts：浏览器与服务端共用的 DTO、请求类型、枚举和内置图标目录。
 - server/ledger/：validation 负责边界解析，repository 负责 SQLite，service 负责写入与生命周期，balance 负责自然余额，projections 负责读模型，routes/ 暴露 HTTP API，idempotency 与 writeTransaction 负责可靠写入。
 - src/features/ledger/：API client、store、金额/时间适配、错误和新建恢复。
-- src/components/ledger/：初始化、账户、交易表单、交易详情、图标和选择器渲染。
+- src/components/ledger/：初始化、账户、交易表单、统一交易详情、图标和选择器渲染。
 - src/views/LedgerView.vue、LedgerTransactionsView.vue、LedgerAccountsView.vue、LedgerAccountDetailView.vue：四个页面级入口。
 - server/migrations/0013_* 至 0029_*：Ledger SQLite schema 演进。
 
@@ -93,7 +93,7 @@ deducted 必须保证扣费后 transfer 金额仍为正数。读取时 bundle.to
 
 LedgerTransferBundleSummary 提供 chargeMinor 和 totalMinor，只属于读取投影，不改变原子交易的 amountMinor。交易表格和详情可以把 parent Transfer 渲染成一行完整业务；账户余额仍逐行通过 balance engine 计算。对 repayment，目标负债只受本金 Transfer 影响；对 withdrawal，目标资产只受 transfer 金额影响。
 
-Overview 投影提供当前资产、负债、净资产、收支、账户、分类切片、四个固定期间、趋势和最近交易。固定期间按 Ledger 时区计算，过去日期可以作为 anchor；趋势是 anchor 所在月份及其前 11 个连续日历月。current snapshot 与期间收支是不同语义，系统没有把历史期间伪装成历史资产负债表快照。
+Overview 投影提供当前资产、负债、净资产、收支、账户、分类切片、四个固定期间、趋势和最近交易。固定期间按 Ledger 时区计算，过去日期可以作为 anchor；趋势是 anchor 所在月份及其前 11 个连续日历月。Dashboard 最近交易、Account Detail 最近交易和 Transactions View 的交易行都复用 `LedgerTransactionDetailSheet.vue`，页面只负责选中交易与刷新自己的 projection，不复制详情或 grouped transaction 逻辑。current snapshot 与期间收支是不同语义，系统没有把历史期间伪装成历史资产负债表快照。
 
 ## 9. Companion Expense Visibility
 

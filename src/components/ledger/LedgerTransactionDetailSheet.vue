@@ -237,7 +237,7 @@ async function remove(): Promise<void> {
             <template v-else-if="transaction.type === 'transfer'">
               <div class="ledger-detail-row"><span>转账类型</span><strong>{{ typeLabel(transaction) }}</strong></div>
               <div v-if="groupedExpense" class="ledger-detail-row"><span>{{ transaction.transferKind === 'repayment' ? '还款本金' : '到账金额' }}</span><strong>{{ formatLedgerMoney(transaction.amountMinor, store.settings.value?.baseCurrency ?? 'CNY') }}</strong></div>
-              <div v-if="groupedExpense" class="ledger-detail-row"><span>{{ transaction.transferKind === 'repayment' ? '利息' : '手续费' }}</span><strong>{{ formatLedgerMoney(groupedExpense.amountMinor, store.settings.value?.baseCurrency ?? 'CNY') }}<em> · {{ categoryName(groupedExpense.categoryId) }}</em></strong></div>
+              <div v-if="groupedExpense" class="ledger-detail-row"><span>{{ transaction.transferKind === 'repayment' ? '利息' : '手续费' }}</span><strong>{{ formatLedgerMoney(groupedExpense.amountMinor, store.settings.value?.baseCurrency ?? 'CNY') }}</strong></div>
               <div v-if="groupedExpense" class="ledger-detail-row"><span>{{ transaction.transferKind === 'repayment' ? '总扣款' : '实际扣款' }}</span><strong>{{ formatLedgerMoney(groupedTotalMinor ?? transaction.amountMinor, store.settings.value?.baseCurrency ?? 'CNY') }}</strong></div>
               <div class="ledger-detail-row"><span>转出账户</span><strong>{{ accountName(transaction.fromAccountId) }}</strong></div>
               <div class="ledger-detail-row"><span>转入账户</span><strong>{{ accountName(transaction.toAccountId) }}</strong></div>

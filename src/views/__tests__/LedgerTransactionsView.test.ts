@@ -483,6 +483,27 @@ describe('Ledger live transaction history workspace', () => {
     expect(getDetail().text()).not.toContain('交易对象未填写')
   })
 
+  it('does not repeat the withdrawal fee label in transfer details', async () => {
+    setup(
+      { transactions: [withdrawal], page: { nextCursor: null } },
+      [activeAccount, walletAccount],
+    )
+    api.listLedgerTransactions.mockImplementation((query: { groupId?: string }) => Promise.resolve(
+      query.groupId === withdrawal.groupId
+        ? { transactions: [withdrawal, withdrawalFee], page: { nextCursor: null } }
+        : { transactions: [withdrawal], page: { nextCursor: null } },
+    ))
+    const wrapper = await mountView()
+
+    await wrapper.get('[data-testid="ledger-transaction-row-tx-withdrawal"]').trigger('click')
+    await flushPromises()
+
+    const feeRow = getDetail().findAll('.ledger-detail-row').find((row) => row.find('span').text() === '手续费')
+    expect(feeRow).toBeDefined()
+    expect(feeRow!.text()).toBe('手续费¥38.00')
+    expect(feeRow!.text()).not.toContain('· 手续费')
+  })
+
   it('shows the stored repayment interest payee in the table and detail sheet', async () => {
     setup(
       { transactions: [repaymentInterest, repayment], page: { nextCursor: null } },

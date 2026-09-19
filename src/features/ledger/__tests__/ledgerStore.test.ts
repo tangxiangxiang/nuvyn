@@ -277,6 +277,29 @@ describe('Ledger feature-local state', () => {
     expect(api.getLedgerOverview).toHaveBeenCalledWith({ scope: 'month', anchorDate: '2026-08-20' })
   })
 
+  it.each(['patch', 'delete'] as const)('refreshes the authoritative Overview after a transaction %s while preserving historical context', async (mutation) => {
+    api.getLedgerSettings.mockResolvedValue(settings(true))
+    api.listLedgerAccounts.mockResolvedValue([account('account-1')])
+    const store = useLedgerStore()
+    await store.bootstrap()
+
+    store.setOverviewRequestContext({ scope: 'month', anchorDate: '2026-08-20' })
+    api.getLedgerOverview.mockResolvedValue(overviewFor('month', '2026-08-20'))
+    await store.refreshOverview()
+    api.getLedgerOverview.mockClear()
+
+    if (mutation === 'patch') {
+      api.patchLedgerTransaction.mockResolvedValue({ id: 'tx-1', type: 'expense' })
+      await store.patchTransaction('tx-1', { expectedVersion: 1, note: '更新后的备注' })
+    } else {
+      api.deleteLedgerTransaction.mockResolvedValue({ id: 'tx-1', type: 'expense' })
+      await store.deleteTransaction('tx-1', 1)
+    }
+
+    expect(api.getLedgerOverview).toHaveBeenCalledWith({ scope: 'month', anchorDate: '2026-08-20' })
+    expect(store.overviewRequestContext.value).toEqual({ scope: 'month', anchorDate: '2026-08-20' })
+  })
+
   it('escalates a successful mutation when its historical overview refresh fails', async () => {
     api.getLedgerSettings.mockResolvedValue(settings(true))
     api.listLedgerAccounts.mockResolvedValue([account('account-1')])

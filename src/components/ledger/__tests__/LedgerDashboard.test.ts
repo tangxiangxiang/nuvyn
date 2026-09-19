@@ -15,6 +15,7 @@ import { resetLedgerStoreForTesting, useLedgerStore } from '../../../features/le
 import { instantFromLocalDateTime } from '../../../features/ledger/time'
 import LedgerCashflowTrend from '../LedgerCashflowTrend.vue'
 import LedgerDatePicker from '../LedgerDatePicker.vue'
+import LedgerTransactionDetailSheet from '../LedgerTransactionDetailSheet.vue'
 import LedgerView from '../../../views/LedgerView.vue'
 import { getNaiveSelect, setNaiveSelect } from './selectTestUtils'
 
@@ -292,6 +293,22 @@ describe('Ledger live dashboard', () => {
     expect(wrapper.get('[data-testid="ledger-period-month"]').text()).toContain('收支结余')
     expect(wrapper.get('[data-testid="ledger-period-month"]').text()).toContain('-¥38.00')
     expect(wrapper.text()).not.toContain('billsMockData')
+  })
+
+  it.each(['click', 'Enter', 'Space'] as const)('opens the shared transaction detail from a recent transaction with %s', async (activation) => {
+    const wrapper = mount(LedgerView)
+    wrappers.push(wrapper)
+    await flushPromises()
+
+    const row = wrapper.get('[data-testid="ledger-recent-transaction-row-tx-1"]')
+    if (activation === 'click') await row.trigger('click')
+    else await row.trigger('keydown', { key: activation === 'Space' ? ' ' : activation })
+    await flushPromises()
+
+    const detail = wrapper.findComponent(LedgerTransactionDetailSheet)
+    expect(detail.props('open')).toBe(true)
+    expect(detail.props('transaction')).toEqual(expense)
+    expect(document.body.querySelector('[data-testid="ledger-transaction-detail-sheet"]')).not.toBeNull()
   })
 
   it('hydrates local projections from the main overview without duplicate initial reads', async () => {
