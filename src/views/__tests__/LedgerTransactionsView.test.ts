@@ -2,7 +2,7 @@
 import { DOMWrapper, flushPromises, mount, type VueWrapper } from '@vue/test-utils'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { createMemoryHistory, createRouter } from 'vue-router'
-import { NPagination } from 'naive-ui'
+import { NDataTable, NPagination } from 'naive-ui'
 import type {
   LedgerAccountDto,
   LedgerCategoryDto,
@@ -331,6 +331,14 @@ describe('Ledger live transaction history workspace', () => {
     expect(getNaiveSelect(wrapper, '账户').props('renderLabel')).toEqual(expect.any(Function))
     expect(getNaiveSelect(wrapper, '分类').props('renderLabel')).toEqual(expect.any(Function))
     expect(wrapper.text()).not.toContain('billsMockData')
+  })
+
+  it('lets the desktop transaction table use the available card height', async () => {
+    const wrapper = await mountView()
+    const table = wrapper.findComponent(NDataTable)
+
+    expect(table.props('flexHeight')).toBe(true)
+    expect(table.props('maxHeight')).toBeUndefined()
   })
 
   it('sends supported type, entity, and Ledger-timezone date filters to the API', async () => {
