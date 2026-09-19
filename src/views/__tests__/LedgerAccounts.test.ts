@@ -100,7 +100,12 @@ describe('Ledger account management list', () => {
   })
 
   it('lists active and archived accounts and never exposes physical delete', async () => {
-    setup([account('bank-1'), account('old-bank', 10)])
+    setup([
+      account('bank-1'),
+      { ...account('credit-card-1'), nature: 'liability', type: 'credit_card' },
+      account('old-bank', 10),
+      { ...account('old-credit-card', 10), nature: 'liability', type: 'credit_card' },
+    ])
     const nextRouter = router()
     await nextRouter.push('/ledger/accounts')
     await nextRouter.isReady()
@@ -110,7 +115,11 @@ describe('Ledger account management list', () => {
     await flushPromises()
 
     expect(wrapper.get('[data-testid="ledger-active-account-list"]').text()).toContain('bank-1')
+    expect(wrapper.get('[data-testid="ledger-active-account-list"]').text()).toContain('credit-card-1')
+    expect(wrapper.get('[data-testid="ledger-account-row-bank-1"] .ledger-account-icon').classes()).toContain('is-asset')
+    expect(wrapper.get('[data-testid="ledger-account-row-credit-card-1"] .ledger-account-icon').classes()).toContain('is-liability')
     expect(wrapper.get('[data-testid="ledger-archived-account-list"]').text()).toContain('old-bank')
+    expect(wrapper.get('[data-testid="ledger-archived-account-list"]').text()).toContain('old-credit-card')
     expect(wrapper.findAll('button').some((button) => button.text() === '删除')).toBe(false)
   })
 

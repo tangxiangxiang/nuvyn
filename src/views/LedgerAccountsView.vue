@@ -13,8 +13,8 @@ const store = useLedgerStore()
 const createOpen = ref(false)
 const restoreId = ref<string | null>(null)
 const actionError = ref('')
-const activeAccountTypeFilter = ref<'all' | 'asset' | 'liability'>('asset')
-const archivedAccountTypeFilter = ref<'all' | 'asset' | 'liability'>('asset')
+const activeAccountTypeFilter = ref<'all' | 'asset' | 'liability'>('all')
+const archivedAccountTypeFilter = ref<'all' | 'asset' | 'liability'>('all')
 const accountTypeOptions = [
   { label: '全部', value: 'all' },
   { label: '资产', value: 'asset' },
@@ -212,6 +212,8 @@ function onAccountSaved(): void {
 <style scoped>
 .ledger-page { min-height: calc(100vh - 52px); background: var(--bg); }
 .ledger-accounts-page {
+  --ledger-income: var(--nuvyn-positive, #15945f);
+  --ledger-expense: var(--nuvyn-negative, #dc3f4d);
   --ledger-glass-surface: color-mix(in srgb, var(--bg-soft) 74%, transparent);
   --ledger-glass-tint: color-mix(in srgb, var(--accent) 3%, transparent);
   --ledger-glass-highlight: color-mix(in srgb, var(--text-h) 9%, transparent);
