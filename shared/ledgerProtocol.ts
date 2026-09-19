@@ -341,6 +341,9 @@ export interface LedgerTrendPoint {
   readonly endAt: number
   readonly incomeMinor: number
   readonly expenseMinor: number
+  /** Repayment principal is shown separately and is not part of expenseMinor. */
+  readonly repaymentMinor: number
+  /** Cashflow balance remains income minus expense; repayment stays separate. */
   readonly balanceMinor: number
 }
 

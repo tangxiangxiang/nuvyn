@@ -29,13 +29,14 @@ const props = defineProps<{
   readonly currency: string
 }>()
 
-const SERIES_LABEL = { income: '收入', expense: '支出' } as const
-const BALANCE_LABEL = '收支结余'
+const SERIES_LABEL = { income: '收入', expense: '支出', repayment: '还款' } as const
+const OUTFLOW_LABEL = '流出'
+const BALANCE_LABEL = '结余'
 
 /**
  * The chart never re-derives money. It renders the server's integer minor
- * amounts directly and only formats them at the axis, tooltip and table
- * boundary, so no financial value makes a lossy trip through the plot.
+ * amounts directly and only derives display-only totals for the tooltip and
+ * accessible table, so no financial value makes a lossy trip through the plot.
  */
 function money(minor: number): string {
   return formatLedgerMoney(minor, props.currency)
@@ -43,6 +44,26 @@ function money(minor: number): string {
 
 function signedMoney(minor: number): string {
   return formatLedgerSignedMoney(minor, props.currency)
+}
+
+function checkedAddMinor(left: number, right: number): number {
+  const result = left + right
+  if (!Number.isSafeInteger(result)) throw new RangeError('minor amount sum must be a safe integer')
+  return result
+}
+
+function checkedSubMinor(left: number, right: number): number {
+  const result = left - right
+  if (!Number.isSafeInteger(result)) throw new RangeError('minor amount difference must be a safe integer')
+  return result
+}
+
+function outflowMinor(point: LedgerTrendPoint): number {
+  return checkedAddMinor(point.expenseMinor, point.repaymentMinor)
+}
+
+function balanceAfterOutflowMinor(point: LedgerTrendPoint): number {
+  return checkedSubMinor(point.incomeMinor, outflowMinor(point))
 }
 
 /**
@@ -80,7 +101,7 @@ const axisLabels = computed(() => props.trend.map((point) => {
 
 const allZero = computed(() => props.trend.every((point) => point.incomeMinor === 0
   && point.expenseMinor === 0
-  && point.balanceMinor === 0))
+  && point.repaymentMinor === 0))
 
 function escapeHtml(value: string): string {
   return value.replace(/[&<>"]/g, (char) => (
@@ -110,12 +131,15 @@ function tooltipFormatter(params: unknown): string {
   return `<div style="font-weight:650">${escapeHtml(fullMonthLabel(point.month))}</div>`
     + tooltipRow(SERIES_LABEL.income, money(point.incomeMinor), palette.income)
     + tooltipRow(SERIES_LABEL.expense, money(point.expenseMinor), palette.expense)
-    + tooltipRow(BALANCE_LABEL, signedMoney(point.balanceMinor), palette.muted)
+    + tooltipRow(SERIES_LABEL.repayment, money(point.repaymentMinor), palette.repayment)
+    + tooltipRow(OUTFLOW_LABEL, money(outflowMinor(point)), palette.muted)
+    + tooltipRow(BALANCE_LABEL, signedMoney(balanceAfterOutflowMinor(point)), palette.muted)
 }
 
 interface TrendPalette {
   readonly income: string
   readonly expense: string
+  readonly repayment: string
   readonly text: string
   readonly muted: string
   readonly border: string
@@ -127,6 +151,7 @@ interface TrendPalette {
 const FALLBACK_PALETTE: TrendPalette = {
   income: '#18794e',
   expense: '#b42318',
+  repayment: '#7c3aed',
   text: '#111827',
   muted: '#6b7280',
   border: '#e5e7eb',
@@ -155,6 +180,7 @@ function currentPalette(): TrendPalette {
   return {
     income: token('--ledger-trend-income', FALLBACK_PALETTE.income),
     expense: token('--ledger-trend-expense', FALLBACK_PALETTE.expense),
+    repayment: token('--ledger-trend-repayment', FALLBACK_PALETTE.repayment),
     text: token('--text-h', FALLBACK_PALETTE.text),
     muted: token('--text-muted', FALLBACK_PALETTE.muted),
     border: token('--border', FALLBACK_PALETTE.border),
@@ -176,7 +202,7 @@ function buildOption(): LedgerTrendChartOption {
       itemHeight: 9,
       itemGap: 14,
       textStyle: { color: palette.muted, fontSize: 11 },
-      data: [SERIES_LABEL.income, SERIES_LABEL.expense],
+      data: [SERIES_LABEL.income, SERIES_LABEL.expense, SERIES_LABEL.repayment],
     },
     tooltip: {
       trigger: 'axis',
@@ -216,9 +242,18 @@ function buildOption(): LedgerTrendChartOption {
       {
         name: SERIES_LABEL.expense,
         type: 'bar',
+        stack: 'outflow',
         barMaxWidth: 20,
-        itemStyle: { color: palette.expense, borderRadius: [3, 3, 0, 0] },
+        itemStyle: { color: palette.expense, borderRadius: [0, 0, 3, 3] },
         data: props.trend.map((point) => point.expenseMinor),
+      },
+      {
+        name: SERIES_LABEL.repayment,
+        type: 'bar',
+        stack: 'outflow',
+        barMaxWidth: 20,
+        itemStyle: { color: palette.repayment, borderRadius: [3, 3, 0, 0] },
+        data: props.trend.map((point) => point.repaymentMinor),
       },
     ],
   }
@@ -306,13 +341,15 @@ onBeforeUnmount(destroyChart)
            `display: table` box, and a plain block is what the rule is for. -->
       <div class="sr-only" data-testid="ledger-cashflow-trend-table">
         <table>
-          <caption>收支趋势：每月收入、支出与收支结余</caption>
+          <caption>收支趋势：每月收入、支出、还款、流出与结余</caption>
           <thead>
             <tr>
               <th scope="col">月份</th>
               <th scope="col">收入</th>
               <th scope="col">支出</th>
-              <th scope="col">收支结余</th>
+              <th scope="col">还款</th>
+              <th scope="col">流出</th>
+              <th scope="col">结余</th>
             </tr>
           </thead>
           <tbody>
@@ -320,7 +357,9 @@ onBeforeUnmount(destroyChart)
               <th scope="row">{{ fullMonthLabel(point.month) }}</th>
               <td>{{ money(point.incomeMinor) }}</td>
               <td>{{ money(point.expenseMinor) }}</td>
-              <td>{{ signedMoney(point.balanceMinor) }}</td>
+              <td>{{ money(point.repaymentMinor) }}</td>
+              <td>{{ money(outflowMinor(point)) }}</td>
+              <td>{{ signedMoney(balanceAfterOutflowMinor(point)) }}</td>
             </tr>
           </tbody>
         </table>
@@ -340,23 +379,27 @@ onBeforeUnmount(destroyChart)
 .ledger-cashflow-trend {
   --ledger-trend-income: #18794e;
   --ledger-trend-expense: #b42318;
+  --ledger-trend-repayment: #7c3aed;
   --ledger-trend-grid: #edf0f4;
 }
 @media (prefers-color-scheme: dark) {
   .ledger-cashflow-trend {
     --ledger-trend-income: #4cc38a;
     --ledger-trend-expense: #f87171;
+    --ledger-trend-repayment: #a78bfa;
     --ledger-trend-grid: #2b3442;
   }
 }
 :root[data-theme='light'] .ledger-cashflow-trend {
   --ledger-trend-income: #18794e;
   --ledger-trend-expense: #b42318;
+  --ledger-trend-repayment: #7c3aed;
   --ledger-trend-grid: #edf0f4;
 }
 :root[data-theme='dark'] .ledger-cashflow-trend {
   --ledger-trend-income: #4cc38a;
   --ledger-trend-expense: #f87171;
+  --ledger-trend-repayment: #a78bfa;
   --ledger-trend-grid: #2b3442;
 }
 .ledger-cashflow-trend-plot { width: 100%; height: 280px; }

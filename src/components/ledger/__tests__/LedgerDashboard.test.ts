@@ -154,7 +154,7 @@ const accountSummary: LedgerAccountSummary = {
   balanceDecreaseMinor: 3_800,
 }
 
-function trendPoint(month: string, incomeMinor: number, expenseMinor: number): LedgerOverviewDto['trend'][number] {
+function trendPoint(month: string, incomeMinor: number, expenseMinor: number, repaymentMinor = 0): LedgerOverviewDto['trend'][number] {
   const [year, index] = month.split('-').map(Number)
   return {
     month,
@@ -162,6 +162,7 @@ function trendPoint(month: string, incomeMinor: number, expenseMinor: number): L
     endAt: Date.UTC(year, index, 1),
     incomeMinor,
     expenseMinor,
+    repaymentMinor,
     balanceMinor: incomeMinor - expenseMinor,
   }
 }

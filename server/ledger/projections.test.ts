@@ -965,6 +965,15 @@ describe('Ledger Overview and trend projections', () => {
     const legacyRepaymentFee = fixture.repository.listTransactionsByGroupId(repayment.groupId!).find((item) => item.type === 'expense')!
     expect(legacyRepaymentFee.payee).toBe(`${loan.name}还款利息`)
 
+    const overview = fixture.projections.getOverview({ scope: 'all', anchorDate: undefined })
+    expect(overview.trend.at(-1)).toMatchObject({
+      month: '2026-09',
+      incomeMinor: 0,
+      expenseMinor: 300,
+      repaymentMinor: 5_000,
+      balanceMinor: -300,
+    })
+
     const page = fixture.projections.listTransactions(query())
     expect(page.transactions).toHaveLength(2)
     expect(page.transactions.find((row) => row.id === repayment.id)).toMatchObject({

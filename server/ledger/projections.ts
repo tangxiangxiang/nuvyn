@@ -220,6 +220,15 @@ function cashflowForTransactions(transactions: readonly LedgerTransaction[]): Le
   }
 }
 
+/** Repayment trend data tracks principal only; companion interest remains expense. */
+function repaymentForTransactions(transactions: readonly LedgerTransaction[]): number {
+  return checkedSumMinor(
+    transactions
+      .filter((transaction) => transaction.type === 'transfer' && transaction.transferKind === 'repayment')
+      .map((transaction) => transaction.amountMinor),
+  )
+}
+
 function categorySlicesForTransactions(
   transactions: readonly LedgerTransaction[],
   categories: ReadonlyMap<string, LedgerCategory>,
@@ -360,14 +369,16 @@ function trendForRanges(
   ranges: readonly { readonly month: string; readonly startMs: number; readonly endMs: number }[],
   transactions: readonly LedgerTransaction[],
 ): readonly LedgerTrendPoint[] {
-  return ranges.map((range) => ({
-    month: range.month,
-    startAt: range.startMs,
-    endAt: range.endMs,
-    ...cashflowForTransactions(
-      transactions.filter((transaction) => isWithinRange(transaction.occurredAt, range)),
-    ),
-  }))
+  return ranges.map((range) => {
+    const monthTransactions = transactions.filter((transaction) => isWithinRange(transaction.occurredAt, range))
+    return {
+      month: range.month,
+      startAt: range.startMs,
+      endAt: range.endMs,
+      ...cashflowForTransactions(monthTransactions),
+      repaymentMinor: repaymentForTransactions(monthTransactions),
+    }
+  })
 }
 
 function normalizeTransactionQuery(query: LedgerTransactionQuery): LedgerTransactionQueryOptions {

@@ -40,10 +40,10 @@ interface ChartOption {
   tooltip: { formatter: (params: unknown) => string }
   xAxis: { data: readonly string[] }
   yAxis: { min?: number; max?: number; axisLabel: { formatter: (value: number) => string } }
-  series: readonly { name: string; type: string; data: readonly number[] }[]
+  series: readonly { name: string; type: string; stack?: string; data: readonly number[] }[]
 }
 
-function point(month: string, incomeMinor: number, expenseMinor: number): LedgerTrendPoint {
+function point(month: string, incomeMinor: number, expenseMinor: number, repaymentMinor = 0): LedgerTrendPoint {
   const [year, index] = month.split('-').map(Number)
   return {
     month,
@@ -51,17 +51,18 @@ function point(month: string, incomeMinor: number, expenseMinor: number): Ledger
     endAt: Date.UTC(year, index, 1),
     incomeMinor,
     expenseMinor,
+    repaymentMinor,
     balanceMinor: incomeMinor - expenseMinor,
   }
 }
 
 const sixMonths: readonly LedgerTrendPoint[] = [
   point('2026-04', 510_000, 5_290),
-  point('2026-05', 480_000, 120_000),
-  point('2026-06', 500_000, 640_000),
+  point('2026-05', 480_000, 120_000, 50_000),
+  point('2026-06', 500_000, 640_000, 200_000),
   point('2026-07', 500_000, 30_000),
   point('2026-08', 520_000, 44_000),
-  point('2026-09', 510_000, 5_290),
+  point('2026-09', 510_000, 5_290, 10_000),
 ]
 
 const wrappers: VueWrapper[] = []
@@ -140,7 +141,7 @@ describe('LedgerCashflowTrend', () => {
     expect(wrapper.find('[data-testid="ledger-cashflow-trend-empty"]').exists()).toBe(false)
   })
 
-  it('maps the six months to income and expense bars over one shared value axis', () => {
+  it('maps income separately and stacks expense with repayment over one shared value axis', () => {
     mountTrend(sixMonths)
     const option = lastOption()
 
@@ -148,12 +149,16 @@ describe('LedgerCashflowTrend', () => {
     expect(option.series.map((series) => [series.name, series.type])).toEqual([
       ['收入', 'bar'],
       ['支出', 'bar'],
+      ['还款', 'bar'],
     ])
     expect(option.series[0].data).toEqual([510_000, 480_000, 500_000, 500_000, 520_000, 510_000])
     expect(option.series[1].data).toEqual([5_290, 120_000, 640_000, 30_000, 44_000, 5_290])
-    expect(option.series.some((series) => series.name === '收支结余')).toBe(false)
+    expect(option.series[2].data).toEqual([0, 50_000, 200_000, 0, 0, 10_000])
+    expect(option.series[0].stack).toBeUndefined()
+    expect(option.series[1].stack).toBe('outflow')
+    expect(option.series[2].stack).toBe('outflow')
     expect(Array.isArray(option.yAxis)).toBe(false)
-    expect(option.legend.data).toEqual(['收入', '支出'])
+    expect(option.legend.data).toEqual(['收入', '支出', '还款'])
   })
 
   it('qualifies month labels with the year when the window crosses one', () => {
@@ -178,8 +183,12 @@ describe('LedgerCashflowTrend', () => {
     expect(text).toContain('¥5,100.00')
     expect(text).toContain('支出')
     expect(text).toContain('¥52.90')
-    expect(text).toContain('收支结余')
-    expect(text).toContain('+¥5,047.10')
+    expect(text).toContain('还款')
+    expect(text).toContain('¥100.00')
+    expect(text).toContain('流出')
+    expect(text).toContain('¥152.90')
+    expect(text).toContain('结余')
+    expect(text).toContain('+¥4,947.10')
     expect(text).not.toContain('incomeMinor')
     expect(text).not.toContain('expenseMinor')
     expect(text).not.toContain('balanceMinor')
@@ -190,7 +199,7 @@ describe('LedgerCashflowTrend', () => {
     const text = lastOption().tooltip.formatter([{ dataIndex: 2 }]).replace(/<[^>]*>/g, ' ')
 
     expect(text).toContain('2026年6月')
-    expect(text).toContain('-¥1,400.00')
+    expect(text).toContain('-¥3,400.00')
   })
 
   it('formats axis ticks with the Ledger money formatter and rejects unusable ticks', () => {
@@ -288,13 +297,13 @@ describe('LedgerCashflowTrend', () => {
     expect(table.element.tagName).toBe('DIV')
     expect(table.get('table').classes()).not.toContain('sr-only')
     expect(wrapper.get('[data-testid="ledger-cashflow-trend-canvas"]').attributes('aria-hidden')).toBe('true')
-    expect(table.findAll('thead th').map((cell) => cell.text())).toEqual(['月份', '收入', '支出', '收支结余'])
+    expect(table.findAll('thead th').map((cell) => cell.text())).toEqual(['月份', '收入', '支出', '还款', '流出', '结余'])
 
     const rows = table.findAll('tbody tr')
     expect(rows).toHaveLength(6)
     expect(rows[5].get('th').text()).toBe('2026年9月')
-    expect(rows[5].findAll('td').map((cell) => cell.text())).toEqual(['¥5,100.00', '¥52.90', '+¥5,047.10'])
-    expect(rows[2].findAll('td')[2].text()).toBe('-¥1,400.00')
+    expect(rows[5].findAll('td').map((cell) => cell.text())).toEqual(['¥5,100.00', '¥52.90', '¥100.00', '¥152.90', '+¥4,947.10'])
+    expect(rows[2].findAll('td')[4].text()).toBe('-¥3,400.00')
   })
 
   it('updates the live instance when the anchored trend changes instead of re-initializing', async () => {
