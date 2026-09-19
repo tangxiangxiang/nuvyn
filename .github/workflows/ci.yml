@@ -104,8 +104,8 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        shard: [1, 2]
-    name: e2e-application (shard ${{ matrix.shard }}/2)
+        shard: [1, 2, 3, 4]
+    name: e2e-application (shard ${{ matrix.shard }}/4)
     runs-on: ubuntu-latest
     timeout-minutes: 25
 
@@ -126,7 +126,7 @@ jobs:
         run: npx playwright install chromium
 
       - name: Run application browser E2E shard
-        run: node node_modules/@playwright/test/cli.js test --config=playwright.cross-platform.config.ts --shard=${{ matrix.shard }}/2 --reporter=line,github
+        run: node node_modules/@playwright/test/cli.js test --config=playwright.cross-platform.config.ts --shard=${{ matrix.shard }}/4 --reporter=line,github
 
       - name: Upload browser failure evidence
         if: failure()
