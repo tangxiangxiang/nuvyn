@@ -499,6 +499,7 @@ export function createLedgerProjections(
     )
     return {
       account: accountDto(account, currentBalanceMinor),
+      hasHistory: repository.hasAccountHistory(account.id),
       movement: movementForAccount(
         account,
         movementTransactions,

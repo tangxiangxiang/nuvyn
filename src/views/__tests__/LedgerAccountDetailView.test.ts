@@ -9,6 +9,7 @@ import type {
   LedgerSettingsDto,
   LedgerTransactionDto,
 } from '../../../shared/ledgerProtocol'
+import { LedgerApiError } from '../../features/ledger/ledgerErrors'
 import { resetLedgerStoreForTesting } from '../../features/ledger/ledgerStore'
 import LedgerAccountDetailView from '../LedgerAccountDetailView.vue'
 
@@ -24,6 +25,7 @@ const api = vi.hoisted(() => ({
   patchLedgerAccount: vi.fn(),
   archiveLedgerAccount: vi.fn(),
   restoreLedgerAccount: vi.fn(),
+  deleteLedgerAccount: vi.fn(),
 }))
 const confirm = vi.hoisted(() => vi.fn())
 
@@ -93,11 +95,13 @@ function setup(
   nextAccount: LedgerAccountDto,
   history: unknown[] = [],
   transactionBalances: readonly LedgerAccountTransactionBalance[] = [],
+  authoritativeHasHistory = history.length > 0,
 ): void {
   api.getLedgerSettings.mockResolvedValue(settings)
   api.getLedgerAccount.mockResolvedValue(nextAccount)
   api.getLedgerAccountTransactions.mockResolvedValue({
     account: nextAccount,
+    hasHistory: authoritativeHasHistory,
     movement: { balanceIncreaseMinor: 0, balanceDecreaseMinor: 0 },
     transactions: history,
     transactionBalances,
@@ -233,11 +237,100 @@ describe('Ledger account detail lifecycle', () => {
     expect(api.archiveLedgerAccount).toHaveBeenCalledWith('bank-1', 3)
   })
 
+  it('offers permanent delete for an active account with no authoritative history', async () => {
+    const original = account({ currentBalanceMinor: 12_000 })
+    setup(original, [], [], false)
+    const nextRouter = createTestRouter()
+    await nextRouter.push('/ledger/accounts/bank-1')
+    await nextRouter.isReady()
+    const wrapper = mount(LedgerAccountDetailView, { global: { plugins: [nextRouter] } })
+    wrappers.push(wrapper)
+    await flushPromises()
+
+    expect(wrapper.get('[data-testid="ledger-account-permanent-delete"]').text()).toBe('永久删除账户')
+    api.deleteLedgerAccount.mockResolvedValue({ deleted: true, id: original.id })
+    await wrapper.get('[data-testid="ledger-account-permanent-delete"]').trigger('click')
+    await flushPromises()
+
+    expect(confirm).toHaveBeenCalledWith(
+      '永久删除“招商银行”？',
+      '此操作无法撤销。该账户没有历史交易，删除后将从 Ledger 中永久移除。',
+      { confirmLabel: '永久删除', cancelLabel: '取消', destructive: true },
+    )
+    expect(api.deleteLedgerAccount).toHaveBeenCalledWith('bank-1', 3)
+    expect(nextRouter.currentRoute.value.name).toBe('ledger-accounts')
+  })
+
+  it('does not delete when permanent-delete confirmation is cancelled', async () => {
+    const original = account({ archivedAt: 20, currentBalanceMinor: 0 })
+    setup(original, [], [], false)
+    confirm.mockResolvedValue(false)
+    const nextRouter = createTestRouter()
+    await nextRouter.push('/ledger/accounts/bank-1')
+    await nextRouter.isReady()
+    const wrapper = mount(LedgerAccountDetailView, { global: { plugins: [nextRouter] } })
+    wrappers.push(wrapper)
+    await flushPromises()
+
+    await wrapper.get('[data-testid="ledger-account-permanent-delete"]').trigger('click')
+    await flushPromises()
+
+    expect(api.deleteLedgerAccount).not.toHaveBeenCalled()
+    expect(nextRouter.currentRoute.value.name).toBe('ledger-account')
+  })
+
+  it('does not offer permanent delete when the authoritative history flag is true', async () => {
+    const original = account({ currentBalanceMinor: 0 })
+    setup(original, [], [], true)
+    const nextRouter = createTestRouter()
+    await nextRouter.push('/ledger/accounts/bank-1')
+    await nextRouter.isReady()
+    const wrapper = mount(LedgerAccountDetailView, { global: { plugins: [nextRouter] } })
+    wrappers.push(wrapper)
+    await flushPromises()
+
+    expect(wrapper.find('[data-testid="ledger-account-permanent-delete"]').exists()).toBe(false)
+    expect(wrapper.findAll('button').some((button) => button.text() === '归档账户')).toBe(true)
+  })
+
+  it('also hides permanent delete for an archived account with authoritative history', async () => {
+    const original = account({ archivedAt: 20, currentBalanceMinor: 0 })
+    setup(original, [], [], true)
+    const nextRouter = createTestRouter()
+    await nextRouter.push('/ledger/accounts/bank-1')
+    await nextRouter.isReady()
+    const wrapper = mount(LedgerAccountDetailView, { global: { plugins: [nextRouter] } })
+    wrappers.push(wrapper)
+    await flushPromises()
+
+    expect(wrapper.find('[data-testid="ledger-account-permanent-delete"]').exists()).toBe(false)
+    expect(wrapper.findAll('button').some((button) => button.text() === '恢复账户')).toBe(true)
+  })
+
+  it('keeps the account detail route and surfaces delete conflicts', async () => {
+    const original = account({ currentBalanceMinor: 0 })
+    setup(original, [], [], false)
+    api.deleteLedgerAccount.mockRejectedValue(new LedgerApiError('version conflict', 409, 'ledger-version-conflict'))
+    const nextRouter = createTestRouter()
+    await nextRouter.push('/ledger/accounts/bank-1')
+    await nextRouter.isReady()
+    const wrapper = mount(LedgerAccountDetailView, { global: { plugins: [nextRouter] } })
+    wrappers.push(wrapper)
+    await flushPromises()
+
+    await wrapper.get('[data-testid="ledger-account-permanent-delete"]').trigger('click')
+    await flushPromises()
+
+    expect(nextRouter.currentRoute.value.name).toBe('ledger-account')
+    expect(wrapper.get('[role="alert"]').text()).toContain('这项数据已被更新')
+  })
+
   it('renders the server movement projection with asset language and a filtered-history link', async () => {
     const original = account()
     setup(original)
     api.getLedgerAccountTransactions.mockResolvedValue({
       account: original,
+      hasHistory: false,
       movement: { balanceIncreaseMinor: 50_000, balanceDecreaseMinor: 12_000 },
       transactions: [],
       page: { nextCursor: null },
@@ -404,6 +497,7 @@ describe('Ledger account detail lifecycle', () => {
     setup(liability)
     api.getLedgerAccountTransactions.mockResolvedValue({
       account: liability,
+      hasHistory: false,
       movement: { balanceIncreaseMinor: 80_000, balanceDecreaseMinor: 30_000 },
       transactions: [],
       page: { nextCursor: null },

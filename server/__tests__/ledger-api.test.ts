@@ -362,6 +362,41 @@ describe('Ledger Account API', () => {
     const missing = await authenticated(`/api/ledger/accounts/${accountBodyResponse.id}`)
     expect(missing.status).toBe(404)
     expect(await json(missing)).toMatchObject({ code: 'ledger-not-found' })
+
+    const historyAccount = await authenticated('/api/ledger/accounts', {
+      method: 'POST',
+      body: accountBody({ name: 'History account' }),
+      idempotencyKey: 'account-delete-history',
+    })
+    expect(historyAccount.status).toBe(201)
+    const historyAccountBody = await json(historyAccount)
+    const categories = await authenticated('/api/ledger/categories?kind=expense')
+    const expenseCategory = (await json(categories))[0]
+    const historyTransaction = await authenticated('/api/ledger/transactions', {
+      method: 'POST',
+      body: {
+        type: 'expense',
+        amountMinor: 1,
+        accountId: historyAccountBody.id,
+        categoryId: expenseCategory.id,
+        occurredAt: Date.now(),
+      },
+      idempotencyKey: 'account-delete-history-transaction',
+    })
+    expect(historyTransaction.status).toBe(201)
+    const historyTransactionBody = await json(historyTransaction)
+    const softDeleted = await authenticated(`/api/ledger/transactions/${historyTransactionBody.id}`, {
+      method: 'DELETE',
+      body: { expectedVersion: historyTransactionBody.version },
+    })
+    expect(softDeleted.status).toBe(200)
+
+    const historyDelete = await authenticated(`/api/ledger/accounts/${historyAccountBody.id}`, {
+      method: 'DELETE',
+      body: { expectedVersion: historyAccountBody.version },
+    })
+    expect(historyDelete.status).toBe(409)
+    expect(await json(historyDelete)).toMatchObject({ code: 'ledger-account-has-history' })
     expect((db.prepare('SELECT has_created_account FROM ledger_settings').get() as { has_created_account: number }).has_created_account)
       .toBe(1)
   })
@@ -818,6 +853,7 @@ describe('Ledger query and projection API', () => {
     expect(accountPage.status).toBe(200)
     expect(await json(accountPage)).toMatchObject({
       account: { id: card.id, currentBalanceMinor: -15 },
+      hasHistory: true,
       movement: { balanceIncreaseMinor: 0, balanceDecreaseMinor: 20 },
       transactions: [expect.objectContaining({ id: adjustment.adjustment.id })],
       transactionBalances: [{ transactionId: adjustment.adjustment.id, balanceMinor: -15 }],

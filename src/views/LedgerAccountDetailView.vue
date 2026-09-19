@@ -9,7 +9,7 @@ import { CanvasRenderer } from 'echarts/renderers'
 import type { LineSeriesOption } from 'echarts/charts'
 import type { GridComponentOption, TooltipComponentOption } from 'echarts/components'
 import type { ComposeOption, ECharts } from 'echarts/core'
-import { useRoute } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
 import { useConfirm } from '../composables/useConfirm'
 import { useTheme } from '../composables/useTheme'
 import LedgerAnimatedMoney from '../components/ledger/LedgerAnimatedMoney.vue'
@@ -38,6 +38,7 @@ type LedgerBalanceChartOption = ComposeOption<
 >
 
 const route = useRoute()
+const router = useRouter()
 const store = useLedgerStore()
 const { theme } = useTheme()
 const { confirm } = useConfirm()
@@ -50,6 +51,7 @@ const balanceTrendPoints = ref<readonly LedgerAccountBalanceTrendPoint[]>([])
 const movement = ref<LedgerMovementSummary | null>(null)
 const loading = ref(false)
 const editing = ref(false)
+const deleting = ref(false)
 const actionError = ref('')
 const trendRange = ref<7 | 30 | 90 | 365>(30)
 const trendOptions: Array<{ value: 7 | 30 | 90 | 365; label: string }> = [
@@ -87,7 +89,7 @@ async function load(): Promise<void> {
     const history = await loadAccountHistory(id)
     if (sequence !== loadSequence) return
     account.value = history.account
-    hasHistory.value = history.transactions.length > 0
+    hasHistory.value = history.hasHistory
     recentTransactions.value = history.transactions
     recentTransactionBalances.value = history.transactionBalances
     balanceTrendPoints.value = history.balanceTrend
@@ -103,6 +105,7 @@ async function load(): Promise<void> {
 
 async function loadAccountHistory(id: string): Promise<{
   readonly account: LedgerAccountDto
+  readonly hasHistory: boolean
   readonly transactions: readonly LedgerTransactionDto[]
   readonly transactionBalances: readonly LedgerAccountTransactionBalance[]
   readonly balanceTrend: readonly LedgerAccountBalanceTrendPoint[]
@@ -114,6 +117,7 @@ async function loadAccountHistory(id: string): Promise<{
   ])
   return {
     account: page.account,
+    hasHistory: page.hasHistory,
     transactions: page.transactions,
     transactionBalances: page.transactionBalances ?? [],
     balanceTrend: trend.points,
@@ -148,6 +152,27 @@ async function restore(): Promise<void> {
     account.value = await store.restoreAccount(current.id, current.version)
   } catch (cause) {
     actionError.value = ledgerErrorMessage(cause, '账户没有恢复，请刷新后重试。')
+  }
+}
+
+async function permanentlyDelete(): Promise<void> {
+  const current = account.value
+  if (!current || hasHistory.value || deleting.value) return
+  const confirmed = await confirm(
+    `永久删除“${current.name}”？`,
+    '此操作无法撤销。该账户没有历史交易，删除后将从 Ledger 中永久移除。',
+    { confirmLabel: '永久删除', cancelLabel: '取消', destructive: true },
+  )
+  if (!confirmed) return
+  deleting.value = true
+  actionError.value = ''
+  try {
+    await store.deleteAccount(current.id, current.version)
+    await router.push({ name: 'ledger-accounts' })
+  } catch (cause) {
+    actionError.value = ledgerErrorMessage(cause, '账户没有删除，请刷新后重试。')
+  } finally {
+    deleting.value = false
   }
 }
 
@@ -436,6 +461,17 @@ const netMovement = computed(() => {
           </NTooltip>
           <NButton v-else-if="account.archivedAt === null" class="ledger-secondary-button ledger-danger-button" attr-type="button" size="small" :bordered="false" @click="archive">归档账户</NButton>
           <NButton v-else class="ledger-secondary-button" attr-type="button" size="small" :bordered="false" @click="restore">恢复账户</NButton>
+          <NButton
+            v-if="!hasHistory"
+            class="ledger-secondary-button ledger-danger-button"
+            attr-type="button"
+            type="error"
+            size="small"
+            :bordered="false"
+            :disabled="deleting"
+            data-testid="ledger-account-permanent-delete"
+            @click="permanentlyDelete"
+          >{{ deleting ? '正在删除…' : '永久删除账户' }}</NButton>
         </div>
       </header>
 

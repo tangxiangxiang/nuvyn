@@ -117,6 +117,7 @@ describe('Ledger frontend API boundary', () => {
   it('validates server-projected running balances for Account Detail', async () => {
     mockedAuthFetch.mockResolvedValue(response({
       account: {},
+      hasHistory: true,
       movement: {},
       transactions: [],
       transactionBalances: [{ transactionId: 'tx-1', balanceMinor: 12_300 }],
@@ -133,6 +134,7 @@ describe('Ledger frontend API boundary', () => {
 
     mockedAuthFetch.mockResolvedValue(response({
       account: {},
+      hasHistory: true,
       movement: {},
       transactions: [],
       transactionBalances: [{ transactionId: 'tx-1', balanceMinor: 12.3 }],

@@ -414,6 +414,8 @@ export interface LedgerAccountTransactionBalance {
 
 export interface LedgerAccountTransactionsDto {
   readonly account: LedgerAccountDto
+  /** True when any persisted transaction has ever referenced this account. */
+  readonly hasHistory: boolean
   readonly movement: LedgerMovementSummary
   readonly transactions: readonly LedgerTransactionDto[]
   /** Running balances for the returned page, calculated by the server. */

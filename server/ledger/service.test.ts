@@ -437,6 +437,47 @@ describe('Ledger Account service lifecycle', () => {
     expect(service.getSettings().version).toBe(1)
   })
 
+  it('preserves Account identity for live, soft-deleted, transfer, and adjustment history', () => {
+    const { repository, service } = freshService()
+    initialize(service)
+    const expenseCategory = service.listCategories('expense', false)[0]!
+    const softDeletedAccount = createAccount(service, 'history-soft-deleted')
+    const softDeletedExpense = transactionFromResult(service.createTransaction(transactionRequest({
+      type: 'expense',
+      amountMinor: 10,
+      accountId: softDeletedAccount.id,
+      categoryId: expenseCategory.id,
+    }), 'history-soft-deleted-expense'))
+    service.deleteTransaction(softDeletedExpense.id, { expectedVersion: softDeletedExpense.version })
+
+    const fromAccount = createAccount(service, 'history-transfer-from')
+    const toAccount = createAccount(service, 'history-transfer-to')
+    transactionFromResult(service.createTransaction(transactionRequest({
+      type: 'transfer',
+      amountMinor: 10,
+      fromAccountId: fromAccount.id,
+      toAccountId: toAccount.id,
+    }), 'history-transfer'))
+
+    const adjustmentAccount = createAccount(service, 'history-adjustment')
+    const adjustment = service.adjustAccount(adjustmentAccount.id, {
+      targetBalanceMinor: 10,
+      expectedCalculatedBalanceMinor: 0,
+      occurredAt: TEST_NOW,
+      note: 'history adjustment',
+    }, 'history-adjustment-write')
+    expect(adjustment.responseStatus).toBe(201)
+
+    for (const candidate of [softDeletedAccount, fromAccount, toAccount, adjustmentAccount]) {
+      expect(repository.hasAccountHistory(candidate.id)).toBe(true)
+      expectLedgerError(
+        () => service.deleteAccount(candidate.id, { expectedVersion: candidate.version }),
+        'ledger-account-has-history',
+      )
+      expect(repository.getAccount(candidate.id)).not.toBeNull()
+    }
+  })
+
   it('replays an Account snapshot after the Account is physically deleted', () => {
     const { service } = freshService()
     initialize(service)

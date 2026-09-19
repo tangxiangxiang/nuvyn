@@ -160,6 +160,7 @@ function accountTransactionsResponse(value: unknown): LedgerAccountTransactionsD
   if (!isRecord(value)
     || !Array.isArray(value.transactions)
     || !Array.isArray(value.transactionBalances)
+    || typeof value.hasHistory !== 'boolean'
     || !isRecord(value.page)) {
     throw malformed('Account transaction response')
   }

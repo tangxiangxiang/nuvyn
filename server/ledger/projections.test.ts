@@ -553,6 +553,24 @@ describe('Ledger Account Detail projections', () => {
     }))
   })
 
+  it('projects authoritative history even when all visible rows are soft-deleted', () => {
+    const fixture = freshFixture()
+    const asset = account(fixture, 'authoritative-history')
+    const expenseCategory = firstCategory(fixture, 'expense')
+    const deleted = transaction(fixture, 'authoritative-history-expense', {
+      type: 'expense',
+      amountMinor: 10,
+      accountId: asset.id,
+      categoryId: expenseCategory.id,
+    })
+    fixture.service.deleteTransaction(deleted.id, { expectedVersion: 1 })
+
+    const detail = fixture.projections.getAccountTransactions(asset.id, query({ limit: '1' }))
+
+    expect(detail.transactions).toEqual([])
+    expect(detail.hasHistory).toBe(true)
+  })
+
   it('reverse-projects recent balances for asset and liability accounts', () => {
     const fixture = freshFixture()
     const asset = account(fixture, 'recent-balance-asset', { openingBalanceMinor: 1_000 })

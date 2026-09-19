@@ -116,7 +116,7 @@ search 在 repository / SQL 层完成，至少匹配持久化的 `location`、`p
 ## 11. Lifecycle
 
 - Settings 首次创建时同时生成默认 Category；第一个账户创建后 hasCreatedAccount 单调变为 true，base currency 和 timezone 锁定。
-- Account 创建校验 type/nature 配对和 currency；有历史后 type、nature、opening balance、opening date 不可改。无历史账户可物理删除；归档要求自然余额为 0，之后可以 restore。
+- Account 创建校验 type/nature 配对和 currency；有历史后 type、nature、opening balance、opening date 不可改。没有任何交易引用的账户可以物理删除；只要存在历史引用（包括 soft-deleted transaction、transfer 的 from/to account 和 adjustment），账户 identity 就必须保留，DELETE 由服务端返回 `ledger-account-has-history`。归档不是删除：归档要求自然余额为 0，之后可以 restore；归档账户继续遵守同一套编辑和物理删除历史约束。
 - Category 可创建、改名、换图标、移入回收站、恢复或永久删除；已有交易记录的分类不能移入回收站或永久删除，所有内置默认分类受保护。当前设置 UI 将无历史分类的删除操作放入回收站，并在回收站提供恢复和永久删除入口；服务端负责最终历史记录校验。旧版本误归档且已有历史的分类会在迁移时恢复。
 - Income、Expense、Transfer 可创建和 PATCH；Adjustment 只能通过 account adjust endpoint 产生。Transaction 删除是 terminal soft delete；带 groupId 的操作按 group 原子删除。
 - PATCH、archive、restore、delete 使用 expectedVersion 做乐观并发控制。
@@ -129,7 +129,7 @@ POST settings、accounts、categories 和 transactions 通过 operation scope、
 
 页面 canonical routes 是 /ledger、/ledger/transactions、/ledger/accounts 和 /ledger/accounts/:id。旧 /bills、/bills/transactions 只在 router 层重定向到相应 Ledger 页面。
 
-API 以 /api/ledger 为前缀，包含 settings、accounts、categories、transactions、overview 和 trend；账户还提供 /:id/transactions、/:id/balance-trend、/:id/adjust、archive 和 restore。账户详情的最近流水余额和余额趋势由服务端 projection 提供，Ledger route 统一使用 no-store，并继承服务端 owner-auth 边界。
+API 以 /api/ledger 为前缀，包含 settings、accounts、categories、transactions、overview 和 trend；账户还提供 /:id/transactions、/:id/balance-trend、/:id/adjust、archive 和 restore。账户详情的最近流水、服务端计算的逐笔余额、余额趋势和 `hasHistory` 由服务端 projection 提供。`hasHistory` 直接来自 `repository.hasAccountHistory(accountId)`，表示持久化交易表中是否曾经有任何交易引用该账户；它不受最近流水分页、`includeDeleted` 默认值或当前交易是否已 soft-delete 影响。Ledger route 统一使用 no-store，并继承服务端 owner-auth 边界。
 
 ## 14. Schema Evolution
 
