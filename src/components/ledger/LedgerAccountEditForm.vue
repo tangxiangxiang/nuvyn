@@ -101,7 +101,7 @@ async function submit(): Promise<void> {
           name: name.value.trim(),
           note: note.value.trim(),
           ...(cardNumber.value.trim() ? { cardNumber: cardNumber.value.trim() } : {}),
-          ...(icon.value !== 'wallet' ? { icon: icon.value } : {}),
+          icon: icon.value,
           type: type.value,
           nature: nature.value,
           openingBalanceMinor: parsedOpeningBalance,
@@ -112,7 +112,7 @@ async function submit(): Promise<void> {
           name: name.value.trim(),
           note: note.value.trim(),
           ...(cardNumber.value.trim() ? { cardNumber: cardNumber.value.trim() } : {}),
-          ...(icon.value !== 'wallet' ? { icon: icon.value } : {}),
+          icon: icon.value,
         }
     const updated = await store.patchAccount(props.account.id, body)
     emit('saved', updated)

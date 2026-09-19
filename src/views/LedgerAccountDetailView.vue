@@ -462,7 +462,7 @@ const netMovement = computed(() => {
         </div>
 
         <div class="ledger-page-actions ledger-detail-header-actions">
-          <RouterLink class="ledger-secondary-button" :to="breadcrumbRootRoute">返回总览</RouterLink>
+          <RouterLink class="ledger-secondary-button" :to="breadcrumbRootRoute">{{ returnFromOverview ? '返回总览' : '返回列表' }}</RouterLink>
           <NButton v-if="account.archivedAt === null" class="ledger-primary-button" attr-type="button" type="primary" size="small" :bordered="false" @click="editing = true">编辑账户</NButton>
           <NTooltip v-if="account.archivedAt === null && account.currentBalanceMinor !== 0" placement="bottom">
             <template #trigger><span class="ledger-action-trigger"><NButton class="ledger-secondary-button ledger-danger-button" attr-type="button" size="small" :bordered="false" disabled>归档账户</NButton></span></template>

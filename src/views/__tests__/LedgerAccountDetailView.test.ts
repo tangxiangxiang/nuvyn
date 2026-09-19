@@ -84,6 +84,7 @@ function createTestRouter() {
   return createRouter({
     history: createMemoryHistory(),
     routes: [
+      { path: '/ledger', name: 'ledger', component: { template: '<div />' } },
       { path: '/ledger/accounts/:id', name: 'ledger-account', component: LedgerAccountDetailView },
       { path: '/ledger/accounts', name: 'ledger-accounts', component: { template: '<div />' } },
       { path: '/ledger/transactions', name: 'ledger-transactions', component: { template: '<div />' } },
@@ -152,6 +153,34 @@ describe('Ledger account detail lifecycle', () => {
     }))
   })
 
+  it('submits the default wallet icon when resetting a custom account icon', async () => {
+    const original = account({ icon: 'custom_builtin_cmb' })
+    setup(original)
+    const nextRouter = createTestRouter()
+    await nextRouter.push('/ledger/accounts/bank-1')
+    await nextRouter.isReady()
+    const wrapper = mount(LedgerAccountDetailView, { global: { plugins: [nextRouter] } })
+    wrappers.push(wrapper)
+    await flushPromises()
+
+    await wrapper.findAll('button').find((button) => button.text() === '编辑账户')!.trigger('click')
+    await flushPromises()
+    await bodyWrapper().get('[aria-label="选择账户图标"]').trigger('click')
+    await flushPromises()
+    const walletOption = bodyWrapper().findAll('.ledger-icon-picker-option').find((button) => button.text() === '钱包')
+    expect(walletOption).toBeDefined()
+    await walletOption!.trigger('click')
+    api.patchLedgerAccount.mockResolvedValue(account({ icon: 'wallet', version: 4 }))
+
+    await bodyWrapper().get('[data-testid="ledger-account-edit-form"]').trigger('submit')
+    await flushPromises()
+
+    expect(api.patchLedgerAccount).toHaveBeenCalledWith('bank-1', expect.objectContaining({
+      expectedVersion: 3,
+      icon: 'wallet',
+    }))
+  })
+
   it('keeps the balance trend mounted while the edit modal opens and closes', async () => {
     const original = account()
     setup(original)
@@ -170,6 +199,24 @@ describe('Ledger account detail lifecycle', () => {
     await bodyWrapper().findAll('button').find((button) => button.text() === '取消')!.trigger('click')
     await flushPromises()
     expect(wrapper.get('[data-testid="ledger-balance-trend-chart"]').element).toBe(chart.element)
+  })
+
+  it.each([
+    { source: 'list', label: '返回列表', href: '/ledger/accounts' },
+    { source: 'overview', label: '返回总览', href: '/ledger' },
+  ])('uses the $source entry point for the account detail back link', async ({ source, label, href }) => {
+    const original = account()
+    setup(original)
+    const nextRouter = createTestRouter()
+    await nextRouter.push({ name: 'ledger-account', params: { id: 'bank-1' }, query: { from: source } })
+    await nextRouter.isReady()
+    const wrapper = mount(LedgerAccountDetailView, { global: { plugins: [nextRouter] } })
+    wrappers.push(wrapper)
+    await flushPromises()
+
+    const backLink = wrapper.get('.ledger-detail-header-actions a')
+    expect(backLink.text()).toBe(label)
+    expect(backLink.attributes('href')).toBe(href)
   })
 
   it('closes the edit modal when clicking the mask', async () => {
@@ -214,6 +261,7 @@ describe('Ledger account detail lifecycle', () => {
 
     expect(api.patchLedgerAccount).toHaveBeenCalledWith('bank-1', {
       expectedVersion: 3,
+      icon: 'wallet',
       name: '历史账户',
       note: '',
     })
