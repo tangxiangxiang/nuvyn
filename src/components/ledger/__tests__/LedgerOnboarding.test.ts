@@ -9,7 +9,7 @@ import type {
   LedgerSettingsDto,
 } from '../../../../shared/ledgerProtocol'
 import LedgerView from '../../../views/LedgerView.vue'
-import { setNaiveSelect } from './selectTestUtils'
+import { naiveSelectValue, setNaiveSelect } from './selectTestUtils'
 
 const api = vi.hoisted(() => ({
   getLedgerSettings: vi.fn(),
@@ -110,7 +110,9 @@ describe('Ledger initialization and first-account onboarding', () => {
 
     await flushPromises()
 
+    const settingsForm = wrapper.get('[data-testid="ledger-settings-form"]')
     expect(wrapper.find('[data-testid="ledger-settings-form"]').exists()).toBe(true)
+    expect(naiveSelectValue(settingsForm, '基础货币')).toBe('CNY')
     expect(wrapper.find('[data-testid="ledger-account-form"]').exists()).toBe(false)
     expect(wrapper.text()).toContain('先设置你的 Ledger')
     expect(wrapper.text()).not.toContain('基础货币决定金额的表达方式')

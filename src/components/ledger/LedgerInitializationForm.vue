@@ -13,7 +13,7 @@ import LedgerPendingCreateRecovery from './LedgerPendingCreateRecovery.vue'
 const store = useLedgerStore()
 const emit = defineEmits<{ saved: [] }>()
 
-const baseCurrency = ref('')
+const baseCurrency = ref('CNY')
 const timezone = ref(browserTimezone())
 const formError = ref('')
 const submitted = ref(false)
@@ -57,7 +57,7 @@ const currencyOptions: SelectOption[] = LEDGER_CURRENCY_METADATA.map((entry) => 
 
 function resetFromSettings(): void {
   const settings = currentSettings.value
-  baseCurrency.value = settings?.baseCurrency ?? ''
+  baseCurrency.value = settings?.baseCurrency ?? 'CNY'
   timezone.value = settings?.timezone ?? browserTimezone()
   formError.value = ''
   submitted.value = false
