@@ -12,7 +12,7 @@ import type {
 import { getLedgerOverview, getLedgerTrend } from '../../features/ledger/api'
 import { currencyExponentFor, formatLedgerMoney, formatLedgerSignedMoney } from '../../features/ledger/money'
 import { ledgerPresentationBalanceMinor, ledgerTransactionPresentationKind } from '../../features/ledger/presentation'
-import { formatLedgerDate, formatLedgerDateTime, formatLedgerPeriodPickerLabel } from '../../features/ledger/time'
+import { formatLedgerDate, formatLedgerDateTime, formatLedgerPeriodPickerLabel, ledgerDateFilterRangeFromPeriod } from '../../features/ledger/time'
 import { ledgerSelectNodeProps } from '../../features/ledger/naiveControls'
 import { calendarDateFromNaivePickerTimestamp } from '../../features/ledger/naiveTemporal'
 import { useLedgerStore } from '../../features/ledger/ledgerStore'
@@ -21,9 +21,15 @@ import LedgerDatePicker from './LedgerDatePicker.vue'
 import LedgerAnimatedMoney from './LedgerAnimatedMoney.vue'
 import LedgerAccountIcon from './LedgerAccountIcon.vue'
 
+type LedgerTransactionNavigationFilters = {
+  readonly categoryId?: string
+  readonly from?: string
+  readonly to?: string
+}
+
 const emit = defineEmits<{
   record: []
-  viewTransactions: [categoryId?: string]
+  viewTransactions: [filters?: LedgerTransactionNavigationFilters]
   inspectTransaction: [transaction: LedgerTransactionDto]
 }>()
 const store = useLedgerStore()
@@ -295,8 +301,27 @@ function inspectTransaction(transaction: LedgerTransactionDto): void {
   emit('inspectTransaction', transaction)
 }
 
+function categoryTransactionFilters(categoryId: string): LedgerTransactionNavigationFilters | null {
+  const projection = categoryOverview.value
+  if (!projection) return null
+  if (projection.context.scope === 'all') return { categoryId }
+
+  const period = projection.periods.find((item) => item.period === projection.context.scope)
+  if (!period) {
+    console.error('Ledger category drill-down is missing its authoritative period range')
+    return null
+  }
+
+  return {
+    categoryId,
+    ...ledgerDateFilterRangeFromPeriod(period.startAt, period.endAt, ledgerTimezone.value),
+  }
+}
+
 function openCategoryTransactions(categoryId: string): void {
-  emit('viewTransactions', categoryId)
+  const filters = categoryTransactionFilters(categoryId)
+  if (!filters) return
+  emit('viewTransactions', filters)
 }
 
 function onCategoryRowKeydown(event: KeyboardEvent, categoryId: string): void {

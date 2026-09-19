@@ -376,6 +376,22 @@ describe('Ledger live transaction history workspace', () => {
     })
   })
 
+  it('hydrates a category drill-down date range and preserves its exclusive API boundary', async () => {
+    const wrapper = await mountView('/ledger/transactions?categoryId=food&from=2026-08-01&to=2026-08-31')
+
+    expect(naiveSelectValue(wrapper, '分类')).toBe('food')
+    expect(naiveSelectValue(wrapper, '日期')).toBe('custom')
+    expect(wrapper.findComponent(LedgerDatePicker).props('modelValue')).toBe('2026-08-01')
+    expect(wrapper.findAllComponents(LedgerDatePicker).find((picker) => picker.props('testId') === 'ledger-filter-to')?.props('modelValue')).toBe('2026-08-31')
+    expect(api.listLedgerTransactions).toHaveBeenLastCalledWith({
+      type: 'all',
+      categoryId: 'food',
+      from: instantFromLedgerDate('2026-08-01', 'Asia/Shanghai', 'start'),
+      to: instantFromLedgerDate('2026-08-31', 'Asia/Shanghai', 'end'),
+      limit: 25,
+    })
+  })
+
   it('requests the selected server-side page with the correct offset', async () => {
     const firstPage: LedgerTransactionPageDto = {
       transactions: Array.from({ length: 25 }, (_, index) => ({ ...expense, id: index === 0 ? expense.id : `tx-expense-${index}` })),

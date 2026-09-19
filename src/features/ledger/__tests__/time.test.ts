@@ -7,6 +7,7 @@ import {
   formatLedgerTransactionDateTime,
   instantFromLedgerDate,
   instantFromLocalDateTime,
+  ledgerDateFilterRangeFromPeriod,
   localDateTimeInputFromInstant,
   openingDateInputFromInstant,
 } from '../time'
@@ -86,6 +87,51 @@ describe('Ledger timezone presentation boundary', () => {
       expect(instantFromLedgerDate('2026-01-01', timezone, 'start')).toBe(start)
       expect(instantFromLedgerDate('2026-01-01', timezone, 'end')).toBe(end)
     }
+  })
+
+  it('converts a Shanghai half-open month into an inclusive route date range', () => {
+    const startAt = instantFromLedgerDate('2026-09-01', 'Asia/Shanghai', 'start')
+    const endAt = instantFromLedgerDate('2026-10-01', 'Asia/Shanghai', 'start')
+
+    expect(ledgerDateFilterRangeFromPeriod(startAt, endAt, 'Asia/Shanghai')).toEqual({
+      from: '2026-09-01',
+      to: '2026-09-30',
+    })
+    expect(instantFromLedgerDate('2026-09-01', 'Asia/Shanghai', 'start')).toBe(startAt)
+    expect(instantFromLedgerDate('2026-09-30', 'Asia/Shanghai', 'end')).toBe(endAt)
+  })
+
+  it('keeps a single-day period on one inclusive route date', () => {
+    const startAt = instantFromLedgerDate('2026-09-05', 'Asia/Shanghai', 'start')
+    const endAt = instantFromLedgerDate('2026-09-06', 'Asia/Shanghai', 'start')
+
+    expect(ledgerDateFilterRangeFromPeriod(startAt, endAt, 'Asia/Shanghai')).toEqual({
+      from: '2026-09-05',
+      to: '2026-09-05',
+    })
+  })
+
+  it('preserves a cross-year week boundary from the server', () => {
+    const startAt = instantFromLedgerDate('2025-12-29', 'Asia/Shanghai', 'start')
+    const endAt = instantFromLedgerDate('2026-01-05', 'Asia/Shanghai', 'start')
+
+    expect(ledgerDateFilterRangeFromPeriod(startAt, endAt, 'Asia/Shanghai')).toEqual({
+      from: '2025-12-29',
+      to: '2026-01-04',
+    })
+  })
+
+  it('round-trips a DST transition day in the Ledger timezone', () => {
+    const timezone = 'America/New_York'
+    const startAt = instantFromLedgerDate('2026-03-08', timezone, 'start')
+    const endAt = instantFromLedgerDate('2026-03-08', timezone, 'end')
+
+    expect(ledgerDateFilterRangeFromPeriod(startAt, endAt, timezone)).toEqual({
+      from: '2026-03-08',
+      to: '2026-03-08',
+    })
+    expect(instantFromLedgerDate('2026-03-08', timezone, 'start')).toBe(startAt)
+    expect(instantFromLedgerDate('2026-03-08', timezone, 'end')).toBe(endAt)
   })
 
   it('retains Temporal disambiguation for nonexistent and ambiguous Ledger wall-clock times', () => {

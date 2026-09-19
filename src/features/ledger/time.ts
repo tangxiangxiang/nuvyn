@@ -22,6 +22,35 @@ export function openingDateInputFromInstant(instantMs: number, timezone: string)
   return `${String(local.year).padStart(4, '0')}-${pad(local.month)}-${pad(local.day)}`
 }
 
+export interface LedgerDateFilterRange {
+  readonly from: string
+  readonly to: string
+}
+
+/** Convert a server-owned half-open period into inclusive Ledger date filters. */
+export function ledgerDateFilterRangeFromPeriod(
+  startAt: number,
+  endAt: number,
+  timezone: string,
+): LedgerDateFilterRange {
+  if (!Number.isSafeInteger(startAt) || !Number.isSafeInteger(endAt)) {
+    throw new RangeError('period boundaries must be safe integers')
+  }
+  if (endAt <= startAt) throw new RangeError('period end must be greater than period start')
+
+  const fromDate = Temporal.Instant.fromEpochMilliseconds(startAt)
+    .toZonedDateTimeISO(timezone)
+    .toPlainDate()
+  const toDate = Temporal.Instant.fromEpochMilliseconds(endAt - 1)
+    .toZonedDateTimeISO(timezone)
+    .toPlainDate()
+
+  return {
+    from: fromDate.toString(),
+    to: toDate.toString(),
+  }
+}
+
 /** Convert a Ledger-local calendar date into an exclusive/inclusive query boundary. */
 export function instantFromLedgerDate(
   value: string,

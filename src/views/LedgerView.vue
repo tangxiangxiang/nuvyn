@@ -140,11 +140,17 @@ function retry(): void {
   void store.bootstrap()
 }
 
-function openTransactions(categoryId?: string): void {
+type LedgerTransactionNavigationFilters = {
+  readonly categoryId?: string
+  readonly from?: string
+  readonly to?: string
+}
+
+function openTransactions(filters?: LedgerTransactionNavigationFilters): void {
   if (!router) return
   void router.push({
     name: 'ledger-transactions',
-    ...(categoryId ? { query: { categoryId } } : {}),
+    ...(filters ? { query: filters } : {}),
   })
 }
 

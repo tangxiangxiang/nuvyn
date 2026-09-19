@@ -2,6 +2,7 @@
 import { flushPromises, mount, type VueWrapper } from '@vue/test-utils'
 import { beforeEach, afterEach, describe, expect, it, vi } from 'vitest'
 import { nextTick } from 'vue'
+import { Temporal } from '@js-temporal/polyfill'
 import { createMemoryHistory, createRouter } from 'vue-router'
 import type {
   LedgerAccountDto,
@@ -12,8 +13,10 @@ import type {
 } from '../../../shared/ledgerProtocol'
 import { LedgerApiError } from '../../features/ledger/ledgerErrors'
 import { resetLedgerStoreForTesting, useLedgerStore } from '../../features/ledger/ledgerStore'
+import { instantFromLedgerDate } from '../../features/ledger/time'
 import LedgerDatePicker from '../../components/ledger/LedgerDatePicker.vue'
 import LedgerView from '../LedgerView.vue'
+import { setNaiveSelect } from '../../components/ledger/__tests__/selectTestUtils'
 
 const api = vi.hoisted(() => ({
   getLedgerSettings: vi.fn(),
@@ -66,6 +69,8 @@ const category: LedgerCategoryDto = {
 
 function overviewFor(input: { scope: LedgerOverviewScope; anchorDate: string | undefined }): LedgerOverviewDto {
   const anchorDate = input.anchorDate ?? '2026-09-05'
+  const date = Temporal.PlainDate.from(anchorDate)
+  const toInstant = (value: Temporal.PlainDate): number => instantFromLedgerDate(value.toString(), 'Asia/Shanghai', 'start')
   return {
     context: {
       anchorDate,
@@ -86,10 +91,10 @@ function overviewFor(input: { scope: LedgerOverviewScope; anchorDate: string | u
     cashflow: { incomeMinor: 0, expenseMinor: 0, repaymentMinor: 0, balanceMinor: 0 },
     categoryBreakdown: { income: [], expense: [] },
     periods: [
-      { period: 'today', startAt: 0, endAt: 1, incomeMinor: 0, expenseMinor: 0, repaymentMinor: 0, balanceMinor: 0 },
-      { period: 'week', startAt: 0, endAt: 1, incomeMinor: 0, expenseMinor: 0, repaymentMinor: 0, balanceMinor: 0 },
-      { period: 'month', startAt: 0, endAt: 1, incomeMinor: 0, expenseMinor: 0, repaymentMinor: 0, balanceMinor: 0 },
-      { period: 'year', startAt: 0, endAt: 1, incomeMinor: 0, expenseMinor: 0, repaymentMinor: 0, balanceMinor: 0 },
+      { period: 'today', startAt: toInstant(date), endAt: toInstant(date.add({ days: 1 })), incomeMinor: 0, expenseMinor: 0, repaymentMinor: 0, balanceMinor: 0 },
+      { period: 'week', startAt: toInstant(date.subtract({ days: date.dayOfWeek - 1 })), endAt: toInstant(date.subtract({ days: date.dayOfWeek - 1 }).add({ days: 7 })), incomeMinor: 0, expenseMinor: 0, repaymentMinor: 0, balanceMinor: 0 },
+      { period: 'month', startAt: toInstant(date.with({ day: 1 })), endAt: toInstant(date.with({ day: 1 }).add({ months: 1 })), incomeMinor: 0, expenseMinor: 0, repaymentMinor: 0, balanceMinor: 0 },
+      { period: 'year', startAt: toInstant(date.with({ month: 1, day: 1 })), endAt: toInstant(date.with({ month: 1, day: 1 }).add({ years: 1 })), incomeMinor: 0, expenseMinor: 0, repaymentMinor: 0, balanceMinor: 0 },
     ],
     trend: [],
     recentTransactions: [],
@@ -173,7 +178,7 @@ describe('Ledger historical period route coordination', () => {
     for (const wrapper of wrappers.splice(0)) wrapper.unmount()
   })
 
-  it('opens transaction history filtered by the clicked category', async () => {
+  it.each(['click', 'Enter', 'Space'] as const)('opens the matching month transaction range from a category row with %s', async (activation) => {
     api.getLedgerOverview.mockResolvedValue({
       ...overviewFor({ scope: 'month', anchorDate: undefined }),
       categoryBreakdown: {
@@ -183,10 +188,104 @@ describe('Ledger historical period route coordination', () => {
     })
     const { router, wrapper } = await mountAt('/ledger')
 
+    const row = wrapper.get('[data-testid="ledger-category-row-food"]')
+    if (activation === 'click') await row.trigger('click')
+    else await row.trigger('keydown', { key: activation === 'Space' ? ' ' : activation })
+    await flushPromises()
+
+    expect(router.currentRoute.value.query).toEqual({
+      categoryId: 'food',
+      from: '2026-09-01',
+      to: '2026-09-30',
+    })
+  })
+
+  it.each([
+    ['today', '2026-09-05', '2026-09-05'],
+    ['week', '2026-08-31', '2026-09-06'],
+    ['year', '2026-01-01', '2026-12-31'],
+  ] as const)('uses the matching %s period boundaries for category drill-down', async (scope, from, to) => {
+    api.getLedgerOverview.mockImplementation((input: { scope: LedgerOverviewScope; anchorDate: string | undefined }) => Promise.resolve({
+      ...overviewFor(input),
+      categoryBreakdown: {
+        income: [],
+        expense: [{ categoryId: 'food', name: '餐饮', kind: 'expense', amountMinor: 3_800 }],
+      },
+    }))
+    const { router, wrapper } = await mountAt('/ledger')
+
+    await setNaiveSelect(wrapper, '选择统计期间', scope)
+    await flushPromises()
     await wrapper.get('[data-testid="ledger-category-row-food"]').trigger('click')
     await flushPromises()
 
-    expect(router.currentRoute.value.fullPath).toBe('/ledger/transactions?categoryId=food')
+    expect(router.currentRoute.value.query).toEqual({ categoryId: 'food', from, to })
+  })
+
+  it('uses the category projection range when category analysis is on a historical month', async () => {
+    api.getLedgerOverview.mockImplementation((input: { scope: LedgerOverviewScope; anchorDate: string | undefined }) => Promise.resolve({
+      ...overviewFor(input),
+      categoryBreakdown: {
+        income: [],
+        expense: [{ categoryId: 'food', name: '餐饮', kind: 'expense', amountMinor: 3_200 }],
+      },
+    }))
+    const { router, wrapper } = await mountAt('/ledger')
+
+    const categoryPicker = wrapper.findAllComponents(LedgerDatePicker).find((picker) => picker.props('testId') === 'ledger-category-date')
+    if (!categoryPicker) throw new Error('Ledger category date picker is not mounted')
+    await categoryPicker.vm.$emit('update:modelValue', '2026-08-20')
+    await flushPromises()
+
+    await wrapper.get('[data-testid="ledger-category-row-food"]').trigger('click')
+    await flushPromises()
+
+    expect(router.currentRoute.value.query).toEqual({
+      categoryId: 'food',
+      from: '2026-08-01',
+      to: '2026-08-31',
+    })
+  })
+
+  it('omits the date range for an all-time category projection', async () => {
+    api.getLedgerOverview.mockImplementation((input: { scope: LedgerOverviewScope; anchorDate: string | undefined }) => Promise.resolve({
+      ...overviewFor(input),
+      categoryBreakdown: {
+        income: [],
+        expense: [{ categoryId: 'food', name: '餐饮', kind: 'expense', amountMinor: 3_800 }],
+      },
+    }))
+    const { router, wrapper } = await mountAt('/ledger')
+
+    await setNaiveSelect(wrapper, '选择统计期间', 'all')
+    await flushPromises()
+    await wrapper.get('[data-testid="ledger-category-row-food"]').trigger('click')
+    await flushPromises()
+
+    expect(router.currentRoute.value.query).toEqual({ categoryId: 'food' })
+  })
+
+  it('fails closed when a category projection has no matching authoritative period', async () => {
+    const error = vi.spyOn(console, 'error').mockImplementation(() => {})
+    try {
+      api.getLedgerOverview.mockResolvedValue({
+        ...overviewFor({ scope: 'month', anchorDate: undefined }),
+        periods: [],
+        categoryBreakdown: {
+          income: [],
+          expense: [{ categoryId: 'food', name: '餐饮', kind: 'expense', amountMinor: 3_800 }],
+        },
+      })
+      const { router, wrapper } = await mountAt('/ledger')
+
+      await wrapper.get('[data-testid="ledger-category-row-food"]').trigger('click')
+      await flushPromises()
+
+      expect(router.currentRoute.value.name).toBe('ledger')
+      expect(error).toHaveBeenCalledWith('Ledger category drill-down is missing its authoritative period range')
+    } finally {
+      error.mockRestore()
+    }
   })
 
   it('loads an anchored route, exposes the requested date, and keeps current snapshot wording', async () => {
