@@ -78,6 +78,40 @@ async function readLayoutMetrics(page: import('@playwright/test').Page): Promise
   })
 }
 
+type MobileLayoutMetrics = {
+  bodyHeight: number
+  headerBottom: number
+  rowTop: number
+  rowBottom: number
+  paginationTop: number
+  rowHit: boolean
+}
+
+async function readMobileLayoutMetrics(page: import('@playwright/test').Page): Promise<MobileLayoutMetrics> {
+  return await page.evaluate(() => {
+    const body = document.querySelector<HTMLElement>('.ledger-transaction-table .n-data-table-base-table-body')
+    const header = document.querySelector<HTMLElement>('.ledger-transaction-table .n-data-table-thead')
+    const row = document.querySelector<HTMLElement>('.ledger-transaction-row')
+    const pagination = document.querySelector<HTMLElement>('.ledger-transaction-pagination')
+    if (!body || !header || !row || !pagination) throw new Error('Mobile transaction history layout nodes are missing')
+
+    const bodyBox = body.getBoundingClientRect()
+    const headerBox = header.getBoundingClientRect()
+    const rowBox = row.getBoundingClientRect()
+    const paginationBox = pagination.getBoundingClientRect()
+    const hitX = Math.max(1, Math.min(window.innerWidth - 1, rowBox.left + Math.min(24, rowBox.width / 2)))
+    const hitTarget = document.elementFromPoint(hitX, rowBox.top + rowBox.height / 2)
+    return {
+      bodyHeight: bodyBox.height,
+      headerBottom: headerBox.bottom,
+      rowTop: rowBox.top,
+      rowBottom: rowBox.bottom,
+      paginationTop: paginationBox.top,
+      rowHit: hitTarget?.closest('.ledger-transaction-row') === row,
+    }
+  })
+}
+
 test('transaction table grows with desktop viewport height and keeps pagination at the card bottom', async ({ page, request }) => {
   await ensureTransactionHistoryFixture(request)
 
@@ -105,4 +139,21 @@ test('transaction table grows with desktop viewport height and keeps pagination 
   expect(metrics[2]!.tableHeight).toBeGreaterThan(metrics[1]!.tableHeight + 200)
   expect(metrics[1]!.bodyHeight).toBeGreaterThan(metrics[0]!.bodyHeight + 200)
   expect(metrics[2]!.bodyHeight).toBeGreaterThan(metrics[1]!.bodyHeight + 200)
+
+  await page.setViewportSize({ width: 390, height: 844 })
+  await page.goto('/ledger/transactions')
+  await expect(page.getByTestId('ledger-transaction-list')).toBeVisible()
+  const mobileRow = page.locator('.ledger-transaction-row').first()
+  await expect(mobileRow).toBeVisible()
+  await mobileRow.scrollIntoViewIfNeeded()
+  const mobileLayout = await readMobileLayoutMetrics(page)
+
+  expect(mobileLayout.bodyHeight).toBeGreaterThan(0)
+  expect(mobileLayout.headerBottom).toBeLessThanOrEqual(mobileLayout.rowTop + 1)
+  expect(mobileLayout.rowBottom).toBeLessThanOrEqual(mobileLayout.paginationTop + 1)
+  expect(mobileLayout.rowHit).toBe(true)
+
+  await mobileRow.click()
+  await expect(page.getByRole('dialog')).toBeVisible()
+  await expect(page.getByTestId('ledger-transaction-detail-sheet')).toBeVisible()
 })

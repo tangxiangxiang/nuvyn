@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, h, onBeforeUnmount, onMounted, ref } from 'vue'
+import { useMediaQuery } from '@vueuse/core'
 import {
   NAlert,
   NButton,
@@ -40,6 +41,7 @@ import { ledgerAccountSelectOptions, renderLedgerAccountLabel, renderLedgerCateg
 
 const store = useLedgerStore()
 const route = useRoute()
+const desktopTableFlexHeight = useMediaQuery('(min-width: 651px)')
 const transactionSheetOpen = ref(false)
 const detailOpen = ref(false)
 const selectedTransaction = ref<LedgerTransactionDto | null>(null)
@@ -582,7 +584,8 @@ const transactionColumns: DataTableColumns<LedgerTransactionDto> = [
         :row-key="(transaction) => transaction.id"
         :row-props="transactionRowProps"
         :loading="loading || paginationLoading"
-        flex-height
+        :flex-height="desktopTableFlexHeight"
+        :max-height="desktopTableFlexHeight ? undefined : 268"
         size="small"
         :bordered="false"
         :bottom-bordered="false"

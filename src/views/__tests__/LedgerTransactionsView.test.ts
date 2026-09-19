@@ -333,12 +333,12 @@ describe('Ledger live transaction history workspace', () => {
     expect(wrapper.text()).not.toContain('billsMockData')
   })
 
-  it('lets the desktop transaction table use the available card height', async () => {
+  it('keeps the mobile transaction table on its bounded scroll height', async () => {
     const wrapper = await mountView()
     const table = wrapper.findComponent(NDataTable)
 
-    expect(table.props('flexHeight')).toBe(true)
-    expect(table.props('maxHeight')).toBeUndefined()
+    expect(table.props('flexHeight')).toBe(false)
+    expect(table.props('maxHeight')).toBe(268)
   })
 
   it('sends supported type, entity, and Ledger-timezone date filters to the API', async () => {
