@@ -333,7 +333,23 @@ function onAccountSaved(): void {
 .ledger-form-error { margin: 0 0 12px; color: #b42318; font-size: .82rem; }
 .ledger-form-error :deep(.n-alert-body) { color: #b42318; }
 @media (min-width: 651px) {
-  .ledger-accounts-page { height: calc(100vh - var(--navbar-h, 52px)); min-height: 0; overflow: hidden; }
+  .ledger-accounts-page {
+    display: flex;
+    height: calc(100vh - var(--navbar-h, 52px));
+    min-height: 0;
+    flex-direction: column;
+    overflow: hidden;
+  }
+  .ledger-page-header,
+  .ledger-form-error { flex: 0 0 auto; }
+  .ledger-account-sections {
+    flex: 1 1 0;
+    min-height: 0;
+    grid-template-rows: minmax(0, 1fr);
+  }
+  .ledger-account-section { height: auto; min-height: 0; }
+  .ledger-account-section :deep(.n-card-content) { display: flex; height: 100%; min-height: 0; flex-direction: column; overflow: hidden; padding: 20px; box-sizing: border-box; }
+  .ledger-account-list { height: auto; flex: 1 1 0; }
 }
 @media (max-width: 650px) {
   .ledger-accounts-page { padding: 28px 16px 48px; }
