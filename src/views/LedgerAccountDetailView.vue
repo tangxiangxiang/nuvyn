@@ -17,7 +17,7 @@ import LedgerAccountIcon from '../components/ledger/LedgerAccountIcon.vue'
 import LedgerAccountEditForm from '../components/ledger/LedgerAccountEditForm.vue'
 import LedgerPendingCreateGate from '../components/ledger/LedgerPendingCreateGate.vue'
 import { ledgerAccountTypeOptionsForNature } from '../features/ledger/accountPresentation'
-import { ledgerErrorMessage } from '../features/ledger/ledgerErrors'
+import { isLedgerApiError, ledgerErrorMessage } from '../features/ledger/ledgerErrors'
 import { formatLedgerMoney } from '../features/ledger/money'
 import { formatLedgerDateTime, formatLedgerTransactionDateTime } from '../features/ledger/time'
 import { useLedgerStore } from '../features/ledger/ledgerStore'
@@ -170,7 +170,16 @@ async function permanentlyDelete(): Promise<void> {
     await store.deleteAccount(current.id, current.version)
     await router.push({ name: 'ledger-accounts' })
   } catch (cause) {
-    actionError.value = ledgerErrorMessage(cause, '账户没有删除，请刷新后重试。')
+    const deleteErrorMessage = ledgerErrorMessage(cause, '账户没有删除，请刷新后重试。')
+    if (isLedgerApiError(cause) && cause.code === 'ledger-account-has-history') {
+      await load()
+      if (account.value === null) {
+        const reloadErrorMessage = actionError.value || '账户详情暂时无法加载。'
+        actionError.value = `${deleteErrorMessage} ${reloadErrorMessage} 请点击“重新加载”后重试。`
+        return
+      }
+    }
+    actionError.value = deleteErrorMessage
   } finally {
     deleting.value = false
   }
@@ -454,7 +463,7 @@ const netMovement = computed(() => {
 
         <div class="ledger-page-actions ledger-detail-header-actions">
           <RouterLink class="ledger-secondary-button" :to="breadcrumbRootRoute">返回总览</RouterLink>
-          <NButton class="ledger-primary-button" attr-type="button" type="primary" size="small" :bordered="false" @click="editing = true">编辑账户</NButton>
+          <NButton v-if="account.archivedAt === null" class="ledger-primary-button" attr-type="button" type="primary" size="small" :bordered="false" @click="editing = true">编辑账户</NButton>
           <NTooltip v-if="account.archivedAt === null && account.currentBalanceMinor !== 0" placement="bottom">
             <template #trigger><span class="ledger-action-trigger"><NButton class="ledger-secondary-button ledger-danger-button" attr-type="button" size="small" :bordered="false" disabled>归档账户</NButton></span></template>
             当前余额需调整为 0 后才能归档账户。
@@ -462,7 +471,7 @@ const netMovement = computed(() => {
           <NButton v-else-if="account.archivedAt === null" class="ledger-secondary-button ledger-danger-button" attr-type="button" size="small" :bordered="false" @click="archive">归档账户</NButton>
           <NButton v-else class="ledger-secondary-button" attr-type="button" size="small" :bordered="false" @click="restore">恢复账户</NButton>
           <NButton
-            v-if="!hasHistory"
+            v-if="account.archivedAt !== null && !hasHistory"
             class="ledger-secondary-button ledger-danger-button"
             attr-type="button"
             type="error"
@@ -471,7 +480,7 @@ const netMovement = computed(() => {
             :disabled="deleting"
             data-testid="ledger-account-permanent-delete"
             @click="permanentlyDelete"
-          >{{ deleting ? '正在删除…' : '永久删除账户' }}</NButton>
+          >{{ deleting ? '正在删除…' : '删除账户' }}</NButton>
         </div>
       </header>
 

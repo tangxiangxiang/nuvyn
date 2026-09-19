@@ -237,8 +237,8 @@ describe('Ledger account detail lifecycle', () => {
     expect(api.archiveLedgerAccount).toHaveBeenCalledWith('bank-1', 3)
   })
 
-  it('offers permanent delete for an active account with no authoritative history', async () => {
-    const original = account({ currentBalanceMinor: 12_000 })
+  it('offers permanent delete for an archived account with no authoritative history', async () => {
+    const original = account({ archivedAt: 20, currentBalanceMinor: 0 })
     setup(original, [], [], false)
     const nextRouter = createTestRouter()
     await nextRouter.push('/ledger/accounts/bank-1')
@@ -247,7 +247,7 @@ describe('Ledger account detail lifecycle', () => {
     wrappers.push(wrapper)
     await flushPromises()
 
-    expect(wrapper.get('[data-testid="ledger-account-permanent-delete"]').text()).toBe('永久删除账户')
+    expect(wrapper.get('[data-testid="ledger-account-permanent-delete"]').text()).toBe('删除账户')
     api.deleteLedgerAccount.mockResolvedValue({ deleted: true, id: original.id })
     await wrapper.get('[data-testid="ledger-account-permanent-delete"]').trigger('click')
     await flushPromises()
@@ -259,6 +259,20 @@ describe('Ledger account detail lifecycle', () => {
     )
     expect(api.deleteLedgerAccount).toHaveBeenCalledWith('bank-1', 3)
     expect(nextRouter.currentRoute.value.name).toBe('ledger-accounts')
+  })
+
+  it('does not offer permanent delete for an active account without history', async () => {
+    const original = account({ currentBalanceMinor: 0 })
+    setup(original, [], [], false)
+    const nextRouter = createTestRouter()
+    await nextRouter.push('/ledger/accounts/bank-1')
+    await nextRouter.isReady()
+    const wrapper = mount(LedgerAccountDetailView, { global: { plugins: [nextRouter] } })
+    wrappers.push(wrapper)
+    await flushPromises()
+
+    expect(wrapper.find('[data-testid="ledger-account-permanent-delete"]').exists()).toBe(false)
+    expect(wrapper.findAll('button').some((button) => button.text() === '归档账户')).toBe(true)
   })
 
   it('does not delete when permanent-delete confirmation is cancelled', async () => {
@@ -304,11 +318,12 @@ describe('Ledger account detail lifecycle', () => {
     await flushPromises()
 
     expect(wrapper.find('[data-testid="ledger-account-permanent-delete"]').exists()).toBe(false)
+    expect(wrapper.findAll('button').some((button) => button.text() === '编辑账户')).toBe(false)
     expect(wrapper.findAll('button').some((button) => button.text() === '恢复账户')).toBe(true)
   })
 
   it('keeps the account detail route and surfaces delete conflicts', async () => {
-    const original = account({ currentBalanceMinor: 0 })
+    const original = account({ archivedAt: 20, currentBalanceMinor: 0 })
     setup(original, [], [], false)
     api.deleteLedgerAccount.mockRejectedValue(new LedgerApiError('version conflict', 409, 'ledger-version-conflict'))
     const nextRouter = createTestRouter()
@@ -322,7 +337,67 @@ describe('Ledger account detail lifecycle', () => {
     await flushPromises()
 
     expect(nextRouter.currentRoute.value.name).toBe('ledger-account')
+    expect(api.getLedgerAccountTransactions).toHaveBeenCalledTimes(1)
     expect(wrapper.get('[role="alert"]').text()).toContain('这项数据已被更新')
+  })
+
+  it('reloads authoritative history after a concurrent delete conflict', async () => {
+    const original = account({ archivedAt: 20, currentBalanceMinor: 0 })
+    setup(original, [], [], false)
+    api.getLedgerAccountTransactions
+      .mockResolvedValueOnce({
+        account: original,
+        hasHistory: false,
+        movement: { balanceIncreaseMinor: 0, balanceDecreaseMinor: 0 },
+        transactions: [],
+        transactionBalances: [],
+        page: { nextCursor: null },
+      })
+      .mockResolvedValueOnce({
+        account: original,
+        hasHistory: true,
+        movement: { balanceIncreaseMinor: 0, balanceDecreaseMinor: 0 },
+        transactions: [],
+        transactionBalances: [],
+        page: { nextCursor: null },
+      })
+    api.deleteLedgerAccount.mockRejectedValue(new LedgerApiError('history conflict', 409, 'ledger-account-has-history'))
+    const nextRouter = createTestRouter()
+    await nextRouter.push('/ledger/accounts/bank-1')
+    await nextRouter.isReady()
+    const wrapper = mount(LedgerAccountDetailView, { global: { plugins: [nextRouter] } })
+    wrappers.push(wrapper)
+    await flushPromises()
+
+    await wrapper.get('[data-testid="ledger-account-permanent-delete"]').trigger('click')
+    await flushPromises()
+
+    expect(api.deleteLedgerAccount).toHaveBeenCalledWith('bank-1', 3)
+    expect(api.getLedgerAccountTransactions).toHaveBeenCalledTimes(2)
+    expect(nextRouter.currentRoute.value.name).toBe('ledger-account')
+    expect(wrapper.find('[data-testid="ledger-account-permanent-delete"]').exists()).toBe(false)
+    expect(wrapper.get('[role="alert"]').text()).toContain('有历史记录的账户不能被永久删除。')
+  })
+
+  it('keeps the conflict visible and offers reload when history refresh fails', async () => {
+    const original = account({ archivedAt: 20, currentBalanceMinor: 0 })
+    setup(original, [], [], false)
+    api.deleteLedgerAccount.mockRejectedValue(new LedgerApiError('history conflict', 409, 'ledger-account-has-history'))
+    const nextRouter = createTestRouter()
+    await nextRouter.push('/ledger/accounts/bank-1')
+    await nextRouter.isReady()
+    const wrapper = mount(LedgerAccountDetailView, { global: { plugins: [nextRouter] } })
+    wrappers.push(wrapper)
+    await flushPromises()
+    api.getLedgerAccountTransactions.mockRejectedValueOnce(new LedgerApiError('reload unavailable', 503, 'ledger-network-error'))
+
+    await wrapper.get('[data-testid="ledger-account-permanent-delete"]').trigger('click')
+    await flushPromises()
+
+    expect(nextRouter.currentRoute.value.name).toBe('ledger-account')
+    expect(wrapper.get('[data-testid="ledger-account-error"]').text()).toContain('有历史记录的账户不能被永久删除。')
+    expect(wrapper.get('[data-testid="ledger-account-error"]').text()).toContain('重新加载')
+    expect((wrapper.vm as unknown as { deleting: boolean }).deleting).toBe(false)
   })
 
   it('renders the server movement projection with asset language and a filtered-history link', async () => {
