@@ -475,6 +475,7 @@ export interface LedgerTransactionQueryOptions {
   readonly from?: number
   readonly to?: number
   readonly search?: string
+  readonly searchAmountMinor?: number
   readonly includeDeleted?: boolean
   readonly limit: number
   readonly offset?: number
@@ -994,6 +995,9 @@ function transactionQueryFilter(
       .replaceAll('%', '\\%')
       .replaceAll('_', '\\_')
     params.searchPattern = `%${escaped}%`
+    if (options.searchAmountMinor !== undefined) {
+      params.searchAmountMinor = options.searchAmountMinor
+    }
     const typeSearchClauses = transactionTypeSearchClauses(options.search)
     clauses.push(`(
       location LIKE @searchPattern ESCAPE '\\' COLLATE NOCASE
@@ -1011,6 +1015,7 @@ function transactionQueryFilter(
         WHERE ledger_categories.name LIKE @searchPattern ESCAPE '\\' COLLATE NOCASE
           AND ledger_categories.id = category_id
       )
+      ${options.searchAmountMinor !== undefined ? 'OR amount_minor = @searchAmountMinor' : ''}
       ${typeSearchClauses.length > 0 ? `OR ${typeSearchClauses.join('\n      OR ')}` : ''}
     )`)
   }

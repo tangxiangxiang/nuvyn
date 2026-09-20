@@ -8,6 +8,7 @@
 
 import {
   currencyExponentFor,
+  parseDecimalToMinor,
 } from '../../shared/ledgerCurrency.js'
 import type {
   LedgerAccountDto,
@@ -73,6 +74,7 @@ import type {
 
 const PERIOD_ORDER = ['today', 'week', 'month', 'year'] as const
 const RECENT_TRANSACTION_LIMIT = 5
+const TRANSACTION_AMOUNT_SEARCH_RE = /^([+-]?)(\d{1,3}(?:,\d{3})+|\d+)(?:\.(\d+))?$/
 
 export interface LedgerOverviewInput {
   readonly scope: LedgerOverviewScope
@@ -376,7 +378,29 @@ function trendForRanges(
   })
 }
 
-function normalizeTransactionQuery(query: LedgerTransactionQuery): LedgerTransactionQueryOptions {
+function transactionAmountSearchMinor(
+  search: string | undefined,
+  currency: string,
+): number | undefined {
+  if (search === undefined) return undefined
+  const match = TRANSACTION_AMOUNT_SEARCH_RE.exec(search)
+  if (!match) return undefined
+
+  const integer = match[2].replaceAll(',', '')
+  const sign = match[1] === '-' ? '-' : ''
+  const normalized = `${sign}${integer}${match[3] === undefined ? '' : `.${match[3]}`}`
+  try {
+    const parsed = parseDecimalToMinor(normalized, currency)
+    return parsed < 0 ? -parsed : parsed
+  } catch {
+    return undefined
+  }
+}
+
+function normalizeTransactionQuery(
+  query: LedgerTransactionQuery,
+  currency: string,
+): LedgerTransactionQueryOptions {
   const limit = query.limit ?? LEDGER_LIST_LIMIT_DEFAULT
   if (!Number.isSafeInteger(limit) || limit < 1 || limit > LEDGER_LIST_LIMIT_MAX) {
     throw ledgerValidationError(
@@ -393,6 +417,7 @@ function normalizeTransactionQuery(query: LedgerTransactionQuery): LedgerTransac
     from: query.from,
     to: query.to,
     search: query.search,
+    searchAmountMinor: transactionAmountSearchMinor(query.search, currency),
     includeDeleted: query.includeDeleted ?? false,
     limit,
     offset: query.offset,
@@ -429,9 +454,10 @@ export function createLedgerProjections(
 
   function transactionPage(
     query: LedgerTransactionQuery,
+    currency: string,
     pageOptions: { readonly includeSummary?: boolean } = {},
   ): ProjectedTransactionPage {
-    const queryOptions = normalizeTransactionQuery(query)
+    const queryOptions = normalizeTransactionQuery(query, currency)
     const rows = repository.queryTransactions(queryOptions)
     const summary = pageOptions.includeSummary === false
       ? null
@@ -478,8 +504,8 @@ export function createLedgerProjections(
   }
 
   function listTransactions(query: LedgerTransactionQuery): LedgerTransactionPageDto {
-    requireSettings()
-    const page = transactionPage(query)
+    const settings = requireSettings()
+    const page = transactionPage(query, settings.baseCurrency)
     return {
       transactions: page.rows.map(transactionDtoWithBundle),
       page: page.page,
@@ -496,7 +522,7 @@ export function createLedgerProjections(
 
     const nowMs = captureNow()
     const currentBalanceMinor = repository.getAccountBalanceBefore(account, exclusiveInstant(nowMs))
-    const page = transactionPage({ ...query, accountId }, { includeSummary: false })
+    const page = transactionPage({ ...query, accountId }, settings.baseCurrency, { includeSummary: false })
     const balancesByTransactionId = repository.getAccountBalancesAtPositions(account, page.rows)
     const movementRange = monthRange(nowMs, settings.timezone)
     const movementTransactions = repository.listActiveTransactionsForAccountInRange(

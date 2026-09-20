@@ -37,6 +37,7 @@ interface ProjectionFixture {
 function freshFixture(
   timezone = 'Asia/Shanghai',
   now = TEST_NOW,
+  baseCurrency = 'CNY',
 ): ProjectionFixture {
   const database = createLedgerTestDatabase()
   databases.push(database)
@@ -50,7 +51,7 @@ function freshFixture(
   })
   const projections = createLedgerProjections(repository, { now: () => clock.value })
   const settings: LedgerSettingsCreateRequest = parseSettingsCreateRequest({
-    baseCurrency: 'CNY',
+    baseCurrency,
     timezone,
   })
   service.createSettings(settings, 'projection-settings')
@@ -66,13 +67,14 @@ function account(
   key: string,
   overrides: Record<string, unknown> = {},
 ): LedgerAccountDto {
+  const settings = fixture.repository.getSettings()
   const result = fixture.service.createAccount(parseAccountCreateRequest({
     name: 'Projection account',
     type: 'bank',
     nature: 'asset',
     openingBalanceMinor: 0,
     openingDate: '2026-01-01',
-    currency: 'CNY',
+    currency: settings?.baseCurrency ?? 'CNY',
     ...overrides,
   }), key)
   expect(result.responseStatus).toBe(201)
@@ -349,6 +351,136 @@ describe('Ledger transaction query projections', () => {
     const allRows = fixture.projections.listTransactions(query({ search: '还款', limit: '10' }))
     expect(new Set(allRows.transactions.map((row) => row.id))).toEqual(new Set([repayment.id, interest.id]))
     expect(allRows.transactions.map((row) => row.id)).not.toContain(unrelatedIncome.id)
+  })
+
+  it('searches exact amount magnitudes without numeric substring matches', () => {
+    const fixture = freshFixture()
+    const asset = account(fixture, 'amount-search-asset')
+    const other = account(fixture, 'amount-search-other')
+    const expenseCategory = firstCategory(fixture, 'expense')
+    const incomeCategory = firstCategory(fixture, 'income')
+
+    const expense38 = transaction(fixture, 'amount-search-expense-38', {
+      type: 'expense', amountMinor: 3_800, accountId: asset.id, categoryId: expenseCategory.id,
+      payee: 'Exact expense',
+    })
+    const income38 = transaction(fixture, 'amount-search-income-38', {
+      type: 'income', amountMinor: 3_800, accountId: asset.id, categoryId: incomeCategory.id,
+      payee: 'Exact income',
+    })
+    transaction(fixture, 'amount-search-expense-138', {
+      type: 'expense', amountMinor: 13_800, accountId: asset.id, categoryId: expenseCategory.id,
+      payee: 'Larger expense one',
+    })
+    transaction(fixture, 'amount-search-expense-380', {
+      type: 'expense', amountMinor: 38_000, accountId: asset.id, categoryId: expenseCategory.id,
+      payee: 'Larger expense two',
+    })
+    transaction(fixture, 'amount-search-expense-3800', {
+      type: 'expense', amountMinor: 380_000, accountId: asset.id, categoryId: expenseCategory.id,
+      payee: 'Larger expense three',
+    })
+    const transfer1245 = transaction(fixture, 'amount-search-transfer-1245', {
+      type: 'transfer', transferKind: 'general', amountMinor: 124_584,
+      fromAccountId: asset.id, toAccountId: other.id,
+      payee: 'Exact transfer',
+    })
+
+    const idsForSearch = (search: string) => fixture.projections
+      .listTransactions(query({ search })).transactions.map((row) => row.id)
+    const exact38 = new Set([expense38.id, income38.id])
+
+    expect(new Set(idsForSearch('38'))).toEqual(exact38)
+    expect(new Set(idsForSearch('38.0'))).toEqual(exact38)
+    expect(new Set(idsForSearch('38.00'))).toEqual(exact38)
+    expect(new Set(idsForSearch('+38'))).toEqual(exact38)
+    expect(new Set(idsForSearch('-38'))).toEqual(exact38)
+    expect(idsForSearch('1,245.84')).toEqual([transfer1245.id])
+  })
+
+  it('combines exact amount matching with the existing fuzzy text OR search', () => {
+    const fixture = freshFixture()
+    const asset = account(fixture, 'amount-search-text-asset')
+    const expenseCategory = firstCategory(fixture, 'expense')
+    const exactAmount = transaction(fixture, 'amount-search-text-exact', {
+      type: 'expense', amountMinor: 3_800, accountId: asset.id, categoryId: expenseCategory.id,
+      payee: 'Ordinary merchant',
+    })
+    const fuzzyText = transaction(fixture, 'amount-search-text-fuzzy', {
+      type: 'expense', amountMinor: 5_000, accountId: asset.id, categoryId: expenseCategory.id,
+      payee: '38号便利店',
+    })
+
+    expect(new Set(fixture.projections.listTransactions(query({ search: '38' })).transactions.map((row) => row.id)))
+      .toEqual(new Set([exactAmount.id, fuzzyText.id]))
+  })
+
+  it('keeps exact amount search summaries independent from pagination', () => {
+    const fixture = freshFixture()
+    const bank = account(fixture, 'amount-search-summary-bank')
+    const loan = account(fixture, 'amount-search-summary-loan', {
+      name: 'Summary loan', type: 'loan', nature: 'liability',
+    })
+    const incomeCategory = firstCategory(fixture, 'income')
+    const expenseCategory = firstCategory(fixture, 'expense')
+
+    const income = transaction(fixture, 'amount-search-summary-income', {
+      type: 'income', amountMinor: 3_800, accountId: bank.id, categoryId: incomeCategory.id,
+    })
+    const expense = transaction(fixture, 'amount-search-summary-expense', {
+      type: 'expense', amountMinor: 3_800, accountId: bank.id, categoryId: expenseCategory.id,
+    })
+    const repayment = transaction(fixture, 'amount-search-summary-repayment', {
+      type: 'transfer', transferKind: 'repayment', amountMinor: 3_800,
+      fromAccountId: bank.id, toAccountId: loan.id,
+    })
+
+    const page = fixture.projections.listTransactions(query({ search: '38', limit: '1' }))
+    expect(page.transactions).toHaveLength(1)
+    expect(page.page).toMatchObject({
+      total: 3,
+      incomeMinor: 3_800,
+      expenseMinor: 3_800,
+      repaymentMinor: 3_800,
+    })
+
+    const allRows = fixture.projections.listTransactions(query({ search: '38', limit: '10' }))
+    expect(new Set(allRows.transactions.map((row) => row.id)))
+      .toEqual(new Set([income.id, expense.id, repayment.id]))
+  })
+
+  it('uses the Ledger base currency exponent and fails soft for invalid amount syntax', () => {
+    const jpyFixture = freshFixture('Asia/Shanghai', TEST_NOW, 'JPY')
+    const jpyAsset = account(jpyFixture, 'amount-search-jpy-asset')
+    const jpy38 = transaction(jpyFixture, 'amount-search-jpy-38', {
+      type: 'expense', amountMinor: 38, accountId: jpyAsset.id,
+      categoryId: firstCategory(jpyFixture, 'expense').id,
+      payee: 'JPY exact expense',
+    })
+    transaction(jpyFixture, 'amount-search-jpy-3800', {
+      type: 'expense', amountMinor: 3_800, accountId: jpyAsset.id,
+      categoryId: firstCategory(jpyFixture, 'expense').id,
+      payee: 'JPY larger expense',
+    })
+
+    expect(jpyFixture.projections.listTransactions(query({ search: '38' })).transactions)
+      .toEqual([jpy38])
+    expect(jpyFixture.projections.listTransactions(query({ search: '38.00' })).transactions)
+      .toHaveLength(0)
+
+    const cnyFixture = freshFixture()
+    const cnyAsset = account(cnyFixture, 'amount-search-invalid-asset')
+    const expenseCategory = firstCategory(cnyFixture, 'expense')
+    transaction(cnyFixture, 'amount-search-invalid-row', {
+      type: 'expense', amountMinor: 5_000, accountId: cnyAsset.id,
+      categoryId: expenseCategory.id,
+      payee: 'Invalid amount fixture',
+    })
+    const invalidSyntaxes = ['1,2', '1e3', '38.123', '999999999999999999999999999']
+    for (const search of invalidSyntaxes) {
+      expect(cnyFixture.projections.listTransactions(query({ search })).transactions)
+        .toHaveLength(0)
+    }
   })
 
   it('keeps the three-field keyset order continuous across pages', () => {
