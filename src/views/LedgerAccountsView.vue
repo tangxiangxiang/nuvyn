@@ -1,18 +1,16 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
-import { NAlert, NButton, NCard, NEmpty, NList, NListItem, NModal, NNumberAnimation, NResult, NSelect, NSpin } from 'naive-ui'
+import { NButton, NCard, NEmpty, NList, NListItem, NModal, NNumberAnimation, NResult, NSelect, NSpin } from 'naive-ui'
 import LedgerFirstAccountForm from '../components/ledger/LedgerFirstAccountForm.vue'
 import LedgerAnimatedMoney from '../components/ledger/LedgerAnimatedMoney.vue'
 import LedgerPendingCreateGate from '../components/ledger/LedgerPendingCreateGate.vue'
 import LedgerAccountIcon from '../components/ledger/LedgerAccountIcon.vue'
 import { ledgerAccountTypeOptionsForNature } from '../features/ledger/accountPresentation'
-import { ledgerErrorMessage, ledgerWorkspaceReadErrorMessage } from '../features/ledger/ledgerErrors'
+import { ledgerWorkspaceReadErrorMessage } from '../features/ledger/ledgerErrors'
 import { useLedgerStore } from '../features/ledger/ledgerStore'
 
 const store = useLedgerStore()
 const createOpen = ref(false)
-const restoreId = ref<string | null>(null)
-const actionError = ref('')
 const activeAccountTypeFilter = ref<'all' | 'asset' | 'liability'>('all')
 const archivedAccountTypeFilter = ref<'all' | 'asset' | 'liability'>('all')
 const accountTypeOptions = [
@@ -66,22 +64,8 @@ function typeLabel(type: string): string {
   return typeLabels.get(type as never) ?? type
 }
 
-async function restore(id: string, version: number): Promise<void> {
-  if (restoreId.value) return
-  restoreId.value = id
-  actionError.value = ''
-  try {
-    await store.restoreAccount(id, version)
-  } catch (cause) {
-    actionError.value = ledgerErrorMessage(cause, '账户没有恢复，请刷新后重试。')
-  } finally {
-    restoreId.value = null
-  }
-}
-
 function onAccountSaved(): void {
   createOpen.value = false
-  actionError.value = ''
 }
 </script>
 
@@ -137,8 +121,6 @@ function onAccountSaved(): void {
       </NCard>
     </NModal>
     <template v-else>
-      <NAlert v-if="actionError" class="ledger-form-error" type="error" :show-icon="false" role="alert">{{ actionError }}</NAlert>
-
       <div class="ledger-account-sections">
         <NCard class="ledger-account-section" :bordered="false" size="small" aria-labelledby="ledger-active-accounts-title">
           <div class="ledger-section-heading">
@@ -183,8 +165,8 @@ function onAccountSaved(): void {
           </div>
           <NList v-if="sortedArchivedAccounts.length" class="ledger-account-list" data-testid="ledger-archived-account-list" :show-divider="false" @scroll="showScrollbarWhileScrolling">
             <NListItem v-for="account in sortedArchivedAccounts" :key="account.id" class="ledger-account-list-item">
-              <div class="ledger-account-row is-archived">
-                <RouterLink class="ledger-account-name" :to="{ name: 'ledger-account', params: { id: account.id }, query: { from: 'list' } }">
+              <RouterLink class="ledger-account-row is-archived" :to="{ name: 'ledger-account', params: { id: account.id }, query: { from: 'list' } }">
+                <span class="ledger-account-name">
                   <span class="ledger-account-icon" :class="account.nature === 'asset' ? 'is-asset' : 'is-liability'" aria-hidden="true">
                     <LedgerAccountIcon :icon="account.icon" />
                   </span>
@@ -192,14 +174,9 @@ function onAccountSaved(): void {
                     <strong>{{ account.name }}</strong>
                     <small>已归档 · {{ account.nature === 'asset' ? '资产' : '负债' }} · {{ typeLabel(account.type) }}</small>
                   </span>
-                </RouterLink>
-                <div class="ledger-row-actions">
-                  <strong class="ledger-account-balance"><LedgerAnimatedMoney :minor="account.currentBalanceMinor" :currency="account.currency" /></strong>
-                  <NButton class="ledger-secondary-button" attr-type="button" size="small" :bordered="false" :disabled="Boolean(restoreId)" @click="restore(account.id, account.version)">
-                    {{ restoreId === account.id ? '正在恢复…' : '恢复' }}
-                  </NButton>
-                </div>
-              </div>
+                </span>
+                <strong class="ledger-account-balance"><LedgerAnimatedMoney :minor="account.currentBalanceMinor" :currency="account.currency" /></strong>
+              </RouterLink>
             </NListItem>
           </NList>
           <NEmpty v-else class="ledger-archived-empty" data-testid="ledger-archived-account-empty" :show-icon="false" :description="store.archivedAccounts.value.length ? '没有符合条件的账户。' : '暂无归档账户。'" />
@@ -227,8 +204,7 @@ function onAccountSaved(): void {
 .ledger-eyebrow { margin: 0 0 7px; color: var(--accent); font-size: .7rem; font-weight: 750; letter-spacing: .1em; text-transform: uppercase; }
 .ledger-page-header h1 { margin: 0; color: var(--text-h); font-size: clamp(1.85rem, 3vw, 2.35rem); font-weight: 720; letter-spacing: -.035em; line-height: 1.16; }
 .ledger-page-header p:not(.ledger-eyebrow) { margin: 8px 0 0; color: var(--text-muted); font-size: .78rem; }
-.ledger-page-actions,
-.ledger-row-actions { display: flex; align-items: center; flex-wrap: wrap; gap: 9px; }
+.ledger-page-actions { display: flex; align-items: center; flex-wrap: wrap; gap: 9px; }
 .ledger-primary-button,
 .ledger-secondary-button { display: inline-flex; min-height: 32px; align-items: center; justify-content: center; box-sizing: border-box; padding: 6px 12px; border-radius: 7px; font: inherit; font-size: .78rem; font-weight: 650; text-decoration: none; cursor: pointer; }
 .ledger-primary-button { border: 1px solid var(--accent); background: var(--accent); color: #fff; }
@@ -356,7 +332,6 @@ function onAccountSaved(): void {
   .ledger-page-header { align-items: stretch; flex-direction: column; }
   .ledger-page-actions > * { flex: 1 1 150px; }
   .ledger-account-row { align-items: flex-start; flex-direction: column; }
-  .ledger-row-actions { width: 100%; justify-content: space-between; }
   .ledger-account-section :deep(.n-card__content) { padding: 16px 13px; }
   .ledger-account-sections { grid-template-columns: 1fr; }
   .ledger-account-create-modal-card { width: calc(100vw - 24px); max-height: 92vh; }

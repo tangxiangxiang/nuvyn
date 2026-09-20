@@ -17,7 +17,6 @@ const api = vi.hoisted(() => ({
   getLedgerOverview: vi.fn(),
   listLedgerTransactions: vi.fn(),
   createLedgerAccount: vi.fn(),
-  restoreLedgerAccount: vi.fn(),
 }))
 
 vi.mock('../../features/ledger/api', () => api)
@@ -120,6 +119,10 @@ describe('Ledger account management list', () => {
     expect(wrapper.get('[data-testid="ledger-account-row-credit-card-1"] .ledger-account-icon').classes()).toContain('is-liability')
     expect(wrapper.get('[data-testid="ledger-archived-account-list"]').text()).toContain('old-bank')
     expect(wrapper.get('[data-testid="ledger-archived-account-list"]').text()).toContain('old-credit-card')
+    const archivedRows = wrapper.get('[data-testid="ledger-archived-account-list"]').findAll('.ledger-account-row')
+    expect(archivedRows).toHaveLength(2)
+    expect(archivedRows.every((row) => row.element.tagName === 'A')).toBe(true)
+    expect(wrapper.get('[data-testid="ledger-archived-account-list"]').findAll('button')).toHaveLength(0)
     expect(wrapper.findAll('button').some((button) => button.text() === '删除')).toBe(false)
   })
 
@@ -171,20 +174,4 @@ describe('Ledger account management list', () => {
     expect(wrapper.get('[data-testid="ledger-active-account-list"]').text()).toContain('cash-1')
   })
 
-  it('restores an archived account through its versioned lifecycle endpoint', async () => {
-    setup([account('old-bank', 10)])
-    const nextRouter = router()
-    await nextRouter.push('/ledger/accounts')
-    await nextRouter.isReady()
-    const wrapper = mount(LedgerAccountsView, { global: { plugins: [nextRouter] } })
-    wrappers.push(wrapper)
-    await flushPromises()
-
-    api.restoreLedgerAccount.mockResolvedValue(account('old-bank'))
-    api.listLedgerAccounts.mockResolvedValue([account('old-bank')])
-    await wrapper.get('[data-testid="ledger-archived-account-list"] button').trigger('click')
-    await flushPromises()
-
-    expect(api.restoreLedgerAccount).toHaveBeenCalledWith('old-bank', 1)
-  })
 })
