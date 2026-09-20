@@ -6,11 +6,16 @@ type LedgerTransaction = {
   type: string
   amountMinor: number
   deletedAt: number | null
+  excludedFromStatistics: boolean
 }
 
 type LedgerTransactionPage = {
   transactions: LedgerTransaction[]
-  page: { nextCursor: string | null }
+  page: {
+    nextCursor: string | null
+    total?: number
+    statisticsExcludedCount?: number
+  }
 }
 
 type LedgerAccount = {

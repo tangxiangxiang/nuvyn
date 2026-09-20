@@ -2,6 +2,7 @@
 import { DOMWrapper, flushPromises, mount, type VueWrapper } from '@vue/test-utils'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { createMemoryHistory, createRouter } from 'vue-router'
+import { nextTick } from 'vue'
 import { NDataTable, NPagination } from 'naive-ui'
 import type {
   LedgerAccountDto,
@@ -42,6 +43,7 @@ const api = vi.hoisted(() => ({
   getLedgerTransaction: vi.fn(),
   patchLedgerTransaction: vi.fn(),
   deleteLedgerTransaction: vi.fn(),
+  setLedgerTransactionStatisticsExcluded: vi.fn(),
 }))
 const confirm = vi.hoisted(() => vi.fn())
 
@@ -114,6 +116,7 @@ const archivedCategory = category('old-food', 'expense', '旧餐饮', 20)
 
 const expense: LedgerTransactionDto = {
   id: 'tx-expense',
+  excludedFromStatistics: false,
   type: 'expense',
   amountMinor: 3_800,
   accountId: activeAccount.id,
@@ -129,6 +132,7 @@ const expense: LedgerTransactionDto = {
 
 const income: LedgerTransactionDto = {
   id: 'tx-income',
+  excludedFromStatistics: false,
   type: 'income',
   amountMinor: 20_000,
   accountId: activeAccount.id,
@@ -144,6 +148,7 @@ const income: LedgerTransactionDto = {
 
 const transfer: LedgerTransactionDto = {
   id: 'tx-transfer',
+  excludedFromStatistics: false,
   type: 'transfer',
   transferKind: 'general',
   amountMinor: 5_000,
@@ -160,6 +165,7 @@ const transfer: LedgerTransactionDto = {
 
 const adjustment: LedgerTransactionDto = {
   id: 'tx-adjustment',
+  excludedFromStatistics: false,
   type: 'adjustment',
   amountMinor: 2_000,
   accountId: activeAccount.id,
@@ -184,6 +190,7 @@ const withdrawalFee: LedgerTransactionDto = {
 
 const withdrawal: LedgerTransactionDto = {
   id: 'tx-withdrawal',
+  excludedFromStatistics: false,
   groupId: withdrawalFee.groupId,
   type: 'transfer',
   transferKind: 'withdrawal',
@@ -210,6 +217,7 @@ const repaymentInterest: LedgerTransactionDto = {
 
 const repayment: LedgerTransactionDto = {
   id: 'tx-repayment',
+  excludedFromStatistics: false,
   groupId: repaymentInterest.groupId,
   type: 'transfer',
   transferKind: 'repayment',
@@ -266,6 +274,10 @@ function setup(
   api.getLedgerTransaction.mockResolvedValue(expense)
   api.patchLedgerTransaction.mockResolvedValue({ ...expense, note: '已更新', version: 4 })
   api.deleteLedgerTransaction.mockResolvedValue({ ...expense, deletedAt: 30, version: 4 })
+  api.setLedgerTransactionStatisticsExcluded.mockResolvedValue({
+    transactionId: expense.id,
+    excludedFromStatistics: true,
+  })
   api.restoreLedgerAccount.mockResolvedValue(activeAccount)
   confirm.mockResolvedValue(true)
 }
@@ -281,7 +293,7 @@ async function mountView(path = '/ledger/transactions'): Promise<VueWrapper> {
   })
   await nextRouter.push(path)
   await nextRouter.isReady()
-  const wrapper = mount(LedgerTransactionsView, { global: { plugins: [nextRouter] } })
+  const wrapper = mount(LedgerTransactionsView, { attachTo: document.body, global: { plugins: [nextRouter] } })
   wrappers.push(wrapper)
   await flushPromises()
   return wrapper
@@ -494,6 +506,132 @@ describe('Ledger live transaction history workspace', () => {
     expect(wrapper.get('[data-testid="ledger-transaction-row-tx-repayment"] .ledger-transaction-type').classes()).toContain('is-repayment')
     expect(wrapper.get('[data-testid="ledger-transaction-row-tx-repayment"] .ledger-transaction-amount').classes()).toContain('is-repayment')
     expect(wrapper.get('[data-testid="ledger-transaction-row-tx-repayment"] .ledger-transaction-type').classes()).not.toContain('is-transfer')
+  })
+
+  it('keeps excluded rows visible and lets the context menu restore them', async () => {
+    const excludedExpense = { ...expense, id: 'tx-excluded-expense', excludedFromStatistics: true }
+    const initialPage: LedgerTransactionPageDto = {
+      transactions: [expense, excludedExpense, transfer, adjustment],
+      page: {
+        nextCursor: null,
+        total: 4,
+        incomeMinor: income.amountMinor,
+        expenseMinor: expense.amountMinor,
+        repaymentMinor: 0,
+        statisticsExcludedCount: 1,
+      },
+    }
+    const excludedPage: LedgerTransactionPageDto = {
+      ...initialPage,
+      transactions: [{ ...expense, excludedFromStatistics: true }, excludedExpense, transfer, adjustment],
+      page: { ...initialPage.page, expenseMinor: 0, statisticsExcludedCount: 2 },
+    }
+    const restoredPage: LedgerTransactionPageDto = {
+      ...initialPage,
+      transactions: [expense, { ...excludedExpense, excludedFromStatistics: false }, transfer, adjustment],
+      page: { ...initialPage.page, expenseMinor: expense.amountMinor, statisticsExcludedCount: 1 },
+    }
+    setup(initialPage)
+    const wrapper = await mountView()
+    expect(wrapper.get('.ledger-history-summary').text()).not.toContain('已排除')
+    expect(wrapper.get('.ledger-pagination-summary').text()).toContain('已排除 1 笔')
+    expect(wrapper.get('[data-testid="ledger-transaction-row-tx-excluded-expense"]').classes())
+      .toContain('is-statistics-excluded')
+    const row = wrapper.get('[data-testid="ledger-transaction-row-tx-expense"]')
+    await row.trigger('contextmenu', { clientX: 40, clientY: 40 })
+    await flushPromises()
+
+    let menuElement = document.body.querySelector<HTMLElement>('[role="menu"]')
+    expect(menuElement).not.toBeNull()
+    let menu = new DOMWrapper(menuElement!)
+    expect(menu.text()).toContain('查看详情')
+    expect(menu.text()).toContain('不计入统计')
+    expect(document.body.querySelector('.ledger-detail-sheet')).toBeNull()
+
+    api.listLedgerTransactions.mockResolvedValue(excludedPage)
+    api.setLedgerTransactionStatisticsExcluded.mockResolvedValue({
+      transactionId: expense.id,
+      excludedFromStatistics: true,
+    })
+    await menu.findAll('button').find((button) => button.text() === '不计入统计')!.trigger('click')
+    await flushPromises()
+    expect(api.setLedgerTransactionStatisticsExcluded).toHaveBeenCalledWith(expense.id, true)
+    expect(wrapper.get('[data-testid="ledger-transaction-row-tx-expense"]').text()).not.toContain('不计统计')
+    expect(wrapper.get('[data-testid="ledger-transaction-row-tx-expense"]').classes())
+      .toContain('is-statistics-excluded')
+    expect(wrapper.get('.ledger-history-summary').text()).not.toContain('已排除')
+    expect(wrapper.get('.ledger-pagination-summary').text()).toContain('已排除 2 笔')
+
+    const excludedRow = wrapper.get('[data-testid="ledger-transaction-row-tx-excluded-expense"]')
+    await excludedRow.trigger('contextmenu', { clientX: 40, clientY: 40 })
+    await flushPromises()
+    menuElement = document.body.querySelector<HTMLElement>('[role="menu"]')
+    expect(menuElement).not.toBeNull()
+    menu = new DOMWrapper(menuElement!)
+    expect(menu.text()).toContain('恢复计入统计')
+    expect(menu.text()).not.toContain('不计入统计')
+
+    api.listLedgerTransactions.mockResolvedValue(restoredPage)
+    api.setLedgerTransactionStatisticsExcluded.mockResolvedValue({
+      transactionId: excludedExpense.id,
+      excludedFromStatistics: false,
+    })
+    await menu.findAll('button').find((button) => button.text() === '恢复计入统计')!.trigger('click')
+    await flushPromises()
+    expect(api.setLedgerTransactionStatisticsExcluded).toHaveBeenCalledWith(excludedExpense.id, false)
+    expect(wrapper.get('[data-testid="ledger-transaction-row-tx-excluded-expense"]').text()).not.toContain('不计统计')
+    expect(wrapper.get('[data-testid="ledger-transaction-row-tx-excluded-expense"]').classes())
+      .not.toContain('is-statistics-excluded')
+    expect(wrapper.get('.ledger-pagination-summary').text()).toContain('已排除 1 笔')
+  })
+
+  it('opens the transaction menu from keyboard and only exposes exclusion for eligible rows', async () => {
+    setup({ transactions: [expense, transfer, withdrawal, adjustment], page: { nextCursor: null, total: 4 } }, [activeAccount, archivedAccount, walletAccount])
+    const wrapper = await mountView()
+    expect(wrapper.get('.ledger-pagination-summary').text()).not.toContain('已排除')
+    const expenseRow = wrapper.get('[data-testid="ledger-transaction-row-tx-expense"]')
+    const expenseRowElement = expenseRow.element as HTMLElement
+    expenseRowElement.focus()
+    await expenseRow.trigger('keydown', { key: 'F10', shiftKey: true })
+    await flushPromises()
+
+    let menuElement = document.body.querySelector<HTMLElement>('[role="menu"]')
+    expect(menuElement).not.toBeNull()
+    expect(new DOMWrapper(menuElement!).findAll('[role="menuitem"]').map((item) => item.text())).toEqual([
+      '查看详情',
+      '不计入统计',
+    ])
+    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))
+    await flushPromises()
+    await nextTick()
+    expect(document.body.querySelector('[role="menu"]')).toBeNull()
+    expect(document.activeElement).toBe(wrapper.get('[data-testid="ledger-transaction-row-tx-expense"]').element)
+
+    await wrapper.get('[data-testid="ledger-transaction-row-tx-transfer"]').trigger('keydown', { key: 'ContextMenu' })
+    await flushPromises()
+    menuElement = document.body.querySelector<HTMLElement>('[role="menu"]')
+    expect(menuElement).not.toBeNull()
+    expect(new DOMWrapper(menuElement!).text()).not.toContain('不计入统计')
+    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))
+    await flushPromises()
+
+    await wrapper.get('[data-testid="ledger-transaction-row-tx-adjustment"]').trigger('contextmenu', { clientX: 40, clientY: 40 })
+    await flushPromises()
+    menuElement = document.body.querySelector<HTMLElement>('[role="menu"]')
+    expect(menuElement).not.toBeNull()
+    expect(new DOMWrapper(menuElement!).text()).toBe('查看详情')
+  })
+
+  it('shows the exclusion state in the shared transaction detail sheet', async () => {
+    const excludedExpense = { ...expense, excludedFromStatistics: true }
+    setup({ transactions: [excludedExpense], page: { nextCursor: null, total: 1, statisticsExcludedCount: 1 } })
+    const wrapper = await mountView()
+
+    await wrapper.get('[data-testid="ledger-transaction-row-tx-expense"]').trigger('click')
+    await flushPromises()
+
+    expect(getDetail().get('[data-testid="ledger-statistics-exclusion-hint"]').text())
+      .toContain('账户余额和真实资金变化不受影响')
   })
 
   it('shows a purposeful empty state for a filtered result', async () => {

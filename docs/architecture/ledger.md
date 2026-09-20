@@ -20,7 +20,7 @@ Ledger → What happens to my money
 - src/features/ledger/：API client、store、金额/时间适配、错误和新建恢复。
 - src/components/ledger/：初始化、账户、交易表单、统一交易详情、图标和选择器渲染。
 - src/views/LedgerView.vue、LedgerTransactionsView.vue、LedgerAccountsView.vue、LedgerAccountDetailView.vue：四个页面级入口。
-- server/migrations/0013_* 至 0029_*：Ledger SQLite schema 演进。
+- server/migrations/0013_* 至 0035_*：Ledger SQLite schema 演进。
 
 ## 2. Domain Model
 
@@ -105,6 +105,14 @@ read visibility 不等于 independent mutation ownership：companion Expense 不
 
 companion Expense 的 payee 是写入 `ledger_transactions.payee`、并在交易发生时固定下来的 snapshot：withdrawal fee 使用 `${fromAccount.name}提现手续费`，repayment interest 使用 `${toAccount.name}还款利息`。账户改名不会修改已有 snapshot。普通的 note、location、amount、feeMinor 或 feeMode 修改也保留现有 payee；只有 transferKind、fromAccountId 或 toAccountId 真正改变交易 identity 时，才根据新的交易事实重新生成 snapshot。
 
+## 6.1 Statistics Exclusion
+
+“不计入统计”是持久化、可逆的 analytics sidecar，不是 `LedgerTransaction` 的财务字段。`ledger_transaction_statistics_exclusions` 以 `transaction_id` 关联交易；存在 row 表示排除，不存在表示计入。它不修改 amount、类型、账户关系、时间、删除状态、version 或 updatedAt，且通过外键随交易物理删除级联清理。
+
+只有 `income`、`expense` 和 `transfer + repayment` 允许设置 exclusion。普通 transfer、withdrawal、Adjustment 原本就不进入 income / expense / repayment 指标，因此服务端拒绝对它们设置 exclusion；还款 parent 与利息 companion Expense 则按 atomic row 独立控制。查询 rows、search、total、pagination、账户余额、账户 movement、running balance 和 account trend 不受影响；transaction summary、cashflow、category breakdown、period summary、12 个月 trend 和 `/trend` 会从匹配全集中排除 eligible sidecar rows，并返回完整筛选集的 `statisticsExcludedCount`。
+
+Transactions 页面通过右键、Shift+F10 或 ContextMenu key 提供“不计入统计 / 恢复计入统计”入口。排除记录仍显示并带有“不计统计”标记；详情 sheet 只展示状态说明，不复制 mutation 入口。PUT/DELETE set-state endpoint 天然幂等，成功后前端从服务端刷新 projection。
+
 ## 10. Transaction Query & Pagination
 
 transaction query 支持 type、accountId、categoryId、groupId、from、to、search、includeDeleted、limit、cursor 和 offset。cursor 是按 occurredAt、createdAt、id 排序的 keyset cursor；offset 供页码式读取使用，两者不能同时提供。服务端默认 limit 为 50，最大为 200。全局交易列表的 page summary 由同一组筛选条件在 repository 中聚合完整结果，包含 total、incomeMinor、expenseMinor 和 repaymentMinor；repaymentMinor 只统计 transfer + repayment 的本金。
@@ -170,11 +178,11 @@ POST settings、accounts、categories 和 transactions 通过 operation scope、
 
 页面 canonical routes 是 /ledger、/ledger/transactions、/ledger/accounts 和 /ledger/accounts/:id。旧 /bills、/bills/transactions 只在 router 层重定向到相应 Ledger 页面。
 
-API 以 /api/ledger 为前缀，包含 settings、accounts、categories、transactions、overview 和 trend；账户还提供 /:id/transactions、/:id/balance-trend、/:id/adjust、archive 和 restore。账户详情的最近流水、服务端计算的逐笔余额、余额趋势和 `hasHistory` 由服务端 projection 提供。`hasHistory` 直接来自 `repository.hasAccountHistory(accountId)`，表示持久化交易表中是否曾经有任何交易引用该账户，包括 soft-deleted transaction；它不受最近流水分页、`includeDeleted` 默认值或当前页面是否为空影响。Ledger route 统一使用 no-store，并继承服务端 owner-auth 边界。
+API 以 /api/ledger 为前缀，包含 settings、accounts、categories、transactions、overview 和 trend；账户还提供 /:id/transactions、/:id/balance-trend、/:id/adjust、archive 和 restore。交易还提供 `PUT/DELETE /transactions/:id/statistics-exclusion`，用于设置或恢复 analytics sidecar，不要求 Idempotency-Key 或 expectedVersion。账户详情的最近流水、服务端计算的逐笔余额、余额趋势和 `hasHistory` 由服务端 projection 提供。`hasHistory` 直接来自 `repository.hasAccountHistory(accountId)`，表示持久化交易表中是否曾经有任何交易引用该账户，包括 soft-deleted transaction；它不受最近流水分页、`includeDeleted` 默认值或当前页面是否为空影响。Ledger route 统一使用 no-store，并继承服务端 owner-auth 边界。
 
 ## 14. Schema Evolution
 
-当前仓库 Ledger schema version 为 29，迁移顺序如下：
+当前仓库 Ledger schema version 为 35，迁移顺序如下：
 
 ~~~text
 0013_ledger_foundation
@@ -194,9 +202,17 @@ API 以 /api/ledger 为前缀，包含 settings、accounts、categories、transa
 0027_ledger_default_category_catalog
 0028_ledger_transfer_payee
 0029_ledger_companion_payees
+0030_asset_foundation
+0031_board_foundation
+0032_board_last_opened_at
+0033_board_folders
+0034_board_materials
+0035_ledger_transaction_statistics_exclusions
 ~~~
 
 `0029_ledger_companion_payees` 回填历史 repayment / withdrawal companion Expense 的 payee。它只处理明确的 legacy representation（空 payee，以及 repayment 中只保存 destination name 的旧格式），不覆盖已经存在的历史 snapshot；只有实际被修改的 row 才递增 version。
+
+当前仓库已经有 0030–0034 的其他模块迁移，因此 Statistics Exclusion 使用新的 0035，不回写已执行 migration。
 
 后续 schema 变更必须新增迁移，不应回写已执行文件；领域字段仍需同步 shared protocol、repository、service、projection 和测试。
 
@@ -210,6 +226,7 @@ API 以 /api/ledger 为前缀，包含 settings、accounts、categories、transa
 - companion Expense 对 transaction query / transaction list read model 可见；某些 Overview projection 可以按产品语义折叠或隐藏它，但它不拥有独立 mutation ownership。
 - composite group 的写入、修改和删除保持原子性。
 - search 同时覆盖持久化 transaction fields、结构化账户/分类关系、presentation type vocabulary 和按 baseCurrency 解析的精确金额语义。
+- Statistics Exclusion 是独立 sidecar：rows / pagination / accounting truth 与 analytics inclusion 分离；parent repayment 与 companion Expense 可独立排除，且 exclusion 不递增 transaction version 或 updatedAt。
 - 服务端拥有账户性质、transfer kind、货币、时间和生命周期校验。
 - Entity mutation 遵循 expectedVersion；create 遵循幂等重放。
 

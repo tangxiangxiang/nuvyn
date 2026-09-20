@@ -33,6 +33,7 @@ import type {
   LedgerTransferBundleSummary,
   LedgerTrendPoint,
 } from '../../shared/ledgerProtocol.js'
+import { ledgerTransactionContributesToStatistics } from '../../shared/ledgerAnalytics.js'
 import {
   deriveCurrentBalance,
   transactionEffectForAccount,
@@ -108,6 +109,7 @@ interface AccountProjectionState {
 interface ProjectedTransactionPage {
   readonly rows: readonly LedgerTransaction[]
   readonly page: LedgerPageInfo
+  readonly excludedIds: ReadonlySet<string>
 }
 
 function notFound(entity: string): never {
@@ -120,10 +122,14 @@ function projectionInvariant(message: string): never {
   throw new Error(`Ledger projection invariant violated: ${message}`)
 }
 
-function transactionDto(transaction: LedgerTransaction): LedgerTransactionDto {
+function transactionDto(
+  transaction: LedgerTransaction,
+  excludedFromStatistics: boolean,
+): LedgerTransactionDto {
   const base = {
     id: transaction.id,
     ...(transaction.groupId ? { groupId: transaction.groupId } : {}),
+    excludedFromStatistics,
     amountMinor: transaction.amountMinor,
     occurredAt: transaction.occurredAt,
     location: transaction.location,
@@ -225,6 +231,16 @@ function cashflowForTransactions(transactions: readonly LedgerTransaction[]): Le
     repaymentMinor,
     balanceMinor: checkedSubMinor(incomeMinor, expenseMinor),
   }
+}
+
+function statisticsTransactions(
+  transactions: readonly LedgerTransaction[],
+  excludedIds: ReadonlySet<string>,
+): readonly LedgerTransaction[] {
+  return transactions.filter((transaction) => !(
+    excludedIds.has(transaction.id)
+    && ledgerTransactionContributesToStatistics(transaction)
+  ))
 }
 
 function categorySlicesForTransactions(
@@ -459,6 +475,7 @@ export function createLedgerProjections(
   ): ProjectedTransactionPage {
     const queryOptions = normalizeTransactionQuery(query, currency)
     const rows = repository.queryTransactions(queryOptions)
+    const excludedIds = new Set(repository.listStatisticsExcludedTransactionIds())
     const summary = pageOptions.includeSummary === false
       ? null
       : repository.summarizeTransactions(queryOptions)
@@ -473,11 +490,15 @@ export function createLedgerProjections(
           : null,
         ...(summary ?? {}),
       },
+      excludedIds,
     }
   }
 
-  function transactionDtoWithBundle(transaction: LedgerTransaction): LedgerTransactionDto {
-    const dto = transactionDto(transaction)
+  function transactionDtoWithBundle(
+    transaction: LedgerTransaction,
+    excludedIds: ReadonlySet<string>,
+  ): LedgerTransactionDto {
+    const dto = transactionDto(transaction, excludedIds.has(transaction.id))
     if (transaction.type !== 'transfer' || transaction.groupId === undefined) return dto
     const chargeMinor = checkedSumMinor(
       repository
@@ -507,7 +528,7 @@ export function createLedgerProjections(
     const settings = requireSettings()
     const page = transactionPage(query, settings.baseCurrency)
     return {
-      transactions: page.rows.map(transactionDtoWithBundle),
+      transactions: page.rows.map((transaction) => transactionDtoWithBundle(transaction, page.excludedIds)),
       page: page.page,
     }
   }
@@ -542,7 +563,7 @@ export function createLedgerProjections(
         balanceMinor: balancesByTransactionId.get(transaction.id)
           ?? projectionInvariant(`missing balance for transaction ${transaction.id}`),
       })),
-      transactions: page.rows.map(transactionDtoWithBundle),
+      transactions: page.rows.map((transaction) => transactionDtoWithBundle(transaction, page.excludedIds)),
       page: page.page,
     }
   }
@@ -623,6 +644,7 @@ export function createLedgerProjections(
     const allTransactions = scope === 'all'
       ? repository.listActiveTransactionsInRange({ to: fixedPeriods.today.endMs })
       : null
+    const excludedIds = new Set(repository.listStatisticsExcludedTransactionIds())
 
     const assetTotalMinor = checkedSumMinor(
       accountStates
@@ -641,6 +663,8 @@ export function createLedgerProjections(
         transaction.occurredAt,
         fixedPeriods[scope],
       ))
+    const analyticsPeriodTransactions = statisticsTransactions(periodTransactions, excludedIds)
+    const analyticsScopedTransactions = statisticsTransactions(scopedTransactions, excludedIds)
     const month = monthRange(nowMs, settings.timezone)
 
     const accounts: readonly LedgerAccountSummary[] = activeAccounts.map((state) => ({
@@ -661,17 +685,17 @@ export function createLedgerProjections(
       liabilityTotalMinor,
       netWorthMinor: checkedSubMinor(assetTotalMinor, liabilityTotalMinor),
       accounts,
-      cashflow: cashflowForTransactions(scopedTransactions),
-      categoryBreakdown: categorySlicesForTransactions(scopedTransactions, categories),
+      cashflow: cashflowForTransactions(analyticsScopedTransactions),
+      categoryBreakdown: categorySlicesForTransactions(analyticsScopedTransactions, categories),
       periods: PERIOD_ORDER.map((period) => periodSummary(
         period,
         fixedPeriods[period],
-        periodTransactions,
+        analyticsPeriodTransactions,
       )),
-      trend: trendForRanges(trendRanges, periodTransactions),
+      trend: trendForRanges(trendRanges, analyticsPeriodTransactions),
       recentTransactions: repository
         .listRecentActiveTransactionsBefore(fixedPeriods.today.endMs, RECENT_TRANSACTION_LIMIT)
-        .map(transactionDtoWithBundle),
+        .map((transaction) => transactionDtoWithBundle(transaction, excludedIds)),
     }
   }
 
@@ -685,9 +709,10 @@ export function createLedgerProjections(
     if (resolvedAnchorDate > todayDate) {
       throw new LedgerError('ledger-validation-failed', 400, 'anchorDate cannot be in the future', { field: 'anchorDate' })
     }
+    const excludedIds = new Set(repository.listStatisticsExcludedTransactionIds())
     return trendForRanges(
       calendarMonthRangesForLocalDate(months, resolvedAnchorDate, settings.timezone),
-      repository.listActiveTransactions(),
+      statisticsTransactions(repository.listActiveTransactions(), excludedIds),
     )
   }
 

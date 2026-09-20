@@ -95,6 +95,7 @@ const category: LedgerCategoryDto = {
 const expense: LedgerTransactionDto = {
   id: 'tx-1',
   type: 'expense',
+  excludedFromStatistics: false,
   amountMinor: 3_800,
   accountId: 'bank-1',
   categoryId: 'food',

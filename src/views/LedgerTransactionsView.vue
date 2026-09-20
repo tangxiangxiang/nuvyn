@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, h, onBeforeUnmount, onMounted, ref } from 'vue'
+import { computed, h, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useMediaQuery } from '@vueuse/core'
 import {
   NAlert,
@@ -27,6 +27,7 @@ import type {
   LedgerTransactionFilterType,
   LedgerTransactionQuery,
 } from '../../shared/ledgerProtocol'
+import { ledgerTransactionContributesToStatistics } from '../../shared/ledgerAnalytics'
 import LedgerTransactionDetailSheet from '../components/ledger/LedgerTransactionDetailSheet.vue'
 import LedgerPendingCreateGate from '../components/ledger/LedgerPendingCreateGate.vue'
 import LedgerTransactionSheet from '../components/ledger/LedgerTransactionSheet.vue'
@@ -34,12 +35,14 @@ import { ledgerErrorMessage } from '../features/ledger/ledgerErrors'
 import { formatLedgerDateTime, formatLedgerTransactionDateTime, instantFromLedgerDate } from '../features/ledger/time'
 import { ledgerTransactionPresentationKind } from '../features/ledger/presentation'
 import { useLedgerStore } from '../features/ledger/ledgerStore'
+import { useToast } from '../composables/useToast'
 import { ledgerSelectNodeProps } from '../features/ledger/naiveControls'
 import LedgerDatePicker from '../components/ledger/LedgerDatePicker.vue'
 import LedgerAnimatedMoney from '../components/ledger/LedgerAnimatedMoney.vue'
 import { ledgerAccountSelectOptions, renderLedgerAccountLabel, renderLedgerCategoryLabel } from '../components/ledger/ledgerSelectRenderers'
 
 const store = useLedgerStore()
+const toast = useToast()
 const route = useRoute()
 const desktopTableFlexHeight = useMediaQuery('(min-width: 651px)')
 const transactionSheetOpen = ref(false)
@@ -58,6 +61,31 @@ const paginationLoading = ref(false)
 const filterError = ref('')
 const tablePage = ref(1)
 const tablePageSize = ref(25)
+
+type TransactionContextMenuAction = 'view' | 'exclude' | 'restore'
+const contextMenuOpen = ref(false)
+const contextMenuTransaction = ref<LedgerTransactionDto | null>(null)
+const contextMenuPosition = ref({ left: 0, top: 0 })
+const contextMenuPending = ref(false)
+const contextMenuElement = ref<HTMLElement | null>(null)
+const contextMenuItemElements = ref<HTMLElement[]>([])
+let contextMenuSource: HTMLElement | null = null
+let contextMenuSourceTestId: string | null = null
+let contextMenuGeneration = 0
+
+const contextMenuItems = computed<readonly { action: TransactionContextMenuAction; label: string }[]>(() => {
+  const transaction = contextMenuTransaction.value
+  if (!transaction) return []
+  return [
+    { action: 'view', label: '查看详情' },
+    ...(ledgerTransactionContributesToStatistics(transaction)
+      ? [{
+          action: transaction.excludedFromStatistics ? 'restore' as const : 'exclude' as const,
+          label: transaction.excludedFromStatistics ? '恢复计入统计' : '不计入统计',
+        }]
+      : []),
+  ]
+})
 
 const typeOptions: SelectOption[] = [
   { value: 'all', label: '全部类型' },
@@ -109,6 +137,159 @@ const resultSummary = computed(() => ({
     .filter((transaction) => ledgerTransactionPresentationKind(transaction) === 'repayment')
     .reduce((total, transaction) => total + transaction.amountMinor, 0),
 }))
+const statisticsExcludedCount = computed(() => page.value?.page.statisticsExcludedCount ?? 0)
+
+function resolveContextMenuElement(value: unknown): HTMLElement | null {
+  if (value instanceof HTMLElement) return value
+  if (!value || typeof value !== 'object') return null
+  const root = (value as { $el?: unknown }).$el
+  return root instanceof HTMLElement ? root : null
+}
+
+function setContextMenuElement(value: unknown): void {
+  contextMenuElement.value = resolveContextMenuElement(value)
+}
+
+function setContextMenuItemElement(value: unknown, index: number): void {
+  const element = resolveContextMenuElement(value)
+  if (element) contextMenuItemElements.value[index] = element
+  else delete contextMenuItemElements.value[index]
+}
+
+function positionContextMenu(): void {
+  const element = contextMenuElement.value
+  if (!element) return
+  const margin = 8
+  const rect = element.getBoundingClientRect()
+  contextMenuPosition.value = {
+    left: Math.max(margin, Math.min(contextMenuPosition.value.left, window.innerWidth - margin - rect.width)),
+    top: Math.max(margin, Math.min(contextMenuPosition.value.top, window.innerHeight - margin - rect.height)),
+  }
+}
+
+function focusContextMenuItem(index: number): void {
+  contextMenuItemElements.value[index]?.focus()
+}
+
+function firstContextMenuItem(): void {
+  focusContextMenuItem(0)
+}
+
+function closeContextMenu(restoreFocus = false): void {
+  contextMenuGeneration += 1
+  const source = contextMenuSource
+  const sourceTestId = contextMenuSourceTestId
+  contextMenuOpen.value = false
+  contextMenuTransaction.value = null
+  contextMenuItemElements.value = []
+  contextMenuPending.value = false
+  contextMenuSource = null
+  contextMenuSourceTestId = null
+  removeContextMenuListeners()
+  if (restoreFocus) {
+    void nextTick(() => {
+      const target = source && source.isConnected
+        ? source
+        : sourceTestId === null
+          ? null
+          : Array.from(document.querySelectorAll<HTMLElement>('.ledger-transaction-row'))
+            .find((row) => row.dataset.testid === sourceTestId) ?? null
+      target?.focus()
+    })
+  }
+}
+
+function removeContextMenuListeners(): void {
+  document.removeEventListener('pointerdown', onContextMenuOutsidePointerDown, true)
+  document.removeEventListener('keydown', onContextMenuKeydown)
+  window.removeEventListener('resize', closeContextMenuWithoutFocus)
+  window.removeEventListener('scroll', closeContextMenuWithoutFocus, true)
+}
+
+function addContextMenuListeners(): void {
+  document.addEventListener('pointerdown', onContextMenuOutsidePointerDown, true)
+  document.addEventListener('keydown', onContextMenuKeydown)
+  window.addEventListener('resize', closeContextMenuWithoutFocus)
+  window.addEventListener('scroll', closeContextMenuWithoutFocus, true)
+}
+
+function closeContextMenuWithoutFocus(): void {
+  closeContextMenu(false)
+}
+
+function openContextMenu(
+  transaction: LedgerTransactionDto,
+  x: number,
+  y: number,
+  source: HTMLElement,
+): void {
+  const generation = ++contextMenuGeneration
+  removeContextMenuListeners()
+  contextMenuTransaction.value = transaction
+  contextMenuSource = source
+  contextMenuSourceTestId = source.dataset.testid ?? null
+  contextMenuPosition.value = { left: x, top: y }
+  contextMenuOpen.value = true
+  void nextTick(() => {
+    if (generation !== contextMenuGeneration || !contextMenuOpen.value) return
+    positionContextMenu()
+    firstContextMenuItem()
+    addContextMenuListeners()
+  })
+}
+
+function onContextMenuOutsidePointerDown(event: PointerEvent): void {
+  if (!contextMenuElement.value?.contains(event.target as Node)) closeContextMenu(false)
+}
+
+function moveContextMenuFocus(direction: 1 | -1): void {
+  const length = contextMenuItems.value.length
+  if (length === 0) return
+  const activeIndex = contextMenuItemElements.value.findIndex((element) => element === document.activeElement)
+  const nextIndex = (Math.max(0, activeIndex) + direction + length) % length
+  focusContextMenuItem(nextIndex)
+}
+
+function onContextMenuKeydown(event: KeyboardEvent): void {
+  if (!contextMenuOpen.value) return
+  if (event.key === 'Escape' || event.key === 'Tab') {
+    event.preventDefault()
+    closeContextMenu(true)
+  } else if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
+    event.preventDefault()
+    moveContextMenuFocus(event.key === 'ArrowDown' ? 1 : -1)
+  } else if (event.key === 'Home' || event.key === 'End') {
+    event.preventDefault()
+    focusContextMenuItem(event.key === 'Home' ? 0 : contextMenuItems.value.length - 1)
+  } else if (event.key === 'Enter' || event.key === ' ') {
+    event.preventDefault()
+    const activeIndex = contextMenuItemElements.value.findIndex((element) => element === document.activeElement)
+    const item = contextMenuItems.value[activeIndex]
+    if (item) void activateContextMenuAction(item.action)
+  }
+}
+
+async function activateContextMenuAction(action: TransactionContextMenuAction): Promise<void> {
+  const transaction = contextMenuTransaction.value
+  if (!transaction || contextMenuPending.value) return
+  if (action === 'view') {
+    closeContextMenu(false)
+    inspect(transaction)
+    return
+  }
+  if (!ledgerTransactionContributesToStatistics(transaction)) return
+  contextMenuPending.value = true
+  const excluded = action === 'exclude'
+  closeContextMenu(true)
+  try {
+    await store.setTransactionStatisticsExcluded(transaction.id, excluded)
+    toast.success(excluded ? '已设为不计入统计' : '已恢复计入统计')
+  } catch (cause) {
+    toast.error(ledgerErrorMessage(cause, excluded ? '交易没有排除，请刷新后重试。' : '交易没有恢复统计，请刷新后重试。'))
+  } finally {
+    contextMenuPending.value = false
+  }
+}
 
 function queryValue(value: unknown): string {
   return typeof value === 'string' ? value : ''
@@ -342,7 +523,15 @@ async function reconcilePageAfterMutation(): Promise<void> {
   if (tablePage.value > maxPage) await loadTransactions(maxPage)
 }
 
+watch(
+  [filterType, filterAccountId, filterCategoryId, filterFrom, filterTo, filterSearch, tablePage, tablePageSize],
+  () => {
+    if (contextMenuOpen.value) closeContextMenu(false)
+  },
+)
+
 onBeforeUnmount(() => {
+  closeContextMenu(false)
   document.body.classList.remove('ledger-transactions-mode')
   document.documentElement.classList.remove('ledger-transactions-mode')
   cancelSearch()
@@ -368,16 +557,39 @@ function onRecoveryResolved(): void {
   detailOpen.value = false
 }
 
+function transactionRowElement(event: Event): HTMLElement {
+  const target = event.target
+  if (target instanceof Element) {
+    const row = target.closest('.ledger-transaction-row')
+    if (row instanceof HTMLElement) return row
+  }
+  if (event.currentTarget instanceof HTMLElement) return event.currentTarget
+  return document.body
+}
+
 function transactionRowProps(transaction: LedgerTransactionDto) {
   return {
-    class: 'ledger-transaction-row',
+    class: transaction.excludedFromStatistics
+      ? 'ledger-transaction-row is-statistics-excluded'
+      : 'ledger-transaction-row',
     'data-testid': `ledger-transaction-row-${transaction.id}`,
     tabindex: 0,
+    'aria-haspopup': 'menu' as const,
     onClick: () => inspect(transaction),
+    onContextmenu: (event: MouseEvent) => {
+      event.preventDefault()
+      event.stopPropagation()
+      openContextMenu(transaction, event.clientX, event.clientY, transactionRowElement(event))
+    },
     onKeydown: (event: KeyboardEvent) => {
       if (event.key === 'Enter' || event.key === ' ') {
         event.preventDefault()
         inspect(transaction)
+      } else if ((event.key === 'F10' && event.shiftKey) || event.key === 'ContextMenu') {
+        event.preventDefault()
+        const source = transactionRowElement(event)
+        const rect = source.getBoundingClientRect()
+        openContextMenu(transaction, rect.left + 12, rect.bottom - 2, source)
       }
     },
   }
@@ -615,7 +827,13 @@ const transactionColumns: DataTableColumns<LedgerTransactionDto> = [
         </template>
       </NEmpty>
       <div v-if="transactions.length" class="ledger-transaction-pagination">
-        <div class="ledger-pagination-meta">共 <span class="ledger-animated-count"><NNumberAnimation :key="transactionTotal" :from="transactionTotal" :to="transactionTotal" :duration="0" /></span> 条</div>
+        <div class="ledger-pagination-meta ledger-pagination-summary">
+          <span>共 <span class="ledger-animated-count"><NNumberAnimation :key="transactionTotal" :from="transactionTotal" :to="transactionTotal" :duration="0" /></span> 条</span>
+          <template v-if="statisticsExcludedCount > 0">
+            <span class="ledger-pagination-summary-separator" aria-hidden="true">·</span>
+            <span class="ledger-statistics-excluded-count">已排除 {{ statisticsExcludedCount }} 笔</span>
+          </template>
+        </div>
         <div class="ledger-pagination-controls">
           <NPagination
             :page="tablePage"
@@ -633,6 +851,32 @@ const transactionColumns: DataTableColumns<LedgerTransactionDto> = [
         </div>
       </div>
     </NCard>
+
+    <Teleport to="body">
+      <div
+        v-if="contextMenuOpen"
+        :ref="setContextMenuElement"
+        class="ledger-transaction-context-menu"
+        role="menu"
+        aria-label="交易操作"
+        :style="{ left: `${contextMenuPosition.left}px`, top: `${contextMenuPosition.top}px` }"
+        @click.stop
+      >
+        <NButton
+          v-for="(item, index) in contextMenuItems"
+          :key="item.action"
+          :ref="(element) => setContextMenuItemElement(element, index)"
+          class="ledger-transaction-context-menu-item"
+          attr-type="button"
+          text
+          :bordered="false"
+          role="menuitem"
+          :tabindex="index === 0 ? 0 : -1"
+          :disabled="contextMenuPending"
+          @click="activateContextMenuAction(item.action)"
+        >{{ item.label }}</NButton>
+      </div>
+    </Teleport>
 
     <LedgerTransactionSheet v-if="!store.recoveryGateVisible.value" :open="transactionSheetOpen" @close="transactionSheetOpen = false" />
     <LedgerTransactionDetailSheet :open="detailOpen" :transaction="selectedTransaction" @close="detailOpen = false" @updated="onTransactionUpdated" @deleted="onTransactionDeleted" />
@@ -753,6 +997,10 @@ const transactionColumns: DataTableColumns<LedgerTransactionDto> = [
 .ledger-notice-actions { display: flex; flex-wrap: wrap; gap: 8px; }
 .ledger-transaction-pagination { display: flex; align-items: center; justify-content: center; gap: 12px; margin-top: 18px; }
 .ledger-pagination-loading { color: var(--text-muted); font-size: .75rem; }
+.ledger-transaction-context-menu { position: fixed; z-index: 3000; display: grid; min-width: 132px; gap: 2px; padding: 5px; border: 1px solid color-mix(in srgb, var(--border) 82%, transparent); border-radius: 9px; background: var(--bg); box-shadow: 0 12px 30px color-mix(in srgb, #0f172a 20%, transparent); }
+.ledger-transaction-context-menu-item { justify-content: flex-start; width: 100%; padding: 7px 9px; border-radius: 6px; color: var(--text); font: inherit; font-size: .78rem; text-align: left; }
+.ledger-transaction-context-menu-item:hover:not(:disabled),
+.ledger-transaction-context-menu-item:focus-visible { background: color-mix(in srgb, var(--accent) 10%, transparent); color: var(--accent); outline: none; }
 @media (max-width: 850px) {
   .ledger-filters-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
   .ledger-filter-submit { grid-column: span 3; }
@@ -1069,6 +1317,7 @@ const transactionColumns: DataTableColumns<LedgerTransactionDto> = [
 .ledger-transaction-table :deep(.n-data-table-th:last-child),
 .ledger-transaction-table :deep(.n-data-table-td:last-child) { text-align: right; }
 .ledger-transaction-table :deep(.n-data-table-tr:last-child .n-data-table-td) { border-bottom: 0; }
+.ledger-transaction-table :deep(.ledger-transaction-row.is-statistics-excluded .n-data-table-td) { background: color-mix(in srgb, var(--bg-soft) 55%, transparent); }
 .ledger-transaction-table :deep(.n-data-table-tr:hover .n-data-table-td) { background: color-mix(in srgb, var(--accent) 4%, transparent); }
 .ledger-transaction-table :deep(.ledger-transaction-row:focus-visible .n-data-table-td) {
   background: color-mix(in srgb, var(--accent) 5%, transparent);
@@ -1108,6 +1357,12 @@ const transactionColumns: DataTableColumns<LedgerTransactionDto> = [
 .ledger-transaction-table :deep(.ledger-transaction-amount.is-income) { color: var(--ledger-income); }
 .ledger-transaction-table :deep(.ledger-transaction-amount.is-expense) { color: var(--ledger-expense); }
 .ledger-transaction-table :deep(.ledger-transaction-amount.is-repayment) { color: var(--ledger-repayment); }
+.ledger-transaction-table :deep(.ledger-transaction-row.is-statistics-excluded .ledger-table-primary strong),
+.ledger-transaction-table :deep(.ledger-transaction-row.is-statistics-excluded .ledger-transaction-category),
+.ledger-transaction-table :deep(.ledger-transaction-row.is-statistics-excluded .ledger-transaction-account),
+.ledger-transaction-table :deep(.ledger-transaction-row.is-statistics-excluded .ledger-transaction-note),
+.ledger-transaction-table :deep(.ledger-transaction-row.is-statistics-excluded .ledger-transaction-date) { color: var(--text-muted); }
+.ledger-transaction-table :deep(.ledger-transaction-row.is-statistics-excluded .ledger-transaction-amount) { opacity: .58; }
 .ledger-transaction-table th {
   padding: 13px 22px 11px;
   border-bottom: 1px solid var(--ledger-divider);
@@ -1175,6 +1430,9 @@ const transactionColumns: DataTableColumns<LedgerTransactionDto> = [
   background: color-mix(in srgb, var(--bg) 14%, transparent);
 }
 .ledger-pagination-meta { color: var(--text-muted); font-size: .74rem; }
+.ledger-pagination-summary { display: inline-flex; align-items: baseline; gap: 6px; }
+.ledger-pagination-summary-separator,
+.ledger-statistics-excluded-count { color: var(--text-muted); }
 .ledger-pagination-controls { display: flex; align-items: center; gap: 12px; }
 .ledger-pagination-controls :deep(.n-pagination) { align-items: center; }
 .ledger-pagination-controls :deep(.n-pagination .n-select) { width: 82px; }

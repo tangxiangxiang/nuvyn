@@ -8,6 +8,7 @@ import {
   getLedgerOverview,
   getLedgerSettings,
   listLedgerTransactions,
+  setLedgerTransactionStatisticsExcluded,
 } from '../api'
 import { LedgerApiError } from '../ledgerErrors'
 
@@ -76,7 +77,7 @@ describe('Ledger frontend API boundary', () => {
   })
 
   it('encodes query parameters and sends a stable idempotency key', async () => {
-    mockedAuthFetch.mockResolvedValue(response({ id: 'tx-1', type: 'expense' }))
+    mockedAuthFetch.mockResolvedValue(response({ id: 'tx-1', type: 'expense', excludedFromStatistics: false }))
     await createLedgerTransaction({
       type: 'expense',
       amountMinor: 3800,
@@ -94,6 +95,34 @@ describe('Ledger frontend API boundary', () => {
     expect(mockedAuthFetch.mock.calls.at(-1)?.[0]).toContain('type=expense')
     expect(mockedAuthFetch.mock.calls.at(-1)?.[0]).toContain('accountId=account+1')
     expect(mockedAuthFetch.mock.calls.at(-1)?.[0]).toContain('offset=20')
+  })
+
+  it('uses idempotent PUT/DELETE set-state requests for statistics exclusion', async () => {
+    mockedAuthFetch.mockResolvedValue(response({
+      transactionId: 'tx-1',
+      excludedFromStatistics: true,
+    }))
+    await expect(setLedgerTransactionStatisticsExcluded('tx-1', true)).resolves.toEqual({
+      transactionId: 'tx-1',
+      excludedFromStatistics: true,
+    })
+    expect(mockedAuthFetch).toHaveBeenLastCalledWith(
+      '/api/ledger/transactions/tx-1/statistics-exclusion',
+      expect.objectContaining({ method: 'PUT', body: '{}' }),
+    )
+
+    mockedAuthFetch.mockResolvedValue(response({
+      transactionId: 'tx-1',
+      excludedFromStatistics: false,
+    }))
+    await expect(setLedgerTransactionStatisticsExcluded('tx-1', false)).resolves.toEqual({
+      transactionId: 'tx-1',
+      excludedFromStatistics: false,
+    })
+    expect(mockedAuthFetch).toHaveBeenLastCalledWith(
+      '/api/ledger/transactions/tx-1/statistics-exclusion',
+      expect.objectContaining({ method: 'DELETE', body: '{}' }),
+    )
   })
 
   it('requests and validates the account balance trend projection', async () => {

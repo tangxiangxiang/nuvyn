@@ -249,6 +249,15 @@ async function remove(): Promise<void> {
             <div class="ledger-detail-row"><span>备注</span><strong>{{ transaction.note || '未填写' }}</strong></div>
           </div>
 
+          <NAlert
+            v-if="transaction.excludedFromStatistics"
+            class="ledger-statistics-exclusion-hint"
+            type="info"
+            :show-icon="false"
+            role="status"
+            data-testid="ledger-statistics-exclusion-hint"
+          >此记录不计入收入、支出、还款及分析统计；账户余额和真实资金变化不受影响。</NAlert>
+
           <NAlert v-if="archivedAccounts.length" class="ledger-archived-warning" type="warning" :show-icon="false" role="alert">
             <template #header>关联账户已归档</template>
             <p>历史记录仍可查看。恢复账户后，才能修改交易的财务字段或删除这笔记录。</p>
@@ -311,6 +320,7 @@ async function remove(): Promise<void> {
 .ledger-detail-row > span { color: var(--text-muted); font-size: .76rem; }
 .ledger-detail-row > strong { min-width: 0; color: var(--text-h); font-size: .82rem; font-weight: 550; line-height: 1.45; overflow-wrap: anywhere; white-space: pre-wrap; }
 .ledger-detail-list em { color: var(--text-muted); font-style: normal; }
+.ledger-statistics-exclusion-hint { margin: 0; color: var(--text-muted); font-size: .79rem; line-height: 1.45; }
 .ledger-archived-warning { border: 1px solid color-mix(in srgb, #b7791f 35%, var(--border)); border-radius: 11px; background: color-mix(in srgb, #f6ad55 8%, transparent); }
 .ledger-archived-warning :deep(.n-alert-body) { display: grid; gap: 9px; padding: 13px; }
 .ledger-archived-warning :deep(.n-alert__title) { color: var(--text-h); font-size: .85rem; }

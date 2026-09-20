@@ -87,7 +87,7 @@ describe('authentication migration', () => {
 
     applyMigrations(db)
 
-    expect((db.prepare('SELECT version FROM schema_version').get() as { version: number }).version).toBe(34)
+    expect((db.prepare('SELECT version FROM schema_version').get() as { version: number }).version).toBe(35)
     expect(db.prepare("SELECT value FROM settings WHERE key = 'theme'").get()).toEqual({ value: 'dark' })
     expect(db.prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'users'").get()).toEqual({ name: 'users' })
     expect(db.prepare('SELECT mood FROM documents WHERE id = ?').get('legacy-document')).toEqual({ mood: null })
@@ -100,7 +100,7 @@ describe('authentication migration', () => {
     applyMigrations(db)
     const after = db.prepare('SELECT COUNT(*) AS count FROM sqlite_master WHERE type = \'table\'').get() as { count: number }
     expect(after.count).toBe(before.count)
-    expect((db.prepare('SELECT version FROM schema_version').get() as { version: number }).version).toBe(34)
+    expect((db.prepare('SELECT version FROM schema_version').get() as { version: number }).version).toBe(35)
   })
 
   it('enforces singleton, uniqueness, value, and foreign-key constraints', () => {

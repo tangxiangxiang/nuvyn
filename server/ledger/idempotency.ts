@@ -220,6 +220,7 @@ const LEDGER_TRANSACTION_BASE_REPLAY_KEYS = [
   'version',
   'createdAt',
   'updatedAt',
+  'excludedFromStatistics',
 ] as const
 
 const LEDGER_INCOME_REPLAY_KEYS = [
@@ -463,10 +464,18 @@ function assertLedgerTransactionBaseReplayBody(object: ReplayObject, label: stri
   assertReplayPositiveSafeInteger(object.version, `${label}.version`)
   assertReplaySafeInteger(object.createdAt, `${label}.createdAt`)
   assertReplaySafeInteger(object.updatedAt, `${label}.updatedAt`)
+  assertReplayBoolean(object.excludedFromStatistics, `${label}.excludedFromStatistics`)
 }
 
 function assertLedgerTransactionReplayBody(value: unknown): asserts value is LedgerTransactionDto {
   const object = replayDataObject(value, 'transaction response')
+  // Successful transaction snapshots created before Statistics Exclusion was
+  // introduced do not contain the new read-only field. Normalize those
+  // durable snapshots during replay so the public DTO remains explicit while
+  // old idempotency keys stay safely replayable.
+  if (!Object.prototype.hasOwnProperty.call(object, 'excludedFromStatistics')) {
+    object.excludedFromStatistics = false
+  }
   switch (object.type) {
     case 'income':
       replayExactObject(object, transactionReplayKeys(object, LEDGER_INCOME_REPLAY_KEYS), 'income response')

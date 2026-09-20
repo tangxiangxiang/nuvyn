@@ -590,6 +590,126 @@ describe('Ledger Transaction and Adjustment API', () => {
     })
   })
 
+  it('sets transaction statistics exclusion without changing rows or transaction versions', async () => {
+    await initialize()
+    const asset = await json(await authenticated('/api/ledger/accounts', {
+      method: 'POST',
+      body: accountBody({ name: 'Statistics asset' }),
+      idempotencyKey: 'statistics-api-asset',
+    }))
+    const wallet = await json(await authenticated('/api/ledger/accounts', {
+      method: 'POST',
+      body: accountBody({ name: 'Statistics wallet', type: 'wallet' }),
+      idempotencyKey: 'statistics-api-wallet',
+    }))
+    const liability = await json(await authenticated('/api/ledger/accounts', {
+      method: 'POST',
+      body: accountBody({ name: 'Statistics loan', type: 'loan', nature: 'liability' }),
+      idempotencyKey: 'statistics-api-liability',
+    }))
+    const categories = await json(await authenticated('/api/ledger/categories'))
+    const expenseCategory = categories.find((category: any) => category.kind === 'expense')
+    const expense = await json(await authenticated('/api/ledger/transactions', {
+      method: 'POST',
+      body: {
+        type: 'expense', amountMinor: 500, accountId: asset.id, categoryId: expenseCategory.id,
+        occurredAt: Date.now(), payee: '社保扣款',
+      },
+      idempotencyKey: 'statistics-api-expense',
+    }))
+    const general = await json(await authenticated('/api/ledger/transactions', {
+      method: 'POST',
+      body: {
+        type: 'transfer', amountMinor: 10, fromAccountId: asset.id, toAccountId: wallet.id,
+        occurredAt: Date.now(),
+      },
+      idempotencyKey: 'statistics-api-general',
+    }))
+    const repayment = await json(await authenticated('/api/ledger/transactions', {
+      method: 'POST',
+      body: {
+        type: 'transfer', transferKind: 'repayment', amountMinor: 1_000,
+        fromAccountId: asset.id, toAccountId: liability.id, occurredAt: Date.now(),
+      },
+      idempotencyKey: 'statistics-api-repayment',
+    }))
+    const before = await json(await authenticated(`/api/ledger/transactions/${expense.id}`))
+
+    expect(await request(`/api/ledger/transactions/${expense.id}/statistics-exclusion`, {
+      method: 'PUT', body: {},
+    })).toMatchObject({ status: 401 })
+
+    const excluded = await authenticated(`/api/ledger/transactions/${expense.id}/statistics-exclusion`, {
+      method: 'PUT', body: {},
+    })
+    expect(excluded.status).toBe(200)
+    expect(await json(excluded)).toEqual({ transactionId: expense.id, excludedFromStatistics: true })
+    expect(await json(await authenticated(`/api/ledger/transactions/${expense.id}/statistics-exclusion`, {
+      method: 'PUT', body: {},
+    }))).toEqual({ transactionId: expense.id, excludedFromStatistics: true })
+
+    const after = await json(await authenticated(`/api/ledger/transactions/${expense.id}`))
+    expect(after).toMatchObject({
+      id: expense.id,
+      excludedFromStatistics: true,
+      version: before.version,
+      updatedAt: before.updatedAt,
+    })
+
+    const page = await json(await authenticated('/api/ledger/transactions?limit=1'))
+    expect(page.transactions).toHaveLength(1)
+    expect(page.page).toMatchObject({
+      total: 3,
+      expenseMinor: 0,
+      repaymentMinor: 1_000,
+      statisticsExcludedCount: 1,
+    })
+    expect(page.page.total).toBeGreaterThan(page.transactions.length)
+    expect((await json(await authenticated('/api/ledger/transactions?search=社保'))).transactions)
+      .toEqual([expect.objectContaining({ id: expense.id, excludedFromStatistics: true })])
+
+    const restored = await authenticated(`/api/ledger/transactions/${expense.id}/statistics-exclusion`, {
+      method: 'DELETE', body: {},
+    })
+    expect(restored.status).toBe(200)
+    expect(await json(restored)).toEqual({ transactionId: expense.id, excludedFromStatistics: false })
+    expect(await json(await authenticated(`/api/ledger/transactions/${expense.id}/statistics-exclusion`, {
+      method: 'DELETE', body: {},
+    }))).toEqual({ transactionId: expense.id, excludedFromStatistics: false })
+
+    const ineligible = await authenticated(`/api/ledger/transactions/${general.id}/statistics-exclusion`, {
+      method: 'PUT', body: {},
+    })
+    expect(ineligible.status).toBe(400)
+    expect(await json(ineligible)).toMatchObject({ code: 'ledger-validation-failed' })
+
+    const grouped = await json(await authenticated('/api/ledger/transactions', {
+      method: 'POST',
+      body: {
+        type: 'transfer', transferKind: 'repayment', amountMinor: 300, feeMinor: 20,
+        fromAccountId: asset.id, toAccountId: liability.id, occurredAt: Date.now(),
+      },
+      idempotencyKey: 'statistics-api-grouped',
+    }))
+    const groupedRows = await json(await authenticated(`/api/ledger/transactions?groupId=${grouped.groupId}`))
+    const companion = groupedRows.transactions.find((row: any) => row.type === 'expense')
+    expect(companion).toBeDefined()
+    expect(await json(await authenticated(`/api/ledger/transactions/${companion.id}/statistics-exclusion`, {
+      method: 'PUT', body: {},
+    }))).toEqual({ transactionId: companion.id, excludedFromStatistics: true })
+
+    const deleted = await authenticated(`/api/ledger/transactions/${expense.id}`, {
+      method: 'DELETE', body: { expectedVersion: before.version },
+    })
+    expect(deleted.status).toBe(200)
+    const deletedToggle = await authenticated(`/api/ledger/transactions/${expense.id}/statistics-exclusion`, {
+      method: 'PUT', body: {},
+    })
+    expect(deletedToggle.status).toBe(409)
+    expect(await json(deletedToggle)).toMatchObject({ code: 'ledger-transaction-deleted' })
+    expect(repayment.type).toBe('transfer')
+  })
+
   it('uses one-row Transfer effects and exposes Adjustment no-op/conflict responses', async () => {
     await initialize()
     const assetResponse = await authenticated('/api/ledger/accounts', {

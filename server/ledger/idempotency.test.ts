@@ -762,6 +762,7 @@ describe('Ledger idempotency response serialization', () => {
   const transactionResponse: LedgerTransactionDto = {
     id: 'serialization-transaction',
     type: 'income',
+    excludedFromStatistics: false,
     amountMinor: 100,
     accountId: 'serialization-account',
     categoryId: 'serialization-category',
@@ -777,6 +778,7 @@ describe('Ledger idempotency response serialization', () => {
   const adjustmentTransaction: Extract<LedgerTransactionDto, { type: 'adjustment' }> = {
     id: 'serialization-adjustment',
     type: 'adjustment',
+    excludedFromStatistics: false,
     amountMinor: 200,
     accountId: 'serialization-adjustment-account',
     adjustmentCalculatedBalanceMinor: 1_000,

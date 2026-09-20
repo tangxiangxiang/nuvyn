@@ -39,7 +39,7 @@ describe('Board Material API', () => {
     applyMigrations(legacy, 33)
     expect((legacy.prepare('SELECT version FROM schema_version').get() as { version: number }).version).toBe(33)
     applyMigrations(legacy)
-    expect((legacy.prepare('SELECT version FROM schema_version').get() as { version: number }).version).toBe(34)
+    expect((legacy.prepare('SELECT version FROM schema_version').get() as { version: number }).version).toBe(35)
     expect(legacy.prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'board_materials'").get()).toEqual({ name: 'board_materials' })
     legacy.close()
   })

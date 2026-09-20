@@ -467,6 +467,98 @@ describe('Ledger transaction query projections', () => {
       .toEqual(new Set([income.id, expense.id, repayment.id]))
   })
 
+  it('keeps excluded rows and account truth while removing them from analytics', () => {
+    const fixture = freshFixture()
+    const asset = account(fixture, 'statistics-exclusion-projection-asset', { openingBalanceMinor: 10_000 })
+    const liability = account(fixture, 'statistics-exclusion-projection-liability', {
+      name: 'Projection loan', type: 'loan', nature: 'liability', openingBalanceMinor: 0,
+    })
+    const expenseCategory = firstCategory(fixture, 'expense')
+    const incomeCategory = firstCategory(fixture, 'income')
+    const income = transaction(fixture, 'statistics-exclusion-income', {
+      type: 'income', amountMinor: 100, accountId: asset.id, categoryId: incomeCategory.id,
+      occurredAt: TEST_NOW - 5_000,
+    })
+    const includedExpense = transaction(fixture, 'statistics-exclusion-included-expense', {
+      type: 'expense', amountMinor: 40, accountId: asset.id, categoryId: expenseCategory.id,
+      occurredAt: TEST_NOW - 4_000,
+    })
+    const excludedExpense = transaction(fixture, 'statistics-exclusion-excluded-expense', {
+      type: 'expense', amountMinor: 20, accountId: asset.id, categoryId: expenseCategory.id,
+      occurredAt: TEST_NOW - 3_000, payee: '社保扣款',
+    })
+    const includedRepayment = transaction(fixture, 'statistics-exclusion-included-repayment', {
+      type: 'transfer', transferKind: 'repayment', amountMinor: 50,
+      fromAccountId: asset.id, toAccountId: liability.id, occurredAt: TEST_NOW - 2_000,
+    })
+    const excludedRepayment = transaction(fixture, 'statistics-exclusion-excluded-repayment', {
+      type: 'transfer', transferKind: 'repayment', amountMinor: 60,
+      fromAccountId: asset.id, toAccountId: liability.id, occurredAt: TEST_NOW - 1_000,
+    })
+
+    const beforeOverview = fixture.projections.getOverview({ scope: 'all', anchorDate: undefined })
+    const beforeDetail = fixture.projections.getAccountTransactions(asset.id, query({ limit: '50' }))
+    const beforeBalanceTrend = fixture.projections.getAccountBalanceTrend(asset.id, 7)
+    fixture.service.excludeTransactionFromStatistics(excludedExpense.id)
+    fixture.service.excludeTransactionFromStatistics(excludedRepayment.id)
+
+    const page = fixture.projections.listTransactions(query({ limit: '1' }))
+    expect(page.transactions).toHaveLength(1)
+    expect(page.page).toMatchObject({
+      total: 5,
+      incomeMinor: 100,
+      expenseMinor: 40,
+      repaymentMinor: 50,
+      statisticsExcludedCount: 2,
+    })
+    const allRows = fixture.projections.listTransactions(query({ limit: '50' }))
+    expect(new Set(allRows.transactions.map((row) => row.id))).toEqual(new Set([
+      income.id,
+      includedExpense.id,
+      excludedExpense.id,
+      includedRepayment.id,
+      excludedRepayment.id,
+    ]))
+    expect(allRows.transactions.find((row) => row.id === excludedExpense.id))
+      .toMatchObject({ excludedFromStatistics: true })
+
+    const afterOverview = fixture.projections.getOverview({ scope: 'all', anchorDate: undefined })
+    expect(afterOverview.assetTotalMinor).toBe(beforeOverview.assetTotalMinor)
+    expect(afterOverview.liabilityTotalMinor).toBe(beforeOverview.liabilityTotalMinor)
+    expect(afterOverview.netWorthMinor).toBe(beforeOverview.netWorthMinor)
+    expect(afterOverview.accounts).toEqual(beforeOverview.accounts)
+    expect(afterOverview.cashflow).toEqual({
+      incomeMinor: 100,
+      expenseMinor: 40,
+      repaymentMinor: 50,
+      balanceMinor: 60,
+    })
+    expect(afterOverview.categoryBreakdown.expense).toEqual(expect.arrayContaining([
+      expect.objectContaining({ categoryId: expenseCategory.id, amountMinor: 40 }),
+    ]))
+    expect(afterOverview.periods.find((period) => period.period === 'month')).toMatchObject({
+      incomeMinor: 100,
+      expenseMinor: 40,
+      repaymentMinor: 50,
+      balanceMinor: 60,
+    })
+    expect(afterOverview.trend.at(-1)).toMatchObject({
+      incomeMinor: 100,
+      expenseMinor: 40,
+      repaymentMinor: 50,
+    })
+    expect(afterOverview.recentTransactions.map((row) => row.id)).toContain(excludedExpense.id)
+    expect(afterOverview.recentTransactions.find((row) => row.id === excludedRepayment.id))
+      .toMatchObject({ excludedFromStatistics: true })
+    expect(fixture.projections.getTrend(12)).toEqual(afterOverview.trend)
+
+    const afterDetail = fixture.projections.getAccountTransactions(asset.id, query({ limit: '50' }))
+    expect(afterDetail.movement).toEqual(beforeDetail.movement)
+    expect(afterDetail.transactionBalances).toEqual(beforeDetail.transactionBalances)
+    expect(afterDetail.transactions.map((row) => row.id)).toEqual(beforeDetail.transactions.map((row) => row.id))
+    expect(fixture.projections.getAccountBalanceTrend(asset.id, 7)).toEqual(beforeBalanceTrend)
+  })
+
   it('uses the Ledger base currency exponent and fails soft for invalid amount syntax', () => {
     const jpyFixture = freshFixture('Asia/Shanghai', TEST_NOW, 'JPY')
     const jpyAsset = account(jpyFixture, 'amount-search-jpy-asset')

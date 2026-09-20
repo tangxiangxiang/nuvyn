@@ -95,7 +95,7 @@ describe('Tags scale evidence', { timeout: SCALE_TEST_TIMEOUT_MS }, () => {
       }
       console.info('[tag-undo-migration-perf]', JSON.stringify(evidence))
 
-      expect(legacy.prepare('SELECT version FROM schema_version').get()).toEqual({ version: 34 })
+      expect(legacy.prepare('SELECT version FROM schema_version').get()).toEqual({ version: 35 })
       expect(legacy.prepare(`
         SELECT document_id, tag_id FROM document_tags ORDER BY document_id, tag_id
       `).all()).toEqual(expectedMemberships)

@@ -9,6 +9,7 @@ import {
 const transfer = (transferKind: 'general' | 'repayment' | 'withdrawal'): LedgerTransactionDto => ({
   id: `transfer-${transferKind}`,
   type: 'transfer',
+  excludedFromStatistics: false,
   transferKind,
   amountMinor: 3_000,
   fromAccountId: 'asset',

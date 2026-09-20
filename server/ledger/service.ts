@@ -20,9 +20,11 @@ import type {
   LedgerSettingsDto,
   LedgerTransactionCreateRequest,
   LedgerTransactionDto,
+  LedgerTransactionStatisticsExclusionDto,
   LedgerTransferFeeMode,
   LedgerTransferKind,
 } from '../../shared/ledgerProtocol.js'
+import { ledgerTransactionContributesToStatistics } from '../../shared/ledgerAnalytics.js'
 import { LEDGER_BUILTIN_ACCOUNT_ICON_NAMES, LEDGER_DEFAULT_ACCOUNT_ICONS } from '../../shared/ledgerProtocol.js'
 import {
   deriveCurrentBalance,
@@ -104,6 +106,8 @@ export interface LedgerService {
   restoreCategory(id: string, value: unknown): LedgerCategoryDto
 
   getTransaction(id: string): LedgerTransactionDto
+  excludeTransactionFromStatistics(id: string): LedgerTransactionStatisticsExclusionDto
+  restoreTransactionToStatistics(id: string): LedgerTransactionStatisticsExclusionDto
   createTransaction(
     request: LedgerTransactionCreateRequest,
     idempotencyKey: string,
@@ -269,10 +273,14 @@ function toCategoryDto(category: LedgerCategory): LedgerCategoryDto {
   }
 }
 
-function toTransactionDto(transaction: LedgerTransaction): LedgerTransactionDto {
+function toTransactionDto(
+  transaction: LedgerTransaction,
+  excludedFromStatistics = false,
+): LedgerTransactionDto {
   const base = {
     id: transaction.id,
     ...(transaction.groupId ? { groupId: transaction.groupId } : {}),
+    excludedFromStatistics,
     amountMinor: transaction.amountMinor,
     occurredAt: transaction.occurredAt,
     location: transaction.location,
@@ -881,10 +889,46 @@ export function createLedgerService(
     return transaction
   }
 
+  function requireStatisticsEligibleTransaction(id: string): LedgerTransaction {
+    const transaction = repository.getTransaction(id)
+    if (transaction === null) notFound('Ledger Transaction')
+    if (transaction.deletedAt !== null) transactionDeleted()
+    if (!ledgerTransactionContributesToStatistics(transaction)) {
+      throw ledgerValidationError('Transaction does not contribute to Ledger statistics', {
+        field: 'transactionId',
+      })
+    }
+    return transaction
+  }
+
   function getTransaction(id: string): LedgerTransactionDto {
     requireSettings()
     const transaction = requireUserTransaction(id)
-    return toTransactionDto(transaction)
+    return toTransactionDto(transaction, repository.isTransactionExcludedFromStatistics(transaction.id))
+  }
+
+  function excludeTransactionFromStatistics(id: string): LedgerTransactionStatisticsExclusionDto {
+    return runLedgerWrite(db, () => {
+      requireSettings()
+      const transaction = requireStatisticsEligibleTransaction(id)
+      repository.excludeTransactionFromStatistics(transaction.id, generatedTimestamp(now))
+      return {
+        transactionId: transaction.id,
+        excludedFromStatistics: true,
+      }
+    })
+  }
+
+  function restoreTransactionToStatistics(id: string): LedgerTransactionStatisticsExclusionDto {
+    return runLedgerWrite(db, () => {
+      requireSettings()
+      const transaction = requireStatisticsEligibleTransaction(id)
+      repository.restoreTransactionToStatistics(transaction.id)
+      return {
+        transactionId: transaction.id,
+        excludedFromStatistics: false,
+      }
+    })
   }
 
   function createTransaction(
@@ -1121,7 +1165,7 @@ export function createLedgerService(
             transaction: updated,
             expectedVersion: transaction.version,
           }) !== 1) versionConflict()
-          return toTransactionDto(updated)
+          return toTransactionDto(updated, repository.isTransactionExcludedFromStatistics(updated.id))
         }
 
         case 'expense': {
@@ -1154,7 +1198,7 @@ export function createLedgerService(
             transaction: updated,
             expectedVersion: transaction.version,
           }) !== 1) versionConflict()
-          return toTransactionDto(updated)
+          return toTransactionDto(updated, repository.isTransactionExcludedFromStatistics(updated.id))
         }
 
         case 'transfer': {
@@ -1284,6 +1328,10 @@ export function createLedgerService(
             expectedVersion: transaction.version,
           }) !== 1) versionConflict()
 
+          if (transaction.transferKind === 'repayment' && transferKind !== 'repayment') {
+            repository.restoreTransactionToStatistics(transaction.id)
+          }
+
           if (feeMinor > 0 && feeCategory && nextGroupId) {
             const updatedFee: ExpenseTransaction = existingFee
               ? {
@@ -1341,7 +1389,7 @@ export function createLedgerService(
             }) !== 1) versionConflict()
           }
 
-          return toTransactionDto(updated)
+          return toTransactionDto(updated, repository.isTransactionExcludedFromStatistics(updated.id))
         }
 
         case 'adjustment': {
@@ -1360,7 +1408,7 @@ export function createLedgerService(
             transaction: updated,
             expectedVersion: transaction.version,
           }) !== 1) versionConflict()
-          return toTransactionDto(updated)
+          return toTransactionDto(updated, repository.isTransactionExcludedFromStatistics(updated.id))
         }
       }
     })
@@ -1373,7 +1421,7 @@ export function createLedgerService(
 
       if (transaction.deletedAt !== null) {
         parseExpectedVersionCommand(value)
-        return toTransactionDto(transaction)
+        return toTransactionDto(transaction, repository.isTransactionExcludedFromStatistics(transaction.id))
       }
 
       const groupTransactions = transaction.groupId
@@ -1410,7 +1458,8 @@ export function createLedgerService(
           returnDto = deletedItem
         }
       }
-      return toTransactionDto(returnDto ?? deleted)
+      const returned = returnDto ?? deleted
+      return toTransactionDto(returned, repository.isTransactionExcludedFromStatistics(returned.id))
     })
   }
 
@@ -1697,6 +1746,8 @@ export function createLedgerService(
     archiveCategory,
     restoreCategory,
     getTransaction,
+    excludeTransactionFromStatistics,
+    restoreTransactionToStatistics,
     createTransaction,
     patchTransaction,
     deleteTransaction,

@@ -33,6 +33,7 @@ const api = vi.hoisted(() => ({
   deleteLedgerCategory: vi.fn(),
   patchLedgerTransaction: vi.fn(),
   deleteLedgerTransaction: vi.fn(),
+  setLedgerTransactionStatisticsExcluded: vi.fn(),
 }))
 
 vi.mock('../api', () => api)
@@ -298,6 +299,29 @@ describe('Ledger feature-local state', () => {
 
     expect(api.getLedgerOverview).toHaveBeenCalledWith({ scope: 'month', anchorDate: '2026-08-20' })
     expect(store.overviewRequestContext.value).toEqual({ scope: 'month', anchorDate: '2026-08-20' })
+  })
+
+  it('refreshes authoritative projections after changing statistics exclusion', async () => {
+    api.getLedgerSettings.mockResolvedValue(settings(true))
+    api.listLedgerAccounts.mockResolvedValue([account('account-1')])
+    const store = useLedgerStore()
+    await store.bootstrap()
+    await store.refreshTransactions({ type: 'all', limit: 25 })
+    api.getLedgerOverview.mockClear()
+    api.listLedgerTransactions.mockClear()
+    api.setLedgerTransactionStatisticsExcluded.mockResolvedValue({
+      transactionId: 'tx-1',
+      excludedFromStatistics: true,
+    })
+
+    await expect(store.setTransactionStatisticsExcluded('tx-1', true)).resolves.toEqual({
+      transactionId: 'tx-1',
+      excludedFromStatistics: true,
+    })
+
+    expect(api.setLedgerTransactionStatisticsExcluded).toHaveBeenCalledWith('tx-1', true)
+    expect(api.getLedgerOverview).toHaveBeenCalledWith({ scope: 'month', anchorDate: undefined })
+    expect(api.listLedgerTransactions).toHaveBeenCalledWith({ type: 'all', limit: 25 })
   })
 
   it('escalates a successful mutation when its historical overview refresh fails', async () => {

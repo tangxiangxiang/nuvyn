@@ -29,6 +29,14 @@ export function createTransactionRoutes(
     return ledgerReplayResponse(c, getService().createTransaction(request, idempotencyKey))
   }))
 
+  routes.put('/:id/statistics-exclusion', (c) => withLedgerErrors(c, () => c.json(
+    getService().excludeTransactionFromStatistics(c.req.param('id')),
+  )))
+
+  routes.delete('/:id/statistics-exclusion', (c) => withLedgerErrors(c, () => c.json(
+    getService().restoreTransactionToStatistics(c.req.param('id')),
+  )))
+
   routes.get('/:id', (c) => withLedgerErrors(c, () => c.json(
     getService().getTransaction(c.req.param('id')),
   )))

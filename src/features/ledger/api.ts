@@ -22,6 +22,7 @@ import type {
   LedgerTransactionDto,
   LedgerTransactionPageDto,
   LedgerTransactionQuery,
+  LedgerTransactionStatisticsExclusionDto,
   LedgerTransferKind,
   LedgerTransferFeeMode,
   LedgerTransferCreateRequest,
@@ -143,7 +144,10 @@ function categoryResponse(value: unknown): LedgerCategoryDto {
 }
 
 function transactionResponse(value: unknown): LedgerTransactionDto {
-  if (!isRecord(value) || typeof value.id !== 'string' || typeof value.type !== 'string') {
+  if (!isRecord(value)
+    || typeof value.id !== 'string'
+    || typeof value.type !== 'string'
+    || typeof value.excludedFromStatistics !== 'boolean') {
     throw malformed('Transaction response')
   }
   return value as unknown as LedgerTransactionDto
@@ -153,6 +157,7 @@ function transactionPageResponse(value: unknown): LedgerTransactionPageDto {
   if (!isRecord(value) || !Array.isArray(value.transactions) || !isRecord(value.page)) {
     throw malformed('Transaction list response')
   }
+  value.transactions.forEach(transactionResponse)
   return value as unknown as LedgerTransactionPageDto
 }
 
@@ -164,6 +169,7 @@ function accountTransactionsResponse(value: unknown): LedgerAccountTransactionsD
     || !isRecord(value.page)) {
     throw malformed('Account transaction response')
   }
+  value.transactions.forEach(transactionResponse)
   for (const entry of value.transactionBalances) {
     if (!isRecord(entry)
       || typeof entry.transactionId !== 'string'
@@ -173,6 +179,15 @@ function accountTransactionsResponse(value: unknown): LedgerAccountTransactionsD
     }
   }
   return value as unknown as LedgerAccountTransactionsDto
+}
+
+function transactionStatisticsExclusionResponse(value: unknown): LedgerTransactionStatisticsExclusionDto {
+  if (!isRecord(value)
+    || typeof value.transactionId !== 'string'
+    || typeof value.excludedFromStatistics !== 'boolean') {
+    throw malformed('Transaction statistics exclusion response')
+  }
+  return value as unknown as LedgerTransactionStatisticsExclusionDto
 }
 
 function accountBalanceTrendResponse(value: unknown): LedgerAccountBalanceTrendDto {
@@ -296,7 +311,7 @@ async function request<T>(
 }
 
 function jsonInit(
-  method: 'POST' | 'PATCH' | 'DELETE',
+  method: 'POST' | 'PATCH' | 'PUT' | 'DELETE',
   body: unknown,
   idempotencyKey?: string,
 ): RequestInit {
@@ -417,6 +432,17 @@ export function createLedgerTransaction(
 
 export function getLedgerTransaction(id: string): Promise<LedgerTransactionDto> {
   return request(`/api/ledger/transactions/${encodeURIComponent(id)}`, {}, transactionResponse)
+}
+
+export function setLedgerTransactionStatisticsExcluded(
+  id: string,
+  excluded: boolean,
+): Promise<LedgerTransactionStatisticsExclusionDto> {
+  return request(
+    `/api/ledger/transactions/${encodeURIComponent(id)}/statistics-exclusion`,
+    jsonInit(excluded ? 'PUT' : 'DELETE', {}),
+    transactionStatisticsExclusionResponse,
+  )
 }
 
 export function patchLedgerTransaction(id: string, body: LedgerTransactionPatchInput): Promise<LedgerTransactionDto> {

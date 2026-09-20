@@ -16,6 +16,7 @@ import type {
   LedgerTransactionDto,
   LedgerTransactionPageDto,
   LedgerTransactionQuery,
+  LedgerTransactionStatisticsExclusionDto,
   LedgerTransferCreateRequest,
 } from '../../../shared/ledgerProtocol'
 import { subscribeAuthSessionRequired } from '../../lib/auth-session'
@@ -44,6 +45,7 @@ import {
   patchLedgerTransaction,
   restoreLedgerAccount,
   restoreLedgerCategory,
+  setLedgerTransactionStatisticsExcluded,
   type LedgerAccountPatchInput,
   type LedgerCategoryPatchInput,
   type LedgerDeletedResponse,
@@ -804,6 +806,7 @@ export interface LedgerStore {
   readonly loadMoreTransactions: () => Promise<void>
   readonly getAccount: (id: string) => Promise<LedgerAccountDto>
   readonly getTransaction: (id: string) => Promise<LedgerTransactionDto>
+  readonly setTransactionStatisticsExcluded: (id: string, excluded: boolean) => Promise<LedgerTransactionStatisticsExclusionDto>
   readonly getTransactionGroup: (groupId: string) => Promise<readonly LedgerTransactionDto[]>
   readonly getAccountTransactions: (id: string, query?: LedgerTransactionQuery) => Promise<LedgerAccountTransactionsDto>
   readonly getAccountBalanceTrend: (id: string, range?: LedgerAccountBalanceTrendRange) => Promise<LedgerAccountBalanceTrendDto>
@@ -875,6 +878,11 @@ const store: LedgerStore = {
     return result
   },
   getTransaction,
+  setTransactionStatisticsExcluded: async (id, excluded) => {
+    const result = await setLedgerTransactionStatisticsExcluded(id, excluded)
+    await refreshData()
+    return result
+  },
   getTransactionGroup: async (groupId) => (await listLedgerTransactions({ groupId, includeDeleted: true, limit: 10 })).transactions,
   getAccountTransactions: async (id, query = {}) => {
     const result = await getLedgerAccountTransactions(id, query)

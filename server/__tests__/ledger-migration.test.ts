@@ -159,7 +159,7 @@ describe('Ledger 0013 foundation migration', () => {
     const db = freshDb()
     applyMigrations(db)
 
-    expect((db.prepare('SELECT version FROM schema_version').get() as { version: number }).version).toBe(34)
+    expect((db.prepare('SELECT version FROM schema_version').get() as { version: number }).version).toBe(35)
     const tables = (db.prepare(
       "SELECT name FROM sqlite_master WHERE type = 'table' ORDER BY name",
     ).all() as Array<{ name: string }>).map((row) => row.name)
@@ -169,6 +169,7 @@ describe('Ledger 0013 foundation migration', () => {
       'ledger_categories',
       'ledger_transactions',
       'ledger_idempotency',
+      'ledger_transaction_statistics_exclusions',
     ]))
     expect(db.prepare('SELECT COUNT(*) AS count FROM ledger_settings').get()).toEqual({ count: 0 })
     expect(db.prepare('SELECT COUNT(*) AS count FROM ledger_categories').get()).toEqual({ count: 0 })
@@ -192,10 +193,46 @@ describe('Ledger 0013 foundation migration', () => {
     ).get() as { count: number }).count
     applyMigrations(db)
 
-    expect((db.prepare('SELECT version FROM schema_version').get() as { version: number }).version).toBe(34)
+    expect((db.prepare('SELECT version FROM schema_version').get() as { version: number }).version).toBe(35)
     expect((db.prepare(
       "SELECT COUNT(*) AS count FROM sqlite_master WHERE type = 'table'",
     ).get() as { count: number }).count).toBe(firstTableCount)
+  })
+
+  it('adds the statistics sidecar without changing existing transactions or weakening its FK', () => {
+    const db = freshDb()
+    applyMigrations(db, 34)
+    insertAccount(db, 'statistics-migration-account')
+    insertCategory(db, 'statistics-migration-category')
+    insertIncome(
+      db,
+      'statistics-migration-transaction',
+      'statistics-migration-account',
+      'statistics-migration-category',
+      { amountMinor: 321, payee: 'preserve me' },
+    )
+    const before = db.prepare(`
+      SELECT id, type, amount_minor, account_id, category_id, payee,
+             occurred_at, note, deleted_at, version, created_at, updated_at
+      FROM ledger_transactions
+      WHERE id = 'statistics-migration-transaction'
+    `).get()
+
+    applyMigrations(db)
+
+    expect((db.prepare('SELECT version FROM schema_version').get() as { version: number }).version).toBe(35)
+    expect(db.prepare(`
+      SELECT id, type, amount_minor, account_id, category_id, payee,
+             occurred_at, note, deleted_at, version, created_at, updated_at
+      FROM ledger_transactions
+      WHERE id = 'statistics-migration-transaction'
+    `).get()).toEqual(before)
+    expect(db.prepare('SELECT COUNT(*) AS count FROM ledger_transaction_statistics_exclusions').get())
+      .toEqual({ count: 0 })
+    expect(() => db.prepare(`
+      INSERT INTO ledger_transaction_statistics_exclusions (transaction_id, excluded_at)
+      VALUES ('missing-transaction', 4_000)
+    `).run()).toThrow()
   })
 
   it('restores legacy archived categories that already have transaction history', () => {

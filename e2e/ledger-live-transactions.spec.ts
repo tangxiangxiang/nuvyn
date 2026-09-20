@@ -250,6 +250,96 @@ test('Accounts cards and lists use the desktop workspace height without mobile r
   await expect(page.locator('.ledger-account-list .ledger-account-row').first()).toBeVisible()
 })
 
+test('transaction statistics exclusion keeps the row visible and is reversible from the context menu', async ({ page, request }) => {
+  await ensureLedgerDashboardFixtures(request)
+
+  const accounts = await getAccounts(request)
+  const account = accounts.find((candidate) => candidate.archivedAt === null)
+  expect(account).toBeTruthy()
+  if (!account) throw new Error('No active Ledger account available for the statistics exclusion fixture')
+
+  const categoriesResponse = await request.get('/api/ledger/categories?kind=expense&includeArchived=true')
+  expect(categoriesResponse.status(), await categoriesResponse.text()).toBe(200)
+  const categories = await categoriesResponse.json() as Array<{ id: string; archivedAt: number | null }>
+  const category = categories.find((candidate) => candidate.archivedAt === null)
+  expect(category).toBeTruthy()
+  if (!category) throw new Error('No expense category available for the statistics exclusion fixture')
+
+  const fixtureId = `statistics-exclusion-${Date.now()}`
+  const payee = `统计排除 E2E ${fixtureId}`
+  const createTransaction = await request.post('/api/ledger/transactions', {
+    data: {
+      type: 'expense',
+      amountMinor: 777,
+      accountId: account.id,
+      categoryId: category.id,
+      occurredAt: Date.now(),
+      payee,
+      note: '',
+    },
+    headers: { 'Idempotency-Key': `${fixtureId}-create` },
+  })
+  expect(createTransaction.status(), await createTransaction.text()).toBe(201)
+  const created = await createTransaction.json() as { id: string }
+
+  const search = encodeURIComponent(payee)
+  const beforeResponse = await request.get(`/api/ledger/transactions?limit=100&includeDeleted=true&search=${search}`)
+  expect(beforeResponse.status(), await beforeResponse.text()).toBe(200)
+  const before = await beforeResponse.json() as {
+    transactions: Array<{ id: string; excludedFromStatistics: boolean }>
+    page: { total: number; statisticsExcludedCount?: number }
+  }
+  expect(before.transactions).toEqual([expect.objectContaining({ id: created.id, excludedFromStatistics: false })])
+  expect(before.page.total).toBe(1)
+
+  await page.goto(`/ledger/transactions?search=${search}`)
+  const row = page.getByTestId(`ledger-transaction-row-${created.id}`)
+  await expect(row).toBeVisible()
+  await expect(row).not.toContainText('不计统计')
+  await expect(page.locator('.ledger-pagination-meta')).toContainText('共 1 条')
+  await row.click({ button: 'right' })
+  const menu = page.getByRole('menu', { name: '交易操作' })
+  await expect(menu).toBeVisible()
+  await expect(menu.getByRole('menuitem', { name: '不计入统计' })).toBeVisible()
+  await menu.getByRole('menuitem', { name: '不计入统计' }).click()
+
+  await expect(row).toBeVisible()
+  await expect(row).not.toContainText('不计统计')
+  await expect(row).toHaveClass(/is-statistics-excluded/)
+  await expect(page.locator('.ledger-history-summary')).not.toContainText('已排除')
+  await expect(page.locator('.ledger-pagination-meta')).toContainText('共 1 条')
+  await expect(page.locator('.ledger-pagination-summary')).toContainText('已排除 1 笔')
+  const afterExclude = await request.get(`/api/ledger/transactions?limit=100&includeDeleted=true&search=${search}`)
+  expect(afterExclude.status()).toBe(200)
+  const excluded = await afterExclude.json() as {
+    transactions: Array<{ id: string; excludedFromStatistics: boolean }>
+    page: { total: number; statisticsExcludedCount?: number }
+  }
+  expect(excluded.transactions).toEqual([expect.objectContaining({ id: created.id, excludedFromStatistics: true })])
+  expect(excluded.page).toMatchObject({ total: 1, statisticsExcludedCount: 1 })
+
+  await page.reload()
+  await expect(row).toBeVisible()
+  await expect(row).not.toContainText('不计统计')
+  await expect(row).toHaveClass(/is-statistics-excluded/)
+  await row.click({ button: 'right' })
+  const restoreMenu = page.getByRole('menu', { name: '交易操作' })
+  await expect(restoreMenu.getByRole('menuitem', { name: '恢复计入统计' })).toBeVisible()
+  await restoreMenu.getByRole('menuitem', { name: '恢复计入统计' }).click()
+
+  await expect(row).toBeVisible()
+  await expect(row).not.toHaveClass(/is-statistics-excluded/)
+  await expect(page.locator('.ledger-statistics-excluded-count')).toHaveCount(0)
+  const afterRestore = await request.get(`/api/ledger/transactions?limit=100&includeDeleted=true&search=${search}`)
+  expect(afterRestore.status()).toBe(200)
+  const restored = await afterRestore.json() as {
+    transactions: Array<{ id: string; excludedFromStatistics: boolean }>
+    page: { total: number; statisticsExcludedCount?: number }
+  }
+  expect(restored.transactions).toEqual([expect.objectContaining({ id: created.id, excludedFromStatistics: false })])
+  expect(restored.page).toMatchObject({ total: 1, statisticsExcludedCount: 0 })
+})
+
 test.describe(() => {
   test.beforeEach(async ({ request }) => {
     await ensureLedgerDashboardFixtures(request)

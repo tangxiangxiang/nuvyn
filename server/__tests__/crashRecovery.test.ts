@@ -240,7 +240,7 @@ describe('T2.1-0 real v6 durable-journal upgrade recovery', () => {
   it('migrates a v6 journal and recovers it through recoverInterruptedOperations', async () => {
     const fixture = await createLegacyV6JournalFixture(vault)
     try {
-      expect((fixture.db.prepare('SELECT version FROM schema_version').get() as { version: number }).version).toBe(34)
+      expect((fixture.db.prepare('SELECT version FROM schema_version').get() as { version: number }).version).toBe(35)
 
       // A logically proven live v7 row keeps its current physical ID.  The
       // missing v6 row is recreated as a new v7 association.

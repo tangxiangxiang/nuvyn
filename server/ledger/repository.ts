@@ -192,6 +192,29 @@ const SELECT_TRANSACTION = `
   WHERE id = @id
 `
 
+const SELECT_TRANSACTION_STATISTICS_EXCLUSION = `
+  SELECT 1 AS present
+  FROM ledger_transaction_statistics_exclusions
+  WHERE transaction_id = @transactionId
+`
+
+const INSERT_TRANSACTION_STATISTICS_EXCLUSION = `
+  INSERT INTO ledger_transaction_statistics_exclusions (transaction_id, excluded_at)
+  VALUES (@transactionId, @excludedAt)
+  ON CONFLICT(transaction_id) DO NOTHING
+`
+
+const DELETE_TRANSACTION_STATISTICS_EXCLUSION = `
+  DELETE FROM ledger_transaction_statistics_exclusions
+  WHERE transaction_id = @transactionId
+`
+
+const SELECT_STATISTICS_EXCLUDED_TRANSACTION_IDS = `
+  SELECT transaction_id
+  FROM ledger_transaction_statistics_exclusions
+  ORDER BY transaction_id ASC
+`
+
 const INSERT_TRANSACTION = `
   INSERT INTO ledger_transactions (
     id, type, transfer_kind, group_id, transfer_fee_mode, amount_minor, account_id, from_account_id, to_account_id,
@@ -491,6 +514,7 @@ export interface LedgerTransactionQuerySummary {
   readonly incomeMinor: number
   readonly expenseMinor: number
   readonly repaymentMinor: number
+  readonly statisticsExcludedCount: number
 }
 
 export interface LedgerTransactionRangeOptions {
@@ -525,6 +549,10 @@ export interface LedgerRepository {
   insertTransaction(transaction: LedgerTransaction): void
   updateTransaction(input: LedgerTransactionUpdateInput): number
   softDeleteTransaction(input: LedgerTransactionSoftDeleteInput): number
+  isTransactionExcludedFromStatistics(transactionId: string): boolean
+  excludeTransactionFromStatistics(transactionId: string, excludedAt: number): void
+  restoreTransactionToStatistics(transactionId: string): void
+  listStatisticsExcludedTransactionIds(): readonly string[]
   getAccountBalanceBefore(account: LedgerAccountBalanceQueryAccount, before: number): number
   getAccountBalanceAtPosition(
     account: LedgerAccountBalanceQueryAccount,
@@ -1068,6 +1096,10 @@ export function createLedgerRepository(db: DatabaseT): LedgerRepository {
     hasCategoryHistory: db.prepare<{ readonly categoryId: string }>(HAS_CATEGORY_HISTORY),
 
     getTransaction: db.prepare(SELECT_TRANSACTION),
+    isTransactionExcludedFromStatistics: db.prepare<{ readonly transactionId: string }>(SELECT_TRANSACTION_STATISTICS_EXCLUSION),
+    excludeTransactionFromStatistics: db.prepare<{ readonly transactionId: string; readonly excludedAt: number }>(INSERT_TRANSACTION_STATISTICS_EXCLUSION),
+    restoreTransactionToStatistics: db.prepare<{ readonly transactionId: string }>(DELETE_TRANSACTION_STATISTICS_EXCLUSION),
+    listStatisticsExcludedTransactionIds: db.prepare(SELECT_STATISTICS_EXCLUDED_TRANSACTION_IDS),
     listTransactionsByGroupId: db.prepare<{ readonly groupId: string; readonly includeDeleted: number }>(SELECT_TRANSACTIONS_BY_GROUP),
     insertTransaction: db.prepare<TransactionParams>(INSERT_TRANSACTION),
     updateTransaction: db.prepare<TransactionUpdateParams>(UPDATE_TRANSACTION),
@@ -1210,6 +1242,26 @@ export function createLedgerRepository(db: DatabaseT): LedgerRepository {
         .changes
     },
 
+    isTransactionExcludedFromStatistics(transactionId: string): boolean {
+      return statements.isTransactionExcludedFromStatistics.get({ transactionId }) !== undefined
+    },
+
+    excludeTransactionFromStatistics(transactionId: string, excludedAt: number): void {
+      if (!Number.isSafeInteger(excludedAt)) {
+        throw ledgerValidationError('statistics exclusion timestamp must be a safe integer', { field: 'excludedAt' })
+      }
+      statements.excludeTransactionFromStatistics.run({ transactionId, excludedAt })
+    },
+
+    restoreTransactionToStatistics(transactionId: string): void {
+      statements.restoreTransactionToStatistics.run({ transactionId })
+    },
+
+    listStatisticsExcludedTransactionIds(): readonly string[] {
+      return (statements.listStatisticsExcludedTransactionIds.all() as Array<{ readonly transaction_id: string }>)
+        .map((row) => row.transaction_id)
+    },
+
     getAccountBalanceBefore(account: LedgerAccountBalanceQueryAccount, before: number): number {
       if (!Number.isSafeInteger(before)) {
         throw ledgerValidationError('account balance cutoff must be a safe integer', { field: 'before' })
@@ -1350,21 +1402,56 @@ export function createLedgerRepository(db: DatabaseT): LedgerRepository {
       const row = db.prepare(`
         SELECT
           COUNT(*) AS total,
-          COALESCE(SUM(CASE WHEN type = 'income' THEN amount_minor ELSE 0 END), 0) AS income_minor,
-          COALESCE(SUM(CASE WHEN type = 'expense' THEN amount_minor ELSE 0 END), 0) AS expense_minor,
-          COALESCE(SUM(CASE WHEN type = 'transfer' AND transfer_kind = 'repayment' THEN amount_minor ELSE 0 END), 0) AS repayment_minor
+          COALESCE(SUM(CASE WHEN type = 'income'
+            AND NOT EXISTS (
+              SELECT 1
+              FROM ledger_transaction_statistics_exclusions AS exclusion
+              WHERE exclusion.transaction_id = ledger_transactions.id
+            )
+            THEN amount_minor ELSE 0 END), 0) AS income_minor,
+          COALESCE(SUM(CASE WHEN type = 'expense'
+            AND NOT EXISTS (
+              SELECT 1
+              FROM ledger_transaction_statistics_exclusions AS exclusion
+              WHERE exclusion.transaction_id = ledger_transactions.id
+            )
+            THEN amount_minor ELSE 0 END), 0) AS expense_minor,
+          COALESCE(SUM(CASE WHEN type = 'transfer' AND transfer_kind = 'repayment'
+            AND NOT EXISTS (
+              SELECT 1
+              FROM ledger_transaction_statistics_exclusions AS exclusion
+              WHERE exclusion.transaction_id = ledger_transactions.id
+            )
+            THEN amount_minor ELSE 0 END), 0) AS repayment_minor,
+          COUNT(CASE WHEN (
+            type = 'income'
+            OR type = 'expense'
+            OR (type = 'transfer' AND transfer_kind = 'repayment')
+          ) AND EXISTS (
+            SELECT 1
+            FROM ledger_transaction_statistics_exclusions AS exclusion
+            WHERE exclusion.transaction_id = ledger_transactions.id
+          ) THEN 1 END) AS statistics_excluded_count
         FROM ledger_transactions
         ${clauses.length === 0 ? '' : `WHERE ${clauses.join('\n          AND ')}`}
-      `).get(params) as { total?: unknown; income_minor?: unknown; expense_minor?: unknown; repayment_minor?: unknown } | undefined
+      `).get(params) as {
+        total?: unknown
+        income_minor?: unknown
+        expense_minor?: unknown
+        repayment_minor?: unknown
+        statistics_excluded_count?: unknown
+      } | undefined
 
       const total = row?.total
       const incomeMinor = row?.income_minor
       const expenseMinor = row?.expense_minor
       const repaymentMinor = row?.repayment_minor
+      const statisticsExcludedCount = row?.statistics_excluded_count
       if (!Number.isSafeInteger(total)
         || !Number.isSafeInteger(incomeMinor)
         || !Number.isSafeInteger(expenseMinor)
-        || !Number.isSafeInteger(repaymentMinor)) {
+        || !Number.isSafeInteger(repaymentMinor)
+        || !Number.isSafeInteger(statisticsExcludedCount)) {
         throw new Error('Ledger transaction summary contains unsafe numeric values')
       }
       return {
@@ -1372,6 +1459,7 @@ export function createLedgerRepository(db: DatabaseT): LedgerRepository {
         incomeMinor: Number(incomeMinor),
         expenseMinor: Number(expenseMinor),
         repaymentMinor: Number(repaymentMinor),
+        statisticsExcludedCount: Number(statisticsExcludedCount),
       }
     },
 

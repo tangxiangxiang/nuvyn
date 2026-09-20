@@ -758,6 +758,106 @@ describe('Ledger Transaction and Adjustment service lifecycle', () => {
     expect(service.getAccount(bank.id).currentBalanceMinor).toBe(4_500)
   })
 
+  it('keeps statistics exclusion as an idempotent analytics sidecar', () => {
+    const { repository, service } = freshService()
+    initialize(service)
+    const asset = createAccount(service, 'statistics-exclusion-asset', { openingBalanceMinor: 1_000 })
+    const wallet = createAccount(service, 'statistics-exclusion-wallet', { type: 'wallet' })
+    const liability = createAccount(service, 'statistics-exclusion-liability', {
+      type: 'loan',
+      nature: 'liability',
+    })
+    const expenseCategory = service.listCategories('expense', false)[0]!
+    const incomeCategory = service.listCategories('income', false)[0]!
+    const expense = transactionFromResult(service.createTransaction(transactionRequest({
+      type: 'expense', amountMinor: 100, accountId: asset.id, categoryId: expenseCategory.id,
+    }), 'statistics-exclusion-expense'))
+    const income = transactionFromResult(service.createTransaction(transactionRequest({
+      type: 'income', amountMinor: 100, accountId: asset.id, categoryId: incomeCategory.id,
+    }), 'statistics-exclusion-income'))
+    const general = transactionFromResult(service.createTransaction(transactionRequest({
+      type: 'transfer', amountMinor: 10, fromAccountId: asset.id, toAccountId: wallet.id,
+    }), 'statistics-exclusion-general'))
+    const withdrawal = transactionFromResult(service.createTransaction(transactionRequest({
+      type: 'transfer', transferKind: 'withdrawal', amountMinor: 10,
+      fromAccountId: asset.id, toAccountId: wallet.id,
+    }), 'statistics-exclusion-withdrawal'))
+    const repayment = transactionFromResult(service.createTransaction(transactionRequest({
+      type: 'transfer', transferKind: 'repayment', amountMinor: 200,
+      fromAccountId: asset.id, toAccountId: liability.id,
+    }), 'statistics-exclusion-repayment'))
+    const adjustment = JSON.parse(service.adjustAccount(asset.id, {
+      targetBalanceMinor: 781,
+      expectedCalculatedBalanceMinor: 780,
+      occurredAt: TEST_NOW,
+      note: 'statistics exclusion adjustment',
+    }, 'statistics-exclusion-adjustment').responseBodyJson).adjustment
+    const before = repository.getTransaction(expense.id)!
+
+    expect(service.excludeTransactionFromStatistics(expense.id)).toEqual({
+      transactionId: expense.id,
+      excludedFromStatistics: true,
+    })
+    expect(service.excludeTransactionFromStatistics(expense.id)).toEqual({
+      transactionId: expense.id,
+      excludedFromStatistics: true,
+    })
+    expect(service.getTransaction(expense.id).excludedFromStatistics).toBe(true)
+    expect(repository.getTransaction(expense.id)).toEqual(before)
+
+    expect(service.restoreTransactionToStatistics(expense.id)).toEqual({
+      transactionId: expense.id,
+      excludedFromStatistics: false,
+    })
+    expect(service.restoreTransactionToStatistics(expense.id)).toEqual({
+      transactionId: expense.id,
+      excludedFromStatistics: false,
+    })
+    expect(repository.getTransaction(expense.id)).toEqual(before)
+
+    for (const id of [general.id, withdrawal.id, adjustment.id]) {
+      expectLedgerError(
+        () => service.excludeTransactionFromStatistics(id),
+        'ledger-validation-failed',
+      )
+    }
+
+    const repaymentBefore = repository.getTransaction(repayment.id)!
+    expect(service.excludeTransactionFromStatistics(repayment.id).excludedFromStatistics).toBe(true)
+    const changedToGeneral = service.patchTransaction(repayment.id, {
+      expectedVersion: repaymentBefore.version,
+      transferKind: 'general',
+    })
+    expect(changedToGeneral.excludedFromStatistics).toBe(false)
+    const changedBackToRepayment = service.patchTransaction(repayment.id, {
+      expectedVersion: changedToGeneral.version,
+      transferKind: 'repayment',
+    })
+    expect(changedBackToRepayment.excludedFromStatistics).toBe(false)
+
+    const groupedRepayment = transactionFromResult(service.createTransaction(transactionRequest({
+      type: 'transfer', transferKind: 'repayment', amountMinor: 300, feeMinor: 20,
+      fromAccountId: asset.id, toAccountId: liability.id,
+    }), 'statistics-exclusion-grouped-repayment'))
+    const companion = repository.listTransactionsByGroupId(groupedRepayment.groupId!)
+      .find((transaction) => transaction.type === 'expense')!
+    expect(service.excludeTransactionFromStatistics(companion.id)).toEqual({
+      transactionId: companion.id,
+      excludedFromStatistics: true,
+    })
+    expect(repository.isTransactionExcludedFromStatistics(companion.id)).toBe(true)
+
+    service.deleteTransaction(income.id, { expectedVersion: income.version })
+    expectLedgerError(
+      () => service.excludeTransactionFromStatistics(income.id),
+      'ledger-transaction-deleted',
+    )
+    expectLedgerError(
+      () => service.restoreTransactionToStatistics(income.id),
+      'ledger-transaction-deleted',
+    )
+  })
+
   it('refreshes a repayment companion payee when its destination account changes', () => {
     const { repository, service } = freshService()
     initialize(service)

@@ -136,6 +136,8 @@ interface LedgerTransactionDtoBase {
   readonly id: string
   /** Links atomic rows that belong to one product-level operation. */
   readonly groupId?: string
+  /** True when this row remains visible but is omitted from financial analytics. */
+  readonly excludedFromStatistics: boolean
   readonly amountMinor: number
   readonly occurredAt: number
   readonly location?: string
@@ -300,6 +302,13 @@ export interface LedgerPageInfo {
   readonly expenseMinor?: number
   /** Matching repayment principal before pagination. Present on the global transaction list. */
   readonly repaymentMinor?: number
+  /** Matching eligible rows excluded from statistics before pagination. */
+  readonly statisticsExcludedCount?: number
+}
+
+export interface LedgerTransactionStatisticsExclusionDto {
+  readonly transactionId: string
+  readonly excludedFromStatistics: boolean
 }
 
 /** The decoded keyset position used by the Ledger transaction query. */

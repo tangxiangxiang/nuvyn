@@ -123,6 +123,7 @@ function expenseTransaction(overrides: Partial<Extract<LedgerTransactionDto, { t
   return {
     id: 'recent-expense',
     type: 'expense',
+    excludedFromStatistics: false,
     amountMinor: 5_000,
     accountId: 'bank-1',
     categoryId: 'food',
@@ -532,6 +533,7 @@ describe('Ledger account detail lifecycle', () => {
     const repayment: LedgerTransactionDto = {
       id: 'repayment-1',
       type: 'transfer',
+      excludedFromStatistics: false,
       transferKind: 'repayment',
       amountMinor: 500_000,
       bundle: { chargeMinor: 30_000, totalMinor: 530_000 },
@@ -549,6 +551,7 @@ describe('Ledger account detail lifecycle', () => {
     const interest: LedgerTransactionDto = {
       id: 'interest-1',
       type: 'expense',
+      excludedFromStatistics: false,
       amountMinor: 30_000,
       groupId: 'repayment-group',
       accountId: 'bank-1',
@@ -585,9 +588,10 @@ describe('Ledger account detail lifecycle', () => {
 
   it('renders server-provided running balances for recent transactions', async () => {
     const original = account({ openingBalanceMinor: 100_000, currentBalanceMinor: 106_000 })
-    const latest: LedgerTransactionDto = {
+    const latest: Extract<LedgerTransactionDto, { type: 'expense' }> = {
       id: 'recent-latest',
       type: 'expense',
+      excludedFromStatistics: false,
       amountMinor: 2_000,
       accountId: 'bank-1',
       categoryId: 'category-1',
@@ -599,7 +603,7 @@ describe('Ledger account detail lifecycle', () => {
       createdAt: 3,
       updatedAt: 3,
     }
-    const middle: LedgerTransactionDto = {
+    const middle: Extract<LedgerTransactionDto, { type: 'expense' }> = {
       ...latest,
       id: 'recent-middle',
       payee: '较早支出',
@@ -607,7 +611,7 @@ describe('Ledger account detail lifecycle', () => {
       createdAt: 2,
       updatedAt: 2,
     }
-    const oldest: LedgerTransactionDto = {
+    const oldest: Extract<LedgerTransactionDto, { type: 'income' }> = {
       ...latest,
       id: 'recent-oldest',
       type: 'income',
@@ -638,6 +642,7 @@ describe('Ledger account detail lifecycle', () => {
     const withdrawal: LedgerTransactionDto = {
       id: 'withdrawal-1',
       type: 'transfer',
+      excludedFromStatistics: false,
       transferKind: 'withdrawal',
       amountMinor: 200_000,
       bundle: { chargeMinor: 5_000, totalMinor: 205_000 },
