@@ -434,6 +434,48 @@ describe('Ledger live transaction history workspace', () => {
     expect(wrapper.get('[data-testid="ledger-transaction-list"]').text()).not.toContain('工资')
   })
 
+  it('clamps to the last valid page after deleting its final transaction', async () => {
+    const lastPageTransaction = { ...expense, id: 'tx-last-page', payee: '最后一笔' }
+    const firstPage: LedgerTransactionPageDto = {
+      transactions: Array.from({ length: 25 }, (_, index) => ({ ...expense, id: index === 0 ? expense.id : `tx-page-one-${index}` })),
+      page: { nextCursor: 'cursor-1', total: 26, incomeMinor: 0, expenseMinor: expense.amountMinor * 25, repaymentMinor: 0 },
+    }
+    const secondPage: LedgerTransactionPageDto = {
+      transactions: [lastPageTransaction],
+      page: { nextCursor: null, total: 26, incomeMinor: 0, expenseMinor: expense.amountMinor * 25, repaymentMinor: 0 },
+    }
+    const emptyAfterDelete: LedgerTransactionPageDto = {
+      transactions: [],
+      page: { nextCursor: null, total: 25, incomeMinor: 0, expenseMinor: expense.amountMinor * 25, repaymentMinor: 0 },
+    }
+    const reloadedFirstPage: LedgerTransactionPageDto = {
+      ...firstPage,
+      page: { ...firstPage.page, nextCursor: null, total: 25 },
+    }
+    api.listLedgerTransactions.mockReset()
+    api.listLedgerTransactions
+      .mockResolvedValueOnce(firstPage)
+      .mockResolvedValueOnce(secondPage)
+      .mockResolvedValueOnce(emptyAfterDelete)
+      .mockResolvedValueOnce(reloadedFirstPage)
+    const wrapper = await mountView()
+
+    await wrapper.findComponent(NPagination).vm.$emit('update:page', 2)
+    await flushPromises()
+    await wrapper.get('[data-testid="ledger-transaction-row-tx-last-page"]').trigger('click')
+    await flushPromises()
+    await getDetail().findAll('button').find((button) => button.text() === '删除记录')!.trigger('click')
+    await flushPromises()
+
+    await vi.waitFor(() => {
+      expect(api.listLedgerTransactions).toHaveBeenCalledWith({ type: 'all', limit: 25 })
+      expect(wrapper.findComponent(NPagination).props('page')).toBe(1)
+      expect(wrapper.get('[data-testid="ledger-transaction-list"]').text()).toContain('午餐')
+    })
+    expect(wrapper.text()).toContain('共 25 条')
+    expect(wrapper.find('[data-testid="ledger-transactions-empty"]').exists()).toBe(false)
+  })
+
   it('uses the repayment summary from the full query and presents repayment rows in purple', async () => {
     setup(
       {

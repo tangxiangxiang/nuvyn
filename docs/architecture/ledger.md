@@ -111,7 +111,7 @@ transaction query 支持 type、accountId、categoryId、groupId、from、to、s
 
 交易记录页当前使用服务端 offset 分页，UI 页大小为 5、25、50、100。repository 会多取一行判断 nextCursor；默认返回未删除的 transaction rows，包括 grouped companion Expense。
 
-search 在 repository / SQL 层完成，至少匹配持久化的 `location`、`payee`、`note`，并通过关联账户匹配 `account.name`、`fromAccount.name` 和 `toAccount.name`。因此搜索“微信”可以命中“微信零钱 → 招商银行储蓄卡” transfer，也可以通过 persisted payee 命中“微信零钱提现手续费”；搜索“招商”可以命中该 transfer。
+search 在 repository / SQL 层完成，采用文本模糊、结构化类型展示语义和精确金额语义的 OR 关系：至少匹配持久化的 `location`、`payee`、`note`，并通过关联账户和分类匹配 `account.name`、`fromAccount.name`、`toAccount.name` 与分类名称；展示类型词汇映射为 `收入` → `income`、`支出` → `expense`、`还款` → `transfer + repayment`、`提现` → `transfer + withdrawal`、`转账` → `transfer + general`、`余额调整` → `adjustment`。金额按当前 Ledger `baseCurrency` 通过 `parseDecimalToMinor()` 解析后，按 minor-unit magnitude 精确匹配，例如 CNY 的 `38`、`38.00`、`+38`、`-38` 都匹配 magnitude `3800`，包括 signed Adjustment；这不是 `CAST(amount_minor AS TEXT) LIKE` 或 substring search。因此搜索“微信”可以命中“微信零钱 → 招商银行储蓄卡” transfer，也可以通过 persisted payee 命中“微信零钱提现手续费”；搜索“招商”可以命中该 transfer。`queryTransactions()` 与 `summarizeTransactions()` 继续共用 `transactionQueryFilter()`，所以 rows、total、incomeMinor、expenseMinor 和 repaymentMinor 来自同一完整筛选结果集，不受分页影响。
 
 ## 11. Lifecycle
 
@@ -209,7 +209,7 @@ API 以 /api/ledger 为前缀，包含 settings、accounts、categories、transa
 - grouped companion payee 是持久化的 transaction-time snapshot；projection 和 UI 不创造数据库中不存在的 companion business label。
 - companion Expense 对 transaction query / transaction list read model 可见；某些 Overview projection 可以按产品语义折叠或隐藏它，但它不拥有独立 mutation ownership。
 - composite group 的写入、修改和删除保持原子性。
-- search 使用持久化 transaction fields 和结构化账户关系。
+- search 同时覆盖持久化 transaction fields、结构化账户/分类关系、presentation type vocabulary 和按 baseCurrency 解析的精确金额语义。
 - 服务端拥有账户性质、transfer kind、货币、时间和生命周期校验。
 - Entity mutation 遵循 expectedVersion；create 遵循幂等重放。
 

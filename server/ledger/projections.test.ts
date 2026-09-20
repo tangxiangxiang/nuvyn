@@ -398,6 +398,24 @@ describe('Ledger transaction query projections', () => {
     expect(idsForSearch('1,245.84')).toEqual([transfer1245.id])
   })
 
+  it('searches signed Adjustment amounts by exact magnitude', () => {
+    const fixture = freshFixture()
+    const asset = account(fixture, 'adjustment-amount-search-asset', { openingBalanceMinor: 10_000 })
+    const increased = adjustment(fixture, 'adjustment-amount-search-increase', asset.id, 13_800, 10_000)
+    const decreased = adjustment(fixture, 'adjustment-amount-search-decrease', asset.id, 10_000, 13_800)
+
+    expect(increased?.amountMinor).toBe(3_800)
+    expect(decreased?.amountMinor).toBe(-3_800)
+    const idsForSearch = (search: string) => fixture.projections
+      .listTransactions(query({ search })).transactions.map((row) => row.id)
+
+    for (const search of ['38', '38.00', '+38', '-38']) {
+      expect(new Set(idsForSearch(search))).toEqual(new Set([increased!.id, decreased!.id]))
+    }
+    expect(idsForSearch('138')).toEqual([])
+    expect(idsForSearch('3800')).toEqual([])
+  })
+
   it('combines exact amount matching with the existing fuzzy text OR search', () => {
     const fixture = freshFixture()
     const asset = account(fixture, 'amount-search-text-asset')

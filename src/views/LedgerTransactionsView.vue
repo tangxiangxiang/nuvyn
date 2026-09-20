@@ -335,6 +335,13 @@ async function changePageSize(value: string | number | null): Promise<void> {
   await loadTransactions()
 }
 
+async function reconcilePageAfterMutation(): Promise<void> {
+  const total = store.transactions.value?.page.total
+  if (total === undefined) return
+  const maxPage = Math.max(1, Math.ceil(total / tablePageSize.value))
+  if (tablePage.value > maxPage) await loadTransactions(maxPage)
+}
+
 onBeforeUnmount(() => {
   document.body.classList.remove('ledger-transactions-mode')
   document.documentElement.classList.remove('ledger-transactions-mode')
@@ -346,12 +353,14 @@ function inspect(transaction: LedgerTransactionDto): void {
   detailOpen.value = true
 }
 
-function onTransactionUpdated(transaction: LedgerTransactionDto): void {
+async function onTransactionUpdated(transaction: LedgerTransactionDto): Promise<void> {
   selectedTransaction.value = transaction
+  await reconcilePageAfterMutation()
 }
 
-function onTransactionDeleted(): void {
+async function onTransactionDeleted(): Promise<void> {
   selectedTransaction.value = null
+  await reconcilePageAfterMutation()
 }
 
 function onRecoveryResolved(): void {

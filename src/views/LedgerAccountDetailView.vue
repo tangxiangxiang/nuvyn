@@ -51,6 +51,7 @@ const recentTransactions = ref<readonly LedgerTransactionDto[]>([])
 const recentTransactionBalances = ref<readonly LedgerAccountTransactionBalance[]>([])
 const balanceTrendPoints = ref<readonly LedgerAccountBalanceTrendPoint[]>([])
 const movement = ref<LedgerMovementSummary | null>(null)
+const trendError = ref('')
 const loading = ref(false)
 const editing = ref(false)
 const deleting = ref(false)
@@ -88,6 +89,7 @@ async function load(): Promise<void> {
   const sequence = ++loadSequence
   loading.value = true
   actionError.value = ''
+  trendError.value = ''
   editing.value = false
   try {
     const history = await loadAccountHistory(id)
@@ -97,6 +99,7 @@ async function load(): Promise<void> {
     recentTransactions.value = history.transactions
     recentTransactionBalances.value = history.transactionBalances
     balanceTrendPoints.value = history.balanceTrend
+    trendError.value = history.balanceTrendError
     movement.value = history.movement
   } catch (cause) {
     if (sequence !== loadSequence) return
@@ -113,18 +116,24 @@ async function loadAccountHistory(id: string): Promise<{
   readonly transactions: readonly LedgerTransactionDto[]
   readonly transactionBalances: readonly LedgerAccountTransactionBalance[]
   readonly balanceTrend: readonly LedgerAccountBalanceTrendPoint[]
+  readonly balanceTrendError: string
   readonly movement: LedgerMovementSummary
 }> {
+  const trendPromise = store.getAccountBalanceTrend(id, trendRange.value).then(
+    (value) => ({ value, error: null as unknown }),
+    (error: unknown) => ({ value: null, error }),
+  )
   const [page, trend] = await Promise.all([
     store.getAccountTransactions(id, { limit: 5 }),
-    store.getAccountBalanceTrend(id, trendRange.value),
+    trendPromise,
   ])
   return {
     account: page.account,
     hasHistory: page.hasHistory,
     transactions: page.transactions,
     transactionBalances: page.transactionBalances ?? [],
-    balanceTrend: trend.points,
+    balanceTrend: trend.value?.points ?? [],
+    balanceTrendError: trend.error === null ? '' : '余额趋势暂时无法加载。',
     movement: page.movement,
   }
 }
@@ -309,10 +318,11 @@ async function reloadBalanceTrend(range: 7 | 30 | 90 | 365): Promise<void> {
     const trend = await store.getAccountBalanceTrend(id, range)
     if (sequence !== balanceTrendSequence || id !== accountId.value || range !== trendRange.value) return
     balanceTrendPoints.value = trend.points
-  } catch (cause) {
+    trendError.value = ''
+  } catch {
     if (sequence !== balanceTrendSequence || id !== accountId.value || range !== trendRange.value) return
     balanceTrendPoints.value = []
-    actionError.value = ledgerErrorMessage(cause, '余额趋势暂时无法加载。')
+    trendError.value = '余额趋势暂时无法加载。'
   }
 }
 
@@ -568,6 +578,10 @@ const netMovement = computed(() => {
                 aria-label="趋势时间范围"
               />
             </div>
+            <NAlert v-if="trendError" class="ledger-trend-error" type="warning" :show-icon="false" role="alert" data-testid="ledger-balance-trend-error">
+              <span>{{ trendError }}</span>
+              <NButton class="ledger-link-button" attr-type="button" size="small" text :bordered="false" @click="reloadBalanceTrend(trendRange)">重试</NButton>
+            </NAlert>
             <div class="ledger-trend-chart" role="img" aria-label="账户余额变化趋势图">
               <div ref="balanceTrendReveal" class="ledger-balance-trend-reveal">
                 <div ref="balanceTrendPlot" class="ledger-balance-trend-plot" data-testid="ledger-balance-trend-chart" aria-hidden="true" />

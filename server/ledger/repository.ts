@@ -1015,7 +1015,7 @@ function transactionQueryFilter(
         WHERE ledger_categories.name LIKE @searchPattern ESCAPE '\\' COLLATE NOCASE
           AND ledger_categories.id = category_id
       )
-      ${options.searchAmountMinor !== undefined ? 'OR amount_minor = @searchAmountMinor' : ''}
+      ${options.searchAmountMinor !== undefined ? 'OR amount_minor = @searchAmountMinor\n      OR amount_minor = -@searchAmountMinor' : ''}
       ${typeSearchClauses.length > 0 ? `OR ${typeSearchClauses.join('\n      OR ')}` : ''}
     )`)
   }

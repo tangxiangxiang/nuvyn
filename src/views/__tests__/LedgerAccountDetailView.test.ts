@@ -176,6 +176,34 @@ describe('Ledger account detail lifecycle', () => {
     }))
   })
 
+  it('keeps account detail available when the initial balance trend fails', async () => {
+    const original = account({ currentBalanceMinor: 123_000 })
+    setup(original, [expenseTransaction()])
+    api.getLedgerAccountBalanceTrend.mockRejectedValueOnce(new Error('trend unavailable'))
+    const nextRouter = createTestRouter()
+    await nextRouter.push('/ledger/accounts/bank-1')
+    await nextRouter.isReady()
+    const wrapper = mount(LedgerAccountDetailView, { global: { plugins: [nextRouter] } })
+    wrappers.push(wrapper)
+    await flushPromises()
+
+    expect(wrapper.get('#ledger-account-detail-title').text()).toContain('招商银行')
+    await vi.waitFor(() => {
+      expect(wrapper.get('[data-testid="ledger-account-movement"]').text()).toContain('¥1,230.00')
+    }, { timeout: 2500 })
+    expect(wrapper.get('.ledger-recent-transactions').text()).toContain('午餐')
+    expect(wrapper.get('#ledger-account-info-title').text()).toContain('账户信息')
+    expect(wrapper.text()).not.toContain('账户详情无法加载')
+    expect(wrapper.get('[data-testid="ledger-balance-trend-error"]').text()).toContain('余额趋势暂时无法加载')
+
+    api.getLedgerAccountBalanceTrend.mockResolvedValueOnce({ range: 30, points: [] })
+    await wrapper.get('[data-testid="ledger-balance-trend-error"] button').trigger('click')
+    await flushPromises()
+
+    expect(api.getLedgerAccountBalanceTrend).toHaveBeenCalledTimes(2)
+    expect(wrapper.find('[data-testid="ledger-balance-trend-error"]').exists()).toBe(false)
+  })
+
   it('submits the default wallet icon when resetting a custom account icon', async () => {
     const original = account({ icon: 'custom_builtin_cmb' })
     setup(original)
