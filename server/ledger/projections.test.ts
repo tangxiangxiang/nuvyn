@@ -271,6 +271,86 @@ describe('Ledger transaction query projections', () => {
       .toEqual([transfer])
   })
 
+  it('searches by transaction type presentation labels without conflating transfer subtypes', () => {
+    const fixture = freshFixture()
+    const incomeAccount = account(fixture, 'type-search-income', { name: 'Type search income' })
+    const expenseAccount = account(fixture, 'type-search-expense', { name: 'Type search expense' })
+    const bank = account(fixture, 'type-search-bank', { name: 'Type search bank' })
+    const wallet = account(fixture, 'type-search-wallet', { name: 'Type search wallet', type: 'wallet' })
+    const loan = account(fixture, 'type-search-loan', {
+      name: 'Type search loan', type: 'loan', nature: 'liability',
+    })
+    const adjustmentAccount = account(fixture, 'type-search-adjustment', { name: 'Type search adjustment' })
+    const incomeCategory = firstCategory(fixture, 'income')
+    const expenseCategory = firstCategory(fixture, 'expense')
+
+    const income = transaction(fixture, 'type-search-income-row', {
+      type: 'income', amountMinor: 100, accountId: incomeAccount.id, categoryId: incomeCategory.id,
+    })
+    const expense = transaction(fixture, 'type-search-expense-row', {
+      type: 'expense', amountMinor: 200, accountId: expenseAccount.id, categoryId: expenseCategory.id,
+    })
+    const generalTransfer = transaction(fixture, 'type-search-general-transfer', {
+      type: 'transfer', transferKind: 'general', amountMinor: 300,
+      fromAccountId: bank.id, toAccountId: wallet.id,
+    })
+    const repayment = transaction(fixture, 'type-search-repayment', {
+      type: 'transfer', transferKind: 'repayment', amountMinor: 400,
+      fromAccountId: bank.id, toAccountId: loan.id,
+    })
+    const withdrawal = transaction(fixture, 'type-search-withdrawal', {
+      type: 'transfer', transferKind: 'withdrawal', amountMinor: 500,
+      fromAccountId: bank.id, toAccountId: wallet.id,
+    })
+    const adjustmentRow = adjustment(fixture, 'type-search-adjustment-row', adjustmentAccount.id, 600, 0)
+    expect(adjustmentRow).not.toBeNull()
+
+    const idsForSearch = (search: string) => fixture.projections
+      .listTransactions(query({ search })).transactions.map((row) => row.id)
+
+    expect(idsForSearch('收入')).toEqual([income.id])
+    expect(idsForSearch('支出')).toEqual([expense.id])
+    expect(idsForSearch('还款')).toEqual([repayment.id])
+    expect(idsForSearch('提现')).toEqual([withdrawal.id])
+    expect(idsForSearch('转账')).toEqual([generalTransfer.id])
+    expect(idsForSearch('余额调整')).toEqual([adjustmentRow!.id])
+    expect(idsForSearch('还')).toEqual([repayment.id])
+    expect(idsForSearch('余额')).toEqual([adjustmentRow!.id])
+  })
+
+  it('combines type presentation search with text matches in summary and pagination', () => {
+    const fixture = freshFixture()
+    const bank = account(fixture, 'type-search-summary-bank', { name: 'Type search summary bank' })
+    const loan = account(fixture, 'type-search-summary-loan', {
+      name: '房贷', type: 'loan', nature: 'liability',
+    })
+    const incomeCategory = firstCategory(fixture, 'income')
+    const repayment = transaction(fixture, 'type-search-summary-repayment', {
+      type: 'transfer', transferKind: 'repayment', amountMinor: 10_000, feeMinor: 500,
+      fromAccountId: bank.id, toAccountId: loan.id,
+    })
+    const interest = fixture.repository.listTransactionsByGroupId(repayment.groupId!)
+      .find((row) => row.type === 'expense')!
+    expect(interest.payee).toBe('房贷还款利息')
+    const unrelatedIncome = transaction(fixture, 'type-search-summary-income', {
+      type: 'income', amountMinor: 20_000, accountId: bank.id, categoryId: incomeCategory.id,
+      payee: 'Salary',
+    })
+
+    const page = fixture.projections.listTransactions(query({ search: '还款', limit: '1' }))
+    expect(page.transactions).toHaveLength(1)
+    expect(page.page).toMatchObject({
+      total: 2,
+      incomeMinor: 0,
+      expenseMinor: 500,
+      repaymentMinor: 10_000,
+    })
+
+    const allRows = fixture.projections.listTransactions(query({ search: '还款', limit: '10' }))
+    expect(new Set(allRows.transactions.map((row) => row.id))).toEqual(new Set([repayment.id, interest.id]))
+    expect(allRows.transactions.map((row) => row.id)).not.toContain(unrelatedIncome.id)
+  })
+
   it('keeps the three-field keyset order continuous across pages', () => {
     const fixture = freshFixture()
     const asset = account(fixture, 'cursor-account')

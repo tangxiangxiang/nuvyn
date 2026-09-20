@@ -909,6 +909,38 @@ function idempotencyParams(record: LedgerIdempotencyRecord): IdempotencyParams {
   }
 }
 
+const LEDGER_TRANSACTION_SEARCH_TYPE_TERMS = {
+  income: '收入',
+  expense: '支出',
+  repayment: '还款',
+  withdrawal: '提现',
+  transfer: '转账',
+  adjustment: '余额调整',
+} as const
+
+function transactionTypeSearchClauses(search: string): string[] {
+  const clauses: string[] = []
+  if (LEDGER_TRANSACTION_SEARCH_TYPE_TERMS.income.includes(search)) {
+    clauses.push("type = 'income'")
+  }
+  if (LEDGER_TRANSACTION_SEARCH_TYPE_TERMS.expense.includes(search)) {
+    clauses.push("type = 'expense'")
+  }
+  if (LEDGER_TRANSACTION_SEARCH_TYPE_TERMS.repayment.includes(search)) {
+    clauses.push("(type = 'transfer' AND transfer_kind = 'repayment')")
+  }
+  if (LEDGER_TRANSACTION_SEARCH_TYPE_TERMS.withdrawal.includes(search)) {
+    clauses.push("(type = 'transfer' AND transfer_kind = 'withdrawal')")
+  }
+  if (LEDGER_TRANSACTION_SEARCH_TYPE_TERMS.transfer.includes(search)) {
+    clauses.push("(type = 'transfer' AND transfer_kind = 'general')")
+  }
+  if (LEDGER_TRANSACTION_SEARCH_TYPE_TERMS.adjustment.includes(search)) {
+    clauses.push("type = 'adjustment'")
+  }
+  return clauses
+}
+
 function transactionQueryFilter(
   options: LedgerTransactionQueryOptions,
   includeCursor: boolean,
@@ -962,6 +994,7 @@ function transactionQueryFilter(
       .replaceAll('%', '\\%')
       .replaceAll('_', '\\_')
     params.searchPattern = `%${escaped}%`
+    const typeSearchClauses = transactionTypeSearchClauses(options.search)
     clauses.push(`(
       location LIKE @searchPattern ESCAPE '\\' COLLATE NOCASE
       OR payee LIKE @searchPattern ESCAPE '\\' COLLATE NOCASE
@@ -978,6 +1011,7 @@ function transactionQueryFilter(
         WHERE ledger_categories.name LIKE @searchPattern ESCAPE '\\' COLLATE NOCASE
           AND ledger_categories.id = category_id
       )
+      ${typeSearchClauses.length > 0 ? `OR ${typeSearchClauses.join('\n      OR ')}` : ''}
     )`)
   }
 
