@@ -20,7 +20,7 @@ Ledger → What happens to my money
 - src/features/ledger/：API client、store、金额/时间适配、错误和新建恢复。
 - src/components/ledger/：初始化、账户、交易表单、统一交易详情、图标和选择器渲染。
 - src/views/LedgerView.vue、LedgerTransactionsView.vue、LedgerAccountsView.vue、LedgerAccountDetailView.vue：四个页面级入口。
-- server/migrations/0013_* 至 0035_*：Ledger SQLite schema 演进。
+- server/migrations/ 中 0013_*–0029_* 以及 0035_ledger_transaction_statistics_exclusions：Ledger SQLite schema 演进；0030_*–0034_* 属于其他模块。
 
 ## 2. Domain Model
 
@@ -111,7 +111,7 @@ companion Expense 的 payee 是写入 `ledger_transactions.payee`、并在交易
 
 只有 `income`、`expense` 和 `transfer + repayment` 允许设置 exclusion。普通 transfer、withdrawal、Adjustment 原本就不进入 income / expense / repayment 指标，因此服务端拒绝对它们设置 exclusion；还款 parent 与利息 companion Expense 则按 atomic row 独立控制。查询 rows、search、total、pagination、账户余额、账户 movement、running balance 和 account trend 不受影响；transaction summary、cashflow、category breakdown、period summary、12 个月 trend 和 `/trend` 会从匹配全集中排除 eligible sidecar rows，并返回完整筛选集的 `statisticsExcludedCount`。
 
-Transactions 页面通过右键、Shift+F10 或 ContextMenu key 提供“不计入统计 / 恢复计入统计”入口。排除记录仍显示并带有“不计统计”标记；详情 sheet 只展示状态说明，不复制 mutation 入口。PUT/DELETE set-state endpoint 天然幂等，成功后前端从服务端刷新 projection。
+Transactions 页面通过右键、Shift+F10 或 ContextMenu key 提供“不计入统计 / 恢复计入统计”入口。排除记录仍显示在 transaction rows 中，并通过 muted / 灰化 row presentation 表达状态，不额外在 row 内显示“不计统计”文字；当前筛选集的 `statisticsExcludedCount` 显示在列表 footer 左侧，与 total 并列，例如“共 145 条 · 已排除 1 笔”，顶部 financial summary 只展示收入、支出和还款。排除记录仍可搜索、分页、打开详情和右键操作；详情 sheet 只展示状态说明，不复制 mutation 入口。PUT/DELETE set-state endpoint 天然幂等，成功后前端从服务端刷新 projection。
 
 ## 10. Transaction Query & Pagination
 
