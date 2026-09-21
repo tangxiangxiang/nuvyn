@@ -971,6 +971,11 @@ const netMovement = computed(() => {
   .ledger-detail-header .ledger-detail-account-icon { width: 68px; height: 68px; }
   .ledger-detail-header .ledger-account-identity-copy h1 { font-size: 1.5rem; }
   .ledger-detail-header-actions > * { flex: 1 1 120px; }
+  .ledger-detail-header-actions :deep(.ledger-action-trigger) {
+    flex: 1 1 120px;
+    min-width: 0;
+  }
+  .ledger-detail-header-actions :deep(.ledger-action-trigger .ledger-danger-button) { width: 100%; }
   .ledger-metric-grid { grid-template-columns: 1fr; }
   .ledger-detail-hero { grid-template-columns: 1fr; gap: 20px; padding: 18px; }
   .ledger-account-identity { grid-template-columns: auto minmax(0, 1fr); }

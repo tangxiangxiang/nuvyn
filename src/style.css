@@ -176,14 +176,13 @@ html.ledger-mode::-webkit-scrollbar {
   width: 0;
   height: 0;
 }
-html.ledger-accounts-mode,
-body.ledger-accounts-mode {
-  height: 100%;
-  overflow: hidden;
-}
-body.ledger-accounts-mode #app {
-  height: 100%;
-  overflow: hidden;
+@media (min-width: 651px) {
+  html.ledger-accounts-mode,
+  body.ledger-accounts-mode,
+  body.ledger-accounts-mode #app {
+    height: 100%;
+    overflow: hidden;
+  }
 }
 
 /* Ledger transaction select renderers are also used inside Naive UI's
