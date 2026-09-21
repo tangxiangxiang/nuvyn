@@ -52,6 +52,14 @@ const compactText = computed(() => props.signed
   : formatLedgerCompactMoney(props.minor, props.currency))
 const hideFraction = computed(() => props.hideFraction)
 const displayText = computed(() => hideFraction.value ? compactText.value : staticText.value)
+
+function handleCompactKeydown(event: KeyboardEvent): void {
+  if (event.key !== 'Enter' && event.key !== ' ') return
+  event.preventDefault()
+  event.stopPropagation()
+  const target = event.currentTarget
+  if (target instanceof HTMLElement) target.click()
+}
 // The Vue template compiler consumes these bindings; keep TypeScript's
 // noUnusedLocals check aware of the runtime template references as well.
 void NumberAnimation
@@ -89,6 +97,7 @@ onBeforeUnmount(() => {
         :aria-label="`金额 ${staticText}`"
         :title="staticText"
         @click.stop
+        @keydown="handleCompactKeydown"
       >{{ displayText }}</span>
     </template>
     <span class="ledger-money-popover-value">完整金额：{{ staticText }}</span>

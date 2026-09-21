@@ -118,7 +118,6 @@ export function formatLedgerWholeMoney(
 export function formatLedgerCompactMoney(
   minor: number,
   currency: string,
-  locale = 'zh-CN',
 ): string {
   const exponent = currencyExponentFor(currency)
   if (!Number.isSafeInteger(minor)) {
@@ -128,6 +127,10 @@ export function formatLedgerCompactMoney(
   const negative = minor < 0
   const magnitude = BigInt(negative ? -minor : minor)
   const unit = 10n ** BigInt(exponent)
+  // Never turn a real sub-unit movement into a misleading zero. The compact
+  // formatter may round whole major units, but values such as -¥0.01 remain
+  // exact and retain the currency exponent.
+  if (magnitude > 0n && magnitude < unit) return formatLedgerMoney(minor, currency)
   const integerMagnitude = magnitude / unit
   const roundedMagnitude = magnitude % unit * 2n >= unit
     ? integerMagnitude + 1n
@@ -160,7 +163,7 @@ export function formatLedgerCompactMoney(
       return part.value
     }).join('')
   } catch {
-    return formatLedgerWholeMoney(minor, currency, locale)
+    return formatLedgerWholeMoney(minor, currency)
   }
 }
 

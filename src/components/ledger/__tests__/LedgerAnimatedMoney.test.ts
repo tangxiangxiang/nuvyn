@@ -75,6 +75,25 @@ describe('LedgerAnimatedMoney', () => {
     wrapper.unmount()
   })
 
+  it.each(['Enter', ' '])('opens the full amount Popover with %s', async (key) => {
+    const wrapper = mount(LedgerAnimatedMoney, {
+      props: {
+        minor: 28_426_688,
+        currency: 'CNY',
+        hideFraction: true,
+        animateOnMount: false,
+        animateOnChange: false,
+      },
+    })
+
+    const trigger = wrapper.get('[role="button"]')
+    await trigger.trigger('keydown', { key })
+    await nextTick()
+
+    expect(document.body.textContent).toContain('完整金额：¥284,266.88')
+    wrapper.unmount()
+  })
+
   it('preserves update animations when only mount animation is disabled', async () => {
     const animatedWrapper = mount(LedgerAnimatedMoney, {
       props: { minor: 120_000, currency: 'CNY', animateOnMount: false },

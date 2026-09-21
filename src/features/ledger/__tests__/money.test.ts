@@ -34,7 +34,21 @@ describe('Ledger money presentation boundary', () => {
     expect(formatLedgerCompactMoney(12_650, 'CNY')).toBe('¥127')
     expect(formatLedgerCompactMoney(126_500, 'CNY')).toBe('¥1.3k')
     expect(formatLedgerCompactMoney(28_426_688, 'CNY')).toBe('¥284.3k')
-    expect(formatLedgerCompactMoney(-1, 'CNY')).toBe('-¥0')
+  })
+
+  it.each([
+    ['CNY', 1, '¥0.01'],
+    ['CNY', -1, '-¥0.01'],
+    ['CNY', 49, '¥0.49'],
+    ['CNY', -49, '-¥0.49'],
+    ['USD', 1, 'US$0.01'],
+    ['KWD', -49, '-KWD 0.049'],
+  ])('keeps non-zero sub-unit amounts exact for %s', (currency, minor, expected) => {
+    expect(formatLedgerCompactMoney(minor, currency)).toBe(expected)
+  })
+
+  it('keeps zero-decimal currencies free of invented fractions', () => {
+    expect(formatLedgerCompactMoney(1, 'JPY')).toBe('¥1')
   })
 
   it('preserves every digit for large safe minor amounts without decimal Number conversion', () => {
