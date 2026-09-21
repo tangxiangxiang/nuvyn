@@ -1969,6 +1969,7 @@ function animatedMoneyParts(minor: number, currency: string, key: MetricKey): { 
     border-top: 1px solid var(--ledger-divider);
     border-left: 0;
   }
+  .ledger-cashflow-grid > div:nth-child(odd) { padding-left: 2px; }
   .ledger-cashflow-grid > div:first-child {
     padding-top: 4px;
     border-top: 0;
