@@ -45,6 +45,7 @@ const store = useLedgerStore()
 const toast = useToast()
 const route = useRoute()
 const desktopTableFlexHeight = useMediaQuery('(min-width: 651px)')
+const compactTableScroll = useMediaQuery('(max-width: 720px)')
 const transactionSheetOpen = ref(false)
 const detailOpen = ref(false)
 const selectedTransaction = ref<LedgerTransactionDto | null>(null)
@@ -807,6 +808,7 @@ const transactionColumns: DataTableColumns<LedgerTransactionDto> = [
         :loading="loading || paginationLoading"
         :flex-height="desktopTableFlexHeight"
         :max-height="desktopTableFlexHeight ? undefined : 268"
+        :scroll-x="compactTableScroll ? 760 : undefined"
         size="small"
         :bordered="false"
         :bottom-bordered="false"
@@ -1534,9 +1536,11 @@ const transactionColumns: DataTableColumns<LedgerTransactionDto> = [
   .ledger-history-tools .ledger-search-row { grid-row: 2; }
   .ledger-history-tools .ledger-history-summary { grid-row: 3; }
   .ledger-history-summary { flex-wrap: wrap; white-space: normal; }
+  .ledger-transaction-history :deep(.n-card__content) { overflow-x: hidden; }
   .ledger-transaction-table th,
   .ledger-transaction-table td { padding-right: 14px; padding-left: 14px; }
-  .ledger-transaction-table { min-width: 760px; }
+  .ledger-transaction-table { width: 100%; min-width: 0; }
+  .ledger-transaction-table :deep(.n-data-table-wrapper) { min-width: 0; }
   .ledger-transaction-table th:nth-child(3),
   .ledger-transaction-table td:nth-child(3),
   .ledger-transaction-table th:nth-child(5),
