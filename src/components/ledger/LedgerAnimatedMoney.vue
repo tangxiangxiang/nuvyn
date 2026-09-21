@@ -1,8 +1,9 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, ref, watch } from 'vue'
-import { NNumberAnimation as NumberAnimation } from 'naive-ui'
+import { NNumberAnimation as NumberAnimation, NPopover } from 'naive-ui'
 import {
   currencyExponentFor,
+  formatLedgerCompactMoney,
   formatLedgerMoney,
   formatLedgerSignedMoney,
 } from '../../features/ledger/money'
@@ -11,9 +12,10 @@ const props = withDefaults(defineProps<{
   minor: number
   currency: string
   signed?: boolean
+  hideFraction?: boolean
   animateOnMount?: boolean
   animateOnChange?: boolean
-}>(), { signed: false, animateOnMount: true, animateOnChange: true })
+}>(), { signed: false, hideFraction: false, animateOnMount: true, animateOnChange: true })
 
 function parts(minor: number, currency: string) {
   const precision = currencyExponentFor(currency)
@@ -43,6 +45,13 @@ const isStatic = computed(() => !props.animateOnMount && !props.animateOnChange)
 const staticText = computed(() => props.signed
   ? formatLedgerSignedMoney(props.minor, props.currency)
   : formatLedgerMoney(props.minor, props.currency))
+const compactText = computed(() => props.signed
+  ? props.minor === 0
+    ? formatLedgerCompactMoney(0, props.currency)
+    : `${props.minor > 0 ? '+' : '-'}${formatLedgerCompactMoney(Math.abs(props.minor), props.currency)}`
+  : formatLedgerCompactMoney(props.minor, props.currency))
+const hideFraction = computed(() => props.hideFraction)
+const displayText = computed(() => hideFraction.value ? compactText.value : staticText.value)
 // The Vue template compiler consumes these bindings; keep TypeScript's
 // noUnusedLocals check aware of the runtime template references as well.
 void NumberAnimation
@@ -50,6 +59,9 @@ void currentParts
 void fromParts
 void isStatic
 void staticText
+void compactText
+void hideFraction
+void displayText
 
 watch(() => ({ minor: props.minor, currency: props.currency }), (next, previous) => {
   if (!props.animateOnChange || next.currency !== previous.currency) fromMinor.value = next.minor
@@ -68,7 +80,20 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <span v-if="isStatic" class="ledger-animated-money">{{ staticText }}</span>
+  <NPopover v-if="hideFraction" trigger="click" placement="top" :show-arrow="true">
+    <template #trigger>
+      <span
+        class="ledger-animated-money ledger-animated-money--compact"
+        role="button"
+        tabindex="0"
+        :aria-label="`金额 ${staticText}`"
+        :title="staticText"
+        @click.stop
+      >{{ displayText }}</span>
+    </template>
+    <span class="ledger-money-popover-value">完整金额：{{ staticText }}</span>
+  </NPopover>
+  <span v-else-if="isStatic" class="ledger-animated-money">{{ staticText }}</span>
   <span v-else class="ledger-animated-money">
     {{ currentParts.prefix }}<component
       :is="NumberAnimation"

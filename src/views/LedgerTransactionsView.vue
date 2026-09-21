@@ -658,6 +658,7 @@ const transactionColumns: DataTableColumns<LedgerTransactionDto> = [
           minor: amountMinor,
           currency: store.settings.value?.baseCurrency ?? 'CNY',
           signed: transaction.type !== 'transfer',
+          hideFraction: compactTableScroll.value,
           animateOnMount: false,
           animateOnChange: false,
         }),
@@ -782,11 +783,11 @@ const transactionColumns: DataTableColumns<LedgerTransactionDto> = [
           </NInput>
         </div>
         <div class="ledger-history-summary" aria-label="交易汇总">
-          <span>收入 <strong class="is-income"><LedgerAnimatedMoney :minor="resultSummary.incomeMinor" :currency="store.settings.value?.baseCurrency ?? 'CNY'" animate-on-mount /></strong></span>
+          <span>收入 <strong class="is-income"><LedgerAnimatedMoney :minor="resultSummary.incomeMinor" :currency="store.settings.value?.baseCurrency ?? 'CNY'" :hide-fraction="compactTableScroll" animate-on-mount /></strong></span>
           <i aria-hidden="true" />
-          <span>支出 <strong class="is-expense"><LedgerAnimatedMoney :minor="resultSummary.expenseMinor" :currency="store.settings.value?.baseCurrency ?? 'CNY'" animate-on-mount /></strong></span>
+          <span>支出 <strong class="is-expense"><LedgerAnimatedMoney :minor="resultSummary.expenseMinor" :currency="store.settings.value?.baseCurrency ?? 'CNY'" :hide-fraction="compactTableScroll" animate-on-mount /></strong></span>
           <i aria-hidden="true" />
-          <span>还款 <strong class="is-repayment"><LedgerAnimatedMoney :minor="resultSummary.repaymentMinor" :currency="store.settings.value?.baseCurrency ?? 'CNY'" animate-on-mount /></strong></span>
+          <span>还款 <strong class="is-repayment"><LedgerAnimatedMoney :minor="resultSummary.repaymentMinor" :currency="store.settings.value?.baseCurrency ?? 'CNY'" :hide-fraction="compactTableScroll" animate-on-mount /></strong></span>
         </div>
       </div>
 

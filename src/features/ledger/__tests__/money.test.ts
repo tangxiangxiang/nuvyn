@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { describe, expect, it } from 'vitest'
-import { formatLedgerMoney, parseLedgerMoney } from '../money'
+import { formatLedgerCompactMoney, formatLedgerMoney, formatLedgerWholeMoney, parseLedgerMoney } from '../money'
 
 describe('Ledger money presentation boundary', () => {
   it.each([
@@ -22,6 +22,19 @@ describe('Ledger money presentation boundary', () => {
     expect(formatLedgerMoney(3800, 'CNY')).toContain('38.00')
     expect(formatLedgerMoney(38, 'JPY')).not.toContain('.00')
     expect(formatLedgerMoney(38000, 'KWD')).toContain('38.000')
+  })
+
+  it('rounds compact money values to whole major units', () => {
+    expect(formatLedgerWholeMoney(12_649, 'CNY')).toBe('¥126')
+    expect(formatLedgerWholeMoney(12_650, 'CNY')).toBe('¥127')
+    expect(formatLedgerWholeMoney(-1, 'CNY')).toBe('-¥0')
+  })
+
+  it('uses short units when a rounded amount would be wide', () => {
+    expect(formatLedgerCompactMoney(12_650, 'CNY')).toBe('¥127')
+    expect(formatLedgerCompactMoney(126_500, 'CNY')).toBe('¥1.3k')
+    expect(formatLedgerCompactMoney(28_426_688, 'CNY')).toBe('¥284.3k')
+    expect(formatLedgerCompactMoney(-1, 'CNY')).toBe('-¥0')
   })
 
   it('preserves every digit for large safe minor amounts without decimal Number conversion', () => {

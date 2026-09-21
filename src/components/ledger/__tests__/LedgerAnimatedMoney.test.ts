@@ -2,6 +2,7 @@
 import { mount } from '@vue/test-utils'
 import { NNumberAnimation as NumberAnimation } from 'naive-ui'
 import { describe, expect, it } from 'vitest'
+import { nextTick } from 'vue'
 import LedgerAnimatedMoney from '../LedgerAnimatedMoney.vue'
 
 describe('LedgerAnimatedMoney', () => {
@@ -34,6 +35,44 @@ describe('LedgerAnimatedMoney', () => {
     expect(staticWrapper.findComponent(NumberAnimation).exists()).toBe(false)
     expect(staticWrapper.text()).toContain('-¥130.00')
     staticWrapper.unmount()
+  })
+
+  it('can hide fractions for compact displays', () => {
+    const wrapper = mount(LedgerAnimatedMoney, {
+      props: {
+        minor: -12_650,
+        currency: 'CNY',
+        signed: true,
+        hideFraction: true,
+        animateOnMount: true,
+      },
+    })
+
+    expect(wrapper.text()).toBe('-¥127')
+    expect(wrapper.findComponent(NumberAnimation).exists()).toBe(false)
+    wrapper.unmount()
+  })
+
+  it('uses short units for large compact amounts while keeping the full value as a label', async () => {
+    const wrapper = mount(LedgerAnimatedMoney, {
+      props: {
+        minor: 28_426_688,
+        currency: 'CNY',
+        hideFraction: true,
+        animateOnMount: false,
+        animateOnChange: false,
+      },
+    })
+
+    expect(wrapper.text()).toBe('¥284.3k')
+    const trigger = wrapper.get('[role="button"]')
+    expect(trigger.attributes('aria-label')).toBe('金额 ¥284,266.88')
+    expect(trigger.attributes('title')).toBe('¥284,266.88')
+
+    await trigger.trigger('click')
+    await nextTick()
+    expect(document.body.textContent).toContain('完整金额：¥284,266.88')
+    wrapper.unmount()
   })
 
   it('preserves update animations when only mount animation is disabled', async () => {
