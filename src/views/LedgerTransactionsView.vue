@@ -46,6 +46,7 @@ const toast = useToast()
 const route = useRoute()
 const desktopTableFlexHeight = useMediaQuery('(min-width: 651px)')
 const compactTableScroll = useMediaQuery('(max-width: 720px)')
+const paginationPageSlot = computed(() => compactTableScroll.value ? 5 : 7)
 const transactionSheetOpen = ref(false)
 const detailOpen = ref(false)
 const selectedTransaction = ref<LedgerTransactionDto | null>(null)
@@ -658,7 +659,6 @@ const transactionColumns: DataTableColumns<LedgerTransactionDto> = [
           minor: amountMinor,
           currency: store.settings.value?.baseCurrency ?? 'CNY',
           signed: transaction.type !== 'transfer',
-          hideFraction: compactTableScroll.value,
           animateOnMount: false,
           animateOnChange: false,
         }),
@@ -844,7 +844,7 @@ const transactionColumns: DataTableColumns<LedgerTransactionDto> = [
             :item-count="transactionTotal"
             :page-sizes="pageSizeOptions"
             :disabled="paginationLoading"
-            :page-slot="7"
+            :page-slot="paginationPageSlot"
             show-size-picker
             size="medium"
             @update:page="changeTablePage"

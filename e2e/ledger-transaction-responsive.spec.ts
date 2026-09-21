@@ -145,6 +145,7 @@ test('transaction table grows with desktop viewport height and keeps pagination 
   await expect(page.getByTestId('ledger-transaction-list')).toBeVisible()
   const mobileRow = page.locator('.ledger-transaction-row').first()
   await expect(mobileRow).toBeVisible()
+  await expect(mobileRow.locator('.ledger-transaction-amount')).toHaveText('-¥1.23')
   await mobileRow.scrollIntoViewIfNeeded()
   const mobileLayout = await readMobileLayoutMetrics(page)
 
