@@ -55,7 +55,7 @@ or public registration flow in v1.
 Sessions are opaque, cryptographically random 32-byte tokens sent only in an
 `HttpOnly` cookie. SQLite stores only the SHA-256 token hash in `auth_sessions`,
 not the raw token. The server checks the owner, disabled state, revocation, and
-fixed absolute expiry before protected access. The default lifetime is 30 days;
+fixed absolute expiry before protected access. The default lifetime is 7 days;
 `last_seen_at` is observability metadata and does not extend that expiry.
 
 The profile is selected only from the resolved `NUVYN_PUBLIC_ORIGIN`:

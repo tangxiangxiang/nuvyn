@@ -546,9 +546,9 @@ The existing route response contracts remain unchanged for authenticated calls. 
 
 ### Lifetime policy
 
-v1 uses a fixed **30-day absolute lifetime** and no idle extension. This avoids SQLite write amplification and makes “stay logged in” predictable for a self-hosted desktop workspace. `last_seen_at` is retained for observability and cleanup, but may be updated at most once per hour for an active session; it does not extend `expires_at`.
+v1 uses a fixed **7-day absolute lifetime** and no idle extension. This avoids SQLite write amplification and makes “stay logged in” predictable for a self-hosted desktop workspace. `last_seen_at` is retained for observability and cleanup, but may be updated at most once per hour for an active session; it does not extend `expires_at`.
 
-The browser cookie and server `expires_at` use the same 30-day bound. There is no refresh-token family.
+The browser cookie and server `expires_at` use the same 7-day bound. There is no refresh-token family.
 
 ### Backup and restore
 
@@ -986,7 +986,7 @@ This design does not protect against a host user who can read the process enviro
 | --- | --- | --- | --- |
 | Setup takeover by a random network visitor | Attacker becomes owner and gains the vault | Token required for every setup request; token cleared after one owner; no proxy-origin inference | Wrong/missing token tests; remote/proxy deployment review; concurrent setup test |
 | Weak password storage | Offline database compromise exposes owner access | Versioned async scrypt with random salt and cost parameters; no plaintext/encryption/SHA-only storage | KDF unit tests; inspect database for no raw password |
-| Session theft | Stolen cookie grants owner access until expiry | `HttpOnly`, `Secure` in HTTPS, `SameSite=Lax`, no Domain, 30-day bound, logout revocation | Cookie flag tests; expiry/revocation tests; HTTPS fixture |
+| Session theft | Stolen cookie grants owner access until expiry | `HttpOnly`, `Secure` in HTTPS, `SameSite=Lax`, no Domain, 7-day bound, logout revocation | Cookie flag tests; expiry/revocation tests; HTTPS fixture |
 | Session fixation | Pre-login identifier becomes authenticated | Generate a new token only after setup/login; no anonymous session ID | Login transition test checks a fresh cookie/hash |
 | CSRF | Cross-site mutation of the vault or AI | SameSite, Origin/Fetch-Metadata checks for unsafe methods, JSON content type where a body exists, no CORS | Cross-origin Origin/Fetch-Metadata tests and browser mutation tests |
 | Brute-force login | Password guessing or owner denial | Bounded username/peer throttling, dummy KDF for unknown users, no permanent lockout | Failure-window and recovery tests |
@@ -1062,7 +1062,7 @@ A later architecture may add roles, ownership, sharing, per-user credentials, an
 | Password KDF? | Node built-in scrypt, versioned parameters | Argon2id native dependency; SHA/bcrypt/plaintext | Avoids new cross-platform native dependency in v1 while providing a memory-hard KDF; leave an upgrade path. |
 | Password policy? | 12–256 code points, paste-friendly, no composition rules | Shorter/minimal; mandatory character classes | Stronger against guessing without making password-manager use awkward. |
 | Username semantics? | Canonical lowercase ASCII, 3–32 chars, unique | Case-sensitive names; email | Nuvyn has no email infrastructure and one owner; canonical names prevent `Admin`/`admin` ambiguity. |
-| Session lifetime? | Fixed 30 days, no idle extension; coarse `last_seen_at` only | Short idle timeout; rolling refresh tokens | Predictable desktop behavior and no per-request SQLite writes; future device management can add shorter policies. |
+| Session lifetime? | Fixed 7 days, no idle extension; coarse `last_seen_at` only | Short idle timeout; rolling refresh tokens | Predictable desktop behavior and no per-request SQLite writes; future device management can add shorter policies. |
 | Cookie policy? | `HttpOnly`, `SameSite=Lax`, no Domain; `__Host-` when explicit `NUVYN_PUBLIC_ORIGIN` is HTTPS | LocalStorage JWT; unrestricted Domain cookie; independent secure-cookie toggle | Limits script and cross-site exposure while preserving local HTTP development and preventing unsafe origin/security combinations. |
 | CSRF? | SameSite + unsafe-method Origin/Fetch-Metadata checks + JSON content type where a body exists | Synchronizer token; broad CORS | A small, meaningful same-origin defense without breaking existing bodyless DELETE APIs or adding a second browser token channel. |
 | Login throttling? | In-memory bounded username/peer buckets, no permanent lockout | Durable account lockout; no throttling | Prevents trivial guessing while avoiding owner denial and migration complexity. |
@@ -1111,7 +1111,7 @@ These are product-owner choices that do not block the core architecture. The rec
 | Question | Recommended default | Alternative | Consequence |
 | --- | --- | --- | --- |
 | Should the generated setup token be printed to logs, or should operators always provide one? | Keep the generated-token fallback for local/Docker usability; prefer explicit `NUVYN_SETUP_TOKEN` in production. | Require an explicit token and refuse startup/setup when absent. | Explicit-only is stricter but creates a less forgiving first-run path and more operator failure modes. |
-| Is a 30-day fixed session acceptable? | Yes; no idle extension in v1. | 7–14 day fixed lifetime or a 30-day rolling idle policy. | Shorter expiry increases login frequency; rolling expiry needs more session writes and clearer device revocation. |
+| Is a 7-day fixed session acceptable? | Yes; no idle extension in v1. | A shorter fixed lifetime or a rolling idle policy. | Shorter expiry increases login frequency; rolling expiry needs more session writes and clearer device revocation. |
 | What is the default initial username? | No default; require the owner to choose a 3–32 character username. | Suggest `admin` in the form. | A suggestion improves setup speed but may encourage predictable usernames; it must remain editable. |
 | Is 12 characters the right minimum password length? | Yes, with a 256-character maximum and no composition rules. | 14+ minimum or a lower 10-character minimum. | Higher minimum improves guessing resistance but may conflict with existing owner passwords during migration; lower minimum weakens the first credential. |
 | Should logout always warn when any tab is dirty? | Warn only when dirty/saving/conflicted/pending recovery state exists; otherwise logout immediately. | Always show a confirmation. | Always-warning is safer but adds friction to routine desktop use. |

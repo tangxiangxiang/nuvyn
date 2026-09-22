@@ -97,7 +97,7 @@ browser E2E stability.
 
 ### Security
 
-- Added opaque server-side sessions in `HttpOnly` cookies with fixed 30-day expiry, revocation, disabled-owner checks, and optional startup session invalidation.
+- Added opaque server-side sessions in `HttpOnly` cookies with fixed 7-day expiry, revocation, disabled-owner checks, and optional startup session invalidation.
 - Added versioned scrypt password hashing, bounded KDF concurrency/queue work, failure-based login throttling, generic credential failures, and malformed/abnormally sized password handling before expensive KDF work.
 - Added layered `SameSite`, Origin, Fetch Metadata, and JSON content-type protections for mutations.
 - Added a dedicated 16 KiB request-body limit for owner setup/login credential payloads without limiting Markdown document bodies.

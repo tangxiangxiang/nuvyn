@@ -535,7 +535,7 @@ Add a reusable authenticated fixture under `e2e/fixtures` (exact filename to mat
 | Password | Username trim/lowercase/length, password 12–256 code points, paste/no normalization, valid hash, malformed hash, wrong password, unknown-user dummy KDF. |
 | KDF guard | Setup/real/dummy share the same budget; max concurrency never exceeds 3; bounded queue/timeout/abort; 100+ attempt burst returns safe overload responses without unbounded scrypt. |
 | Login limiter | Five-minute bucket, bounded exponential delay/Retry-After, setup-token limiter, restart reset, hot failure bucket still permits correct verification and clears on success, unknown/wrong responses indistinguishable. |
-| Sessions | Fresh token after setup/login, SHA-256 hash only in DB, 30-day fixed expiry, revoked/expired/disabled owner, coarse last-seen update, repeated logout, startup invalidation. |
+| Sessions | Fresh token after setup/login, SHA-256 hash only in DB, 7-day fixed expiry, revoked/expired/disabled owner, coarse last-seen update, repeated logout, startup invalidation. |
 | Cookies | HTTPS `__Host-nuvyn_session`, loopback HTTP `nuvyn_session`, flags/expiry, logout clears both, alternate cookie never accepted as fallback. |
 | Origin/CSRF | Matching origin, mismatched origin, `Sec-Fetch-Site: cross-site`, absent browser metadata policy, JSON-body content type, existing bodyless `DELETE`. |
 | Routes | Public health/auth, protected vault identity/Vault/metadata/links/AI/History, unknown `/api/*` fails closed, no partial handler execution, no-store headers. |
@@ -606,7 +606,7 @@ Apply the exact three-table schema and indexes described above. Verify migration
 
 ### Server changes
 
-Implement parsing/validation, scrypt `N=32768,r=8,p=1,maxmem>=64MiB`, 16-byte salts/32-byte derived keys, versioned hashes, raw-token hashing, fixed 30-day expiry, strict cookie profile selection, and optional session pruning. Do not mount middleware yet.
+Implement parsing/validation, scrypt `N=32768,r=8,p=1,maxmem>=64MiB`, 16-byte salts/32-byte derived keys, versioned hashes, raw-token hashing, fixed 7-day expiry, strict cookie profile selection, and optional session pruning. Do not mount middleware yet.
 
 ### Client changes
 
@@ -1164,7 +1164,7 @@ Rollout invariant for every commit: before commit 5, enforcement is inactive and
 - Every landed phase satisfies the rollout invariant: before enforcement the legacy application remains operable; once enforcement is active a complete browser Setup/Login path and authenticated workspace path are available.
 - Fresh installations require bootstrap-protected setup; exactly one owner can exist, including under concurrent setup.
 - Passwords use versioned asynchronous scrypt; KDF work is globally bounded; raw passwords/secrets never persist or log.
-- Sessions use fresh opaque high-entropy tokens, store only SHA-256 hashes, expire after a fixed 30 days, and support revocation/disabled owners/startup invalidation.
+- Sessions use fresh opaque high-entropy tokens, store only SHA-256 hashes, expire after a fixed 7 days, and support revocation/disabled owners/startup invalidation.
 - Cookie profile derives only from `NUVYN_PUBLIC_ORIGIN`; HTTPS reads only `__Host-nuvyn_session`; loopback HTTP reads only `nuvyn_session`; no alternate fallback; public non-loopback HTTP fails fast; Docker internal `0.0.0.0` remains compatible with loopback publishing.
 - `/api/health` is public liveness with no stable `vaultId`; `/api/vault/identity` is protected and supplies the existing stable instance ID for tabs/Draft Store/document/recovery scoping.
 - The health/identity split and every `vaultId` consumer migration land together in the Phase 5 atomic cutover; auth hydration and identity resolution complete before VaultView, tabs, or Draft Recovery initialize.

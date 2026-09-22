@@ -13,7 +13,7 @@ import {
   NUVYN_SECURE_SESSION_COOKIE_NAME,
 } from '../technicalNamespace.js'
 
-export const SESSION_LIFETIME_MS = 30 * 24 * 60 * 60 * 1000
+export const SESSION_LIFETIME_MS = 7 * 24 * 60 * 60 * 1000
 export const SESSION_LAST_SEEN_UPDATE_INTERVAL_MS = 60 * 60 * 1000
 
 export const SECURE_SESSION_COOKIE_NAME = NUVYN_SECURE_SESSION_COOKIE_NAME

@@ -58,7 +58,7 @@ authentication rows.
 The server generates a fresh cryptographically random 32-byte opaque session
 token after successful setup or login. The raw token is sent only in a cookie;
 SQLite stores only its SHA-256 hash in `auth_sessions`. Sessions have a fixed
-30-day absolute expiry. Logout revokes the current session, and expired,
+7-day absolute expiry. Logout revokes the current session, and expired,
 revoked, or disabled-owner sessions do not authorize requests. The optional
 `NUVYN_AUTH_REVOKE_SESSIONS_ON_START=1` startup control revokes existing rows
 before requests are accepted; normal restarts leave valid sessions alone.

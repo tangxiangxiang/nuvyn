@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import app, { __setMetadataDbForTesting } from '../index.js'
+import { SESSION_LIFETIME_MS } from '../auth/config.js'
 import { PASSWORD_MAX_LENGTH, PASSWORD_MIN_LENGTH } from '../auth/password.js'
 import { AUTH_REQUEST_BODY_MAX_BYTES } from '../auth/routes.js'
 import { createSession, findSessionByRawToken, revokeSession } from '../auth/session.js'
@@ -56,7 +57,15 @@ describe('Phase 2 auth routes', () => {
     expect(created.response.headers.get('set-cookie')).toMatch(/HttpOnly/)
     expect(created.response.headers.get('set-cookie')).toMatch(/SameSite=Lax/)
     expect(created.response.headers.get('set-cookie')).toMatch(/Path=\//)
-    expect(created.response.headers.get('set-cookie')).toMatch(/Max-Age=2592000/)
+    const setCookie = created.response.headers.get('set-cookie') ?? ''
+    expect(setCookie).toContain(`Max-Age=${Math.floor(SESSION_LIFETIME_MS / 1000)}`)
+    const session = context.db.prepare(
+      'SELECT created_at, expires_at FROM auth_sessions ORDER BY id DESC LIMIT 1',
+    ).get() as { created_at: number; expires_at: number }
+    expect(session.expires_at - session.created_at).toBe(SESSION_LIFETIME_MS)
+    const cookieExpires = setCookie.match(/Expires=([^;]+)/)?.[1]
+    expect(cookieExpires).toBeDefined()
+    expect(Math.abs(Date.parse(cookieExpires!) - session.expires_at)).toBeLessThan(1000)
     expect(countRows(context.db, 'users')).toBe(1)
     expect(countRows(context.db, 'auth_instance')).toBe(1)
     expect(countRows(context.db, 'auth_sessions')).toBe(1)

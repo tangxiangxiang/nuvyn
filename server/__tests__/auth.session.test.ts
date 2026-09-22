@@ -41,6 +41,15 @@ afterEach(() => {
 })
 
 describe('authentication session primitives', () => {
+  it('creates new sessions with a fixed seven-day absolute expiry', () => {
+    const db = databaseWithUser()
+    const now = 1_700_000_000_000
+    const created = createSession(db, 1, { now })
+
+    expect(SESSION_LIFETIME_MS).toBe(7 * 24 * 60 * 60 * 1000)
+    expect(created.session.expiresAt).toBe(now + 7 * 24 * 60 * 60 * 1000)
+  })
+
   it('generates high-entropy tokens and stores only their SHA-256 hash', () => {
     const first = generateSessionToken()
     const second = generateSessionToken()

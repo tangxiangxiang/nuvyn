@@ -29,7 +29,7 @@ Authentication v1 state is part of the same SQLite database:
 - `auth_sessions` stores session metadata and token hashes, never raw session tokens.
 
 A database backup therefore includes owner metadata and may include sessions
-that are still within their fixed 30-day lifetime. The setup token is not part
+that are still within their fixed 7-day lifetime. The setup token is not part
 of the database backup: an explicit `NUVYN_SETUP_TOKEN` belongs in the
 operator's secret management, while a generated fallback exists only in the
 process memory that created it and is not recoverable from SQLite.
