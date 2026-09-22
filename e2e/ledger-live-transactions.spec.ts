@@ -146,6 +146,8 @@ test('real Ledger onboarding and expense survive dashboard refresh', async ({ pa
   await expect(page.getByTestId('ledger-dashboard-assets-viewport')).toBeVisible()
   await expect(page.getByTestId('ledger-dashboard-assets-viewport')).toHaveCSS('max-height', '280px')
   await expect(page.getByTestId('ledger-dashboard-assets-viewport')).toHaveCSS('overflow-y', 'auto')
+  await expect(page.getByTestId('ledger-dashboard-assets-viewport')).toHaveCSS('scrollbar-gutter', 'stable')
+  await expect(page.locator('[data-testid="ledger-dashboard-assets"] h3')).toHaveCSS('scrollbar-gutter', 'stable')
   await expect(page.getByTestId('ledger-total-assets')).toContainText('¥10,000.00')
   await expect(page.getByTestId('ledger-net-worth')).toContainText('¥10,000.00')
 

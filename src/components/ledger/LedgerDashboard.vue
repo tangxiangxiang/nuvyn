@@ -1383,6 +1383,7 @@ function animatedMoneyParts(minor: number, currency: string, key: MetricKey): { 
   max-height: 280px;
   overflow-y: auto;
   overscroll-behavior: contain;
+  scrollbar-gutter: stable;
   scrollbar-color: transparent transparent;
   scrollbar-width: thin;
 }
@@ -1446,6 +1447,26 @@ function animatedMoneyParts(minor: number, currency: string, key: MetricKey): { 
   color: var(--text-muted);
   font-size: .75rem;
   font-weight: 550;
+}
+
+/* Classic scrollbars (notably on Windows) take space out of the account
+   list, while macOS overlay scrollbars do not. Reserve the same gutter for
+   the group heading so its total stays aligned with the row amounts. */
+@media (min-width: 621px) {
+  .ledger-dashboard-account-group h3 {
+    overflow-y: auto;
+    scrollbar-gutter: stable;
+    scrollbar-color: transparent transparent;
+    scrollbar-width: thin;
+  }
+
+  .ledger-dashboard-account-group h3::-webkit-scrollbar {
+    width: 6px;
+  }
+
+  .ledger-dashboard-account-group h3::-webkit-scrollbar-thumb {
+    background: transparent;
+  }
 }
 
 .ledger-dashboard-account-group h3 > span {
@@ -1967,6 +1988,7 @@ function animatedMoneyParts(minor: number, currency: string, key: MetricKey): { 
     max-height: none;
     overflow-y: visible;
     overscroll-behavior: auto;
+    scrollbar-gutter: auto;
   }
   .ledger-cashflow-grid { grid-template-columns: 1fr; margin-inline: 0; }
   .ledger-cashflow-grid > div {
