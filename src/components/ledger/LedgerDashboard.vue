@@ -1962,6 +1962,12 @@ function animatedMoneyParts(minor: number, currency: string, key: MetricKey): { 
   .ledger-metric-grid { grid-template-columns: 1fr; }
   .ledger-metric-card.is-primary { grid-column: auto; }
   .ledger-dashboard-section :deep(.n-card__content) { padding: 17px 15px; }
+  .ledger-dashboard-account-list-viewport,
+  .ledger-breakdown-list-viewport {
+    max-height: none;
+    overflow-y: visible;
+    overscroll-behavior: auto;
+  }
   .ledger-cashflow-grid { grid-template-columns: 1fr; margin-inline: 0; }
   .ledger-cashflow-grid > div {
     min-height: 60px;

@@ -178,6 +178,9 @@ test('real Ledger onboarding and expense survive dashboard refresh', async ({ pa
   await expect(page.locator('.ledger-breakdown-columns > div')).toHaveCount(2)
   await expect(page.getByRole('heading', { name: '收入分类' })).toBeVisible()
   await expect(page.getByRole('heading', { name: '支出分类' })).toBeVisible()
+  await expect(page.locator('.ledger-breakdown-list-viewport')).toHaveCount(1)
+  await expect(page.locator('.ledger-breakdown-list-viewport')).toHaveCSS('max-height', '280px')
+  await expect(page.locator('.ledger-breakdown-list-viewport')).toHaveCSS('overflow-y', 'auto')
   await expect(page.getByTestId('ledger-total-assets')).toContainText('¥9,962.00')
   await expect(page.getByTestId('ledger-net-worth')).toContainText('¥9,962.00')
   for (const period of ['today', 'week', 'month', 'year']) {
@@ -201,6 +204,27 @@ test('real Ledger onboarding and expense survive dashboard refresh', async ({ pa
   await expect(page.getByTestId('ledger-recent-transactions')).toContainText('¥38.00')
   await expect(page.getByTestId('ledger-cashflow-trend-canvas')).toBeVisible()
   await expect(page.locator('body')).not.toContainText('billsMockData')
+
+  await page.setViewportSize({ width: 390, height: 844 })
+  await page.reload()
+  await expect(page.getByTestId('ledger-dashboard')).toBeVisible()
+  const mobileListMetrics = await page.locator(
+    '.ledger-dashboard-account-list-viewport, .ledger-breakdown-list-viewport',
+  ).evaluateAll((elements) => elements.map((element) => {
+    const style = getComputedStyle(element)
+    return {
+      clientHeight: element.clientHeight,
+      scrollHeight: element.scrollHeight,
+      maxHeight: style.maxHeight,
+      overflowY: style.overflowY,
+    }
+  }))
+  expect(mobileListMetrics.length).toBeGreaterThan(0)
+  for (const metrics of mobileListMetrics) {
+    expect(metrics.maxHeight).toBe('none')
+    expect(metrics.overflowY).toBe('visible')
+    expect(metrics.scrollHeight).toBeLessThanOrEqual(metrics.clientHeight)
+  }
 })
 
 // This file owns the fresh Ledger onboarding case first. Tests below may call
