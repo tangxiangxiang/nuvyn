@@ -8,11 +8,13 @@ const props = withDefaults(defineProps<{
   modelValue: string
   busy: boolean
   configured: boolean
+  modelName?: string
   contextPaths: string[]
   canAddContext: boolean
   contextPickerOpen: boolean
 }>(), {
   contextPaths: () => [],
+  modelName: '',
   canAddContext: true,
   contextPickerOpen: false,
 })
@@ -26,9 +28,7 @@ const emit = defineEmits<{
 }>()
 const { t } = useI18n()
 
-const inputPlaceholder = computed(
-  () => `${t('ai.input_placeholder')} · ${t('ai.keyboard_hint')}`,
-)
+const inputPlaceholder = computed(() => t('ai.input_placeholder'))
 const inputEl = ref<InputInst | null>(null)
 
 function onInput(value: string) {
@@ -98,10 +98,8 @@ defineExpose({ focus })
           >
             <span class="ai-tool-plus">+</span>
           </NButton>
-          <!-- Reserved for a future AI mode selector; currently display-only. -->
-          <span class="ai-mode-badge" aria-hidden="true">
-            <span class="ai-mode-dot" />
-            Auto
+          <span class="ai-mode-badge" :title="modelName">
+            <span class="ai-model-name">{{ modelName || '…' }}</span>
           </span>
         </div>
         <div class="ai-toolbar-right">

@@ -149,6 +149,7 @@ const filteredPaths = computed(() => {
 .ai-context-option {
   display: flex;
   align-items: center;
+  justify-content: flex-start;
   width: 100%;
   min-width: 0;
   gap: 7px;
@@ -164,6 +165,13 @@ const filteredPaths = computed(() => {
   text-align: left;
   cursor: pointer;
 }
+.ai-context-option :deep(.n-button__content) {
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+  width: 100%;
+  min-width: 0;
+}
 .ai-context-option:hover {
   background: var(--vs-hover-bg);
   color: var(--vs-text-1);
@@ -175,6 +183,7 @@ const filteredPaths = computed(() => {
 }
 .ai-context-option-icon :deep(svg) { width: 13px; height: 13px; }
 .ai-context-option-path {
+  flex: 1 1 auto;
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;

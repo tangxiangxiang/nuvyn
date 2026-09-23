@@ -59,6 +59,7 @@ const emit = defineEmits<{
 const visibleHeadings = computed(() => tocHeadings.value.filter((heading) => heading.level <= 3))
 const hasHeadings = computed(() => visibleHeadings.value.length > 0)
 const documentPaths = computed(() => props.posts.map((post) => post.path))
+const currentPost = computed(() => props.posts.find((post) => post.path === props.path) ?? null)
 const aiHasOpened = ref(props.activeTab === 'ai')
 const tabsRef = ref<HTMLElement | null>(null)
 const metadataDirty = ref(false)
@@ -215,7 +216,12 @@ function onHistoryTabClick(): void {
       <div v-else class="right-rail-history-empty right-rail-empty-state">{{ t('rail.history_empty') }}</div>
     </section>
     <section v-if="aiHasOpened" v-show="activeTab === 'ai'" class="ai-slot" role="tabpanel" :aria-label="t('rail.ai')">
-      <AiPanel :document-paths="documentPaths" />
+      <AiPanel
+        :document-paths="documentPaths"
+        :current-path="path"
+        :current-document-id="currentPost?.documentId ?? null"
+        :current-title="currentPost?.title ?? null"
+      />
     </section>
   </div>
 </template>
@@ -292,7 +298,12 @@ function onHistoryTabClick(): void {
   overflow-y: auto;
   scrollbar-width: thin;
 }
-.ai-slot { height: calc(100% - 36px); min-height: 0; }
+.ai-slot {
+  height: calc(100% - 36px);
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+}
 .ai-slot :deep(.ai-panel) { height: 100%; }
 .toc-panel {
   padding-top: 0;

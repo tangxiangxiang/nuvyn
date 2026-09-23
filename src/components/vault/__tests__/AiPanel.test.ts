@@ -4,11 +4,12 @@
 // synchronously BEFORE any async work and transports the full
 // send-time snapshot for every ready kind (Edit-10.3). none /
 // unavailable captures send no liveContext at all. The same capture
-// also drives the composer/messages path chip + quick prompts.
+// also drives the empty-state title/path summary + quick prompts.
 import { computed, defineComponent, h, nextTick, ref } from 'vue'
 import { mount, type VueWrapper } from '@vue/test-utils'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { Tab } from '../../../components/vault/tabs'
+import type { AiThreadScope } from '../../../lib/ai-api'
 import type {
   AiDiffContext,
   AiDocumentContext,
@@ -34,19 +35,23 @@ vi.mock('../../../composables/vault/useAiHistory', async () => {
   const history = {
     activeSession: vueRef(null),
     messages: vueRef([]),
+    threadScope: vueRef<AiThreadScope | null>(null),
     sessions: vueRef([]),
     isLoading: vueRef(false),
     busy: vueRef(false),
     errorState: vueRef<string | null>(null),
     configured: vueRef(true),
     loadActive: async () => {},
+    loadSettings: async () => {},
+    loadThread: async (scope: AiThreadScope | null) => { history.threadScope.value = scope },
+    clearThread: async () => {},
     refreshSessions: async () => {},
     createSession: async () => ({ id: 1, title: '', createdAt: 0, updatedAt: 0 }),
     switchSession: async () => {},
     renameSession: async () => {},
     deleteSession: async () => {},
     sendMessage: async () => {},
-    sendAndStream: async (_text: string, _opts?: { liveContext?: AiLiveContextSnapshot }) => {},
+    sendAndStream: async (_text: string, _opts?: { liveContext?: AiLiveContextSnapshot; threadScope?: unknown }) => {},
     stop: () => {},
   }
   return { useAiHistory: () => history }
@@ -117,6 +122,36 @@ function readyContext(capture: AiLiveContextCapture): AiLiveContextSnapshot {
   return capture.context
 }
 
+function threadScopeForTest(capture: AiLiveContextCapture) {
+  if (capture.status !== 'ready') return { kind: 'workspace', vaultId: 'vault-a' }
+  const context = capture.context
+  if (context.kind === 'document') {
+    return {
+      kind: 'document',
+      vaultId: context.vaultId,
+      documentId: context.identity.documentId,
+      path: context.identity.path,
+      title: context.title,
+    }
+  }
+  if (context.kind === 'diff') {
+    return {
+      kind: context.identity.currentDocumentId ? 'document' : 'path',
+      vaultId: context.vaultId,
+      ...(context.identity.currentDocumentId ? { documentId: context.identity.currentDocumentId } : {}),
+      path: context.identity.path,
+      title: context.title,
+    }
+  }
+  return {
+    kind: 'document',
+    vaultId: context.vaultId,
+    documentId: context.identity.documentId,
+    path: context.identity.path,
+    title: context.title,
+  }
+}
+
 function mountPanel(
   captureAiContext: () => AiLiveContextCapture,
   documentPaths: string[] = [],
@@ -179,7 +214,10 @@ describe('AiPanel live context capture and transport (Edit-10.3)', () => {
     expect(events).toEqual(['capture', 'send'])
     expect(captureSpy).toHaveBeenCalledOnce()
     // The exact send-time snapshot object — not a re-read, not a path.
-    expect(sendSpy).toHaveBeenCalledWith('hello', { liveContext: readyContext(capture) })
+    expect(sendSpy).toHaveBeenCalledWith('hello', {
+      threadScope: threadScopeForTest(capture),
+      liveContext: readyContext(capture),
+    })
     expect(wrapper.findComponent(AiComposer).props('modelValue')).toBe('')
   })
 
@@ -196,7 +234,10 @@ describe('AiPanel live context capture and transport (Edit-10.3)', () => {
     // The FULL snapshot — kind, identity, and Markdown bodies — goes to
     // the transport. History/Diff/Recovery are never degraded to a
     // path-only hint.
-    expect(sendSpy.mock.calls[0][1]).toEqual({ liveContext: readyContext(capture) })
+    expect(sendSpy.mock.calls[0][1]).toEqual({
+      threadScope: threadScopeForTest(capture),
+      liveContext: readyContext(capture),
+    })
   })
 
   it.each([
@@ -206,7 +247,10 @@ describe('AiPanel live context capture and transport (Edit-10.3)', () => {
     const sendSpy = vi.spyOn(history, 'sendAndStream').mockImplementation(async () => {})
     const wrapper = mountPanel(makeCapture)
     await typeAndSend(wrapper, 'hello')
-    expect(sendSpy.mock.calls[0][1]).toEqual({ liveContext: undefined })
+    expect(sendSpy.mock.calls[0][1]).toEqual({
+      threadScope: threadScopeForTest(makeCapture()),
+      liveContext: undefined,
+    })
   })
 
   it('keeps the send-time capture when the user switches tabs before the stream settles', async () => {
@@ -222,7 +266,10 @@ describe('AiPanel live context capture and transport (Edit-10.3)', () => {
     captureSpy.mockClear() // drop the render-time display-path read
 
     await typeAndSend(wrapper, 'hello')
-    expect(sendSpy.mock.calls[0][1]).toEqual({ liveContext: readyContext(captureA) })
+    expect(sendSpy.mock.calls[0][1]).toEqual({
+      threadScope: threadScopeForTest(captureA),
+      liveContext: readyContext(captureA),
+    })
 
     // The user switches to tab B while this turn is still streaming.
     current = documentCapture('notes/b.md')
@@ -234,7 +281,10 @@ describe('AiPanel live context capture and transport (Edit-10.3)', () => {
     // splicing.
     expect(captureSpy).toHaveBeenCalledOnce()
     expect(sendSpy).toHaveBeenCalledOnce()
-    expect(sendSpy.mock.calls[0][1]).toEqual({ liveContext: readyContext(captureA) })
+    expect(sendSpy.mock.calls[0][1]).toEqual({
+      threadScope: threadScopeForTest(captureA),
+      liveContext: readyContext(captureA),
+    })
   })
 
   it('skips the send-time capture when the guard rails reject the send', async () => {
@@ -267,9 +317,18 @@ describe('AiPanel live context capture and transport (Edit-10.3)', () => {
     ['history', () => historyCapture('notes/h.md'), 'notes/h.md'],
     ['diff', () => diffCapture('notes/d.md'), 'notes/d.md'],
     ['recovery', () => recoveryCapture('notes/r.md'), 'notes/r.md'],
-  ])('shows the %s context path in the chat header', (_label, makeCapture, path) => {
+  ])('shows the %s path in the panel header instead of repeating it in the message area', (_label, makeCapture, path) => {
     const wrapper = mountPanel(makeCapture)
     expect(wrapper.findComponent(AiChatMessages).props('currentPath')).toBe(path)
+    expect(wrapper.get('.ai-header-path').text()).toBe(path)
+    expect(wrapper.find('.ai-context-block').exists()).toBe(false)
+  })
+
+  it('does not show a duplicate document title in the message area', () => {
+    const wrapper = mountPanel(() => documentCapture('notes/a.md'))
+
+    expect(wrapper.text()).not.toContain('Current context')
+    expect(wrapper.text()).not.toContain('notes / a.md')
   })
 
   it.each([
@@ -278,6 +337,7 @@ describe('AiPanel live context capture and transport (Edit-10.3)', () => {
   ])('shows no path in the chat header for %s context', (_label, makeCapture) => {
     const wrapper = mountPanel(makeCapture)
     expect(wrapper.findComponent(AiChatMessages).props('currentPath')).toBeNull()
+    expect(wrapper.get('.ai-header-path').text()).toBe('AI assistant')
   })
 
   it('offers note-scoped quick prompts whenever a ready context exists', () => {
@@ -339,6 +399,7 @@ describe('AiPanel live context capture and transport (Edit-10.3)', () => {
 
     await typeAndSend(wrapper, 'compare this')
     expect(sendSpy).toHaveBeenCalledWith('compare this', {
+      threadScope: threadScopeForTest(documentCapture('notes/current.md')),
       liveContext: readyContext(documentCapture('notes/current.md')),
       contextPaths: ['notes/reference.md'],
     })

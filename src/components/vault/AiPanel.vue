@@ -1,10 +1,7 @@
 <script setup lang="ts">
-// AI panel — chat UI + session persistence + LLM streaming. The
-// close button emits `close` so the parent (VaultView) can decide
-// what to do (typically toggleRightRail). The composer sends a user
-// message to the active session via useAiHistory.sendAndStream;
-// the server streams back tokens that fill the assistant bubble
-// in real time.
+// AI panel — one persistent conversation per current document, with
+// LLM streaming handled by useAiHistory. The server streams tokens
+// into the assistant bubble in real time.
 //
 // The `configured` flag (from /api/ai/active) determines whether
 // the send button is enabled. When false, a persistent banner
@@ -32,53 +29,144 @@
 // unavailable fail closed with no liveContext at all (no route, no
 // getPost, no path fallback). The server validates the snapshot
 // strictly and uses it for this run's system prompt only.
-import { onMounted, ref, computed, nextTick } from 'vue'
+import { onMounted, ref, computed, nextTick, watch } from 'vue'
 import { NButton, NIcon } from 'naive-ui'
-import { History, MessagePlus } from '@vicons/tabler'
+import { Eraser } from '@vicons/tabler'
 import { useAiHistory } from '../../composables/vault/useAiHistory'
 import { useAiLiveContext } from '../../composables/vault/useAiLiveContext'
 import { useI18n } from '../../composables/useI18n'
-import { displayPathForCapture } from './aiContextPaths'
-import AiSessionPicker from './AiSessionPicker.vue'
+import { useConfirm } from '../../composables/useConfirm'
+import { useOptionalVaultContext } from '../../composables/vault/context/useVaultContext'
+import { displayContextForCapture } from './aiContextPaths'
+import type { AiThreadScope } from '../../lib/ai-api'
 import AiChatMessages from './AiChatMessages.vue'
 import AiComposer from './AiComposer.vue'
 import AiContextPicker from './AiContextPicker.vue'
 
 const props = withDefaults(defineProps<{
   documentPaths?: string[]
+  currentPath?: string | null
+  currentDocumentId?: string | null
+  currentTitle?: string | null
 }>(), {
   documentPaths: () => [],
+  currentPath: null,
+  currentDocumentId: null,
+  currentTitle: null,
 })
 
 const draft = ref('')
 const contextPaths = ref<string[]>([])
 const contextPickerOpen = ref(false)
-const pickerOpen = ref(false)
 const history = useAiHistory()
 const liveContext = useAiLiveContext()
+const vaultContext = useOptionalVaultContext()
 const { t } = useI18n()
+const { confirm } = useConfirm()
 const composer = ref<InstanceType<typeof AiComposer> | null>(null)
 
-// The path chip + quick-prompt scope follow the same capture the send
-// uses. The computed re-runs capture() on every workspace change —
-// there is no cache, and the send path never reads this value.
-const displayPath = computed(() => displayPathForCapture(liveContext.capture()))
+// The header path and quick-prompt scope follow the same capture the
+// send uses. Fall back to the route path for display only if the live
+// capture is unavailable; the send path still captures independently.
+const displayContext = computed(() => {
+  return displayContextForCapture(liveContext.capture())
+})
+const displayPath = computed(() => displayContext.value?.path ?? props.currentPath ?? null)
+const threadScope = computed(() => scopeForCapture(liveContext.capture()))
+const threadScopeKey = computed(() => scopeKey(threadScope.value))
 const availableContextPaths = computed(() => props.documentPaths.filter(
   (path) => path !== displayPath.value && !contextPaths.value.includes(path),
 ))
 
-onMounted(async () => {
-  await history.loadActive()
+watch(threadScopeKey, (next, previous) => {
+  if (previous === undefined || next === previous) return
+  draft.value = ''
+  contextPaths.value = []
+  void history.loadThread(threadScope.value)
 })
+
+onMounted(async () => {
+  await history.loadThread(threadScope.value)
+  if (!history.model?.value && history.refreshModel) {
+    await history.refreshModel().catch(() => {})
+  }
+})
+
+function scopeForCapture(capture: ReturnType<typeof liveContext.capture>): AiThreadScope | null {
+  const context = capture.status === 'ready' ? capture.context : null
+  const vaultId = context?.vaultId ?? vaultContext?.vaultId.value
+  if (!vaultId) return null
+
+  if (context?.kind === 'document') {
+    return {
+      kind: 'document',
+      vaultId,
+      documentId: context.identity.documentId,
+      path: context.identity.path,
+      title: context.title,
+    }
+  }
+  if (context?.kind === 'diff') {
+    return context.identity.currentDocumentId
+      ? {
+          kind: 'document',
+          vaultId,
+          documentId: context.identity.currentDocumentId,
+          path: context.identity.path,
+          title: context.title,
+        }
+      : { kind: 'path', vaultId, path: context.identity.path, title: context.title }
+  }
+  if (context?.kind === 'recovery') {
+    return {
+      kind: 'document',
+      vaultId,
+      documentId: context.identity.documentId,
+      path: context.identity.path,
+      title: context.title,
+    }
+  }
+
+  if (props.currentPath && props.currentDocumentId) {
+    return {
+      kind: 'document',
+      vaultId,
+      documentId: props.currentDocumentId,
+      path: props.currentPath,
+      title: props.currentTitle ?? props.currentPath.split('/').at(-1) ?? '',
+    }
+  }
+  if (props.currentPath) {
+    return {
+      kind: 'path',
+      vaultId,
+      path: props.currentPath,
+      title: props.currentTitle ?? props.currentPath.split('/').at(-1) ?? '',
+    }
+  }
+  return { kind: 'workspace', vaultId }
+}
+
+function scopeKey(scope: AiThreadScope | null): string | null {
+  if (!scope) return null
+  const identity = scope.kind === 'document'
+    ? scope.documentId
+    : scope.kind === 'path'
+      ? scope.path
+      : ''
+  return JSON.stringify([scope.kind, scope.vaultId, identity])
+}
 
 async function onSend() {
   const text = draft.value.trim()
   if (!text) return
-  if (history.busy.value) return
+  if (history.busy.value || history.isLoading.value) return
   if (!history.configured.value) return
 
   // Capture BEFORE any await: one immutable send-time snapshot.
   const capture = liveContext.capture()
+  const scope = scopeForCapture(capture)
+  if (!scope) return
 
   draft.value = '' // clear immediately for snappy UX
 
@@ -87,6 +175,7 @@ async function onSend() {
   const snapshot = capture.status === 'ready' ? capture.context : undefined
 
   await history.sendAndStream(text, {
+    threadScope: scope,
     liveContext: snapshot,
     ...(contextPaths.value.length ? { contextPaths: [...contextPaths.value] } : {}),
   })
@@ -105,14 +194,16 @@ function removeContextPath(path: string) {
   contextPaths.value = contextPaths.value.filter((item) => item !== path)
 }
 
-function togglePicker() {
-  pickerOpen.value = !pickerOpen.value
-}
-
-async function onNewSession() {
-  if (history.busy.value) return
-  pickerOpen.value = false
-  await history.createSession()
+async function onClearThread() {
+  const scope = threadScope.value
+  if (!scope || !history.activeSession.value || history.busy.value || history.isLoading.value) return
+  const confirmed = await confirm(
+    t('ai.clear_context_title'),
+    t('ai.clear_context_detail'),
+    { confirmLabel: t('ai.clear_context'), destructive: true },
+  )
+  if (!confirmed) return
+  await history.clearThread(scope)
 }
 
 const quickPrompts = computed(() => {
@@ -141,31 +232,21 @@ async function useQuickPrompt(text: string) {
   <aside class="ai-panel" :aria-label="t('ai.assistant')">
     <header class="ai-header">
       <span
-        class="ai-title-session"
-        :title="history.activeSession.value?.title || t('ai.new_conversation')"
-      >{{ history.activeSession.value?.title || t('ai.new_conversation') }}</span>
+        class="ai-header-path"
+        :title="displayPath || t('ai.assistant')"
+      >{{ displayPath || t('ai.assistant') }}</span>
       <div class="ai-header-actions">
       <NButton
         class="ai-header-btn"
         attr-type="button"
         text
         :bordered="false"
-        :title="t(pickerOpen ? 'ai.close_history' : 'ai.open_history')"
-        :aria-label="t(pickerOpen ? 'ai.close_history' : 'ai.open_history')"
-        aria-haspopup="dialog"
-        :aria-expanded="pickerOpen"
-        @click="togglePicker"
-      ><NIcon aria-hidden="true"><History /></NIcon></NButton>
-      <NButton
-        class="ai-header-btn"
-        attr-type="button"
-        text
-        :bordered="false"
-        :title="t('ai.new_conversation')"
-        :aria-label="t('ai.new_conversation')"
-        :disabled="history.busy.value"
-        @click="onNewSession"
-      ><NIcon aria-hidden="true"><MessagePlus /></NIcon></NButton>
+        v-if="history.activeSession.value && history.messages.value.length > 0"
+        :title="t('ai.clear_context')"
+        :aria-label="t('ai.clear_context')"
+        :disabled="history.busy.value || history.isLoading.value"
+        @click="onClearThread"
+      ><NIcon aria-hidden="true"><Eraser /></NIcon></NButton>
       </div>
     </header>
 
@@ -194,6 +275,7 @@ async function useQuickPrompt(text: string) {
       v-model="draft"
       :busy="history.busy.value"
       :configured="history.configured.value"
+      :model-name="history.model?.value ?? ''"
       :context-paths="contextPaths"
       :can-add-context="availableContextPaths.length > 0"
       :context-picker-open="contextPickerOpen"
@@ -203,6 +285,5 @@ async function useQuickPrompt(text: string) {
       @toggle-context-picker="toggleContextPicker"
     />
 
-    <AiSessionPicker v-if="pickerOpen" @close="pickerOpen = false" />
   </aside>
 </template>

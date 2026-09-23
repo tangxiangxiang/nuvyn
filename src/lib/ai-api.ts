@@ -12,6 +12,16 @@ export interface Session {
   updatedAt: number
 }
 
+export type AiThreadScope =
+  | { kind: 'document'; vaultId: string; documentId: string; path: string; title: string }
+  | { kind: 'path'; vaultId: string; path: string; title: string }
+  | { kind: 'workspace'; vaultId: string }
+
+export interface AiThreadState {
+  session: Session | null
+  messages: Message[]
+}
+
 export interface Message {
   id: number
   sessionId: number
@@ -46,6 +56,8 @@ export interface ToolCallRecord {
 export interface ActiveSession {
   activeId: number | null
   configured: boolean
+  /** Resolved runtime model, including the provider's default when unset. */
+  model?: string
   /** Full active session metadata when an active session exists. */
   activeSession?: Session | null
 }
@@ -107,6 +119,8 @@ export interface AiCredentialStatus {
 export interface ChatRequest {
   sessionId: number
   content: string
+  /** Document/workspace identity for Nuvyn's one-thread-per-note model. */
+  threadScope?: AiThreadScope
   // Edit-10.3: the ONE live-context authority on the new wire. When
   // present, it is the complete send-time snapshot captured by the
   // client at click time (src/composables/vault/aiLiveContext.ts).
@@ -194,6 +208,25 @@ export async function appendMessage(
 
 export async function getActiveSession(): Promise<ActiveSession> {
   return jsonOrThrow<ActiveSession>(await authFetch('/api/ai/active', { method: 'GET' }))
+}
+
+export async function getAiThread(scope: AiThreadScope): Promise<AiThreadState> {
+  const params = new URLSearchParams({ scope: JSON.stringify(scope) })
+  return jsonOrThrow<AiThreadState>(await authFetch(`/api/ai/thread?${params.toString()}`, { method: 'GET' }))
+}
+
+export async function ensureAiThread(scope: AiThreadScope): Promise<Session> {
+  return jsonOrThrow<Session>(await authFetch('/api/ai/thread', {
+    method: 'POST',
+    ...jsonBody({ scope }),
+  }))
+}
+
+export async function clearAiThread(scope: AiThreadScope): Promise<{ cleared: true }> {
+  return jsonOrThrow<{ cleared: true }>(await authFetch('/api/ai/thread', {
+    method: 'DELETE',
+    ...jsonBody({ scope }),
+  }))
 }
 
 // Backwards-compat shim: existing call sites use getActiveSessionId()

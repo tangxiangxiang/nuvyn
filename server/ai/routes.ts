@@ -58,7 +58,7 @@ import {
   SUPPORTED_PROVIDERS,
   type Provider,
 } from './settings.js'
-import type { Message, AssistantBlocks } from '../../src/lib/ai-api.js'
+import type { AssistantBlocks, AiThreadScope, Message } from '../../src/lib/ai-api.js'
 
 function bad(c: any, msg: string, status = 400, errorCode?: string) {
   c.header('Cache-Control', 'no-store')
@@ -253,7 +253,73 @@ function rehydrateForClient(m: Message): Message {
   return { ...m, content: parsed.envelope.text, blocks }
 }
 
+function threadScopeMatchesContext(scope: AiThreadScope, ctx: ChatContext): boolean {
+  if (ctx.kind === 'none') return true
+  if (ctx.kind === 'legacy-path') return scope.kind !== 'workspace' && scope.path === ctx.currentNotePath
+
+  const context = ctx.liveContext
+  let documentId: string | null
+  let path: string
+  if (context.kind === 'document') {
+    documentId = context.identity.documentId
+    path = context.identity.path
+  } else if (context.kind === 'diff') {
+    documentId = context.identity.currentDocumentId
+    path = context.identity.path
+  } else {
+    documentId = context.identity.documentId
+    path = context.identity.path
+  }
+  if (scope.vaultId !== context.vaultId) return false
+  if (scope.kind === 'workspace') return false
+  if (scope.kind === 'document') {
+    return documentId === scope.documentId && path === scope.path
+  }
+  return scope.path === path
+}
+
 const ai = new Hono()
+
+// ---- /thread ----
+// The UI addresses one durable thread by document identity. Sessions
+// remain an internal storage detail so existing message/tool persistence
+// can continue to retain the complete raw conversation.
+ai.get('/thread', (c) => {
+  c.header('Cache-Control', 'no-store')
+  const rawScope = c.req.query('scope')
+  let parsedScope: unknown
+  try {
+    parsedScope = rawScope ? JSON.parse(rawScope) : null
+  } catch {
+    return bad(c, 'invalid thread scope')
+  }
+  const scope = sessions.parseAiThreadScope(parsedScope)
+  if (!scope) return bad(c, 'invalid thread scope')
+  const thread = sessions.getAiThread(getDb(), scope)
+  if (!thread) return c.json({ session: null, messages: [] })
+  const history = messages.listMessages(getDb(), thread.session.id)
+  return c.json({
+    session: thread.session,
+    messages: (history ?? []).map(rehydrateForClient),
+  })
+})
+
+ai.post('/thread', async (c) => {
+  c.header('Cache-Control', 'no-store')
+  const body = await c.req.json().catch(() => null) as { scope?: unknown } | null
+  const scope = sessions.parseAiThreadScope(body?.scope)
+  if (!scope) return bad(c, 'invalid thread scope')
+  return c.json(sessions.ensureAiThread(getDb(), scope).session)
+})
+
+ai.delete('/thread', async (c) => {
+  c.header('Cache-Control', 'no-store')
+  const body = await c.req.json().catch(() => null) as { scope?: unknown } | null
+  const scope = sessions.parseAiThreadScope(body?.scope)
+  if (!scope) return bad(c, 'invalid thread scope')
+  sessions.clearAiThread(getDb(), scope)
+  return c.json({ cleared: true as const })
+})
 
 // ---- /sessions ----
 ai.get('/sessions', (c) => c.json(sessions.listSessions(getDb())))
@@ -452,8 +518,11 @@ ai.get('/active', (c) => {
   const storedActiveId = sessions.getActiveSessionId(db)
   const activeSession = storedActiveId === null ? null : sessions.getSession(db, storedActiveId)
   let configured: boolean
+  let model: string
   try {
-    configured = Boolean(resolveAiRuntimeConfig(db).apiKey)
+    const runtimeConfig = resolveAiRuntimeConfig(db)
+    configured = Boolean(runtimeConfig.apiKey)
+    model = runtimeConfig.model
   } catch (error) {
     const response = aiKeyErrorResponse(c, error)
     if (response) return response
@@ -463,6 +532,7 @@ ai.get('/active', (c) => {
     activeId: activeSession?.id ?? null,
     activeSession,
     configured,
+    model,
   })
 })
 
@@ -667,6 +737,7 @@ ai.post('/chat', async (c) => {
         liveContext?: unknown
         currentNotePath?: unknown
         contextPaths?: unknown
+        threadScope?: unknown
       }
     | null
   if (
@@ -679,6 +750,12 @@ ai.post('/chat', async (c) => {
   // Bind to locals so the narrowed types survive into runChat().
   const sessionId = body.sessionId
   const userContent = body.content
+  const threadScope = body.threadScope === undefined
+    ? null
+    : sessions.parseAiThreadScope(body.threadScope)
+  if (body.threadScope !== undefined && !threadScope) {
+    return c.json({ ok: false, reason: 'invalid-thread-scope' }, 400)
+  }
   const authSessionId = (c as any).get('authSessionId') as unknown
   const presentedDiaryCapability = readDiaryAccessCapability(c.req.raw.headers)
   const authRuntime = getAuthRuntime()
@@ -708,6 +785,16 @@ ai.post('/chat', async (c) => {
     ctx = { kind: 'legacy-path', currentNotePath: body.currentNotePath, ...contextOptions }
   } else {
     ctx = { kind: 'none', ...contextOptions }
+  }
+
+  if (threadScope) {
+    const thread = sessions.getAiThread(db, threadScope)
+    if (!thread || thread.session.id !== sessionId) {
+      return c.json({ ok: false, reason: 'thread-session-mismatch' }, 409)
+    }
+    if (!threadScopeMatchesContext(threadScope, ctx)) {
+      return c.json({ ok: false, reason: 'thread-context-mismatch' }, 409)
+    }
   }
 
   // The AI provider is not an adapter-aware body owner in D8.3. Reject

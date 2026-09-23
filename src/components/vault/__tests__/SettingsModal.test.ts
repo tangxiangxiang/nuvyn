@@ -20,6 +20,7 @@ const cleanDocumentFrontmatter = vi.fn()
 const restoreDocumentFrontmatter = vi.fn()
 const confirm = vi.fn()
 const loadActive = vi.fn()
+const loadSettings = vi.fn()
 const activateFocusTrap = vi.fn()
 const deactivateFocusTrap = vi.fn()
 const onFocusTrapTab = vi.fn()
@@ -81,7 +82,7 @@ vi.mock('../../../composables/useFocusTrap', () => ({
 }))
 
 vi.mock('../../../composables/vault/useAiHistory', () => ({
-  useAiHistory: () => ({ loadActive }),
+  useAiHistory: () => ({ loadActive, loadSettings }),
 }))
 
 vi.mock('../../../composables/vault/context/useVaultContext', () => ({
@@ -187,6 +188,7 @@ beforeEach(() => {
   restoreDocumentFrontmatter.mockResolvedValue({ changed: [], failed: [] })
   confirm.mockResolvedValue(true)
   loadActive.mockResolvedValue(undefined)
+  loadSettings.mockResolvedValue(undefined)
   deactivateFocusTrap.mockResolvedValue(undefined)
   useEditorPreferences().reset()
   useFileTreePreferences().compactFileTree.value = true
@@ -317,7 +319,7 @@ describe('SettingsModal', () => {
       baseURL: 'https://example.test/v1',
       model: 'third-party-model',
     })
-    expect(loadActive).toHaveBeenCalled()
+    expect(loadSettings).toHaveBeenCalled()
     expect(toastSuccess).toHaveBeenCalledWith('AI 设置已保存')
   })
 

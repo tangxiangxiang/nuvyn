@@ -5329,6 +5329,7 @@ body:has(.ledger-detail-sheet-card) .n-modal-mask {
   display: flex;
   flex-direction: column;
   min-height: 0;
+  min-width: 0;
   height: 100%;
   background: var(--vs-bg-1);
   color: var(--vs-text-1);
@@ -5338,26 +5339,26 @@ body:has(.ledger-detail-sheet-card) .n-modal-mask {
 .ai-panel .ai-header {
   display: flex;
   align-items: center;
-  gap: 10px;
-  height: 32px;
+  gap: 8px;
+  height: 34px;
   box-sizing: border-box;
-  padding: 0 14px 0 20px;
+  padding: 0 12px 0 14px;
   background: transparent;
   border-bottom: 1px solid color-mix(in srgb, var(--vs-border) 34%, transparent);
   user-select: none;
   flex: 0 0 auto;
 }
 
-.ai-panel .ai-title-session {
+.ai-panel .ai-header-path {
   margin-right: auto;
   min-width: 0;
-  max-width: calc(100% - 70px);
+  max-width: calc(100% - 64px);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
   color: var(--vs-text-3);
-  font-size: 0.72rem;
-  font-weight: 500;
+  font-size: 0.76rem;
+  font-weight: 550;
 }
 
 .ai-panel .ai-header-actions {
@@ -5375,9 +5376,9 @@ body:has(.ledger-detail-sheet-card) .n-modal-mask {
   border: 0;
   color: var(--vs-text-3);
   cursor: pointer;
-  width: 26px;
-  height: 26px;
-  border-radius: 4px;
+  width: 28px;
+  height: 28px;
+  border-radius: 6px;
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -5441,10 +5442,15 @@ body:has(.ledger-detail-sheet-card) .n-modal-mask {
   flex: 1 1 auto;
   min-height: 0;
   overflow-y: auto;
-  padding: 12px 12px 10px;
+  box-sizing: border-box;
+  padding: 12px 14px 10px;
   display: flex;
   flex-direction: column;
-  gap: 10px;
+  gap: 12px;
+}
+.ai-panel .ai-messages.is-empty {
+  align-items: stretch;
+  justify-content: flex-start;
 }
 
 .ai-panel .ai-message {
@@ -5498,34 +5504,25 @@ body:has(.ledger-detail-sheet-card) .n-modal-mask {
   max-width: 88%;
 }
 
-/* Composer — two-layer card. The input sits on top as a clean
-   text field; the toolbar (slash shortcut, current-note context,
-   send button) sits below as a separate row, divided from the
-   input by a thin top border. Matches the Claude Code CLI
-   composer where the file/action/send row is visually
-   independent of the input area. The whole card lights up on
-   focus-within via the same accent ring used by other vault inputs. */
+/* Composer — one compact surface for the message field and its actions. */
 .ai-panel .ai-composer {
   flex: 0 0 auto;
-  padding: 7px 8px 8px;
+  padding: 6px 8px 7px;
   background: transparent;
 }
 
 .ai-panel .ai-composer-card {
   display: flex;
   flex-direction: column;
-  background: var(--vs-bg-2);
-  border: 1px solid color-mix(in srgb, var(--vs-border) 22%, transparent);
-  border-radius: 8px;
+  min-width: 0;
+  background: transparent;
+  border: 1px solid color-mix(in srgb, var(--vs-border) 58%, transparent);
+  border-radius: 9px;
   overflow: hidden;
-  box-shadow: 0 2px 8px color-mix(in srgb, var(--vs-border) 35%, transparent);
-  transition: border-color 0.15s, box-shadow 0.15s, background 0.15s;
+  transition: border-color 0.15s, background 0.15s;
 }
 .ai-panel .ai-composer-card:focus-within {
-  background: color-mix(in srgb, var(--vs-bg-2) 88%, var(--vs-bg-1));
-  border-color: color-mix(in srgb, var(--vs-accent) 62%, var(--vs-border));
-  box-shadow: 0 0 0 3px color-mix(in srgb, var(--vs-accent) 13%, transparent),
-    0 5px 14px color-mix(in srgb, var(--vs-border) 42%, transparent);
+  border-color: color-mix(in srgb, var(--vs-accent) 30%, var(--vs-border));
 }
 .ai-panel .ai-context-paths {
   display: flex;
@@ -5572,29 +5569,22 @@ body:has(.ledger-detail-sheet-card) .n-modal-mask {
 .ai-panel .ai-input {
   display: block;
   width: 100%;
+  min-width: 0;
   box-sizing: border-box;
-  /* JS in AiPanel.vue resizes this textarea to fit its content
-     (autoresize() in the component). min-height is the empty-
-     state floor — matches the toolbar row so the two halves read
-     as equal-weight layers. autoresize() writes an inline height
-     that overrides this as content grows, capped at INPUT_MAX_H
-     (160px ≈ 6 lines); at the cap the field flips to
-     overflow-y:auto with a transparent scrollbar so a huge paste
-     is still scrollable inside, but the panel reads as scrollbar-
-     free at a glance. */
+  /* Naive UI autosizes the textarea as content grows. Keep its empty
+     state short so the composer stays compact in the right rail. */
   resize: none;
   background: transparent;
   border: 0;
-  /* Padding is asymmetric — extra horizontal so long words have
-     breathing room from the card edges, generous vertical so the
-     placeholder sits centered with breathing room. */
-  padding: 9px 10px 8px;
+  /* A small inset keeps the placeholder close to the toolbar while
+     leaving enough room to type comfortably. */
+  padding: 8px 10px 4px;
   font-family: var(--sans);
-  font-size: 0.85rem;
+  font-size: 0.82rem;
   color: var(--vs-text-1);
   line-height: 1.4;
   outline: none;
-  min-height: 46px;
+  min-height: 32px;
   overflow-y: hidden;
   scrollbar-width: thin;
   scrollbar-color: transparent transparent;
@@ -5602,23 +5592,23 @@ body:has(.ledger-detail-sheet-card) .n-modal-mask {
 .ai-panel .ai-input-control {
   width: 100%;
   min-width: 0;
+  background: transparent;
 }
 .ai-panel .ai-input::-webkit-scrollbar { width: 0; background: transparent; }
-.ai-panel .ai-input::placeholder { color: var(--vs-text-3); }
+.ai-panel .ai-input::placeholder {
+  color: var(--vs-text-2);
+  opacity: 1;
+}
 
-/* Toolbar — the action row below the input. Two layers reading
-   as one card: the thin top border (inherited from the card's
-   own divider logic below) separates the input from the toolbar
-   without adding a second visual surface. height matches .ai-input
-   so the two halves read as exactly equal-height layers. */
+/* Toolbar — actions sit directly on the shared composer surface. */
 .ai-panel .ai-toolbar {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 6px;
-  padding: 4px 5px 5px 8px;
-  border-top: 1px solid color-mix(in srgb, var(--vs-border) 58%, transparent);
-  min-height: 32px;
+  padding: 2px 7px 5px;
+  border-top: 0;
+  min-height: 27px;
   box-sizing: border-box;
 }
 .ai-panel .ai-toolbar-left {
@@ -5639,36 +5629,35 @@ body:has(.ledger-detail-sheet-card) .n-modal-mask {
 .ai-panel .ai-mode-badge {
   display: inline-flex;
   align-items: center;
-  gap: 5px;
+  min-width: 0;
+  overflow: hidden;
   color: var(--vs-text-3);
   font-size: 0.64rem;
   line-height: 1;
   white-space: nowrap;
 }
-.ai-panel .ai-mode-dot {
-  width: 5px;
-  height: 5px;
-  border-radius: 50%;
-  background: #51b87a;
-  box-shadow: 0 0 0 2px color-mix(in srgb, #51b87a 14%, transparent);
+.ai-panel .ai-model-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
-
 /* The add-context control keeps the toolbar compact while remaining quiet
    until the user opens the document picker. */
 .ai-panel .ai-tool-button {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 23px;
-  height: 23px;
+  width: 24px;
+  height: 24px;
   padding: 0;
   border: 1px solid transparent;
-  border-radius: 7px;
+  border-radius: 6px;
   background: transparent;
   color: var(--vs-text-3);
   font-size: 1rem;
   line-height: 1;
-  opacity: 0.8;
+  opacity: 0.9;
   cursor: pointer;
 }
 .ai-panel .ai-tool-button:hover:not(:disabled) {
@@ -5687,10 +5676,10 @@ body:has(.ledger-detail-sheet-card) .n-modal-mask {
   flex: 0 0 auto;
   width: 24px;
   height: 24px;
-  border-radius: 5px;
+  border-radius: 6px;
   border: 0;
   background: var(--vs-accent);
-  color: #fff;
+  color: var(--vs-status-fg);
   font-size: 0.9rem;
   line-height: 1;
   cursor: pointer;
@@ -5704,7 +5693,7 @@ body:has(.ledger-detail-sheet-card) .n-modal-mask {
   box-shadow: 0 1px 2px color-mix(in srgb, var(--vs-accent) 35%, transparent);
 }
 .ai-panel .ai-send:disabled {
-  opacity: 0.35;
+  opacity: 0.5;
   cursor: not-allowed;
   box-shadow: none;
 }

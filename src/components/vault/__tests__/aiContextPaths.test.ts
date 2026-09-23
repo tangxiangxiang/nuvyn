@@ -6,10 +6,9 @@ import type {
   AiLiveContextUnavailableReason,
   AiRecoveryContext,
 } from '../../../composables/vault/aiLiveContext'
-// Edit-10.3: the legacy path-only transport helper is gone — the
-// panel now ships the full send-time snapshot. Only the UI display
-// path helper remains.
-import { displayPathForCapture } from '../aiContextPaths'
+// Edit-10.3: the panel ships the full send-time snapshot. These helpers
+// only project its title/path into the empty-state display.
+import { displayContextForCapture, displayPathForCapture } from '../aiContextPaths'
 
 function documentCapture(path = 'notes/a.md'): AiLiveContextCapture {
   const context: AiDocumentContext = {
@@ -81,5 +80,19 @@ describe('displayPathForCapture (Edit-10.2)', () => {
 
   it('shows nothing when there is no context', () => {
     expect(displayPathForCapture({ status: 'none' })).toBeNull()
+  })
+})
+
+describe('displayContextForCapture', () => {
+  it('shows the captured title and path for ready context', () => {
+    expect(displayContextForCapture(documentCapture('notes/a.md'))).toEqual({
+      title: 'a',
+      path: 'notes/a.md',
+    })
+  })
+
+  it('shows no context when capture is unavailable or absent', () => {
+    expect(displayContextForCapture(unavailable('loading'))).toBeNull()
+    expect(displayContextForCapture({ status: 'none' })).toBeNull()
   })
 })

@@ -11,6 +11,9 @@ function mountComposer(props: Partial<InstanceType<typeof AiComposer>['$props']>
       modelValue: '',
       busy: false,
       configured: true,
+      contextPaths: [],
+      canAddContext: true,
+      contextPickerOpen: false,
       ...props,
     } as any,
   })
@@ -22,7 +25,7 @@ describe('AiComposer', () => {
   it('owns input updates and Enter/Shift+Enter behavior', async () => {
     const wrapper = mountComposer({ modelValue: 'hello' })
     const input = wrapper.get('textarea')
-    expect(input.attributes('placeholder')).toBe('Type a message… · Enter to send · Shift+Enter for newline')
+    expect(input.attributes('placeholder')).toBe('Type a message…')
 
     await input.setValue('updated')
     expect(wrapper.emitted('update:modelValue')?.at(-1)).toEqual(['updated'])
@@ -36,7 +39,7 @@ describe('AiComposer', () => {
   it('uses a provider-neutral Chinese input placeholder', () => {
     useI18n().setLocale('zh')
     const wrapper = mountComposer()
-    expect(wrapper.get('textarea').attributes('placeholder')).toBe('输入消息… · Enter 发送 · Shift+Enter 换行')
+    expect(wrapper.get('textarea').attributes('placeholder')).toBe('输入消息…')
   })
 
   it('switches the primary action from send to stop while busy', async () => {
@@ -51,12 +54,13 @@ describe('AiComposer', () => {
     expect(busy.emitted('stop')).toHaveLength(1)
   })
 
-  it('shows the composer mode and disables send without configuration', () => {
+  it('shows the current model and disables send without configuration', () => {
     const wrapper = mountComposer({
       modelValue: 'hello',
       configured: false,
+      modelName: 'claude-sonnet-4-6',
     })
-    expect(wrapper.get('.ai-mode-badge').text()).toContain('Auto')
+    expect(wrapper.get('.ai-mode-badge').text()).toContain('claude-sonnet-4-6')
     expect(wrapper.get('.ai-send').attributes('disabled')).toBeDefined()
   })
 

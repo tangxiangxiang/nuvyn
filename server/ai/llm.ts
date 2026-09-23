@@ -674,6 +674,8 @@ export interface GenerateTextOpts {
   maxTokens: number
   temperature?: number
   signal?: AbortSignal
+  /** Allows background helpers to use the same isolated database as the chat run. */
+  db?: DatabaseT
 }
 
 export interface GenerateTextResult {
@@ -694,7 +696,7 @@ function normalizeAnthropicFinishReason(reason: unknown): GenerateTextResult['fi
 }
 
 export async function generateText(opts: GenerateTextOpts): Promise<GenerateTextResult> {
-  const cfg = resolveAiRuntimeConfig()
+  const cfg = resolveAiRuntimeConfig(opts.db)
   if (!cfg.apiKey) throw new ChatError('no-api-key')
   if (cfg.provider === 'openai') {
     const client = new OpenAI({ apiKey: cfg.apiKey, ...(cfg.baseURL ? { baseURL: cfg.baseURL } : {}) })

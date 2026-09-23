@@ -3,7 +3,42 @@
 // an in-memory DB. The `rowToSession` mapper handles the SQL
 // snake_case → TS camelCase translation.
 import type { Database as DatabaseT } from 'better-sqlite3'
-import type { Session } from '../../src/lib/ai-api.js'
+import type { AiThreadScope, Session } from '../../src/lib/ai-api.js'
+
+function threadKey(scope: AiThreadScope): string {
+  const identity = scope.kind === 'document'
+    ? scope.documentId
+    : scope.kind === 'path'
+      ? scope.path
+      : ''
+  return JSON.stringify([scope.kind, scope.vaultId, identity])
+}
+
+export function parseAiThreadScope(value: unknown): AiThreadScope | null {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null
+  const input = value as Record<string, unknown>
+  if (typeof input.vaultId !== 'string' || !input.vaultId.trim() || input.vaultId.length > 512) return null
+  const vaultId = input.vaultId.trim()
+  if (input.kind === 'workspace') return { kind: 'workspace', vaultId }
+  if (input.kind === 'document') {
+    if (typeof input.documentId !== 'string' || !input.documentId.trim() || input.documentId.length > 512) return null
+    if (typeof input.path !== 'string' || !input.path.trim() || input.path.length > 1024) return null
+    if (typeof input.title !== 'string' || input.title.length > 512) return null
+    return {
+      kind: 'document',
+      vaultId,
+      documentId: input.documentId.trim(),
+      path: input.path.trim(),
+      title: input.title.trim(),
+    }
+  }
+  if (input.kind === 'path') {
+    if (typeof input.path !== 'string' || !input.path.trim() || input.path.length > 1024) return null
+    if (typeof input.title !== 'string' || input.title.length > 512) return null
+    return { kind: 'path', vaultId, path: input.path.trim(), title: input.title.trim() }
+  }
+  return null
+}
 
 function rowToSession(r: any): Session {
   return {
@@ -13,6 +48,29 @@ function rowToSession(r: any): Session {
     updatedAt: r.updated_at,
   }
 }
+
+export interface AiThreadRecord {
+  session: Session
+  compactSummary: string
+  compactedThroughMessageId: number
+}
+
+export interface AiThreadCompactionState {
+  compactSummary: string
+  compactedThroughMessageId: number
+}
+
+function rowToAiThread(r: any): AiThreadRecord {
+  return {
+    session: rowToSession(r),
+    compactSummary: r.compact_summary,
+    compactedThroughMessageId: r.compacted_through_message_id,
+  }
+}
+
+const THREAD_COLUMNS = `
+  id, title, created_at, updated_at, compact_summary, compacted_through_message_id
+`
 
 export function listSessions(db: DatabaseT): Session[] {
   const rows = db.prepare('SELECT id, title, created_at, updated_at FROM sessions ORDER BY updated_at DESC').all()
@@ -30,6 +88,85 @@ export function createSession(db: DatabaseT): Session {
     'INSERT INTO sessions (title, created_at, updated_at) VALUES (?, ?, ?)'
   ).run('', now, now)
   return { id: Number(info.lastInsertRowid), title: '', createdAt: now, updatedAt: now }
+}
+
+/** Read one scoped conversation without creating it. */
+export function getAiThread(db: DatabaseT, scope: AiThreadScope): AiThreadRecord | null {
+  const row = db.prepare(`SELECT ${THREAD_COLUMNS} FROM sessions WHERE thread_key = ?`)
+    .get(threadKey(scope))
+  return row ? rowToAiThread(row) : null
+}
+
+export function getAiThreadCompactionState(
+  db: DatabaseT,
+  sessionId: number,
+): AiThreadCompactionState | null {
+  const row = db.prepare(`
+    SELECT thread_kind, compact_summary, compacted_through_message_id
+    FROM sessions
+    WHERE id = ?
+  `).get(sessionId) as {
+    thread_kind: string
+    compact_summary: string
+    compacted_through_message_id: number
+  } | undefined
+  if (!row || row.thread_kind === 'legacy') return null
+  return {
+    compactSummary: row.compact_summary,
+    compactedThroughMessageId: row.compacted_through_message_id,
+  }
+}
+
+/**
+ * Return the unique thread for a note/workspace, creating it on the first
+ * message. Old unscoped sessions are left untouched and are not adopted by
+ * a document because their original note identity was never persisted.
+ */
+export function ensureAiThread(db: DatabaseT, scope: AiThreadScope): AiThreadRecord {
+  const key = threadKey(scope)
+  const now = Date.now()
+  const documentId = scope.kind === 'document' ? scope.documentId : null
+  const contextPath = scope.kind === 'workspace' ? null : scope.path
+  const contextTitle = scope.kind === 'workspace' ? null : scope.title
+
+  return db.transaction(() => {
+    db.prepare(`
+      INSERT OR IGNORE INTO sessions (
+        title, created_at, updated_at, thread_key, thread_kind,
+        vault_id, document_id, context_path, context_title
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(contextTitle ?? '', now, now, key, scope.kind, scope.vaultId, documentId, contextPath, contextTitle)
+    db.prepare(`
+      UPDATE sessions
+      SET context_path = ?, context_title = ?, updated_at = ?
+      WHERE thread_key = ?
+    `).run(contextPath, contextTitle, now, key)
+    const row = db.prepare(`SELECT ${THREAD_COLUMNS} FROM sessions WHERE thread_key = ?`).get(key)
+    if (!row) throw new Error('AI thread could not be created')
+    return rowToAiThread(row)
+  })()
+}
+
+/** Persist one compaction checkpoint without changing the raw messages. */
+export function saveAiThreadCompaction(
+  db: DatabaseT,
+  sessionId: number,
+  expectedThroughMessageId: number,
+  throughMessageId: number,
+  compactSummary: string,
+): boolean {
+  const result = db.prepare(`
+    UPDATE sessions
+    SET compact_summary = ?, compacted_through_message_id = ?
+    WHERE id = ? AND thread_kind != 'legacy' AND compacted_through_message_id = ?
+  `).run(compactSummary, throughMessageId, sessionId, expectedThroughMessageId)
+  return result.changes === 1
+}
+
+/** Permanently clear exactly the conversation attached to this scope. */
+export function clearAiThread(db: DatabaseT, scope: AiThreadScope): boolean {
+  const thread = getAiThread(db, scope)
+  return thread ? deleteSession(db, thread.session.id) : false
 }
 
 export function deleteSession(db: DatabaseT, id: number): boolean {

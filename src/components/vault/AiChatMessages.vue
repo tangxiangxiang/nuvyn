@@ -1,12 +1,12 @@
 <script setup lang="ts">
 import { NButton, NIcon } from 'naive-ui'
 import type { Message } from '../../lib/ai-api'
-import { Stars } from '@vicons/tabler'
+import { Link, ListCheck, Search, Stars } from '@vicons/tabler'
 import AiToolCallCard from './AiToolCallCard.vue'
 import AiMarkdown from './AiMarkdown.vue'
 import { useI18n } from '../../composables/useI18n'
 
-defineProps<{
+const props = defineProps<{
   messages: Message[]
   currentPath: string | null
   quickPrompts: Array<{ label: string; text: string }>
@@ -19,33 +19,40 @@ const { t } = useI18n()
 </script>
 
 <template>
-  <div class="ai-messages" role="log" aria-live="polite">
-    <div v-if="messages.length === 0" class="ai-empty-chat">
-      <div class="ai-empty-head">
-        <NIcon class="ai-empty-icon" aria-hidden="true"><Stars /></NIcon>
-        <div>
-          <div class="ai-empty-title">
-            {{ t(currentPath ? 'ai.ask_note' : 'ai.ask_vault') }}
-          </div>
-          <div class="ai-empty-subtitle">
-            {{ currentPath || t('ai.no_document') }}
-          </div>
-        </div>
-      </div>
+  <div
+    class="ai-messages"
+    :class="{ 'is-empty': props.messages.length === 0, 'has-messages': props.messages.length > 0 }"
+    role="log"
+    aria-live="polite"
+  >
+    <div v-if="props.messages.length === 0" class="ai-empty-chat">
+      <div class="ai-suggestion-heading">{{ t('ai.suggestions') }}</div>
       <div class="ai-quick-prompts" :aria-label="t('ai.quick_prompts')">
         <NButton
-          v-for="prompt in quickPrompts"
+          v-for="(prompt, index) in props.quickPrompts"
           :key="prompt.label"
           attr-type="button"
           :bordered="false"
           class="ai-quick-prompt"
           @click="emit('prompt', prompt.text)"
-        >{{ prompt.label }}</NButton>
+        >
+          <NIcon class="ai-quick-icon" aria-hidden="true">
+            <Stars v-if="index === 0" />
+            <Link v-else-if="index === 1 && props.currentPath" />
+            <Search v-else-if="index === 1" />
+            <ListCheck v-else />
+          </NIcon>
+          <span>{{ prompt.label }}</span>
+        </NButton>
+      </div>
+
+      <div class="ai-empty-hint">
+        {{ t(props.currentPath ? 'ai.empty_hint_note' : 'ai.empty_hint_vault') }}
       </div>
     </div>
 
     <div
-      v-for="message in messages"
+      v-for="message in props.messages"
       v-else
       :key="message.id || `${message.sessionId}-${message.createdAt}`"
       class="ai-message"
@@ -119,55 +126,64 @@ const { t } = useI18n()
 .ai-empty-chat {
   display: flex;
   flex-direction: column;
-  gap: 12px;
-  padding: 4px 0;
-  color: var(--vs-text-2, #858585);
+  align-self: stretch;
+  width: 100%;
+  gap: 0;
+  padding: 0 0 10px;
+  color: var(--vs-text-2);
 }
-.ai-empty-head {
+.ai-suggestion-heading {
+  margin-top: 6px;
+  color: var(--vs-text-3);
+  font-size: 0.7rem;
+  font-weight: 600;
+  line-height: 1.3;
+}
+.ai-quick-prompts {
   display: flex;
-  align-items: center;
-  gap: 9px;
+  flex-direction: column;
+  align-items: stretch;
+  min-width: 0;
+  gap: 1px;
+  margin-top: 5px;
 }
-.ai-empty-icon {
-  display: inline-flex;
-  width: 26px;
-  height: 26px;
-  align-items: center;
-  justify-content: center;
-  flex: 0 0 auto;
-  color: color-mix(in srgb, var(--vs-accent, #007acc) 82%, var(--vs-text-1, #d4d4d4));
-  background: color-mix(in srgb, var(--vs-accent, #007acc) 12%, transparent);
-  border: 1px solid color-mix(in srgb, var(--vs-accent, #007acc) 22%, transparent);
-  border-radius: 7px;
-}
-.ai-empty-icon :deep(svg) { width: 15px; height: 15px; display: block; }
-.ai-empty-title { color: var(--vs-text-1, #d4d4d4); font-size: 0.86rem; font-weight: 600; line-height: 1.25; }
-.ai-empty-subtitle {
-  margin-top: 2px;
-  max-width: 230px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  color: var(--vs-text-3, #6a6a6a);
-  font-family: var(--mono, ui-monospace, SFMono-Regular, Menlo, monospace);
-  font-size: 0.72rem;
-}
-.ai-quick-prompts { display: flex; flex-wrap: wrap; gap: 6px; }
 .ai-quick-prompt {
-  padding: 4px 7px;
-  border: 1px solid color-mix(in srgb, var(--vs-border, #3c3c3c) 22%, transparent);
-  border-radius: 6px;
-  background: color-mix(in srgb, var(--vs-bg-2, #252526) 72%, transparent);
-  color: var(--vs-text-2, #858585);
+  display: flex;
+  justify-content: flex-start;
+  width: 100%;
+  min-width: 0;
+  height: 28px;
+  padding: 0 6px;
+  border: 1px solid transparent;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--vs-text-2);
   font: inherit;
-  font-size: 0.75rem;
+  font-size: 0.78rem;
   line-height: 1.2;
+  text-align: left;
   cursor: pointer;
-  transition: background 0.12s, border-color 0.12s, color 0.12s;
+  transition: background 0.12s, color 0.12s;
 }
 .ai-quick-prompt:hover {
-  color: var(--vs-text-1, #d4d4d4);
-  background: color-mix(in srgb, var(--vs-accent, #007acc) 10%, var(--vs-bg-2, #252526));
-  border-color: color-mix(in srgb, var(--vs-accent, #007acc) 36%, var(--vs-border, #3c3c3c));
+  color: var(--vs-text-1);
+  background: color-mix(in srgb, var(--vs-hover-bg) 72%, transparent);
+}
+.ai-quick-prompt :deep(.n-button__content) {
+  justify-content: flex-start;
+  gap: 8px;
+  width: 100%;
+}
+.ai-quick-icon {
+  flex: 0 0 auto;
+  color: var(--vs-text-3);
+}
+.ai-quick-icon :deep(svg) { width: 14px; height: 14px; display: block; }
+.ai-empty-hint {
+  margin-top: 9px;
+  padding-left: 6px;
+  color: var(--vs-text-3);
+  font-size: 0.72rem;
+  line-height: 1.4;
 }
 </style>

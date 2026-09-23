@@ -19,7 +19,7 @@
 // the editor can refresh any open tab.
 import { ref, type Ref } from 'vue'
 import * as api from '../../lib/ai-api.js'
-import type { Session, Message, ChatEvent, ToolCallRecord } from '../../lib/ai-api.js'
+import type { Session, Message, ChatEvent, ToolCallRecord, AiProvider, AiThreadScope } from '../../lib/ai-api.js'
 import { streamChat } from '../../lib/ai-api.js'
 import type { FileChangeEvent } from '../../lib/ai-api.js'
 import type { AiLiveContextSnapshot } from './aiLiveContext.js'
@@ -35,20 +35,27 @@ import type { VaultContext } from './context/types.js'
 export interface SendAndStreamOptions {
   liveContext?: AiLiveContextSnapshot
   contextPaths?: readonly string[]
+  threadScope?: AiThreadScope
 }
 
 export interface AiHistory {
   // state
   activeSession: Ref<Session | null>
   messages: Ref<Message[]>
+  threadScope: Ref<AiThreadScope | null>
   sessions: Ref<Session[]>
   isLoading: Ref<boolean>
   busy: Ref<boolean>
   errorState: Ref<string | null>
   configured: Ref<boolean>
+  model: Ref<string>
 
   // actions
   loadActive(): Promise<void>
+  loadSettings(): Promise<void>
+  loadThread(scope: AiThreadScope | null): Promise<void>
+  clearThread(scope: AiThreadScope): Promise<void>
+  refreshModel(): Promise<void>
   refreshSessions(): Promise<void>
   createSession(): Promise<Session>
   switchSession(id: number): Promise<void>
@@ -66,6 +73,11 @@ export interface AiHistory {
 let stateByVault = new WeakMap<VaultContext, AiHistory>()
 let legacyState: AiHistory | null = null
 
+const DEFAULT_MODEL_BY_PROVIDER: Record<AiProvider, string> = {
+  anthropic: 'claude-sonnet-4-6',
+  openai: 'gpt-4o',
+}
+
 // Test-only escape hatch: reset the fallback and scoped cache so each test starts
 // from a clean slate. Not exported in the public type — tests reach
 // for it via a re-export declared in __tests__.
@@ -77,20 +89,27 @@ export function __resetForTesting(): void {
 function createAiHistory(publishChange: (event: FileChangeEvent) => void): AiHistory {
   // The currently in-flight stream belongs only to this Vault instance.
   let activeController: AbortController | null = null
+  let streamSettled: Promise<void> = Promise.resolve()
+  let settleStream: (() => void) | null = null
+  let threadLoadGeneration = 0
 
   const activeSession = ref<Session | null>(null)
   const messages = ref<Message[]>([])
+  const threadScope = ref<AiThreadScope | null>(null)
   const sessions = ref<Session[]>([])
   const isLoading = ref(false)
   const busy = ref(false)
   const errorState = ref<string | null>(null)
   const configured = ref(false)
+  const model = ref('')
 
   async function loadActive() {
     isLoading.value = true
     try {
+      threadScope.value = null
       const out = await api.getActiveSession()
       configured.value = out.configured
+      model.value = out.model ?? ''
       if (out.activeId === null) {
         activeSession.value = null
         messages.value = []
@@ -103,6 +122,66 @@ function createAiHistory(publishChange: (event: FileChangeEvent) => void): AiHis
     } finally {
       isLoading.value = false
     }
+  }
+
+  async function loadSettings() {
+    const out = await api.getActiveSession()
+    configured.value = out.configured
+    model.value = out.model ?? ''
+  }
+
+  async function loadThread(scope: AiThreadScope | null) {
+    const generation = ++threadLoadGeneration
+    if (busy.value) {
+      stop()
+      await streamSettled
+    }
+    if (generation !== threadLoadGeneration) return
+
+    threadScope.value = scope
+    activeSession.value = null
+    messages.value = []
+    errorState.value = null
+    isLoading.value = true
+    try {
+      const [status, thread] = await Promise.all([
+        api.getActiveSession(),
+        scope ? api.getAiThread(scope) : Promise.resolve(null),
+      ])
+      if (generation !== threadLoadGeneration) return
+      configured.value = status.configured
+      model.value = status.model ?? ''
+      activeSession.value = thread?.session ?? null
+      messages.value = thread?.messages ?? []
+    } finally {
+      if (generation === threadLoadGeneration) isLoading.value = false
+    }
+  }
+
+  async function clearThread(scope: AiThreadScope) {
+    if (busy.value) {
+      stop()
+      await streamSettled
+    }
+    await api.clearAiThread(scope)
+    if (threadScope.value && threadScopeKey(threadScope.value) === threadScopeKey(scope)) {
+      activeSession.value = null
+      messages.value = []
+    }
+  }
+
+  async function refreshModel() {
+    const settings = await api.getAiSettings()
+    model.value = settings.model || DEFAULT_MODEL_BY_PROVIDER[settings.provider]
+  }
+
+  function threadScopeKey(scope: AiThreadScope): string {
+    const identity = scope.kind === 'document'
+      ? scope.documentId
+      : scope.kind === 'path'
+        ? scope.path
+        : ''
+    return JSON.stringify([scope.kind, scope.vaultId, identity])
   }
 
   async function refreshSessions() {
@@ -161,45 +240,61 @@ function createAiHistory(publishChange: (event: FileChangeEvent) => void): AiHis
     const trimmed = text.trim()
     if (!trimmed) return
     if (!configured.value) return
-    if (busy.value) return
-    if (activeSession.value === null) {
-      const s = await createSession()
-      activeSession.value = s
-    }
-    const sessionId = activeSession.value.id
+    if (busy.value || isLoading.value) return
 
-    // Optimistic insert: user message (id 0) + empty assistant (id 0).
-    // Object identity is the in-flight discriminator (see spec §3.9).
-    const optimisticUser: Message = {
-      id: 0,
-      sessionId,
-      role: 'user',
-      content: trimmed,
-      createdAt: Date.now(),
+    if (options?.threadScope) {
+      const loadedKey = threadScope.value ? threadScopeKey(threadScope.value) : null
+      if (loadedKey !== threadScopeKey(options.threadScope)) {
+        await loadThread(options.threadScope)
+      }
     }
-    const optimisticAssistant: Message = {
-      id: 0,
-      sessionId,
-      role: 'assistant',
-      content: '',
-      createdAt: Date.now() + 1,
-      // Initialize the structured-blocks field so tool events
-      // have a place to land. The text is kept in sync with
-      // `content` as tokens stream in.
-      blocks: { v: 1, text: '', toolCalls: [] },
-    }
-    messages.value = [...messages.value, optimisticUser, optimisticAssistant]
+    if (busy.value || isLoading.value) return
 
     busy.value = true
     errorState.value = null
     const ac = new AbortController()
     activeController = ac
+    streamSettled = new Promise<void>((resolve) => { settleStream = resolve })
+    let optimisticAssistant: Message | null = null
 
     try {
+      let session = activeSession.value
+      if (options?.threadScope) {
+        session = await api.ensureAiThread(options.threadScope)
+        if (ac.signal.aborted) return
+        activeSession.value = session
+        threadScope.value = options.threadScope
+      } else if (!session) {
+        session = await createSession()
+      }
+      if (!session) throw new Error('AI thread is unavailable')
+      const sessionId = session.id
+
+      // Optimistic insert: user message (id 0) + empty assistant (id 0).
+      // Object identity is the in-flight discriminator (see spec §3.9).
+      const userMessage: Message = {
+        id: 0,
+        sessionId,
+        role: 'user',
+        content: trimmed,
+        createdAt: Date.now(),
+      }
+      const assistantMessage: Message = {
+        id: 0,
+        sessionId,
+        role: 'assistant',
+        content: '',
+        createdAt: Date.now() + 1,
+        blocks: { v: 1, text: '', toolCalls: [] },
+      }
+      optimisticAssistant = assistantMessage
+      messages.value = [...messages.value, userMessage, assistantMessage]
+
       for await (const event of streamChat(
         {
           sessionId,
           content: trimmed,
+          ...(options?.threadScope ? { threadScope: options.threadScope } : {}),
           // Edit-10.3: the send-time snapshot is the ONE live-context
           // authority. Present → it becomes the request's liveContext
           // field (server injects it into this run's system prompt
@@ -212,17 +307,17 @@ function createAiHistory(publishChange: (event: FileChangeEvent) => void): AiHis
         },
         ac.signal,
       )) {
-        applyEvent(event, optimisticUser, optimisticAssistant)
+        applyEvent(event, userMessage, assistantMessage)
         if (event.type === 'done' || event.type === 'error') break
       }
-      await refreshSessions()
+      if (!options?.threadScope) await refreshSessions()
     } catch (e) {
       // Abort is the expected path when the user clicks Stop; surface
       // it as a quiet "[aborted]" tag on the assistant bubble and
       // move on. Other errors are rethrown so the existing
       // finally (which clears busy) still runs, but the catch
       // block doesn't swallow them silently.
-      if (ac.signal.aborted) {
+      if (ac.signal.aborted && optimisticAssistant) {
         optimisticAssistant.content += '\n\n[aborted]'
         if (optimisticAssistant.blocks) {
           optimisticAssistant.blocks.text = optimisticAssistant.content
@@ -239,6 +334,8 @@ function createAiHistory(publishChange: (event: FileChangeEvent) => void): AiHis
     } finally {
       activeController = null
       busy.value = false
+      settleStream?.()
+      settleStream = null
     }
   }
 
@@ -327,12 +424,18 @@ function createAiHistory(publishChange: (event: FileChangeEvent) => void): AiHis
   return {
     activeSession,
     messages,
+    threadScope,
     sessions,
     isLoading,
     busy,
     errorState,
     configured,
+    model,
     loadActive,
+    loadSettings,
+    loadThread,
+    clearThread,
+    refreshModel,
     refreshSessions,
     createSession,
     switchSession,

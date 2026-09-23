@@ -76,6 +76,12 @@ const previewing = ref(false)
 const mutatingMetadata = ref(false)
 const cleanedPaths = ref<string[]>([])
 
+async function refreshActiveAiModel() {
+  await aiHistory.loadSettings()
+  if (!aiHistory.model?.value && aiHistory.refreshModel) {
+    await aiHistory.refreshModel().catch(() => {})
+  }
+}
 /* Left nav + right detail. Each section is its own .vue file
    (SettingsAiSection / SettingsEditorSection / SettingsMetadataSection /
    SettingsTagsSection)
@@ -268,7 +274,7 @@ async function onSave() {
     apiKey.value = ''
     baseURL.value = next.baseURL
     model.value = next.model
-    await aiHistory.loadActive()
+    await refreshActiveAiModel()
     toast.success(t('settings.saved'))
   } catch (e: any) {
     toast.error(t('settings.save_failed', { error: e.message ?? t('common.unknown_error') }))
@@ -292,6 +298,7 @@ async function onSwitchProvider(provider: 'anthropic' | 'openai') {
     apiKey.value = ''
     baseURL.value = next.baseURL
     model.value = next.model
+    await refreshActiveAiModel()
   } catch (e: any) {
     toast.error(t('settings.save_failed', { error: e.message ?? t('common.unknown_error') }))
   } finally {
@@ -331,7 +338,7 @@ async function onClearKey(provider?: AiProvider) {
       model.value = next.model
       aiErrorCode.value = undefined
       credentialStatus.value = null
-      await aiHistory.loadActive()
+      await aiHistory.loadSettings()
     } catch (error: any) {
       aiErrorCode.value = error.code
       if (error.code === 'master-key-required') {

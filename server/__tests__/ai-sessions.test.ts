@@ -6,9 +6,11 @@ import { describe, it, expect, beforeEach } from 'vitest'
 import Database from 'better-sqlite3'
 import { applyMigrations } from '../db'
 import * as sessions from '../ai/sessions'
+import * as messages from '../ai/messages'
 
 function freshDb(): Database.Database {
   const db = new Database(':memory:')
+  db.pragma('foreign_keys = ON')
   applyMigrations(db)
   return db
 }
@@ -91,6 +93,69 @@ describe('sessions service', () => {
       sessions.setActiveSessionId(db, a.id)
       sessions.deleteSession(db, b.id)
       expect(sessions.getActiveSessionId(db)).toBe(a.id)
+    })
+  })
+
+  describe('document AI threads', () => {
+    const noteScope = {
+      kind: 'document' as const,
+      vaultId: 'vault-a',
+      documentId: 'document-1',
+      path: 'guides/mysql-recovery.md',
+      title: 'MySQL recovery',
+    }
+
+    it('reuses one thread for a document when its path or title changes', () => {
+      const first = sessions.ensureAiThread(db, noteScope)
+      const renamed = sessions.ensureAiThread(db, {
+        ...noteScope,
+        path: 'archive/mysql-recovery.md',
+        title: 'MySQL recovery archive',
+      })
+
+      expect(renamed.session.id).toBe(first.session.id)
+      expect(sessions.listSessions(db)).toHaveLength(1)
+      expect(db.prepare('SELECT context_path, context_title FROM sessions WHERE id = ?')
+        .get(first.session.id)).toEqual({
+        context_path: 'archive/mysql-recovery.md',
+        context_title: 'MySQL recovery archive',
+      })
+    })
+
+    it('isolates a document thread by vault and preserves raw messages when compacting', () => {
+      const first = sessions.ensureAiThread(db, noteScope)
+      const otherVault = sessions.ensureAiThread(db, { ...noteScope, vaultId: 'vault-b' })
+      const userMessage = messages.appendMessage(db, first.session.id, 'user', 'Keep this message')
+
+      expect(otherVault.session.id).not.toBe(first.session.id)
+      expect(userMessage.ok).toBe(true)
+      expect(sessions.saveAiThreadCompaction(db, first.session.id, 0, userMessage.ok ? userMessage.message.id : 1, 'Summary'))
+        .toBe(true)
+      expect(sessions.saveAiThreadCompaction(db, first.session.id, 0, 999, 'Stale summary')).toBe(false)
+      expect(messages.listMessages(db, first.session.id)?.map((message) => message.content))
+        .toEqual(['Keep this message'])
+    })
+
+    it('clears only the selected document thread and its raw messages', () => {
+      const first = sessions.ensureAiThread(db, noteScope)
+      const other = sessions.ensureAiThread(db, { ...noteScope, documentId: 'document-2' })
+      messages.appendMessage(db, first.session.id, 'user', 'First note')
+      messages.appendMessage(db, other.session.id, 'user', 'Second note')
+
+      expect(sessions.clearAiThread(db, noteScope)).toBe(true)
+      expect(sessions.getAiThread(db, noteScope)).toBeNull()
+      expect(messages.listMessages(db, first.session.id)).toBeNull()
+      expect(sessions.getAiThread(db, { ...noteScope, documentId: 'document-2' })?.session.id)
+        .toBe(other.session.id)
+      expect(messages.listMessages(db, other.session.id)?.map((message) => message.content))
+        .toEqual(['Second note'])
+    })
+
+    it('does not compact legacy sessions', () => {
+      const legacy = sessions.createSession(db)
+
+      expect(sessions.getAiThreadCompactionState(db, legacy.id)).toBeNull()
+      expect(sessions.saveAiThreadCompaction(db, legacy.id, 0, 1, 'Summary')).toBe(false)
     })
   })
 })
