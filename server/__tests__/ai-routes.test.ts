@@ -776,6 +776,40 @@ describe('POST /api/ai/chat', () => {
       expect(opts.ctx).toEqual({ kind: 'none' })
     })
 
+    it('rejects a document thread with no live context', async () => {
+      const scope = {
+        kind: 'document',
+        vaultId: 'vault-a',
+        documentId: 'doc-a',
+        path: 'notes/a',
+        title: 'A',
+      }
+      const thread = await (await call('POST', '/thread', { scope })).json() as { id: number }
+      const r = await call('POST', '/chat', {
+        sessionId: thread.id,
+        content: 'hi',
+        threadScope: scope,
+      })
+
+      expect(r.status).toBe(409)
+      expect(await r.json()).toEqual({ ok: false, reason: 'thread-context-mismatch' })
+      expect(chatModule.runChat).not.toHaveBeenCalled()
+    })
+
+    it('accepts a workspace thread with no live context', async () => {
+      const scope = { kind: 'workspace', vaultId: 'vault-a' }
+      const thread = await (await call('POST', '/thread', { scope })).json() as { id: number }
+      const r = await call('POST', '/chat', {
+        sessionId: thread.id,
+        content: 'hi',
+        threadScope: scope,
+      })
+
+      expect(r.status).toBe(200)
+      expect(chatModule.runChat).toHaveBeenCalledOnce()
+      expect(chatModule.runChat.mock.calls[0][0].ctx).toEqual({ kind: 'none' })
+    })
+
     it('passes validated attached document paths to runChat', async () => {
       const created = (await (await call('POST', '/sessions')).json()) as { id: number }
       await call('POST', '/chat', {

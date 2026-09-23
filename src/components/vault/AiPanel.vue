@@ -94,11 +94,18 @@ onMounted(async () => {
 
 function scopeForCapture(capture: ReturnType<typeof liveContext.capture>): AiThreadScope | null {
   if (capture.status === 'unavailable') return null
-  const context = capture.status === 'ready' ? capture.context : null
-  const vaultId = context?.vaultId ?? vaultContext?.vaultId.value
+
+  if (capture.status === 'none') {
+    const vaultId = vaultContext?.vaultId.value
+    if (!vaultId || props.currentPath || props.currentDocumentId) return null
+    return { kind: 'workspace', vaultId }
+  }
+
+  const context = capture.context
+  const vaultId = context.vaultId
   if (!vaultId) return null
 
-  if (context?.kind === 'document') {
+  if (context.kind === 'document') {
     return {
       kind: 'document',
       vaultId,
@@ -107,7 +114,7 @@ function scopeForCapture(capture: ReturnType<typeof liveContext.capture>): AiThr
       title: context.title,
     }
   }
-  if (context?.kind === 'diff') {
+  if (context.kind === 'diff') {
     const documentId = context.identity.currentDocumentId
       ?? (props.currentPath === context.identity.path ? props.currentDocumentId : null)
       ?? vaultContext?.editor.tabs.value.find((tab) => tab.path === context.identity.path)?.documentId
@@ -120,7 +127,7 @@ function scopeForCapture(capture: ReturnType<typeof liveContext.capture>): AiThr
       title: context.title,
     }
   }
-  if (context?.kind === 'recovery') {
+  if (context.kind === 'recovery') {
     return {
       kind: 'document',
       vaultId,
@@ -130,17 +137,7 @@ function scopeForCapture(capture: ReturnType<typeof liveContext.capture>): AiThr
     }
   }
 
-  if (props.currentPath && props.currentDocumentId) {
-    return {
-      kind: 'document',
-      vaultId,
-      documentId: props.currentDocumentId,
-      path: props.currentPath,
-      title: props.currentTitle ?? props.currentPath.split('/').at(-1) ?? '',
-    }
-  }
-  if (props.currentPath) return null
-  return { kind: 'workspace', vaultId }
+  return null
 }
 
 function scopeKey(scope: AiThreadScope | null): string | null {

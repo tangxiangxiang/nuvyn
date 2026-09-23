@@ -190,6 +190,7 @@ describe('AiPanel live context capture and transport (Edit-10.3)', () => {
     useI18n().setLocale('en')
     history.configured.value = true
     history.busy.value = false
+    history.threadScope.value = null
   })
   afterEach(() => {
     vi.restoreAllMocks()
@@ -248,11 +249,35 @@ describe('AiPanel live context capture and transport (Edit-10.3)', () => {
     const sendSpy = vi.spyOn(history, 'sendAndStream').mockImplementation(async () => {})
     const capture = () => ({ status: 'none' }) as AiLiveContextCapture
     const wrapper = mountPanel(capture)
+    expect(wrapper.findComponent(AiComposer).props('canSend')).toBe(true)
     await typeAndSend(wrapper, 'hello')
-    expect(sendSpy.mock.calls[0][1]).toEqual({
-      threadScope: threadScopeForTest(capture()),
+    expect(sendSpy).toHaveBeenCalledWith('hello', {
+      threadScope: { kind: 'workspace', vaultId: 'vault-a' },
       liveContext: undefined,
     })
+  })
+
+  it('blocks document sending when capture is none even if display props still name the note', async () => {
+    const sendSpy = vi.spyOn(history, 'sendAndStream').mockImplementation(async () => {})
+    const loadThreadSpy = vi.spyOn(history, 'loadThread')
+    const capture = () => ({ status: 'none' }) as AiLiveContextCapture
+    const wrapper = mountPanel(capture, [], {
+      currentPath: 'notes/a.md',
+      currentDocumentId: 'doc-a',
+      currentTitle: 'A',
+    })
+
+    await wrapper.find('textarea').setValue('hello')
+    expect(wrapper.findComponent(AiComposer).props('canSend')).toBe(false)
+    expect(wrapper.get('.ai-send').attributes('disabled')).toBeDefined()
+    expect(wrapper.get('.ai-header-path').text()).toBe('notes/a.md')
+    expect(loadThreadSpy).toHaveBeenCalledWith(null)
+
+    wrapper.findComponent(AiComposer).vm.$emit('send')
+    await nextTick()
+
+    expect(history.threadScope.value).toBeNull()
+    expect(sendSpy).not.toHaveBeenCalled()
   })
 
   it.each([

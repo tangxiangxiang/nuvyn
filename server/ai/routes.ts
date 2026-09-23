@@ -255,7 +255,7 @@ function rehydrateForClient(m: Message): Message {
 }
 
 function threadScopeMatchesContext(scope: AiThreadScope, ctx: ChatContext): boolean {
-  if (ctx.kind === 'none') return true
+  if (ctx.kind === 'none') return scope.kind === 'workspace'
   if (ctx.kind === 'legacy-path') return false
 
   const context = ctx.liveContext
