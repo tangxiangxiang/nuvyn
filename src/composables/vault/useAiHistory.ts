@@ -178,9 +178,7 @@ function createAiHistory(publishChange: (event: FileChangeEvent) => void): AiHis
   function threadScopeKey(scope: AiThreadScope): string {
     const identity = scope.kind === 'document'
       ? scope.documentId
-      : scope.kind === 'path'
-        ? scope.path
-        : ''
+      : ''
     return JSON.stringify([scope.kind, scope.vaultId, identity])
   }
 

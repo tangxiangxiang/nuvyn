@@ -8,12 +8,14 @@ const props = withDefaults(defineProps<{
   modelValue: string
   busy: boolean
   configured: boolean
+  canSend?: boolean
   modelName?: string
   contextPaths: string[]
   canAddContext: boolean
   contextPickerOpen: boolean
 }>(), {
   contextPaths: () => [],
+  canSend: true,
   modelName: '',
   canAddContext: true,
   contextPickerOpen: false,
@@ -111,7 +113,7 @@ defineExpose({ focus })
             :bordered="false"
             :title="t(busy ? 'ai.stop' : 'ai.send_hint')"
             :aria-label="t(busy ? 'ai.stop' : 'ai.send')"
-            :disabled="!busy && (!modelValue.trim() || !configured)"
+            :disabled="!busy && (!modelValue.trim() || !configured || !canSend)"
             @click="onPrimaryAction"
           >
             <NIcon class="ai-send-icon" aria-hidden="true">

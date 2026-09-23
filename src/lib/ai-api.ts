@@ -14,7 +14,6 @@ export interface Session {
 
 export type AiThreadScope =
   | { kind: 'document'; vaultId: string; documentId: string; path: string; title: string }
-  | { kind: 'path'; vaultId: string; path: string; title: string }
   | { kind: 'workspace'; vaultId: string }
 
 export interface AiThreadState {

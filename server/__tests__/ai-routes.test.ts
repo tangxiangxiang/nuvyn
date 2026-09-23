@@ -9,6 +9,7 @@ import path from 'node:path'
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import Database from 'better-sqlite3'
 import { applyMigrations } from '../db'
+import * as aiSessions from '../ai/sessions'
 
 // vi.hoisted runs synchronously before imports are resolved, so the
 // factory must be sync. Only `testDbRef` lives in the hoisted scope
@@ -209,6 +210,36 @@ describe('GET /api/ai/sessions/:id/messages', () => {
     const list = await r.json() as Array<{ content: string; blocks?: unknown }>
     expect(list[0].content).toBe('plain reply')
     expect(list[0].blocks).toBeUndefined()
+  })
+})
+
+describe('GET /api/ai/thread', () => {
+  it('returns only the bounded recent window after compaction and retains raw history', async () => {
+    const scope = {
+      kind: 'document' as const,
+      vaultId: 'vault-a',
+      documentId: 'doc-a',
+      path: 'notes/a.md',
+      title: 'A note',
+    }
+    const thread = aiSessions.ensureAiThread(testDbRef.value!, scope)
+    const insert = testDbRef.value!.prepare(
+      'INSERT INTO messages (session_id, role, content, created_at) VALUES (?, ?, ?, ?)'
+    )
+    for (let i = 1; i <= 100; i += 1) {
+      insert.run(thread.session.id, i % 2 ? 'user' : 'assistant', `message-${i}`, i)
+    }
+    expect(aiSessions.saveAiThreadCompaction(testDbRef.value!, thread.session.id, 0, 20, 'summary')).toBe(true)
+
+    const url = `/thread?scope=${encodeURIComponent(JSON.stringify(scope))}`
+    const response = await call('GET', url)
+    expect(response.status).toBe(200)
+    const body = await response.json() as { messages: Array<{ id: number; content: string }> }
+    expect(body.messages).toHaveLength(40)
+    expect(body.messages[0]).toMatchObject({ id: 61, content: 'message-61' })
+    expect(body.messages.at(-1)).toMatchObject({ id: 100, content: 'message-100' })
+    expect(testDbRef.value!.prepare('SELECT COUNT(*) AS count FROM messages WHERE session_id = ?')
+      .get(thread.session.id)).toEqual({ count: 100 })
   })
 })
 

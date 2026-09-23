@@ -69,7 +69,9 @@ redacted from visible error messages.
 
 ## Chat and Context
 
-AI chat supports multiple persisted sessions. User messages, assistant replies, and tool-call records are stored in SQLite.
+Each Note has one persistent AI thread keyed by its stable document identity, so renaming or moving a Note keeps its conversation attached. When no Note is open, the assistant uses a separate workspace thread. The interface does not expose a session history picker.
+
+Raw user messages, assistant replies, and tool-call records remain in SQLite. As a thread grows, Nuvyn compacts older turns into a working summary for model requests while keeping the raw transcript for recovery. The thread API and panel load only messages after the latest compact checkpoint, capped at the most recent 40 messages; older raw messages are not sent to the browser.
 
 At Send time, Nuvyn captures the active workspace view rather than assuming the route is current. The context can be:
 

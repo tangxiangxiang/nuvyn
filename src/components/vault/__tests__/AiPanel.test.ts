@@ -84,7 +84,7 @@ function historyCapture(path = 'notes/h.md'): AiLiveContextCapture {
   return diffCapture(path)
 }
 
-function diffCapture(path = 'notes/d.md'): AiLiveContextCapture {
+function diffCapture(path = 'notes/d.md', currentDocumentId: string | null = 'doc-a'): AiLiveContextCapture {
   const context: AiDiffContext = {
     v: 1,
     kind: 'diff',
@@ -92,7 +92,7 @@ function diffCapture(path = 'notes/d.md'): AiLiveContextCapture {
     vaultId: 'vault-a',
     workspaceTabId: `diff:${path}`,
     readOnly: true,
-    identity: { path, revisionId: 'rev-1', revisionTime: 1, currentDocumentId: 'doc-a' },
+    identity: { path, revisionId: 'rev-1', revisionTime: 1, currentDocumentId },
     title: 'd',
     before: { raw: 'old', source: 'history' },
     after: { raw: 'new', source: 'live-editor', dirty: true },
@@ -123,7 +123,8 @@ function readyContext(capture: AiLiveContextCapture): AiLiveContextSnapshot {
 }
 
 function threadScopeForTest(capture: AiLiveContextCapture) {
-  if (capture.status !== 'ready') return { kind: 'workspace', vaultId: 'vault-a' }
+  if (capture.status === 'unavailable') return null
+  if (capture.status === 'none') return { kind: 'workspace', vaultId: 'vault-a' }
   const context = capture.context
   if (context.kind === 'document') {
     return {
@@ -135,10 +136,11 @@ function threadScopeForTest(capture: AiLiveContextCapture) {
     }
   }
   if (context.kind === 'diff') {
+    if (!context.identity.currentDocumentId) return null
     return {
-      kind: context.identity.currentDocumentId ? 'document' : 'path',
+      kind: 'document',
       vaultId: context.vaultId,
-      ...(context.identity.currentDocumentId ? { documentId: context.identity.currentDocumentId } : {}),
+      documentId: context.identity.currentDocumentId,
       path: context.identity.path,
       title: context.title,
     }
@@ -155,6 +157,7 @@ function threadScopeForTest(capture: AiLiveContextCapture) {
 function mountPanel(
   captureAiContext: () => AiLiveContextCapture,
   documentPaths: string[] = [],
+  panelProps: Record<string, unknown> = {},
 ): VueWrapper {
   const context = createVaultContext({
     vaultId: ref('vault-a'),
@@ -168,7 +171,7 @@ function mountPanel(
   return mount(defineComponent({
     setup() {
       provideVaultContext(context)
-      return () => h(AiPanel, { documentPaths })
+      return () => h(AiPanel, { documentPaths, ...panelProps })
     },
   }))
 }
@@ -240,17 +243,32 @@ describe('AiPanel live context capture and transport (Edit-10.3)', () => {
     })
   })
 
-  it.each([
-    ['unavailable', () => ({ status: 'unavailable', reason: 'loading' }) as AiLiveContextCapture],
-    ['none', () => ({ status: 'none' }) as AiLiveContextCapture],
-  ])('sends no liveContext for %s context (fail closed)', async (_label, makeCapture) => {
+  it('sends a workspace message without liveContext when no note is open', async () => {
     const sendSpy = vi.spyOn(history, 'sendAndStream').mockImplementation(async () => {})
-    const wrapper = mountPanel(makeCapture)
+    const capture = () => ({ status: 'none' }) as AiLiveContextCapture
+    const wrapper = mountPanel(capture)
     await typeAndSend(wrapper, 'hello')
     expect(sendSpy.mock.calls[0][1]).toEqual({
-      threadScope: threadScopeForTest(makeCapture()),
+      threadScope: threadScopeForTest(capture()),
       liveContext: undefined,
     })
+  })
+
+  it.each([
+    ['unavailable note context', () => ({ status: 'unavailable', reason: 'loading' }) as AiLiveContextCapture, {}],
+    ['diff without a stable document id', () => diffCapture('notes/loading.md', null), {}],
+    ['route path without a stable document id', () => ({ status: 'none' }) as AiLiveContextCapture, {
+      currentPath: 'notes/loading.md', currentDocumentId: null,
+    }],
+  ])('disables sending for %s', async (_label, makeCapture, panelProps) => {
+    const sendSpy = vi.spyOn(history, 'sendAndStream').mockImplementation(async () => {})
+    const wrapper = mountPanel(makeCapture, [], panelProps)
+    await wrapper.find('textarea').setValue('hello')
+    expect(wrapper.findComponent(AiComposer).props('canSend')).toBe(false)
+    expect(wrapper.get('.ai-send').attributes('disabled')).toBeDefined()
+    wrapper.findComponent(AiComposer).vm.$emit('send')
+    await nextTick()
+    expect(sendSpy).not.toHaveBeenCalled()
   })
 
   it('keeps the send-time capture when the user switches tabs before the stream settles', async () => {

@@ -105,6 +105,15 @@ describe('sessions service', () => {
       title: 'MySQL recovery',
     }
 
+    it('rejects path-only thread identity', () => {
+      expect(sessions.parseAiThreadScope({
+        kind: 'path',
+        vaultId: 'vault-a',
+        path: 'guides/mysql-recovery.md',
+        title: 'MySQL recovery',
+      })).toBeNull()
+    })
+
     it('reuses one thread for a document when its path or title changes', () => {
       const first = sessions.ensureAiThread(db, noteScope)
       const renamed = sessions.ensureAiThread(db, {

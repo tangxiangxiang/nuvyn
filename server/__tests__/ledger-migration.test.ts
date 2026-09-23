@@ -182,16 +182,7 @@ describe('Ledger 0013 foundation migration', () => {
 
   it('upgrades a schema through version 12 and is idempotent on repeat application', () => {
     const db = freshDb()
-    db.exec(`
-      CREATE TABLE schema_version (version INTEGER NOT NULL);
-      INSERT INTO schema_version (version) VALUES (12);
-      CREATE TABLE sessions (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        title TEXT NOT NULL DEFAULT '',
-        created_at INTEGER NOT NULL,
-        updated_at INTEGER NOT NULL
-      );
-    `)
+    applyMigrations(db, 12)
 
     applyMigrations(db)
     const firstTableCount = (db.prepare(

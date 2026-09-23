@@ -6,11 +6,7 @@ import type { Database as DatabaseT } from 'better-sqlite3'
 import type { AiThreadScope, Session } from '../../src/lib/ai-api.js'
 
 function threadKey(scope: AiThreadScope): string {
-  const identity = scope.kind === 'document'
-    ? scope.documentId
-    : scope.kind === 'path'
-      ? scope.path
-      : ''
+  const identity = scope.kind === 'document' ? scope.documentId : ''
   return JSON.stringify([scope.kind, scope.vaultId, identity])
 }
 
@@ -31,11 +27,6 @@ export function parseAiThreadScope(value: unknown): AiThreadScope | null {
       path: input.path.trim(),
       title: input.title.trim(),
     }
-  }
-  if (input.kind === 'path') {
-    if (typeof input.path !== 'string' || !input.path.trim() || input.path.length > 1024) return null
-    if (typeof input.title !== 'string' || input.title.length > 512) return null
-    return { kind: 'path', vaultId, path: input.path.trim(), title: input.title.trim() }
   }
   return null
 }
@@ -126,8 +117,8 @@ export function ensureAiThread(db: DatabaseT, scope: AiThreadScope): AiThreadRec
   const key = threadKey(scope)
   const now = Date.now()
   const documentId = scope.kind === 'document' ? scope.documentId : null
-  const contextPath = scope.kind === 'workspace' ? null : scope.path
-  const contextTitle = scope.kind === 'workspace' ? null : scope.title
+  const contextPath = scope.kind === 'document' ? scope.path : null
+  const contextTitle = scope.kind === 'document' ? scope.title : null
 
   return db.transaction(() => {
     db.prepare(`

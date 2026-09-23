@@ -115,53 +115,7 @@ async function createLegacyV6JournalFixture(contentDir: string): Promise<{
   const dbPath = path.join(dbRoot, 'nuvyn.db')
   const legacyDb = new Database(dbPath)
   legacyDb.pragma('foreign_keys = ON')
-  legacyDb.exec(`
-    CREATE TABLE schema_version (version INTEGER NOT NULL);
-    INSERT INTO schema_version (version) VALUES (6);
-    CREATE TABLE sessions (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      title TEXT NOT NULL DEFAULT '',
-      created_at INTEGER NOT NULL,
-      updated_at INTEGER NOT NULL
-    );
-    CREATE TABLE documents (
-      id TEXT PRIMARY KEY,
-      path TEXT NOT NULL UNIQUE,
-      title TEXT NOT NULL,
-      summary TEXT NOT NULL DEFAULT '',
-      created_at INTEGER NOT NULL,
-      updated_at INTEGER NOT NULL
-    );
-    CREATE TABLE tags (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      name TEXT NOT NULL,
-      normalized_name TEXT NOT NULL UNIQUE
-    );
-    CREATE TABLE document_tags (
-      document_id TEXT NOT NULL REFERENCES documents(id) ON DELETE CASCADE,
-      tag_id INTEGER NOT NULL REFERENCES tags(id) ON DELETE CASCADE,
-      PRIMARY KEY (document_id, tag_id)
-    );
-    CREATE INDEX idx_document_tags_tag ON document_tags(tag_id, document_id);
-    CREATE TABLE document_embeddings (
-      document_id TEXT PRIMARY KEY REFERENCES documents(id) ON DELETE CASCADE,
-      content_hash TEXT NOT NULL,
-      model TEXT NOT NULL,
-      embedding BLOB NOT NULL,
-      indexed_at INTEGER NOT NULL
-    );
-    CREATE TABLE metadata_migrations (
-      path TEXT PRIMARY KEY,
-      document_id TEXT REFERENCES documents(id) ON DELETE SET NULL,
-      original_path TEXT NOT NULL DEFAULT '',
-      status TEXT NOT NULL CHECK (status IN ('legacy', 'imported', 'verified', 'cleaned', 'failed', 'orphaned')),
-      source_hash TEXT NOT NULL DEFAULT '',
-      error TEXT NOT NULL DEFAULT '',
-      updated_at INTEGER NOT NULL,
-      frontmatter_backup TEXT NOT NULL DEFAULT '',
-      cleaned_hash TEXT NOT NULL DEFAULT ''
-    );
-  `)
+  applyMigrations(legacyDb, 6)
   legacyDb.exec(`
     INSERT INTO documents (id, path, title, summary, created_at, updated_at)
     VALUES

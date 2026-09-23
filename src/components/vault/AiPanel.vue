@@ -93,6 +93,7 @@ onMounted(async () => {
 })
 
 function scopeForCapture(capture: ReturnType<typeof liveContext.capture>): AiThreadScope | null {
+  if (capture.status === 'unavailable') return null
   const context = capture.status === 'ready' ? capture.context : null
   const vaultId = context?.vaultId ?? vaultContext?.vaultId.value
   if (!vaultId) return null
@@ -107,15 +108,14 @@ function scopeForCapture(capture: ReturnType<typeof liveContext.capture>): AiThr
     }
   }
   if (context?.kind === 'diff') {
-    return context.identity.currentDocumentId
-      ? {
-          kind: 'document',
-          vaultId,
-          documentId: context.identity.currentDocumentId,
-          path: context.identity.path,
-          title: context.title,
-        }
-      : { kind: 'path', vaultId, path: context.identity.path, title: context.title }
+    if (!context.identity.currentDocumentId) return null
+    return {
+      kind: 'document',
+      vaultId,
+      documentId: context.identity.currentDocumentId,
+      path: context.identity.path,
+      title: context.title,
+    }
   }
   if (context?.kind === 'recovery') {
     return {
@@ -136,14 +136,7 @@ function scopeForCapture(capture: ReturnType<typeof liveContext.capture>): AiThr
       title: props.currentTitle ?? props.currentPath.split('/').at(-1) ?? '',
     }
   }
-  if (props.currentPath) {
-    return {
-      kind: 'path',
-      vaultId,
-      path: props.currentPath,
-      title: props.currentTitle ?? props.currentPath.split('/').at(-1) ?? '',
-    }
-  }
+  if (props.currentPath) return null
   return { kind: 'workspace', vaultId }
 }
 
@@ -151,9 +144,7 @@ function scopeKey(scope: AiThreadScope | null): string | null {
   if (!scope) return null
   const identity = scope.kind === 'document'
     ? scope.documentId
-    : scope.kind === 'path'
-      ? scope.path
-      : ''
+    : ''
   return JSON.stringify([scope.kind, scope.vaultId, identity])
 }
 
@@ -275,6 +266,7 @@ async function useQuickPrompt(text: string) {
       v-model="draft"
       :busy="history.busy.value"
       :configured="history.configured.value"
+      :can-send="threadScope !== null"
       :model-name="history.model?.value ?? ''"
       :context-paths="contextPaths"
       :can-add-context="availableContextPaths.length > 0"

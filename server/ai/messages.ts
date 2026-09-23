@@ -201,6 +201,26 @@ export function listMessagesAfter(
   return rows.map(rowToMessage)
 }
 
+/** Read the most recent bounded message window after the durable compact checkpoint. */
+export function listRecentMessagesAfter(
+  db: DatabaseT,
+  sessionId: number,
+  afterMessageId: number,
+  limit: number,
+): Message[] | null {
+  const sess = db.prepare('SELECT id FROM sessions WHERE id = ?').get(sessionId)
+  if (!sess) return null
+  if (!Number.isSafeInteger(limit) || limit <= 0) return []
+  const rows = db.prepare(`
+    SELECT id, session_id, role, content, created_at
+    FROM messages
+    WHERE session_id = ? AND id > ?
+    ORDER BY id DESC
+    LIMIT ?
+  `).all(sessionId, afterMessageId, limit) as unknown[]
+  return rows.reverse().map(rowToMessage)
+}
+
 type AppendResult =
   | { ok: true; message: Message }
   | { ok: false; reason: 'not-found' | 'empty' | 'invalid-role' }

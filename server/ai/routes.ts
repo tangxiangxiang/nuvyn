@@ -127,6 +127,7 @@ export const MAX_TOTAL_COMMIT_DIFF_CHARS = 20_000
 export const MAX_SUMMARY_FILE_BYTES = 24 * 1024
 export const MAX_SUMMARY_CONTENT_CHARS = 20_000
 export const MAX_CHAT_CONTEXT_PATHS = 12
+export const MAX_AI_THREAD_UI_MESSAGES = 40
 
 class CommitMessageResourceLimitError extends Error {
   constructor(message: string) {
@@ -255,7 +256,7 @@ function rehydrateForClient(m: Message): Message {
 
 function threadScopeMatchesContext(scope: AiThreadScope, ctx: ChatContext): boolean {
   if (ctx.kind === 'none') return true
-  if (ctx.kind === 'legacy-path') return scope.kind !== 'workspace' && scope.path === ctx.currentNotePath
+  if (ctx.kind === 'legacy-path') return false
 
   const context = ctx.liveContext
   let documentId: string | null
@@ -272,10 +273,7 @@ function threadScopeMatchesContext(scope: AiThreadScope, ctx: ChatContext): bool
   }
   if (scope.vaultId !== context.vaultId) return false
   if (scope.kind === 'workspace') return false
-  if (scope.kind === 'document') {
-    return documentId === scope.documentId && path === scope.path
-  }
-  return scope.path === path
+  return documentId === scope.documentId && path === scope.path
 }
 
 const ai = new Hono()
@@ -295,9 +293,15 @@ ai.get('/thread', (c) => {
   }
   const scope = sessions.parseAiThreadScope(parsedScope)
   if (!scope) return bad(c, 'invalid thread scope')
-  const thread = sessions.getAiThread(getDb(), scope)
+  const db = getDb()
+  const thread = sessions.getAiThread(db, scope)
   if (!thread) return c.json({ session: null, messages: [] })
-  const history = messages.listMessages(getDb(), thread.session.id)
+  const history = messages.listRecentMessagesAfter(
+    db,
+    thread.session.id,
+    thread.compactedThroughMessageId,
+    MAX_AI_THREAD_UI_MESSAGES,
+  )
   return c.json({
     session: thread.session,
     messages: (history ?? []).map(rehydrateForClient),

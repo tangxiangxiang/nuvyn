@@ -32,52 +32,14 @@ function migratedDb(): Database.Database {
 function legacyV6Db(): Database.Database {
   const db = new Database(':memory:')
   db.pragma('foreign_keys = ON')
-  db.exec(`
-    CREATE TABLE schema_version (version INTEGER NOT NULL);
-    INSERT INTO schema_version (version) VALUES (6);
-    CREATE TABLE sessions (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      title TEXT NOT NULL DEFAULT '',
-      created_at INTEGER NOT NULL,
-      updated_at INTEGER NOT NULL
-    );
-    CREATE TABLE documents (
-      id TEXT PRIMARY KEY,
-      path TEXT NOT NULL UNIQUE,
-      title TEXT NOT NULL,
-      summary TEXT NOT NULL DEFAULT '',
-      created_at INTEGER NOT NULL,
-      updated_at INTEGER NOT NULL
-    );
-    CREATE TABLE tags (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      name TEXT NOT NULL,
-      normalized_name TEXT NOT NULL UNIQUE
-    );
-    CREATE TABLE document_tags (
-      document_id TEXT NOT NULL REFERENCES documents(id) ON DELETE CASCADE,
-      tag_id INTEGER NOT NULL REFERENCES tags(id) ON DELETE CASCADE,
-      PRIMARY KEY (document_id, tag_id)
-    );
-    CREATE INDEX idx_document_tags_tag ON document_tags(tag_id, document_id);
-  `)
+  applyMigrations(db, 6)
   return db
 }
 
 function brokenLegacyV6Db(): Database.Database {
-  const db = new Database(':memory:')
-  db.pragma('foreign_keys = ON')
+  const db = legacyV6Db()
   db.exec(`
-    CREATE TABLE schema_version (version INTEGER NOT NULL);
-    INSERT INTO schema_version (version) VALUES (6);
-    CREATE TABLE sessions (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      title TEXT NOT NULL DEFAULT '',
-      created_at INTEGER NOT NULL,
-      updated_at INTEGER NOT NULL
-    );
-    CREATE TABLE documents (id TEXT PRIMARY KEY);
-    CREATE TABLE tags (id INTEGER PRIMARY KEY AUTOINCREMENT);
+    DROP TABLE document_tags;
     CREATE TABLE document_tags (document_id TEXT NOT NULL);
   `)
   return db
@@ -303,21 +265,6 @@ describe('T2.1-0 migration and foundation health', () => {
 
     db.exec(`
       DROP TABLE document_tags;
-      DROP TABLE tags;
-      DROP TABLE documents;
-      CREATE TABLE documents (
-        id TEXT PRIMARY KEY,
-        path TEXT NOT NULL UNIQUE,
-        title TEXT NOT NULL,
-        summary TEXT NOT NULL DEFAULT '',
-        created_at INTEGER NOT NULL,
-        updated_at INTEGER NOT NULL
-      );
-      CREATE TABLE tags (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        name TEXT NOT NULL,
-        normalized_name TEXT NOT NULL UNIQUE
-      );
       CREATE TABLE document_tags (
         document_id TEXT NOT NULL REFERENCES documents(id) ON DELETE CASCADE,
         tag_id INTEGER NOT NULL REFERENCES tags(id) ON DELETE CASCADE,
