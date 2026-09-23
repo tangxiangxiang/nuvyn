@@ -35,6 +35,12 @@ function legacyV6Db(): Database.Database {
   db.exec(`
     CREATE TABLE schema_version (version INTEGER NOT NULL);
     INSERT INTO schema_version (version) VALUES (6);
+    CREATE TABLE sessions (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      title TEXT NOT NULL DEFAULT '',
+      created_at INTEGER NOT NULL,
+      updated_at INTEGER NOT NULL
+    );
     CREATE TABLE documents (
       id TEXT PRIMARY KEY,
       path TEXT NOT NULL UNIQUE,
@@ -64,6 +70,12 @@ function brokenLegacyV6Db(): Database.Database {
   db.exec(`
     CREATE TABLE schema_version (version INTEGER NOT NULL);
     INSERT INTO schema_version (version) VALUES (6);
+    CREATE TABLE sessions (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      title TEXT NOT NULL DEFAULT '',
+      created_at INTEGER NOT NULL,
+      updated_at INTEGER NOT NULL
+    );
     CREATE TABLE documents (id TEXT PRIMARY KEY);
     CREATE TABLE tags (id INTEGER PRIMARY KEY AUTOINCREMENT);
     CREATE TABLE document_tags (document_id TEXT NOT NULL);
@@ -230,7 +242,7 @@ describe('T2.1-0 migration and foundation health', () => {
 
     applyMigrations(db)
 
-    expect((db.prepare('SELECT version FROM schema_version').get() as { version: number }).version).toBe(35)
+    expect((db.prepare('SELECT version FROM schema_version').get() as { version: number }).version).toBe(36)
     expect(db.prepare('SELECT document_id, tag_id FROM document_tags ORDER BY document_id, tag_id').all()).toEqual([
       { document_id: 'a', tag_id: 7 },
       { document_id: 'a', tag_id: 9 },
@@ -256,7 +268,7 @@ describe('T2.1-0 migration and foundation health', () => {
     expect(db.prepare('SELECT * FROM tag_undo_state').all()).toEqual(before)
 
     const health = initializeTagUndoFoundationHealth(db)
-    expect(health).toMatchObject({ state: 'healthy', schemaVersion: 35 })
+    expect(health).toMatchObject({ state: 'healthy', schemaVersion: 36 })
     expect(getTagUndoFoundationHealth(db)).toEqual(health)
     expect(db.prepare('SELECT COUNT(*) AS count FROM tag_undo_records').get()).toEqual({ count: 0 })
     expect(db.prepare('SELECT current_record_id FROM tag_undo_state').get()).toEqual({ current_record_id: null })
@@ -320,7 +332,7 @@ describe('T2.1-0 migration and foundation health', () => {
 
     applyMigrations(db)
 
-    expect((db.prepare('SELECT version FROM schema_version').get() as { version: number }).version).toBe(35)
+    expect((db.prepare('SELECT version FROM schema_version').get() as { version: number }).version).toBe(36)
     expect(db.prepare('SELECT document_id, tag_id FROM document_tags').all()).toEqual([
       { document_id: 'retry-doc', tag_id: 7 },
     ])
@@ -341,7 +353,7 @@ describe('T2.1-0 forward repair migration and lifecycle contract', () => {
 
     applyMigrations(db)
 
-    expect((db.prepare('SELECT version FROM schema_version').get() as { version: number }).version).toBe(35)
+    expect((db.prepare('SELECT version FROM schema_version').get() as { version: number }).version).toBe(36)
     expect(db.prepare('SELECT * FROM tag_undo_records').all()).toEqual(beforeRecord)
     expect(db.prepare('SELECT * FROM tag_undo_state').all()).toEqual(beforeState)
     expect(db.prepare('PRAGMA foreign_key_check').all()).toEqual([])
@@ -406,7 +418,7 @@ describe('T2.1-0 forward repair migration and lifecycle contract', () => {
     const db = migratedDb()
     const recordId = insertSyntheticUndoRecord(db, overrides)
     pointFoundationStateAt(db, recordId)
-    expect(initializeTagUndoFoundationHealth(db)).toMatchObject({ state: 'healthy', schemaVersion: 35 })
+    expect(initializeTagUndoFoundationHealth(db)).toMatchObject({ state: 'healthy', schemaVersion: 36 })
     db.close()
   })
 
@@ -429,7 +441,7 @@ describe('T2.1-0 forward repair migration and lifecycle contract', () => {
 describe('T2.1-0 foundation health bounded state and record contract', () => {
   it('accepts an empty singleton foundation', () => {
     const db = migratedDb()
-    expect(initializeTagUndoFoundationHealth(db)).toMatchObject({ state: 'healthy', schemaVersion: 35 })
+    expect(initializeTagUndoFoundationHealth(db)).toMatchObject({ state: 'healthy', schemaVersion: 36 })
     db.close()
   })
 

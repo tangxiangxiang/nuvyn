@@ -17,6 +17,12 @@ function legacyV6ScaleDb(): Database.Database {
   db.exec(`
     CREATE TABLE schema_version (version INTEGER NOT NULL);
     INSERT INTO schema_version (version) VALUES (6);
+    CREATE TABLE sessions (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      title TEXT NOT NULL DEFAULT '',
+      created_at INTEGER NOT NULL,
+      updated_at INTEGER NOT NULL
+    );
     CREATE TABLE documents (
       id TEXT PRIMARY KEY,
       path TEXT NOT NULL UNIQUE,
@@ -95,7 +101,7 @@ describe('Tags scale evidence', { timeout: SCALE_TEST_TIMEOUT_MS }, () => {
       }
       console.info('[tag-undo-migration-perf]', JSON.stringify(evidence))
 
-      expect(legacy.prepare('SELECT version FROM schema_version').get()).toEqual({ version: 35 })
+      expect(legacy.prepare('SELECT version FROM schema_version').get()).toEqual({ version: 36 })
       expect(legacy.prepare(`
         SELECT document_id, tag_id FROM document_tags ORDER BY document_id, tag_id
       `).all()).toEqual(expectedMemberships)

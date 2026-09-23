@@ -118,6 +118,12 @@ async function createLegacyV6JournalFixture(contentDir: string): Promise<{
   legacyDb.exec(`
     CREATE TABLE schema_version (version INTEGER NOT NULL);
     INSERT INTO schema_version (version) VALUES (6);
+    CREATE TABLE sessions (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      title TEXT NOT NULL DEFAULT '',
+      created_at INTEGER NOT NULL,
+      updated_at INTEGER NOT NULL
+    );
     CREATE TABLE documents (
       id TEXT PRIMARY KEY,
       path TEXT NOT NULL UNIQUE,
@@ -240,7 +246,7 @@ describe('T2.1-0 real v6 durable-journal upgrade recovery', () => {
   it('migrates a v6 journal and recovers it through recoverInterruptedOperations', async () => {
     const fixture = await createLegacyV6JournalFixture(vault)
     try {
-      expect((fixture.db.prepare('SELECT version FROM schema_version').get() as { version: number }).version).toBe(35)
+      expect((fixture.db.prepare('SELECT version FROM schema_version').get() as { version: number }).version).toBe(36)
 
       // A logically proven live v7 row keeps its current physical ID.  The
       // missing v6 row is recreated as a new v7 association.

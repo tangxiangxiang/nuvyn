@@ -159,7 +159,7 @@ describe('Ledger 0013 foundation migration', () => {
     const db = freshDb()
     applyMigrations(db)
 
-    expect((db.prepare('SELECT version FROM schema_version').get() as { version: number }).version).toBe(35)
+    expect((db.prepare('SELECT version FROM schema_version').get() as { version: number }).version).toBe(36)
     const tables = (db.prepare(
       "SELECT name FROM sqlite_master WHERE type = 'table' ORDER BY name",
     ).all() as Array<{ name: string }>).map((row) => row.name)
@@ -185,6 +185,12 @@ describe('Ledger 0013 foundation migration', () => {
     db.exec(`
       CREATE TABLE schema_version (version INTEGER NOT NULL);
       INSERT INTO schema_version (version) VALUES (12);
+      CREATE TABLE sessions (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        title TEXT NOT NULL DEFAULT '',
+        created_at INTEGER NOT NULL,
+        updated_at INTEGER NOT NULL
+      );
     `)
 
     applyMigrations(db)
@@ -193,7 +199,7 @@ describe('Ledger 0013 foundation migration', () => {
     ).get() as { count: number }).count
     applyMigrations(db)
 
-    expect((db.prepare('SELECT version FROM schema_version').get() as { version: number }).version).toBe(35)
+    expect((db.prepare('SELECT version FROM schema_version').get() as { version: number }).version).toBe(36)
     expect((db.prepare(
       "SELECT COUNT(*) AS count FROM sqlite_master WHERE type = 'table'",
     ).get() as { count: number }).count).toBe(firstTableCount)
@@ -220,7 +226,7 @@ describe('Ledger 0013 foundation migration', () => {
 
     applyMigrations(db)
 
-    expect((db.prepare('SELECT version FROM schema_version').get() as { version: number }).version).toBe(35)
+    expect((db.prepare('SELECT version FROM schema_version').get() as { version: number }).version).toBe(36)
     expect(db.prepare(`
       SELECT id, type, amount_minor, account_id, category_id, payee,
              occurred_at, note, deleted_at, version, created_at, updated_at

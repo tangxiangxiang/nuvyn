@@ -43,6 +43,12 @@ describe('authentication migration', () => {
     db.exec(`
       CREATE TABLE schema_version (version INTEGER NOT NULL);
       INSERT INTO schema_version (version) VALUES (5);
+      CREATE TABLE sessions (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        title TEXT NOT NULL DEFAULT '',
+        created_at INTEGER NOT NULL,
+        updated_at INTEGER NOT NULL
+      );
       CREATE TABLE settings (key TEXT PRIMARY KEY, value TEXT NOT NULL);
       INSERT INTO settings (key, value) VALUES ('theme', 'dark');
       CREATE TABLE documents (
@@ -87,7 +93,7 @@ describe('authentication migration', () => {
 
     applyMigrations(db)
 
-    expect((db.prepare('SELECT version FROM schema_version').get() as { version: number }).version).toBe(35)
+    expect((db.prepare('SELECT version FROM schema_version').get() as { version: number }).version).toBe(36)
     expect(db.prepare("SELECT value FROM settings WHERE key = 'theme'").get()).toEqual({ value: 'dark' })
     expect(db.prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'users'").get()).toEqual({ name: 'users' })
     expect(db.prepare('SELECT mood FROM documents WHERE id = ?').get('legacy-document')).toEqual({ mood: null })
@@ -100,7 +106,7 @@ describe('authentication migration', () => {
     applyMigrations(db)
     const after = db.prepare('SELECT COUNT(*) AS count FROM sqlite_master WHERE type = \'table\'').get() as { count: number }
     expect(after.count).toBe(before.count)
-    expect((db.prepare('SELECT version FROM schema_version').get() as { version: number }).version).toBe(35)
+    expect((db.prepare('SELECT version FROM schema_version').get() as { version: number }).version).toBe(36)
   })
 
   it('enforces singleton, uniqueness, value, and foreign-key constraints', () => {
