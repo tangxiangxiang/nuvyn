@@ -158,11 +158,12 @@ function mountPanel(
   captureAiContext: () => AiLiveContextCapture,
   documentPaths: string[] = [],
   panelProps: Record<string, unknown> = {},
+  tabs: Tab[] = [],
 ): VueWrapper {
   const context = createVaultContext({
     vaultId: ref('vault-a'),
     fileChanges: createVaultFileChanges(),
-    tabs: ref<Tab[]>([]),
+    tabs: ref<Tab[]>(tabs),
     activePath: ref<string | null>(null),
     activeTab: computed(() => null),
     openPost: async () => {},
@@ -257,6 +258,9 @@ describe('AiPanel live context capture and transport (Edit-10.3)', () => {
   it.each([
     ['unavailable note context', () => ({ status: 'unavailable', reason: 'loading' }) as AiLiveContextCapture, {}],
     ['diff without a stable document id', () => diffCapture('notes/loading.md', null), {}],
+    ['diff whose path differs from the rail document', () => diffCapture('notes/loading.md', null), {
+      currentPath: 'notes/other.md', currentDocumentId: 'doc-other',
+    }],
     ['route path without a stable document id', () => ({ status: 'none' }) as AiLiveContextCapture, {
       currentPath: 'notes/loading.md', currentDocumentId: null,
     }],
@@ -269,6 +273,40 @@ describe('AiPanel live context capture and transport (Edit-10.3)', () => {
     wrapper.findComponent(AiComposer).vm.$emit('send')
     await nextTick()
     expect(sendSpy).not.toHaveBeenCalled()
+  })
+
+  it('uses the open tab stable document id for a matching read-only diff', async () => {
+    const capture = diffCapture('notes/d.md', null)
+    const sendSpy = vi.spyOn(history, 'sendAndStream').mockImplementation(async () => {})
+    const tab: Tab = {
+      path: 'notes/d.md',
+      documentId: 'doc-a',
+      title: 'd',
+      raw: 'body',
+      originalRaw: 'body',
+      revision: 1,
+      savedRevision: 1,
+      savingRevision: null,
+      saveStatus: 'idle',
+      error: null,
+      loadError: null,
+      loading: false,
+      serverMtime: 1,
+    }
+    const wrapper = mountPanel(() => capture, [], {}, [tab])
+
+    await typeAndSend(wrapper, 'hello')
+
+    expect(sendSpy).toHaveBeenCalledWith('hello', {
+      threadScope: {
+        kind: 'document',
+        vaultId: 'vault-a',
+        documentId: 'doc-a',
+        path: 'notes/d.md',
+        title: 'd',
+      },
+      liveContext: readyContext(capture),
+    })
   })
 
   it('keeps the send-time capture when the user switches tabs before the stream settles', async () => {

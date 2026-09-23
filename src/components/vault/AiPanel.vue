@@ -108,11 +108,14 @@ function scopeForCapture(capture: ReturnType<typeof liveContext.capture>): AiThr
     }
   }
   if (context?.kind === 'diff') {
-    if (!context.identity.currentDocumentId) return null
+    const documentId = context.identity.currentDocumentId
+      ?? (props.currentPath === context.identity.path ? props.currentDocumentId : null)
+      ?? vaultContext?.editor.tabs.value.find((tab) => tab.path === context.identity.path)?.documentId
+    if (!documentId) return null
     return {
       kind: 'document',
       vaultId,
-      documentId: context.identity.currentDocumentId,
+      documentId,
       path: context.identity.path,
       title: context.title,
     }
