@@ -290,19 +290,6 @@ describe('streamChat', () => {
     expect((body.liveContext as { raw: string }).raw).toBe('WIRE_BODY_SENTINEL')
   })
 
-  it('serializes attached context paths as a separate request field', async () => {
-    const body = await collectRequestBody({
-      sessionId: 3,
-      content: 'hello',
-      contextPaths: ['notes/reference'],
-    })
-    expect(body).toEqual({
-      sessionId: 3,
-      content: 'hello',
-      contextPaths: ['notes/reference'],
-    })
-  })
-
   it('omits the liveContext key entirely when no context is given (not null)', async () => {
     const body = await collectRequestBody({ sessionId: 1, content: 'x' })
     expect(body).toEqual({ sessionId: 1, content: 'x' })

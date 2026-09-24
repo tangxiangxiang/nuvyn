@@ -41,23 +41,18 @@ import { displayContextForCapture } from './aiContextPaths'
 import type { AiThreadScope } from '../../lib/ai-api'
 import AiChatMessages from './AiChatMessages.vue'
 import AiComposer from './AiComposer.vue'
-import AiContextPicker from './AiContextPicker.vue'
 
 const props = withDefaults(defineProps<{
-  documentPaths?: string[]
   currentPath?: string | null
   currentDocumentId?: string | null
   currentTitle?: string | null
 }>(), {
-  documentPaths: () => [],
   currentPath: null,
   currentDocumentId: null,
   currentTitle: null,
 })
 
 const draft = ref('')
-const contextPaths = ref<string[]>([])
-const contextPickerOpen = ref(false)
 const history = useAiHistory()
 const liveContext = useAiLiveContext()
 const vaultContext = useOptionalVaultContext()
@@ -74,14 +69,10 @@ const displayContext = computed(() => {
 const displayPath = computed(() => displayContext.value?.path ?? props.currentPath ?? null)
 const threadScope = computed(() => scopeForCapture(liveContext.capture()))
 const threadScopeKey = computed(() => scopeKey(threadScope.value))
-const availableContextPaths = computed(() => props.documentPaths.filter(
-  (path) => path !== displayPath.value && !contextPaths.value.includes(path),
-))
 
 watch(threadScopeKey, (next, previous) => {
   if (previous === undefined || next === previous) return
   draft.value = ''
-  contextPaths.value = []
   void history.loadThread(threadScope.value)
 })
 
@@ -168,21 +159,7 @@ async function onSend() {
   await history.sendAndStream(text, {
     threadScope: scope,
     liveContext: snapshot,
-    ...(contextPaths.value.length ? { contextPaths: [...contextPaths.value] } : {}),
   })
-}
-
-function toggleContextPicker() {
-  contextPickerOpen.value = !contextPickerOpen.value
-}
-
-function addContextPath(path: string) {
-  if (contextPaths.value.includes(path)) return
-  contextPaths.value = [...contextPaths.value, path]
-}
-
-function removeContextPath(path: string) {
-  contextPaths.value = contextPaths.value.filter((item) => item !== path)
 }
 
 async function onClearThread() {
@@ -254,13 +231,6 @@ async function useQuickPrompt(text: string) {
       @prompt="useQuickPrompt"
     />
 
-    <AiContextPicker
-      v-if="contextPickerOpen"
-      :paths="availableContextPaths"
-      @select="addContextPath"
-      @close="contextPickerOpen = false"
-    />
-
     <AiComposer
       ref="composer"
       v-model="draft"
@@ -268,13 +238,8 @@ async function useQuickPrompt(text: string) {
       :configured="history.configured.value"
       :can-send="threadScope !== null"
       :model-name="history.model?.value ?? ''"
-      :context-paths="contextPaths"
-      :can-add-context="availableContextPaths.length > 0"
-      :context-picker-open="contextPickerOpen"
       @send="onSend"
       @stop="history.stop"
-      @remove-context="removeContextPath"
-      @toggle-context-picker="toggleContextPicker"
     />
 
   </aside>

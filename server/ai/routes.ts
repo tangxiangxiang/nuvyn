@@ -126,7 +126,6 @@ export const MAX_COMMIT_DIFF_CHARS = 8_000
 export const MAX_TOTAL_COMMIT_DIFF_CHARS = 20_000
 export const MAX_SUMMARY_FILE_BYTES = 24 * 1024
 export const MAX_SUMMARY_CONTENT_CHARS = 20_000
-export const MAX_CHAT_CONTEXT_PATHS = 12
 export const MAX_AI_THREAD_UI_MESSAGES = 40
 
 class CommitMessageResourceLimitError extends Error {
@@ -218,19 +217,6 @@ function isValidLegacyNotePath(value: unknown): value is string {
     !value.includes(String.fromCharCode(0)) &&
     !/[\r\n]/.test(value)
   )
-}
-
-function parseChatContextPaths(value: unknown): string[] | null {
-  if (value === undefined) return []
-  if (!Array.isArray(value) || value.length > MAX_CHAT_CONTEXT_PATHS) return null
-  const paths: string[] = []
-  for (const item of value) {
-    if (typeof item !== 'string') return null
-    const normalized = normalizeLogicalContentPath(item)
-    if (!normalized || paths.includes(normalized)) return null
-    paths.push(normalized)
-  }
-  return paths
 }
 
 // Tool-using assistant turns persist as a JSON envelope in the
@@ -740,7 +726,6 @@ ai.post('/chat', async (c) => {
         content?: unknown
         liveContext?: unknown
         currentNotePath?: unknown
-        contextPaths?: unknown
         threadScope?: unknown
       }
     | null
@@ -763,11 +748,6 @@ ai.post('/chat', async (c) => {
   const authSessionId = (c as any).get('authSessionId') as unknown
   const presentedDiaryCapability = readDiaryAccessCapability(c.req.raw.headers)
   const authRuntime = getAuthRuntime()
-  const contextPaths = parseChatContextPaths(body.contextPaths)
-  if (contextPaths === null) {
-    return c.json({ ok: false, reason: 'invalid-context-paths' }, 400)
-  }
-
   // Edit-10.3: normalize the ONE ChatContext authority BEFORE the
   // SSE stream starts, so validation failures land as plain JSON
   // responses the client maps to stable reasons:
@@ -777,18 +757,17 @@ ai.post('/chat', async (c) => {
   //   absent + valid currentNotePath → legacy-path (old clients).
   //   neither → none.
   let ctx: ChatContext
-  const contextOptions = contextPaths.length ? { contextPaths } : {}
   if (body.liveContext !== undefined) {
     const parsed = parseAiLiveContext(body.liveContext)
     if (!parsed.ok) {
       const status = parsed.reason === 'context-too-large' ? 413 : 400
       return c.json({ ok: false, reason: parsed.reason }, status)
     }
-    ctx = { kind: 'live', liveContext: parsed.value, ...contextOptions }
+    ctx = { kind: 'live', liveContext: parsed.value }
   } else if (isValidLegacyNotePath(body.currentNotePath)) {
-    ctx = { kind: 'legacy-path', currentNotePath: body.currentNotePath, ...contextOptions }
+    ctx = { kind: 'legacy-path', currentNotePath: body.currentNotePath }
   } else {
-    ctx = { kind: 'none', ...contextOptions }
+    ctx = { kind: 'none' }
   }
 
   if (threadScope) {
@@ -802,23 +781,19 @@ ai.post('/chat', async (c) => {
   }
 
   // The AI provider is not an adapter-aware body owner in D8.3. Reject
-  // managed Diary paths in every context transport, including the legacy
-  // currentNotePath hint and attached contextPaths. Checking only the live
-  // snapshot would leave old clients able to ask read_file for an opaque
-  // Diary envelope. Do this before provider/client construction or SSE.
-  const managedContextPath = [
-    ctx.kind === 'live'
-      ? ctx.liveContext.identity.path
-      : ctx.kind === 'legacy-path'
-        ? ctx.currentNotePath
-        : undefined,
-    ...(ctx.contextPaths ?? []),
-  ]
-    .map((candidate) => {
-      if (typeof candidate !== 'string') return null
-      return normalizeLogicalContentPath(candidate) ?? candidate
-    })
-    .find((candidate) => candidate && classifyDiaryPath(candidate) === 'managed')
+  // managed Diary paths in every supported context transport. Do this
+  // before provider/client construction or SSE.
+  const contextPath = ctx.kind === 'live'
+    ? ctx.liveContext.identity.path
+    : ctx.kind === 'legacy-path'
+      ? ctx.currentNotePath
+      : null
+  const normalizedContextPath = contextPath
+    ? normalizeLogicalContentPath(contextPath) ?? contextPath
+    : null
+  const managedContextPath = normalizedContextPath && classifyDiaryPath(normalizedContextPath) === 'managed'
+    ? normalizedContextPath
+    : null
   if (managedContextPath) {
     return bad(c, 'Diary AI context is unavailable while encrypted Diary bodies are managed', 422, 'diary-ai-context-unsupported')
   }

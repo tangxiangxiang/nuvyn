@@ -58,7 +58,6 @@ const emit = defineEmits<{
 // deeply nested details.
 const visibleHeadings = computed(() => tocHeadings.value.filter((heading) => heading.level <= 3))
 const hasHeadings = computed(() => visibleHeadings.value.length > 0)
-const documentPaths = computed(() => props.posts.map((post) => post.path))
 const currentPost = computed(() => props.posts.find((post) => post.path === props.path) ?? null)
 const aiHasOpened = ref(props.activeTab === 'ai')
 const tabsRef = ref<HTMLElement | null>(null)
@@ -217,7 +216,6 @@ function onHistoryTabClick(): void {
     </section>
     <section v-if="aiHasOpened" v-show="activeTab === 'ai'" class="ai-slot" role="tabpanel" :aria-label="t('rail.ai')">
       <AiPanel
-        :document-paths="documentPaths"
         :current-path="path"
         :current-document-id="currentPost?.documentId ?? null"
         :current-title="currentPost?.title ?? null"

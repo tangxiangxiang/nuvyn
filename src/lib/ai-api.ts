@@ -129,8 +129,6 @@ export interface ChatRequest {
   // (never null). Type-only import: the wire types stay free of any
   // runtime dependency on the capture module.
   liveContext?: AiLiveContextSnapshot
-  /** Additional vault-relative documents selected with the composer + button. */
-  contextPaths?: string[]
 }
 
 export type FileChangeKind = 'write' | 'delete' | 'rename'

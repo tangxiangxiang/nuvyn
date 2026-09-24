@@ -10,23 +10,15 @@ const props = withDefaults(defineProps<{
   configured: boolean
   canSend?: boolean
   modelName?: string
-  contextPaths: string[]
-  canAddContext: boolean
-  contextPickerOpen: boolean
 }>(), {
-  contextPaths: () => [],
   canSend: true,
   modelName: '',
-  canAddContext: true,
-  contextPickerOpen: false,
 })
 
 const emit = defineEmits<{
   'update:modelValue': [value: string]
   send: []
   stop: []
-  'remove-context': [path: string]
-  'toggle-context-picker': []
 }>()
 const { t } = useI18n()
 
@@ -59,19 +51,6 @@ defineExpose({ focus })
 <template>
   <form class="ai-composer" @submit.prevent="emit('send')">
     <div class="ai-composer-card">
-      <div v-if="contextPaths.length" class="ai-context-paths" :aria-label="t('ai.attached_context')">
-        <span v-for="path in contextPaths" :key="path" class="ai-context-chip" :title="path">
-          <span class="ai-context-chip-path">{{ path }}</span>
-          <NButton
-            class="ai-context-chip-remove"
-            attr-type="button"
-            text
-            :bordered="false"
-            :aria-label="t('ai.remove_context')"
-            @click="emit('remove-context', path)"
-          >×</NButton>
-        </span>
-      </div>
       <NInput
         ref="inputEl"
         class="ai-input-control"
@@ -86,20 +65,6 @@ defineExpose({ focus })
       />
       <div class="ai-toolbar">
         <div class="ai-toolbar-left">
-          <NButton
-            class="ai-tool-button"
-            attr-type="button"
-            text
-            :bordered="false"
-            :title="t('ai.add_context')"
-            :aria-label="t('ai.add_context')"
-            :disabled="!canAddContext"
-            :aria-expanded="contextPickerOpen"
-            aria-haspopup="listbox"
-            @click="emit('toggle-context-picker')"
-          >
-            <span class="ai-tool-plus">+</span>
-          </NButton>
           <span class="ai-mode-badge" :title="modelName">
             <span class="ai-model-name">{{ modelName || '…' }}</span>
           </span>

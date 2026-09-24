@@ -25,7 +25,6 @@ import { useI18n } from '../../../composables/useI18n'
 import AiPanel from '../AiPanel.vue'
 import AiChatMessages from '../AiChatMessages.vue'
 import AiComposer from '../AiComposer.vue'
-import AiContextPicker from '../AiContextPicker.vue'
 
 // The network layer is not part of this stage: the whole transport
 // (session creation, streaming) is stubbed so only the capture/send
@@ -156,7 +155,6 @@ function threadScopeForTest(capture: AiLiveContextCapture) {
 
 function mountPanel(
   captureAiContext: () => AiLiveContextCapture,
-  documentPaths: string[] = [],
   panelProps: Record<string, unknown> = {},
   tabs: Tab[] = [],
 ): VueWrapper {
@@ -172,7 +170,7 @@ function mountPanel(
   return mount(defineComponent({
     setup() {
       provideVaultContext(context)
-      return () => h(AiPanel, { documentPaths, ...panelProps })
+      return () => h(AiPanel, panelProps)
     },
   }))
 }
@@ -261,7 +259,7 @@ describe('AiPanel live context capture and transport (Edit-10.3)', () => {
     const sendSpy = vi.spyOn(history, 'sendAndStream').mockImplementation(async () => {})
     const loadThreadSpy = vi.spyOn(history, 'loadThread')
     const capture = () => ({ status: 'none' }) as AiLiveContextCapture
-    const wrapper = mountPanel(capture, [], {
+    const wrapper = mountPanel(capture, {
       currentPath: 'notes/a.md',
       currentDocumentId: 'doc-a',
       currentTitle: 'A',
@@ -291,7 +289,7 @@ describe('AiPanel live context capture and transport (Edit-10.3)', () => {
     }],
   ])('disables sending for %s', async (_label, makeCapture, panelProps) => {
     const sendSpy = vi.spyOn(history, 'sendAndStream').mockImplementation(async () => {})
-    const wrapper = mountPanel(makeCapture, [], panelProps)
+    const wrapper = mountPanel(makeCapture, panelProps)
     await wrapper.find('textarea').setValue('hello')
     expect(wrapper.findComponent(AiComposer).props('canSend')).toBe(false)
     expect(wrapper.get('.ai-send').attributes('disabled')).toBeDefined()
@@ -318,7 +316,7 @@ describe('AiPanel live context capture and transport (Edit-10.3)', () => {
       loading: false,
       serverMtime: 1,
     }
-    const wrapper = mountPanel(() => capture, [], {}, [tab])
+    const wrapper = mountPanel(() => capture, {}, [tab])
 
     await typeAndSend(wrapper, 'hello')
 
@@ -462,39 +460,4 @@ describe('AiPanel live context capture and transport (Edit-10.3)', () => {
     expect(wrapper.findComponent(AiChatMessages).props('currentPath')).toBe('notes/b.md')
   })
 
-  it('adds the active document path to the next AI request context', async () => {
-    const sendSpy = vi.spyOn(history, 'sendAndStream').mockImplementation(async () => {})
-    const wrapper = mountPanel(() => documentCapture('notes/current.md'), [
-      'notes/current.md',
-      'notes/reference.md',
-      'archive/example.md',
-    ])
-    const composer = wrapper.findComponent(AiComposer)
-
-    expect(composer.props('canAddContext')).toBe(true)
-    await composer.get('.ai-tool-button').trigger('click')
-    const picker = wrapper.findComponent(AiContextPicker)
-    expect(picker.props('paths')).toEqual(['notes/reference.md', 'archive/example.md'])
-    await picker.find('.ai-context-option').trigger('click')
-    expect(composer.find('.ai-context-chip').text()).toContain('notes/reference.md')
-
-    await typeAndSend(wrapper, 'compare this')
-    expect(sendSpy).toHaveBeenCalledWith('compare this', {
-      threadScope: threadScopeForTest(documentCapture('notes/current.md')),
-      liveContext: readyContext(documentCapture('notes/current.md')),
-      contextPaths: ['notes/reference.md'],
-    })
-  })
-
-  it('does not add the same document path twice', async () => {
-    const wrapper = mountPanel(() => documentCapture('notes/current.md'), ['notes/current.md', 'notes/reference.md'])
-    const composer = wrapper.findComponent(AiComposer)
-
-    await composer.get('.ai-tool-button').trigger('click')
-    const picker = wrapper.findComponent(AiContextPicker)
-    expect(picker.findAll('.ai-context-option')).toHaveLength(1)
-    await picker.get('.ai-context-option').trigger('click')
-    expect(composer.findAll('.ai-context-chip')).toHaveLength(1)
-    expect(composer.props('canAddContext')).toBe(false)
-  })
 })

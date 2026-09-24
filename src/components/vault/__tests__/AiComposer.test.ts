@@ -11,9 +11,6 @@ function mountComposer(props: Partial<InstanceType<typeof AiComposer>['$props']>
       modelValue: '',
       busy: false,
       configured: true,
-      contextPaths: [],
-      canAddContext: true,
-      contextPickerOpen: false,
       ...props,
     } as any,
   })
@@ -64,21 +61,16 @@ describe('AiComposer', () => {
     expect(wrapper.get('.ai-send').attributes('disabled')).toBeDefined()
   })
 
-  it('keeps the decorative add control on the left side of the toolbar', () => {
+  it('shows only the model on the left and the send action on the right', () => {
     const wrapper = mountComposer()
-    expect(wrapper.find('.ai-toolbar-left > .ai-tool-button').exists()).toBe(true)
-    expect(wrapper.find('.ai-toolbar-right > .ai-tool-button').exists()).toBe(false)
+    expect(wrapper.find('.ai-toolbar-left > .ai-mode-badge').exists()).toBe(true)
+    expect(wrapper.find('.ai-toolbar-left button').exists()).toBe(false)
+    expect(wrapper.find('.ai-toolbar-right .ai-send').exists()).toBe(true)
+    expect(wrapper.find('.ai-tool-button, .ai-context-chip, .ai-context-picker').exists()).toBe(false)
   })
 
-  it('emits context actions from the add and remove controls', async () => {
-    const wrapper = mountComposer({
-      contextPaths: ['notes/reference'],
-      canAddContext: true,
-    })
-    await wrapper.get('.ai-tool-button').trigger('click')
-    expect(wrapper.emitted('toggle-context-picker')).toHaveLength(1)
-
-    await wrapper.get('.ai-context-chip-remove').trigger('click')
-    expect(wrapper.emitted('remove-context')).toEqual([['notes/reference']])
+  it('disables send when the current Note has no sendable live context', () => {
+    const wrapper = mountComposer({ modelValue: 'hello', canSend: false })
+    expect(wrapper.get('.ai-send').attributes('disabled')).toBeDefined()
   })
 })

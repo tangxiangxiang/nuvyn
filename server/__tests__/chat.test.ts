@@ -111,17 +111,6 @@ describe('buildSystemPrompt', () => {
     expect(out).toContain('## 你可以修改工作区里的文件')
   })
 
-  it('includes explicitly attached document paths as read-on-demand context', () => {
-    const out = buildSystemPrompt({
-      ...liveDocument(),
-      contextPaths: ['notes/reference', 'archive/example'],
-    })
-    expect(out).toContain('## Additional document context')
-    expect(out).toContain('- notes/reference')
-    expect(out).toContain('- archive/example')
-    expect(out).toContain('Read them with read_file')
-  })
-
   it('live diff: inlines BOTH sides', () => {
     const out = buildSystemPrompt(liveDiff())
     expect(out).toContain('DIFF_BEFORE_BODY')

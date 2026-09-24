@@ -715,12 +715,13 @@ describe('POST /api/ai/chat', () => {
       expect(opts.ctx).toEqual({ kind: 'legacy-path', currentNotePath: 'archive/old.md' })
     })
 
-    it.each([
-      ['legacy currentNotePath', { currentNotePath: 'diary/2026-08-30' }],
-      ['attached contextPath', { contextPaths: ['diary/2026-08-30'] }],
-    ])('rejects managed Diary paths in %s before provider setup', async (_label, fields) => {
+    it('rejects a managed Diary path in the legacy currentNotePath before provider setup', async () => {
       const created = (await (await call('POST', '/sessions')).json()) as { id: number }
-      const r = await call('POST', '/chat', { sessionId: created.id, content: 'hi', ...fields })
+      const r = await call('POST', '/chat', {
+        sessionId: created.id,
+        content: 'hi',
+        currentNotePath: 'diary/2026-08-30',
+      })
       expect(r.status).toBe(422)
       expect(r.headers.get('cache-control')).toBe('no-store')
       expect(await r.json()).toEqual({
@@ -810,35 +811,16 @@ describe('POST /api/ai/chat', () => {
       expect(chatModule.runChat.mock.calls[0][0].ctx).toEqual({ kind: 'none' })
     })
 
-    it('passes validated attached document paths to runChat', async () => {
-      const created = (await (await call('POST', '/sessions')).json()) as { id: number }
-      await call('POST', '/chat', {
-        sessionId: created.id,
-        content: 'hi',
-        contextPaths: ['notes/reference.md', 'archive/example'],
-      })
-      const opts = vi.mocked(chatModule.runChat).mock.calls[0][0]
-      expect(opts.ctx).toEqual({
-        kind: 'none',
-        contextPaths: ['notes/reference', 'archive/example'],
-      })
-    })
-
-    it.each([
-      ['absolute', '/etc/passwd'],
-      ['parent traversal', '../secret'],
-      ['hidden path', '.nuvyn/vault-id'],
-      ['duplicate', ['notes/a', 'notes/a']],
-    ])('rejects invalid attached context paths: %s', async (_label, contextPaths) => {
+    it('ignores the removed contextPaths field on /chat', async () => {
       const created = (await (await call('POST', '/sessions')).json()) as { id: number }
       const r = await call('POST', '/chat', {
         sessionId: created.id,
         content: 'hi',
-        contextPaths: Array.isArray(contextPaths) ? contextPaths : [contextPaths],
+        contextPaths: ['/etc/passwd', '../secret', 'diary/2026-08-30'],
       })
-      expect(r.status).toBe(400)
-      expect(await r.json()).toEqual({ ok: false, reason: 'invalid-context-paths' })
-      expect(chatModule.runChat).not.toHaveBeenCalled()
+      expect(r.status).toBe(200)
+      const opts = vi.mocked(chatModule.runChat).mock.calls[0][0]
+      expect(opts.ctx).toEqual({ kind: 'none' })
     })
 
     it('never echoes the live context back over SSE', async () => {

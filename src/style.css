@@ -5524,48 +5524,6 @@ body:has(.ledger-detail-sheet-card) .n-modal-mask {
 .ai-panel .ai-composer-card:focus-within {
   border-color: color-mix(in srgb, var(--vs-accent) 30%, var(--vs-border));
 }
-.ai-panel .ai-context-paths {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 4px;
-  padding: 6px 8px 0;
-}
-.ai-panel .ai-context-chip {
-  display: inline-flex;
-  align-items: center;
-  gap: 3px;
-  min-width: 0;
-  max-width: 100%;
-  padding: 2px 4px 2px 6px;
-  border-radius: 4px;
-  background: color-mix(in srgb, var(--vs-accent) 9%, transparent);
-  color: var(--vs-text-2);
-  font-family: var(--mono);
-  font-size: 0.66rem;
-  line-height: 1.3;
-}
-.ai-panel .ai-context-chip-path {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.ai-panel .ai-context-chip-remove {
-  flex: 0 0 auto;
-  width: 16px;
-  height: 16px;
-  padding: 0;
-  border: 0;
-  border-radius: 3px;
-  background: transparent;
-  color: var(--vs-text-3);
-  font-size: 0.9rem;
-  line-height: 1;
-  cursor: pointer;
-}
-.ai-panel .ai-context-chip-remove:hover {
-  background: color-mix(in srgb, var(--vs-accent) 14%, transparent);
-  color: var(--vs-text-1);
-}
 .ai-panel .ai-input {
   display: block;
   width: 100%;
@@ -5641,36 +5599,6 @@ body:has(.ledger-detail-sheet-card) .n-modal-mask {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-}
-/* The add-context control keeps the toolbar compact while remaining quiet
-   until the user opens the document picker. */
-.ai-panel .ai-tool-button {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 24px;
-  height: 24px;
-  padding: 0;
-  border: 1px solid transparent;
-  border-radius: 6px;
-  background: transparent;
-  color: var(--vs-text-3);
-  font-size: 1rem;
-  line-height: 1;
-  opacity: 0.9;
-  cursor: pointer;
-}
-.ai-panel .ai-tool-button:hover:not(:disabled) {
-  background: color-mix(in srgb, var(--vs-accent) 10%, transparent);
-  color: var(--vs-text-1);
-}
-.ai-panel .ai-tool-button:disabled {
-  opacity: 0.38;
-  cursor: default;
-}
-.ai-panel .ai-tool-plus {
-  margin-top: -1px;
-  font-weight: 300;
 }
 .ai-panel .ai-send {
   flex: 0 0 auto;
