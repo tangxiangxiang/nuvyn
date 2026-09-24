@@ -82,6 +82,15 @@ async function refreshActiveAiModel() {
     await aiHistory.refreshModel().catch(() => {})
   }
 }
+
+function isMasterKeyRecoveryCode(code: unknown): boolean {
+  return code === 'master-key-required' || code === 'master-key-invalid'
+}
+
+async function refreshCredentialStatus() {
+  credentialStatus.value = await getAiCredentialStatus().catch(() => null)
+}
+
 /* Left nav + right detail. Each section is its own .vue file
    (SettingsAiSection / SettingsEditorSection / SettingsMetadataSection /
    SettingsTagsSection)
@@ -115,13 +124,13 @@ async function load() {
     apiKey.value = ''
     baseURL.value = next.baseURL
     model.value = next.model || 'claude-sonnet-4-6'
+    aiErrorCode.value = undefined
+    credentialStatus.value = null
     migrationSummary.value = migration?.summary ?? null
     cleanedPaths.value = migration?.cleanedPaths ?? []
   } catch (e: any) {
     aiErrorCode.value = e.code
-    if (e.code === 'master-key-required') {
-      credentialStatus.value = await getAiCredentialStatus().catch(() => null)
-    }
+    if (isMasterKeyRecoveryCode(e.code)) await refreshCredentialStatus()
     toast.error(t('settings.load_failed', { error: e.message ?? t('common.unknown_error') }))
   } finally {
     loading.value = false
@@ -274,9 +283,13 @@ async function onSave() {
     apiKey.value = ''
     baseURL.value = next.baseURL
     model.value = next.model
+    aiErrorCode.value = undefined
+    credentialStatus.value = null
     await refreshActiveAiModel()
     toast.success(t('settings.saved'))
   } catch (e: any) {
+    aiErrorCode.value = e.code
+    if (isMasterKeyRecoveryCode(e.code)) await refreshCredentialStatus()
     toast.error(t('settings.save_failed', { error: e.message ?? t('common.unknown_error') }))
   } finally {
     saving.value = false
@@ -298,8 +311,12 @@ async function onSwitchProvider(provider: 'anthropic' | 'openai') {
     apiKey.value = ''
     baseURL.value = next.baseURL
     model.value = next.model
+    aiErrorCode.value = undefined
+    credentialStatus.value = null
     await refreshActiveAiModel()
   } catch (e: any) {
+    aiErrorCode.value = e.code
+    if (isMasterKeyRecoveryCode(e.code)) await refreshCredentialStatus()
     toast.error(t('settings.save_failed', { error: e.message ?? t('common.unknown_error') }))
   } finally {
     saving.value = false
@@ -341,9 +358,7 @@ async function onClearKey(provider?: AiProvider) {
       await aiHistory.loadSettings()
     } catch (error: any) {
       aiErrorCode.value = error.code
-      if (error.code === 'master-key-required') {
-        credentialStatus.value = await getAiCredentialStatus().catch(() => null)
-      }
+      if (isMasterKeyRecoveryCode(error.code)) await refreshCredentialStatus()
     }
     toast.success(t('settings.key_cleared'))
   } catch (e: any) {

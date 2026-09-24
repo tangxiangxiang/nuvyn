@@ -60,6 +60,19 @@ const hasSavedKey = computed(() => Boolean(
   && props.settings.maskedKey
   && !props.apiKey.trim(),
 ))
+const hasMasterKeyRecovery = computed(() =>
+  props.recoveryCode === 'master-key-required' || props.recoveryCode === 'master-key-invalid',
+)
+const recoveryTitleKey = computed(() =>
+  props.recoveryCode === 'master-key-invalid'
+    ? 'settings.master_key_invalid'
+    : 'settings.master_key_missing',
+)
+const recoveryDetailKey = computed(() =>
+  props.recoveryCode === 'master-key-invalid'
+    ? 'settings.master_key_invalid_detail'
+    : 'settings.master_key_missing_detail',
+)
 const recoveryProviders = computed<AiProvider[]>(() => {
   if (props.credentialStatus) {
     return (['anthropic', 'openai'] as AiProvider[])
@@ -90,7 +103,7 @@ function onProviderChange(value: string | number | null) {
       </div>
       <div class="settings-section-actions">
         <NButton
-          v-if="settings || recoveryCode === 'master-key-required'"
+          v-if="settings || hasMasterKeyRecovery"
           attr-type="button"
           size="medium"
           type="error"
@@ -112,13 +125,13 @@ function onProviderChange(value: string | number | null) {
       </div>
     </header>
     <div class="settings-section-body">
-      <div v-if="recoveryCode === 'master-key-required'" class="settings-ai-recovery settings-warning-card" role="alert">
+      <div v-if="hasMasterKeyRecovery" class="settings-ai-recovery settings-warning-card" role="alert">
         <div class="settings-warning-heading">
           <NIcon class="settings-warning-icon" aria-hidden="true"><AlertTriangle /></NIcon>
-          <strong>{{ t('settings.master_key_missing') }}</strong>
+          <strong>{{ t(recoveryTitleKey) }}</strong>
         </div>
         <div class="settings-warning-content">
-          <p>{{ t('settings.master_key_missing_detail') }}</p>
+          <p>{{ t(recoveryDetailKey) }}</p>
           <p>{{ t('settings.master_key_forget_warning') }}</p>
         </div>
         <div class="settings-warning-actions">

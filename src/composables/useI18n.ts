@@ -320,6 +320,8 @@ const STRINGS: Strings = {
   'settings.clear_key': { zh: '清除 Key', en: 'Clear key' },
   'settings.master_key_missing': { zh: '找不到用于解密现有 AI 凭据的主密钥', en: 'The master key required to decrypt the existing AI credentials is missing' },
   'settings.master_key_missing_detail': { zh: '请恢复 data/.nuvyn-master-key，或配置 NUVYN_MASTER_KEY / NUVYN_MASTER_KEY_FILE。', en: 'Restore data/.nuvyn-master-key, or configure NUVYN_MASTER_KEY / NUVYN_MASTER_KEY_FILE.' },
+  'settings.master_key_invalid': { zh: '当前主密钥无法解密已保存的 AI 凭据', en: 'The current master key cannot decrypt the saved AI credentials' },
+  'settings.master_key_invalid_detail': { zh: '请恢复保存这些凭据时使用的 NUVYN_MASTER_KEY（或对应密钥文件）；如果无法恢复，可放弃指定提供商的 API Key 后重新保存。', en: 'Restore the NUVYN_MASTER_KEY (or key file) used when these credentials were saved. If it cannot be recovered, forget the provider API key and save a new one.' },
   'settings.master_key_forget_warning': { zh: '如果无法恢复主密钥，可以明确放弃指定提供商的加密 API Key；此操作不可撤销。', en: 'If the master key cannot be recovered, you can explicitly abandon a provider’s encrypted API key. This cannot be undone.' },
   'settings.forget_provider_key': { zh: '放弃 {provider} API Key', en: 'Forget {provider} API key' },
   'settings.forget_key_confirm': { zh: '永久删除 {provider} 保存的 API Key？', en: 'Permanently delete the saved {provider} API key?' },

@@ -357,6 +357,36 @@ describe('SettingsModal', () => {
     expect(getAiCredentialStatus).toHaveBeenCalled()
   })
 
+  it('offers the same provider-specific recovery when the master key does not match', async () => {
+    getAiSettings.mockRejectedValue(Object.assign(new Error('master key mismatch'), {
+      code: 'master-key-invalid',
+    }))
+    mountSettings()
+    await flushPromises()
+
+    const alert = document.body.querySelector<HTMLElement>('[role="alert"]')
+    expect(alert?.textContent).toContain('当前主密钥无法解密已保存的 AI 凭据')
+    expect(alert?.textContent).toContain('NUVYN_MASTER_KEY')
+    expect(findButton('放弃 openai API Key')).toBeTruthy()
+    expect(getAiCredentialStatus).toHaveBeenCalled()
+  })
+
+  it('shows the recovery entry after saving with a mismatched master key', async () => {
+    saveAiSettings.mockRejectedValueOnce(Object.assign(new Error('master key mismatch'), {
+      code: 'master-key-invalid',
+    }))
+    mountSettings()
+    await flushPromises()
+
+    inputValue(fieldControl<HTMLInputElement>('API Key', 'input'), 'replacement-key')
+    findButton('保存').click()
+    await flushPromises()
+
+    expect(document.body.querySelector('[role="alert"]')?.textContent).toContain('当前主密钥无法解密已保存的 AI 凭据')
+    expect(findButton('放弃 openai API Key')).toBeTruthy()
+    expect(getAiCredentialStatus).toHaveBeenCalled()
+  })
+
   it('switches to the Editor and Metadata sections without changing their behavior surfaces', async () => {
     const wrapper = mountSettings({ withTags: true })
     await flushPromises()
