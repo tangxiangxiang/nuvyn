@@ -6,18 +6,36 @@ import { createDocumentSearchSource } from '../documentSearchSource'
 
 const makePost = (path: string, title: string, summary = ''): PostSummary => ({ path, title, created: '', updated: '', tags: [], summary, size: 0, mtime: 1 })
 
+function nextProviderUpdate(provider: SearchProvider): Promise<void> {
+  return new Promise((resolve) => {
+    let unsubscribe = () => {}
+    unsubscribe = provider.subscribe?.(() => {
+      unsubscribe()
+      resolve()
+    }) ?? (() => {})
+  })
+}
+
+function deferred<T>() {
+  let resolve!: (value: T) => void
+  const promise = new Promise<T>((done) => { resolve = done })
+  return { promise, resolve }
+}
+
 describe('Search Everywhere document provider', () => {
   beforeEach(() => dispose())
-  afterEach(() => { vi.unstubAllGlobals(); dispose() })
+  afterEach(() => { vi.unstubAllGlobals(); vi.restoreAllMocks(); dispose() })
 
   it('finds title, path, summary, and body-only matches with snippets', async () => {
     const posts = [makePost('inbox/redis-notes', 'Redis Notes', 'cache reference')]
     vi.stubGlobal('fetch', vi.fn(async () => ({ ok: true, json: async () => ({ content: 'distributed transaction isolation guarantees' }) })))
     const provider = createDocumentSearchProvider(() => posts)
+    const bodyReady = nextProviderUpdate(provider)
 
     expect((await provider('Redis')).results[0].payload).toMatchObject({ match: 'title' })
-    expect((await provider('redis-notes')).results[0].payload).toMatchObject({ match: 'path' })
+    expect((await provider('inbox')).results[0].payload).toMatchObject({ match: 'path' })
     expect((await provider('cache reference')).results[0].payload).toMatchObject({ match: 'summary' })
+    await bodyReady
     const body = (await provider('transaction isolation')).results[0]
     expect(body.title).toBe('Redis Notes')
     expect(body.payload).toMatchObject({ match: 'body' })
@@ -37,6 +55,7 @@ describe('Search Everywhere document provider', () => {
 
   it('loads document metadata without a VaultView consumer', async () => {
     const source = createDocumentSearchSource(async () => [makePost('inbox/atlas', 'Project Atlas')])
+    vi.stubGlobal('fetch', vi.fn(async () => ({ ok: false, status: 404 })))
     const provider = createDocumentSearchProvider(source)
 
     const result = await provider('atlas')
@@ -50,12 +69,76 @@ describe('Search Everywhere document provider', () => {
     const fetchMock = vi.fn(async () => ({ ok: true, json: async () => ({ content: bodies.shift() ?? '' }) }))
     vi.stubGlobal('fetch', fetchMock)
     const provider = createDocumentSearchProvider(() => posts)
+    const oldBodyReady = nextProviderUpdate(provider)
 
+    expect((await provider('old unique phrase')).results).toHaveLength(0)
+    await oldBodyReady
     expect((await provider('old unique phrase')).results).toHaveLength(1)
     posts = [{ ...posts[0], mtime: 2 }]
+    const newBodyReady = nextProviderUpdate(provider)
+    expect((await provider('new unique phrase')).results).toHaveLength(0)
+    await newBodyReady
     expect((await provider('new unique phrase')).results).toHaveLength(1)
     expect((await provider('old unique phrase')).results).toHaveLength(0)
     expect(fetchMock).toHaveBeenCalledTimes(2)
+  })
+
+  it('returns metadata hits while the body fetch is still pending', async () => {
+    const posts = [makePost('inbox/redis', 'Redis')]
+    const response = deferred<unknown>()
+    const fetchMock = vi.fn(() => response.promise)
+    vi.stubGlobal('fetch', fetchMock)
+    const provider = createDocumentSearchProvider(() => posts)
+    const update = nextProviderUpdate(provider)
+
+    const section = await provider('Redis')
+
+    expect(section.results).toHaveLength(1)
+    expect(section.results[0].payload).toMatchObject({ path: 'inbox/redis', match: 'title' })
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+
+    response.resolve({ ok: true, status: 200, json: async () => ({ content: 'Redis body' }) })
+    await update
+  })
+
+  it('notifies subscribers after body priming so the same query returns body-only hits', async () => {
+    const posts = [makePost('inbox/guide', 'Engineering guide')]
+    const response = deferred<unknown>()
+    vi.stubGlobal('fetch', vi.fn(() => response.promise))
+    const provider = createDocumentSearchProvider(() => posts)
+    const update = nextProviderUpdate(provider)
+    const query = 'bodyonlymarker'
+
+    expect((await provider(query)).results).toHaveLength(0)
+    response.resolve({ ok: true, status: 200, json: async () => ({ content: `Contains ${query} in the note body` }) })
+    await update
+
+    expect((await provider(query)).results[0].payload).toMatchObject({ path: posts[0].path, match: 'body' })
+  })
+
+  it('retries failed body fetches after the backoff expires', async () => {
+    const posts = [makePost('inbox/retry-guide', 'Retry guide')]
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce({ ok: false, status: 503 })
+      .mockResolvedValueOnce({ ok: true, status: 200, json: async () => ({ content: 'retrybodymarker' }) })
+    vi.stubGlobal('fetch', fetchMock)
+    const provider = createDocumentSearchProvider(() => posts)
+    const now = vi.spyOn(Date, 'now').mockReturnValue(100_000)
+    const firstUpdate = nextProviderUpdate(provider)
+
+    expect((await provider('retrybodymarker')).results).toHaveLength(0)
+    await firstUpdate
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+
+    await provider('retrybodymarker')
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+
+    now.mockReturnValue(101_501)
+    const retryUpdate = nextProviderUpdate(provider)
+    await provider('retrybodymarker')
+    await retryUpdate
+    expect(fetchMock).toHaveBeenCalledTimes(2)
+    expect((await provider('retrybodymarker')).results[0].payload).toMatchObject({ path: posts[0].path, match: 'body' })
   })
 
   it('composes future providers as independent sections', async () => {
