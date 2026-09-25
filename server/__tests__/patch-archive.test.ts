@@ -81,6 +81,20 @@ describe('PATCH /api/posts/* Archive Soft-Policy contract', () => {
     await expect(fs.stat(path.join(tmpRoot, 'inbox', 'foo.md'))).rejects.toThrow()
   })
 
+  it('preserves the stable document identity when archiving a Note', async () => {
+    saveDocumentMetadata(db, {
+      id: 'archive-stable-document-id',
+      path: 'inbox/foo',
+      title: 'Foo',
+    })
+
+    const r = await patch('/api/posts/inbox/foo', { targetPath: 'archive/foo' })
+
+    expect(r.status).toBe(200)
+    expect(getDocumentMetadata(db, 'archive/foo')?.id).toBe('archive-stable-document-id')
+    expect(getDocumentMetadata(db, 'inbox/foo')).toBeNull()
+  })
+
   it('moves literature/ahrens.md to archive/ahrens.md', async () => {
     const r = await patch('/api/posts/literature/ahrens', { targetPath: 'archive/ahrens' })
     expect(r.status).toBe(200)

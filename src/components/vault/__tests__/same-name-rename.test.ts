@@ -120,4 +120,22 @@ describe('FileTree rename collision (file and folder share a path)', () => {
     expect(patchSpy).not.toHaveBeenCalled()
     expect(renameFolderSpy).toHaveBeenCalledWith('inbox/notes', 'inbox/notes-v2')
   })
+
+  it('does not use duplicate Vue keys for a same-path file and folder', async () => {
+    const warnings: string[] = []
+    const warn = vi.spyOn(console, 'warn').mockImplementation((...args) => {
+      warnings.push(args.map(String).join(' '))
+    })
+    const w = mount(FileTree, { props: { tree: TREE, currentPath: null } })
+    const inbox = rowByLabel(w.findAll('li.tree-row'), 'inbox', 'folder')
+
+    await inbox.find('.chevron').trigger('click')
+    await w.vm.$nextTick()
+
+    expect(warnings.some((message) => message.includes('Duplicate keys found'))).toBe(false)
+    expect(w.find('[data-tree-key="folder:inbox/notes"]').exists()).toBe(true)
+    expect(w.find('[data-tree-key="file:inbox/notes"]').exists()).toBe(true)
+    warn.mockRestore()
+    w.unmount()
+  })
 })

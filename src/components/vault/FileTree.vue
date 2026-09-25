@@ -409,6 +409,40 @@ function toggle(path: string) {
   saveExpanded()
 }
 
+function remapExpandedFolder(fromPath: string, toPath: string): void {
+  let changed = false
+  const next = new Set<string>()
+  for (const path of expanded.value) {
+    if (path === fromPath || path.startsWith(`${fromPath}/`)) {
+      next.add(`${toPath}${path.slice(fromPath.length)}`)
+      changed = true
+    } else next.add(path)
+  }
+  if (!changed) return
+  expanded.value = next
+  saveExpanded()
+}
+
+function remapFocusedNodeKey(
+  key: string | null,
+  fromPath: string,
+  toPath: string,
+  kind: 'file' | 'folder',
+): string | null {
+  if (!key) return key
+  const separator = key.indexOf(':')
+  if (separator === -1) return key
+  const focusedKind = key.slice(0, separator)
+  const focusedPath = key.slice(separator + 1)
+  if (kind === 'file') {
+    return focusedKind === 'file' && focusedPath === fromPath
+      ? `file:${toPath}`
+      : key
+  }
+  if (focusedPath !== fromPath && !focusedPath.startsWith(`${fromPath}/`)) return key
+  return `${focusedKind}:${toPath}${focusedPath.slice(fromPath.length)}`
+}
+
 // Default-expand ancestors of currentPath. Archive can now contain
 // classification folders, so the active archived note should be revealed too.
 watch(() => props.currentPath, (p) => {
@@ -524,6 +558,7 @@ async function onRename(oldPath: string, newName: string, kind: 'file' | 'folder
     toast.error(t('common.name_invalid'))
     return
   }
+  const focusedBeforeRename = focusedNodeKey.value
   try {
     if (node.kind === 'folder') {
       const parent = oldPath.split('/').slice(0, -1).join('/')
@@ -548,19 +583,29 @@ async function onRename(oldPath: string, newName: string, kind: 'file' | 'folder
         : updateReferences
           ? await renameFolder(oldPath, newPath, true)
           : await renameFolder(oldPath, newPath)
+      remapExpandedFolder(oldPath, res.path)
       if (!lifecycle) {
         for (const updated of res.updatedReferences ?? []) {
           publishChange({ path: updated.path, kind: 'write', newRaw: updated.raw })
         }
       }
       toast.success(t('file_tree.renamed_count', { count: res.moved.length }))
+      const remappedFocus = remapFocusedNodeKey(focusedBeforeRename, oldPath, res.path, 'folder')
+      if (remappedFocus && remappedFocus !== focusedBeforeRename) {
+        const separator = remappedFocus.indexOf(':')
+        const focusedKind = remappedFocus.slice(0, separator)
+        const focusedPath = remappedFocus.slice(separator + 1)
+        if (focusedKind === 'file' || focusedKind === 'folder') {
+          setFocused(focusedPath, focusedKind, true)
+        }
+      }
       for (const oldFilePath of filePaths(node)) {
         const nextFilePath = oldFilePath === oldPath
-          ? newPath
-          : `${newPath}/${oldFilePath.slice(oldPath.length + 1)}`
+          ? res.path
+          : `${res.path}/${oldFilePath.slice(oldPath.length + 1)}`
         updateMetadataDraftPath(oldFilePath, nextFilePath)
       }
-      } else {
+    } else {
       const parent = oldPath.split('/').slice(0, -1).join('/')
       const newPath = parent ? `${parent}/${safeName}` : safeName
       if (blockDiaryDestination(newPath)) return
@@ -577,6 +622,10 @@ async function onRename(oldPath: string, newName: string, kind: 'file' | 'folder
       const renamed = lifecycle
         ? await lifecycle.renameFile(oldPath, body, updateReferences ? referencePaths : [])
         : await patchPost(oldPath, body)
+      const remappedFocus = remapFocusedNodeKey(focusedBeforeRename, oldPath, renamed.path, 'file')
+      if (remappedFocus && remappedFocus !== focusedBeforeRename) {
+        setFocused(renamed.path, 'file', true)
+      }
       if (!lifecycle) {
         for (const updated of renamed.updatedReferences ?? []) {
           if (updated.path !== renamed.path) publishChange({ path: updated.path, kind: 'write', newRaw: updated.raw })
@@ -714,6 +763,7 @@ async function onArchiveNote(path: string) {
     if (props.currentPath === path) emit('select', movedPath)
   }
   updateMetadataDraftPath(path, movedPath)
+  await revealPath(movedPath)
 }
 
 async function onCreateIn(folder: string, kind: 'file' | 'folder') {
@@ -725,15 +775,19 @@ async function onCreateIn(folder: string, kind: 'file' | 'folder') {
     const msg = blockedMessage(folder, kind === 'file' ? 'create-file' : 'create-folder', t)
     if (msg) { toast.error(msg); return }
   }
-  let sourceTitle = ''
+  let translatedFromTitle = ''
+  let translatedSlug = ''
   const title = await prompt({
     title: t(kind === 'file' ? 'file_tree.create_file_prompt' : 'file_tree.create_folder_prompt', { folder: folder || 'inbox' }),
     placeholder: t('file_tree.name_placeholder'),
     actionLabel: '✧',
     actionTitle: t('file_tree.translate_slug'),
     transform: async (value) => {
-      sourceTitle = value.trim()
-      return suggestEnglishSlug(value, kind)
+      const sourceTitle = value.trim()
+      const slug = await suggestEnglishSlug(value, kind)
+      translatedFromTitle = sourceTitle
+      translatedSlug = slug
+      return slug
     },
   })
   if (!title) return
@@ -743,11 +797,14 @@ async function onCreateIn(folder: string, kind: 'file' | 'folder') {
     return
   }
   const path = folder ? `${folder}/${name}` : name
+  const metadataTitle = title === translatedSlug && translatedFromTitle
+    ? translatedFromTitle
+    : title
   try {
     if (kind === 'file') {
-      if (lifecycle) await lifecycle.createFile({ path, title: sourceTitle || title })
+      if (lifecycle) await lifecycle.createFile({ path, title: metadataTitle })
       else {
-        await createPost({ path, title: sourceTitle || title })
+        await createPost({ path, title: metadataTitle })
         publishChange({ path, kind: 'write', source: 'editor-lifecycle' })
       }
     }
@@ -805,7 +862,7 @@ async function onCreateIn(folder: string, kind: 'file' | 'folder') {
     <ul v-if="topLevel.length" class="tree" role="tree">
       <TreeRow
         v-for="node in topLevel"
-        :key="node.path"
+        :key="nodeKey(node)"
         :node="node"
         :depth="0"
         :current-path="currentPath"

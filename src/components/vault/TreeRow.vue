@@ -395,7 +395,7 @@ function menuAction(fn: () => void) {
     <ul v-if="isFolder && isExpanded" class="tree-children">
       <TreeRow
         v-for="child in childNodes"
-        :key="child.path"
+        :key="`${child.kind}:${child.path}`"
         :node="child"
         :depth="depth + 1"
         :current-path="currentPath"
