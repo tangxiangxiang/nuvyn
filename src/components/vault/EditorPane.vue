@@ -137,6 +137,22 @@ function saveViewState(path = props.path) {
   } catch { /* best effort */ }
 }
 
+function revealText(text: string): boolean {
+  const needle = text.trim()
+  if (!editor || !model || !needle) return false
+
+  const raw = model.getValue()
+  const startOffset = raw.toLocaleLowerCase().indexOf(needle.toLocaleLowerCase())
+  if (startOffset < 0) return false
+
+  const start = model.getPositionAt(startOffset)
+  const end = model.getPositionAt(startOffset + needle.length)
+  const selection = new monaco.Selection(start.lineNumber, start.column, end.lineNumber, end.column)
+  editor.setSelection(selection)
+  editor.revealRangeInCenterIfOutsideViewport(selection)
+  return true
+}
+
 function rebuildLinkIndex() {
   linkPaths = (props.linkTargets ?? []).map((target) => target.path)
   targetsByPath = new Map((props.linkTargets ?? []).map((target) => [target.path, target]))
@@ -623,6 +639,7 @@ onBeforeUnmount(() => {
 
 defineExpose({
   focus: () => editor?.focus(),
+  revealText,
 })
 </script>
 

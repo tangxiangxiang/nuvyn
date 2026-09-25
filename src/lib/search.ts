@@ -21,6 +21,7 @@ export interface SearchHit {
   score: number
   match: 'title' | 'path' | 'tag' | 'summary' | 'body'
   snippet?: string
+  bodyQuery?: string
 }
 
 let mini: MiniSearch<SearchDoc> | null = null
@@ -215,7 +216,7 @@ export function search(query: string, limit = 12): SearchHit[] {
       if (seen.has(path)) continue
       const body = cached.body
       if (body.toLowerCase().includes(q.toLowerCase())) {
-        hits.push({ path, title: mini.getStoredFields(path)?.title as string || path, score: 0.1, match: 'body', snippet: snippet(body, q) })
+        hits.push({ path, title: mini.getStoredFields(path)?.title as string || path, score: 0.1, match: 'body', snippet: snippet(body, q), bodyQuery: q })
         seen.add(path)
         if (hits.length >= limit) break
       }

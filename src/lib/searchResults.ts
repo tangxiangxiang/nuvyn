@@ -9,7 +9,7 @@ export interface SearchResultSection { id: string; label: string; results: Searc
 export type SearchProvider = ((query: string) => SearchResultSection | Promise<SearchResultSection>) & {
   subscribe?: (listener: () => void) => () => void
 }
-export interface DocumentSearchPayload { path: string; match: 'title' | 'path' | 'tag' | 'summary' | 'body'; snippet?: string }
+export interface DocumentSearchPayload { path: string; match: 'title' | 'path' | 'tag' | 'summary' | 'body'; snippet?: string; bodyQuery?: string }
 
 function postsSignature(posts: readonly PostSummary[]): string {
   return posts.map((post) => `${post.path}\0${isManagedDiaryPath(post.path) ? '' : post.title}\0${post.mtime}\0${isManagedDiaryPath(post.path) ? '' : (post.summary ?? '')}\0${isManagedDiaryPath(post.path) ? '' : post.tags.join(',')}`).join('\u0001')
@@ -81,7 +81,12 @@ export function createDocumentSearchProvider(input: DocumentPostsInput): SearchP
 
     const results = search(query, 12).map<SearchResult<DocumentSearchPayload>>((hit) => ({
       id: `file:${hit.path}`, type: 'file', title: hit.title, subtitle: hit.path, score: hit.score,
-      payload: { path: hit.path, match: hit.match, snippet: hit.snippet },
+      payload: {
+        path: hit.path,
+        match: hit.match,
+        snippet: hit.snippet,
+        ...(hit.bodyQuery ? { bodyQuery: hit.bodyQuery } : {}),
+      },
     }))
     return { id: 'files', label: 'Files', results }
   }

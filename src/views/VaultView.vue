@@ -56,6 +56,7 @@ import {
 } from '../composables/vault/aiLiveContext'
 import { invalidateDocumentSearchState } from '../lib/searchResults'
 import { documentSearchSource } from '../lib/documentSearchSource'
+import { watchSearchRevealHandoff } from '../composables/vault/useSearchRevealHandoff'
 import { createVaultContext } from '../composables/vault/context/createVaultContext'
 import { provideVaultContext } from '../composables/vault/context/useVaultContext'
 import { createVaultFileChanges } from '../composables/vault/context/fileChanges'
@@ -152,6 +153,7 @@ import {
 // Monaco is the heaviest client dependency. Load it only when edit mode
 // actually mounts an editor, keeping navigation/read-only startup lean.
 const EditorPane = defineAsyncComponent(() => import('../components/vault/EditorPane.vue'))
+const editorPaneRef = ref<{ revealText(text: string): boolean } | null>(null)
 
 const settingsOpen = ref(false)
 const appShell = inject(AppShellContextKey, null)
@@ -1715,6 +1717,20 @@ const isDiaryCalendarVisible = computed(() => (
   isDiaryCalendarMode.value && !hasOpenDiaryDocument.value
 ))
 const isDiaryPresentationPrimary = computed(() => isDiaryCalendarVisible.value)
+const isOrdinaryDocumentPresentation = computed(() => (
+  !isDiaryPresentationPrimary.value
+  && !activeHistoryComparison.value
+  && !activeWorkingTreeDiff.value
+  && !activeDraftRecovery.value
+))
+
+watchSearchRevealHandoff({
+  activePath,
+  activeTab,
+  editorPane: editorPaneRef,
+  isReadMode,
+  isOrdinaryPresentation: isOrdinaryDocumentPresentation,
+})
 
 const diaryBackChord = createDiaryShortcutChord({
   isDiaryDocument: () => isDiaryScope.value
@@ -2672,6 +2688,7 @@ watch(isReadMode, async (reading) => {
           <div v-else-if="activeTab.loadError" class="empty error" role="alert">{{ activeTab.loadError }}</div>
           <EditorPane
             v-else
+            ref="editorPaneRef"
             :key="activeTab.path"
             :model-value="activeTab.raw"
             :path="activeTab.path"

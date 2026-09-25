@@ -22,6 +22,7 @@ import DiaryAccessDialog from './components/diary/DiaryAccessDialog.vue'
 import type { ScopeKey } from '../shared/scopeProtocol'
 import { boardMetadataSource } from './features/board/boardMetadataSource'
 import { documentSearchSource } from './lib/documentSearchSource'
+import { clearSearchReveal } from './composables/useSearchReveal'
 import { workspaceKindForPath, type ChromeStyle, type WorkspaceKind } from './lib/workspace'
 import { createIndexedDbBoardCheckpointStore } from './features/board/checkpointStore'
 import { NUVYN_BROWSER_STORAGE_KEYS, readStorageKey, writeStorageKey } from './technicalNamespace'
@@ -238,6 +239,7 @@ watch(() => auth.state.value, (next) => {
   void boardRecoveryStore.clearAllRecovery().catch(() => {})
   boardMetadataSource.invalidate()
   documentSearchSource.invalidate()
+  clearSearchReveal()
   if (pendingAccess) finishAccess(false)
   else accessIntentGeneration += 1
 })

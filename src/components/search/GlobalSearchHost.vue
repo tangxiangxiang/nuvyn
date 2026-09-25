@@ -8,6 +8,7 @@ import { boardMetadataSource } from '../../features/board/boardMetadataSource'
 import { createBoardSearchProvider, type BoardSearchPayload } from '../../features/board/searchProvider'
 import { isNuvynShortcutBlocked } from '../../lib/keyboard'
 import { workspaceKindForPath, type WorkspaceKind } from '../../lib/workspace'
+import { clearSearchReveal, requestSearchReveal } from '../../composables/useSearchReveal'
 
 const router = useRouter()
 const route = useRoute()
@@ -45,13 +46,20 @@ watch(canOpen, (allowed) => {
 
 function commit(result: SearchResult): void {
   if (result.type === 'file') {
-    const path = (result.payload as { path?: unknown }).path
+    const payload = result.payload as { path?: unknown; match?: unknown; bodyQuery?: unknown }
+    const path = payload.path
     if (typeof path === 'string' && path.length > 0) {
+      if (payload.match === 'body' && typeof payload.bodyQuery === 'string' && payload.bodyQuery.trim()) {
+        requestSearchReveal({ path, text: payload.bodyQuery })
+      } else {
+        clearSearchReveal()
+      }
       void router.push({ name: 'vault-doc', params: { pathMatch: path.split('/') } })
     }
     return
   }
   if (result.type === 'board') {
+    clearSearchReveal()
     const boardId = (result.payload as Partial<BoardSearchPayload>).boardId
     if (typeof boardId === 'string' && boardId.length > 0) {
       void router.push({ name: 'board-editor', params: { boardId } })

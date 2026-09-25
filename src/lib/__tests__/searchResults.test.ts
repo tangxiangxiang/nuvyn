@@ -32,13 +32,15 @@ describe('Search Everywhere document provider', () => {
     const provider = createDocumentSearchProvider(() => posts)
     const bodyReady = nextProviderUpdate(provider)
 
-    expect((await provider('Redis')).results[0].payload).toMatchObject({ match: 'title' })
+    const title = (await provider('Redis')).results[0].payload as Record<string, unknown>
+    expect(title).toMatchObject({ match: 'title' })
+    expect(title).not.toHaveProperty('bodyQuery')
     expect((await provider('inbox')).results[0].payload).toMatchObject({ match: 'path' })
     expect((await provider('cache reference')).results[0].payload).toMatchObject({ match: 'summary' })
     await bodyReady
     const body = (await provider('transaction isolation')).results[0]
     expect(body.title).toBe('Redis Notes')
-    expect(body.payload).toMatchObject({ match: 'body' })
+    expect(body.payload).toMatchObject({ match: 'body', bodyQuery: 'transaction isolation' })
     expect((body.payload as { snippet?: string }).snippet).toContain('transaction isolation')
     expect(fetch).toHaveBeenCalledTimes(1)
   })
@@ -113,7 +115,11 @@ describe('Search Everywhere document provider', () => {
     response.resolve({ ok: true, status: 200, json: async () => ({ content: `Contains ${query} in the note body` }) })
     await update
 
-    expect((await provider(query)).results[0].payload).toMatchObject({ path: posts[0].path, match: 'body' })
+    expect((await provider(query)).results[0].payload).toMatchObject({
+      path: posts[0].path,
+      match: 'body',
+      bodyQuery: query,
+    })
   })
 
   it('retries failed body fetches after the backoff expires', async () => {

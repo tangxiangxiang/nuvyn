@@ -138,6 +138,18 @@ describe('VaultView editor tab wiring', () => {
     expect(editorPane).not.toContain('activePath!')
   })
 
+  it('hands body search reveals to the active Edit Mode Monaco pane', () => {
+    const source = readFileSync(fileURLToPath(new URL('../VaultView.vue', import.meta.url)), 'utf8')
+    const editorPane = source.match(/<EditorPane[\s\S]*?\/>/)?.[0]
+
+    expect(source).toContain("import { watchSearchRevealHandoff } from '../composables/vault/useSearchRevealHandoff'")
+    expect(source).toContain('const editorPaneRef = ref<{ revealText(text: string): boolean } | null>(null)')
+    expect(source).toContain('watchSearchRevealHandoff({')
+    expect(source).toContain('isOrdinaryPresentation: isOrdinaryDocumentPresentation')
+    expect(editorPane).toContain('ref="editorPaneRef"')
+    expect(source).not.toContain('ReadingPane ref=')
+  })
+
   it('keeps the editor and tabs mounted while the History sidebar is active', () => {
     const source = readFileSync(fileURLToPath(new URL('../VaultView.vue', import.meta.url)), 'utf8')
 

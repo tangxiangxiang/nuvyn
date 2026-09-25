@@ -20,7 +20,11 @@ const mocks = vi.hoisted(() => {
     getLineCount: vi.fn(() => Math.max(1, model.value.split('\n').length)),
     getLineMaxColumn: vi.fn(() => 1),
     getOffsetAt: vi.fn(() => 0),
-    getPositionAt: vi.fn(() => ({ lineNumber: 1, column: 1 })),
+    getPositionAt: vi.fn((offset: number) => {
+      const prefix = model.value.slice(0, offset)
+      const lines = prefix.split('\n')
+      return { lineNumber: lines.length, column: (lines.at(-1)?.length ?? 0) + 1 }
+    }),
     isDisposed: vi.fn(() => false),
     dispose: vi.fn(),
   }
@@ -45,6 +49,7 @@ const mocks = vi.hoisted(() => {
     executeEdits: vi.fn(),
     setModel: vi.fn(),
     setSelection: vi.fn(),
+    revealRangeInCenterIfOutsideViewport: vi.fn(),
     updateOptions: vi.fn(),
     focus: vi.fn(),
     dispose: vi.fn(),
@@ -89,7 +94,22 @@ vi.mock('monaco-editor/esm/vs/editor/editor.api.js', () => ({
     constructor(..._args: number[]) {}
   },
   Selection: class Selection {
-    constructor(..._args: number[]) {}
+    public selectionStartLineNumber: number
+    public selectionStartColumn: number
+    public positionLineNumber: number
+    public positionColumn: number
+
+    constructor(
+      selectionStartLineNumber: number,
+      selectionStartColumn: number,
+      positionLineNumber: number,
+      positionColumn: number,
+    ) {
+      this.selectionStartLineNumber = selectionStartLineNumber
+      this.selectionStartColumn = selectionStartColumn
+      this.positionLineNumber = positionLineNumber
+      this.positionColumn = positionColumn
+    }
   },
   KeyCode: { Enter: 3, Tab: 2, KeyB: 31, KeyI: 38, KeyK: 40, Backquote: 85 },
   KeyMod: { Shift: 1024, CtrlCmd: 2048 },
@@ -171,6 +191,49 @@ describe('Monaco EditorPane', () => {
     expect(mocks.model.dispose).not.toHaveBeenCalled()
     expect(mocks.completionDispose).not.toHaveBeenCalled()
     expect(mocks.hoverDispose).not.toHaveBeenCalled()
+  })
+
+  it('reveals a body search match using the raw Monaco model after frontmatter', () => {
+    const raw = '---\ntitle: Redis\n---\n\n# Note\n\nThis contains transaction isolation guarantees.'
+    const wrapper = mount(EditorPane, { props: { modelValue: raw, path: 'inbox/search-reveal' } })
+    const original = mocks.model.getValue()
+    const startOffset = raw.indexOf('transaction isolation')
+    const before = raw.slice(0, startOffset).split('\n')
+    const start = { lineNumber: before.length, column: before.at(-1)!.length + 1 }
+    const after = raw.slice(0, startOffset + 'transaction isolation'.length).split('\n')
+    const end = { lineNumber: after.length, column: after.at(-1)!.length + 1 }
+
+    const revealText = (wrapper.vm as unknown as { revealText(text: string): boolean }).revealText
+    expect(revealText('transaction isolation')).toBe(true)
+    expect(mocks.model.getPositionAt).toHaveBeenNthCalledWith(1, startOffset)
+    expect(mocks.model.getPositionAt).toHaveBeenNthCalledWith(2, startOffset + 'transaction isolation'.length)
+    expect(mocks.editor.setSelection).toHaveBeenCalledWith(expect.objectContaining({
+      selectionStartLineNumber: start.lineNumber,
+      selectionStartColumn: start.column,
+      positionLineNumber: end.lineNumber,
+      positionColumn: end.column,
+    }))
+    expect(mocks.editor.revealRangeInCenterIfOutsideViewport).toHaveBeenCalledWith(mocks.editor.setSelection.mock.calls[0][0])
+    expect(mocks.model.getValue()).toBe(original)
+    expect(mocks.model.setValue).not.toHaveBeenCalled()
+    expect(mocks.editor.executeEdits).not.toHaveBeenCalled()
+    expect(mocks.editor.focus).not.toHaveBeenCalled()
+    expect(wrapper.emitted('update:modelValue')).toBeUndefined()
+    wrapper.unmount()
+  })
+
+  it('does not change the selection or content when a reveal query is stale', () => {
+    const raw = '---\ntitle: Redis\n---\n\n# Note\n\nCurrent text.'
+    const wrapper = mount(EditorPane, { props: { modelValue: raw, path: 'inbox/stale-search-reveal' } })
+    const original = mocks.model.getValue()
+
+    const revealText = (wrapper.vm as unknown as { revealText(text: string): boolean }).revealText
+    expect(revealText('missing phrase')).toBe(false)
+    expect(mocks.editor.setSelection).not.toHaveBeenCalled()
+    expect(mocks.editor.revealRangeInCenterIfOutsideViewport).not.toHaveBeenCalled()
+    expect(mocks.model.getValue()).toBe(original)
+    expect(mocks.model.setValue).not.toHaveBeenCalled()
+    wrapper.unmount()
   })
 
   it('updates the Monaco theme without recreating the editor', async () => {
