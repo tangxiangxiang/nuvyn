@@ -93,6 +93,65 @@ describe('VaultView search reveal handoff', () => {
     expect(searchRevealIntent.value).toBeNull()
   })
 
+  it('keeps a not-yet-entered target pending across route ticks', async () => {
+    const state = setup({
+      path: 'inbox/a',
+      tab: { path: 'inbox/a', loading: false, loadError: null },
+    })
+    const intent = requestSearchReveal({ path: 'inbox/b', text: 'target body' })
+
+    await flushRevealWatch()
+    await flushRevealWatch()
+    await flushRevealWatch()
+
+    expect(state.activePath.value).toBe('inbox/a')
+    expect(searchRevealIntent.value).toEqual(intent)
+  })
+
+  it('consumes an entered target when the user leaves before reveal, preventing a later stale reveal', async () => {
+    const tabA = { path: 'inbox/a', loading: false, loadError: null }
+    const tabBLoading = { path: 'inbox/b', loading: true, loadError: null }
+    const state = setup({ path: tabA.path, tab: tabA })
+    const revealText = vi.fn(() => true)
+    const intent = requestSearchReveal({ path: 'inbox/b', text: 'target body' })
+
+    await flushRevealWatch()
+    expect(searchRevealIntent.value).toEqual(intent)
+
+    state.activePath.value = tabBLoading.path
+    state.activeTab.value = tabBLoading
+    await flushRevealWatch()
+    expect(searchRevealIntent.value).toEqual(intent)
+
+    state.activePath.value = tabA.path
+    state.activeTab.value = tabA
+    await flushRevealWatch()
+    expect(searchRevealIntent.value).toBeNull()
+
+    state.activePath.value = 'inbox/b'
+    state.activeTab.value = { path: 'inbox/b', loading: false, loadError: null }
+    state.editorPane.value = { revealText }
+    await flushRevealWatch()
+    expect(revealText).not.toHaveBeenCalled()
+  })
+
+  it('resets entered-target tracking when a newer intent replaces the old one', async () => {
+    const state = setup({ path: 'inbox/a', tab: { path: 'inbox/a', loading: false, loadError: null } })
+    requestSearchReveal({ path: 'inbox/b', text: 'first target' })
+    state.activePath.value = 'inbox/b'
+    state.activeTab.value = { path: 'inbox/b', loading: true, loadError: null }
+    await flushRevealWatch()
+
+    const latest = requestSearchReveal({ path: 'inbox/c', text: 'second target' })
+    await flushRevealWatch()
+    expect(searchRevealIntent.value).toEqual(latest)
+
+    state.activePath.value = 'inbox/c'
+    state.activeTab.value = { path: 'inbox/c', loading: true, loadError: null }
+    await flushRevealWatch()
+    expect(searchRevealIntent.value).toEqual(latest)
+  })
+
   it('reveals on the current same-route Note and handles repeated identical requests', async () => {
     const revealText = vi.fn(() => true)
     setup({

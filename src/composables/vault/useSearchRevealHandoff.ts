@@ -21,6 +21,9 @@ export function watchSearchRevealHandoff(options: {
   isReadMode: Readonly<Ref<boolean>>
   isOrdinaryPresentation: Readonly<Ref<boolean>>
 }): WatchStopHandle {
+  let trackedIntentId: number | null = null
+  let enteredTarget = false
+
   return watch(
     () => [
       searchRevealIntent.value?.id,
@@ -34,7 +37,27 @@ export function watchSearchRevealHandoff(options: {
     ],
     async () => {
       const pending = searchRevealIntent.value
-      if (!pending || options.activePath.value !== pending.path) return
+      if (!pending) {
+        trackedIntentId = null
+        enteredTarget = false
+        return
+      }
+      if (pending.id !== trackedIntentId) {
+        trackedIntentId = pending.id
+        enteredTarget = false
+      }
+
+      const activePath = options.activePath.value
+      if (activePath === pending.path) enteredTarget = true
+      else if (enteredTarget) {
+        consumeSearchReveal(pending.id)
+        trackedIntentId = null
+        enteredTarget = false
+        return
+      } else {
+        // The route may still be leaving the source Note for this target.
+        return
+      }
 
       const tab = options.activeTab.value
       if (!tab || tab.path !== pending.path || tab.loading) return

@@ -7,6 +7,7 @@ import { acquireMarkdownModel } from './monacoModels'
 import { bindMarkdownProviderContext, unbindMarkdownProviderContext } from './monacoMarkdownProviders'
 import { resolveWikiTarget } from '../../../shared/linkResolve'
 import { getPost } from '../../lib/api'
+import { parseDoc } from '../../lib/frontmatter'
 import { useEditorPreferences } from '../../composables/vault/useEditorPreferences'
 import {
   indentMarkdownLine,
@@ -142,14 +143,28 @@ function revealText(text: string): boolean {
   if (!editor || !model || !needle) return false
 
   const raw = model.getValue()
-  const startOffset = raw.toLocaleLowerCase().indexOf(needle.toLocaleLowerCase())
-  if (startOffset < 0) return false
+  const { content } = parseDoc(raw)
+  const bodyStartOffset = raw.length - content.length
+  const bodyStart = model.getPositionAt(bodyStartOffset)
+  const modelEnd = model.getFullModelRange()
+  const bodyRange = new monaco.Range(
+    bodyStart.lineNumber,
+    bodyStart.column,
+    modelEnd.endLineNumber,
+    modelEnd.endColumn,
+  )
+  const match = model.findMatches(needle, bodyRange, false, false, null, false, 1)[0]
+  if (!match) return false
 
-  const start = model.getPositionAt(startOffset)
-  const end = model.getPositionAt(startOffset + needle.length)
-  const selection = new monaco.Selection(start.lineNumber, start.column, end.lineNumber, end.column)
+  const { range } = match
+  const selection = new monaco.Selection(
+    range.startLineNumber,
+    range.startColumn,
+    range.endLineNumber,
+    range.endColumn,
+  )
   editor.setSelection(selection)
-  editor.revealRangeInCenterIfOutsideViewport(selection)
+  editor.revealRangeInCenterIfOutsideViewport(range)
   return true
 }
 

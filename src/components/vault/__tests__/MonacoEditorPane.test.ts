@@ -20,11 +20,16 @@ const mocks = vi.hoisted(() => {
     getLineCount: vi.fn(() => Math.max(1, model.value.split('\n').length)),
     getLineMaxColumn: vi.fn(() => 1),
     getOffsetAt: vi.fn(() => 0),
+    getFullModelRange: vi.fn(() => {
+      const lines = model.value.split('\n')
+      return { startLineNumber: 1, startColumn: 1, endLineNumber: lines.length, endColumn: lines.at(-1)!.length + 1 }
+    }),
     getPositionAt: vi.fn((offset: number) => {
       const prefix = model.value.slice(0, offset)
       const lines = prefix.split('\n')
       return { lineNumber: lines.length, column: (lines.at(-1)?.length ?? 0) + 1 }
     }),
+    findMatches: vi.fn((): Array<{ range: { startLineNumber: number; startColumn: number; endLineNumber: number; endColumn: number } }> => []),
     isDisposed: vi.fn(() => false),
     dispose: vi.fn(),
   }
@@ -91,7 +96,17 @@ vi.mock('monaco-editor/esm/vs/editor/editor.api.js', () => ({
   },
   Uri: { parse: vi.fn((value: string) => value) },
   Range: class Range {
-    constructor(..._args: number[]) {}
+    public startLineNumber: number
+    public startColumn: number
+    public endLineNumber: number
+    public endColumn: number
+
+    constructor(startLineNumber: number, startColumn: number, endLineNumber: number, endColumn: number) {
+      this.startLineNumber = startLineNumber
+      this.startColumn = startColumn
+      this.endLineNumber = endLineNumber
+      this.endColumn = endColumn
+    }
   },
   Selection: class Selection {
     public selectionStartLineNumber: number
@@ -121,6 +136,7 @@ vi.mock('../../../lib/api', () => ({ getPost: mocks.getPost }))
 
 import EditorPane from '../EditorPane.vue'
 import { resetMarkdownModelsForTesting } from '../monacoModels'
+import { parseDoc } from '../../../lib/frontmatter'
 
 describe('Monaco EditorPane', () => {
   function setDocumentLines(lines: string[]) {
@@ -162,6 +178,13 @@ describe('Monaco EditorPane', () => {
     mocks.model.value = ''
     mocks.editor.getSelection.mockReturnValue(null)
     mocks.model.getLineContent.mockReturnValue('')
+    mocks.model.findMatches.mockReset()
+    mocks.model.findMatches.mockReturnValue([])
+    mocks.model.getFullModelRange.mockReset()
+    mocks.model.getFullModelRange.mockImplementation(() => {
+      const lines = mocks.model.value.split('\n')
+      return { startLineNumber: 1, startColumn: 1, endLineNumber: lines.length, endColumn: lines.at(-1)!.length + 1 }
+    })
     document.documentElement.setAttribute('data-theme', 'light')
   })
 
@@ -197,28 +220,112 @@ describe('Monaco EditorPane', () => {
     const raw = '---\ntitle: Redis\n---\n\n# Note\n\nThis contains transaction isolation guarantees.'
     const wrapper = mount(EditorPane, { props: { modelValue: raw, path: 'inbox/search-reveal' } })
     const original = mocks.model.getValue()
-    const startOffset = raw.indexOf('transaction isolation')
-    const before = raw.slice(0, startOffset).split('\n')
-    const start = { lineNumber: before.length, column: before.at(-1)!.length + 1 }
-    const after = raw.slice(0, startOffset + 'transaction isolation'.length).split('\n')
-    const end = { lineNumber: after.length, column: after.at(-1)!.length + 1 }
+    const bodyStartOffset = raw.length - parseDoc(raw).content.length
+    const bodyStart = mocks.model.getPositionAt(bodyStartOffset)
+    const modelEnd = mocks.model.getFullModelRange()
+    const matchRange = { startLineNumber: 7, startColumn: 15, endLineNumber: 7, endColumn: 36 }
+    mocks.model.getPositionAt.mockClear()
+    mocks.model.findMatches.mockReturnValueOnce([{ range: matchRange }])
 
     const revealText = (wrapper.vm as unknown as { revealText(text: string): boolean }).revealText
     expect(revealText('transaction isolation')).toBe(true)
-    expect(mocks.model.getPositionAt).toHaveBeenNthCalledWith(1, startOffset)
-    expect(mocks.model.getPositionAt).toHaveBeenNthCalledWith(2, startOffset + 'transaction isolation'.length)
+    expect(mocks.model.getPositionAt).toHaveBeenCalledOnce()
+    expect(mocks.model.getPositionAt).toHaveBeenCalledWith(bodyStartOffset)
+    expect(mocks.model.findMatches).toHaveBeenCalledWith(
+      'transaction isolation',
+      expect.objectContaining({
+        startLineNumber: bodyStart.lineNumber,
+        startColumn: bodyStart.column,
+        endLineNumber: modelEnd.endLineNumber,
+        endColumn: modelEnd.endColumn,
+      }),
+      false,
+      false,
+      null,
+      false,
+      1,
+    )
     expect(mocks.editor.setSelection).toHaveBeenCalledWith(expect.objectContaining({
-      selectionStartLineNumber: start.lineNumber,
-      selectionStartColumn: start.column,
-      positionLineNumber: end.lineNumber,
-      positionColumn: end.column,
+      selectionStartLineNumber: matchRange.startLineNumber,
+      selectionStartColumn: matchRange.startColumn,
+      positionLineNumber: matchRange.endLineNumber,
+      positionColumn: matchRange.endColumn,
     }))
-    expect(mocks.editor.revealRangeInCenterIfOutsideViewport).toHaveBeenCalledWith(mocks.editor.setSelection.mock.calls[0][0])
+    expect(mocks.editor.revealRangeInCenterIfOutsideViewport).toHaveBeenCalledWith(matchRange)
     expect(mocks.model.getValue()).toBe(original)
     expect(mocks.model.setValue).not.toHaveBeenCalled()
     expect(mocks.editor.executeEdits).not.toHaveBeenCalled()
     expect(mocks.editor.focus).not.toHaveBeenCalled()
     expect(wrapper.emitted('update:modelValue')).toBeUndefined()
+    wrapper.unmount()
+  })
+
+  it('reveals the body occurrence when frontmatter contains the same query first', () => {
+    const raw = '---\ncustom: transaction isolation\n---\n\n# Note\n\nThe body contains transaction isolation guarantees.'
+    const wrapper = mount(EditorPane, { props: { modelValue: raw, path: 'inbox/duplicate-search-reveal' } })
+    const bodyStartOffset = raw.length - parseDoc(raw).content.length
+    const bodyStart = mocks.model.getPositionAt(bodyStartOffset)
+    const bodyMatchStartColumn = raw.split('\n')[6].indexOf('transaction isolation') + 1
+    const bodyMatchRange = {
+      startLineNumber: 7,
+      startColumn: bodyMatchStartColumn,
+      endLineNumber: 7,
+      endColumn: bodyMatchStartColumn + 'transaction isolation'.length,
+    }
+    mocks.model.getPositionAt.mockClear()
+    mocks.model.findMatches.mockReturnValueOnce([{ range: bodyMatchRange }])
+
+    const revealText = (wrapper.vm as unknown as { revealText(text: string): boolean }).revealText
+    expect(revealText('transaction isolation')).toBe(true)
+    expect(mocks.model.findMatches).toHaveBeenCalledWith(
+      'transaction isolation',
+      expect.objectContaining({ startLineNumber: bodyStart.lineNumber, startColumn: bodyStart.column }),
+      false,
+      false,
+      null,
+      false,
+      1,
+    )
+    expect(mocks.editor.setSelection).toHaveBeenCalledWith(expect.objectContaining({
+      selectionStartLineNumber: bodyMatchRange.startLineNumber,
+      selectionStartColumn: bodyMatchRange.startColumn,
+      positionLineNumber: bodyMatchRange.endLineNumber,
+      positionColumn: bodyMatchRange.endColumn,
+    }))
+    expect(mocks.editor.setSelection.mock.calls[0][0].selectionStartLineNumber).toBeGreaterThan(bodyStart.lineNumber - 1)
+    expect(mocks.editor.revealRangeInCenterIfOutsideViewport).toHaveBeenCalledWith(bodyMatchRange)
+    wrapper.unmount()
+  })
+
+  it('uses Monaco’s original-model Range for matches after Unicode case-folding prefixes', () => {
+    const raw = '---\ntitle: Unicode\n---\n\n# Note\n\nİ prefix text\ntransaction isolation target'
+    const wrapper = mount(EditorPane, { props: { modelValue: raw, path: 'inbox/unicode-search-reveal' } })
+    const bodyStartOffset = raw.length - parseDoc(raw).content.length
+    const bodyStart = mocks.model.getPositionAt(bodyStartOffset)
+    const matchRange = { startLineNumber: 8, startColumn: 1, endLineNumber: 8, endColumn: 22 }
+    mocks.model.getPositionAt.mockClear()
+    mocks.model.findMatches.mockReturnValueOnce([{ range: matchRange }])
+
+    const revealText = (wrapper.vm as unknown as { revealText(text: string): boolean }).revealText
+    expect(revealText('transaction isolation')).toBe(true)
+    expect(mocks.model.getPositionAt).toHaveBeenCalledOnce()
+    expect(mocks.model.getPositionAt).toHaveBeenCalledWith(bodyStartOffset)
+    expect(mocks.model.findMatches).toHaveBeenCalledWith(
+      'transaction isolation',
+      expect.objectContaining({ startLineNumber: bodyStart.lineNumber, startColumn: bodyStart.column }),
+      false,
+      false,
+      null,
+      false,
+      1,
+    )
+    expect(mocks.editor.setSelection).toHaveBeenCalledWith(expect.objectContaining({
+      selectionStartLineNumber: matchRange.startLineNumber,
+      selectionStartColumn: matchRange.startColumn,
+      positionLineNumber: matchRange.endLineNumber,
+      positionColumn: matchRange.endColumn,
+    }))
+    expect(mocks.editor.revealRangeInCenterIfOutsideViewport).toHaveBeenCalledWith(matchRange)
     wrapper.unmount()
   })
 
