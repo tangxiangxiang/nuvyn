@@ -1,12 +1,14 @@
 import type { PostSummary } from './api'
 import type { DocumentSearchSource } from './documentSearchSource'
-import { buildIndex, captureSearchEpoch, invalidateSearchState, primeBody, rebuildIndex, search } from './search'
+import { buildIndex, captureSearchEpoch, invalidateSearchState, needsBodyPrime, primeBody, rebuildIndex, search } from './search'
 import { isManagedDiaryPath } from '../../shared/diaryProtocol'
 
 export type SearchResultType = 'file' | 'heading' | 'tag' | 'alias' | 'command' | 'ai' | 'recent-file' | 'board'
 export interface SearchResult<T = unknown> { id: string; type: SearchResultType; title: string; subtitle?: string; icon?: string; score: number; payload: T }
 export interface SearchResultSection { id: string; label: string; results: SearchResult[] }
-export type SearchProvider = (query: string) => SearchResultSection | Promise<SearchResultSection>
+export type SearchProvider = ((query: string) => SearchResultSection | Promise<SearchResultSection>) & {
+  subscribe?: (listener: () => void) => () => void
+}
 export interface DocumentSearchPayload { path: string; match: 'title' | 'path' | 'tag' | 'summary' | 'body'; snippet?: string }
 
 function postsSignature(posts: readonly PostSummary[]): string {
@@ -26,9 +28,11 @@ async function resolvePosts(input: DocumentPostsInput): Promise<PostSummary[]> {
 export function createDocumentSearchProvider(input: DocumentPostsInput): SearchProvider {
   let indexed = false
   let signature = ''
-  let priming: Promise<void> | null = null
+  let priming: Promise<boolean> | null = null
+  let retryAfter = 0
+  const listeners = new Set<() => void>()
 
-  return async (query) => {
+  const provider: SearchProvider = async (query) => {
     const requestEpoch = captureSearchEpoch()
     const posts = await resolvePosts(input)
     const nextSignature = postsSignature(posts)
@@ -40,6 +44,7 @@ export function createDocumentSearchProvider(input: DocumentPostsInput): SearchP
       rebuildIndex(posts)
       signature = nextSignature
       priming = null
+      retryAfter = 0
     }
 
     if (!query.trim()) {
@@ -54,17 +59,38 @@ export function createDocumentSearchProvider(input: DocumentPostsInput): SearchP
       return { id: 'files', label: 'Files', results }
     }
 
-    if (!priming) priming = primeBody(posts)
-    await priming
     if (requestEpoch !== captureSearchEpoch()) {
       return { id: 'files', label: 'Files', results: [] }
     }
+
+    // Return metadata hits immediately. Body requests are started in the
+    // background and bounded inside primeBody; completion notifies the
+    // palette so it can merge body-only hits into the current query.
+    if (!priming && Date.now() >= retryAfter && needsBodyPrime(posts)) {
+      const attemptSignature = nextSignature
+      const attempt = primeBody(posts)
+      priming = attempt
+      const finish = (succeeded: boolean) => {
+        if (priming !== attempt || signature !== attemptSignature) return
+        priming = null
+        retryAfter = succeeded ? 0 : Date.now() + 1500
+        for (const listener of listeners) listener()
+      }
+      void attempt.then(finish, () => finish(false))
+    }
+
     const results = search(query, 12).map<SearchResult<DocumentSearchPayload>>((hit) => ({
       id: `file:${hit.path}`, type: 'file', title: hit.title, subtitle: hit.path, score: hit.score,
       payload: { path: hit.path, match: hit.match, snippet: hit.snippet },
     }))
     return { id: 'files', label: 'Files', results }
   }
+
+  provider.subscribe = (listener) => {
+    listeners.add(listener)
+    return () => listeners.delete(listener)
+  }
+  return provider
 }
 
 export async function searchEverywhere(query: string, providers: SearchProvider[]): Promise<SearchResultSection[]> {

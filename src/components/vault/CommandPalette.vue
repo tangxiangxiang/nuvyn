@@ -45,6 +45,19 @@ const runLatestSearch = createLatestSearchRunner(
 async function refresh() {
   await runLatestSearch(query.value)
 }
+let providerUnsubscribers: Array<() => void> = []
+function subscribeToProviderUpdates() {
+  providerUnsubscribers.forEach((unsubscribe) => unsubscribe())
+  providerUnsubscribers = []
+  const activeProviders = props.providers ?? [documentProvider]
+  for (const provider of activeProviders) {
+    const unsubscribe = provider.subscribe?.(() => {
+      if (open.value && query.value.trim()) void refresh()
+    })
+    if (unsubscribe) providerUnsubscribers.push(unsubscribe)
+  }
+}
+watch(() => props.providers, subscribeToProviderUpdates, { immediate: true })
 function show() { trap.activate(); open.value = true; query.value = ''; void refresh(); void nextTick(() => inputRef.value?.focus()) }
 function hide() { open.value = false; void trap.deactivate() }
 function commit(hit: SearchResult) {
@@ -76,6 +89,8 @@ onMounted(() => {
   document.addEventListener('keydown', onGlobalKey)
 })
 onBeforeUnmount(() => {
+  providerUnsubscribers.forEach((unsubscribe) => unsubscribe())
+  providerUnsubscribers = []
   if (props.keyboardShortcut !== false) document.removeEventListener('keydown', onKey)
   document.removeEventListener('keydown', onGlobalKey)
 })
