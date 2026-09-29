@@ -254,6 +254,7 @@ folderRoutes.patch('/api/folders/*', async (c) => {
 
   const body = await c.req.json().catch(() => null) as { newPath?: string; updateReferences?: boolean } | null
   if (!body || typeof body.newPath !== 'string') return bad(c, 'newPath required')
+  const updateReferences = body.updateReferences === true
   const newPath = body.newPath
   try { validateFolderMutation({ operation: 'rename', sourcePath: srcPath, destinationPath: newPath }) }
   catch (error) { return bad(c, (error as Error).message, 422) }
@@ -275,7 +276,7 @@ folderRoutes.patch('/api/folders/*', async (c) => {
   // reference updates are requested, conservatively reject a vault that has
   // any managed Diary file before LinkIndex planning (locked callers retain
   // the normal 423 response).
-  if (body.updateReferences !== false) {
+  if (updateReferences) {
     const referenceError = await rejectManagedDiaryReferenceFootprint(c)
     if (referenceError) return referenceError
   }
@@ -283,7 +284,7 @@ folderRoutes.patch('/api/folders/*', async (c) => {
   if (plannedOldPaths.some((value) => classifyDiaryPath(value) === 'managed')) {
     return bad(c, 'folder rename reference footprint contains an encrypted managed Diary body', 422, 'diary-encrypted-reference-unsupported')
   }
-  const plannedReferencePaths = body.updateReferences
+  const plannedReferencePaths = updateReferences
     ? Object.entries((await getLinkIndex()).snapshot().outgoing)
       .filter(([, links]) => links.some((link) => plannedOldPaths.includes(link.target)))
       .map(([source]) => source)
@@ -319,7 +320,7 @@ folderRoutes.patch('/api/folders/*', async (c) => {
     sourcePath: string; writePath: string; raw: string; updated: string
     mtime: number
   }> = []
-  if (body.updateReferences) {
+  if (updateReferences) {
     const idx = await getLinkIndex()
     const indexSnapshot = idx.snapshot()
     const moves = oldPaths.map((oldPath) => ({ oldPath, newPath: newPath + oldPath.slice(srcPath.length) }))

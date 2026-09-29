@@ -603,6 +603,7 @@ postRoutes.patch('/api/posts/*', async (c) => {
   if (body.name !== undefined && body.targetPath !== undefined) {
     return bad(c, 'pass exactly one of name / targetPath')
   }
+  const updateReferences = body.updateReferences === true
 
   let dest: string
   let destPath: string
@@ -648,11 +649,11 @@ postRoutes.patch('/api/posts/*', async (c) => {
   // Rename/move changes tree membership: structure lock first, with
   // the backlink plan computed under it (see folders PATCH note).
   return withVaultStructureLock(async () => {
-  if (body.updateReferences !== false) {
+  if (updateReferences) {
     const referenceError = await rejectManagedDiaryReferenceFootprint(c)
     if (referenceError) return referenceError
   }
-  const plannedReferencePaths = body.updateReferences
+  const plannedReferencePaths = updateReferences
     ? (await getLinkIndex()).getBacklinks(srcPath).map((backlink) => backlink.source)
     : []
   for (const referencePath of plannedReferencePaths) {
@@ -675,7 +676,7 @@ postRoutes.patch('/api/posts/*', async (c) => {
     updated: string
     mtime: number
   }> = []
-  if (body.updateReferences) {
+  if (updateReferences) {
     // ONE authoritative in-lock backlink enumeration: the verified
     // candidate set AND the executed reference plan below are both
     // built from this single snapshot — the index is never re-queried

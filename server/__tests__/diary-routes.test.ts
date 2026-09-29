@@ -577,6 +577,7 @@ describe('Diary REST mutation contract', () => {
     })
 
     expect(rename.status).toBe(423)
+    expect(await rename.json()).toMatchObject({ code: 'diary-locked' })
     await expect(fs.readFile(path.join(vault, 'inbox', 'rename-target.md'), 'utf8'))
       .resolves.toBe('# Target\n')
     await expect(fs.readFile(path.join(vault, 'diary', `${date}.md`), 'utf8'))
@@ -602,9 +603,89 @@ describe('Diary REST mutation contract', () => {
     })
 
     expect(rename.status).toBe(423)
+    expect(await rename.json()).toMatchObject({ code: 'diary-locked' })
     await expect(fs.stat(path.join(vault, 'inbox', 'rename-folder', 'child.md'))).resolves.toBeTruthy()
     await expect(fs.readFile(path.join(vault, 'diary', `${date}.md`), 'utf8'))
       .resolves.not.toContain(diaryBody)
+  })
+
+  it('allows an ordinary Note move to archive when Diary is locked and updateReferences is omitted', async () => {
+    const date = '2000-06-01'
+    const sourcePath = 'inbox/source'
+    expect((await call('POST', '/api/diary/dates', { date, timeZone: TIME_ZONE })).status).toBe(201)
+    expect((await call('POST', '/api/posts', { path: sourcePath, title: 'Source' })).status).toBe(201)
+
+    const move = await callWithoutDiaryCapability('PATCH', `/api/posts/${sourcePath}`, {
+      targetPath: 'archive/source',
+    })
+
+    expect(move.status).toBe(200)
+    await expect(fs.stat(path.join(vault, 'inbox', 'source.md'))).rejects.toThrow()
+    await expect(fs.readFile(path.join(vault, 'archive', 'source.md'), 'utf8')).resolves.toBe('# Source\n')
+  })
+
+  it('allows an ordinary Note move when updateReferences is explicitly false and Diary is locked', async () => {
+    const date = '2000-06-02'
+    const sourcePath = 'inbox/source'
+    expect((await call('POST', '/api/diary/dates', { date, timeZone: TIME_ZONE })).status).toBe(201)
+    expect((await call('POST', '/api/posts', { path: sourcePath, title: 'Source' })).status).toBe(201)
+
+    const move = await callWithoutDiaryCapability('PATCH', `/api/posts/${sourcePath}`, {
+      targetPath: 'archive/source',
+      updateReferences: false,
+    })
+
+    expect(move.status).toBe(200)
+    await expect(fs.stat(path.join(vault, 'inbox', 'source.md'))).rejects.toThrow()
+    await expect(fs.readFile(path.join(vault, 'archive', 'source.md'), 'utf8')).resolves.toBe('# Source\n')
+  })
+
+  it('allows an ordinary Note rename when updateReferences is omitted and Diary is locked', async () => {
+    const date = '2000-06-03'
+    const sourcePath = 'inbox/source'
+    expect((await call('POST', '/api/diary/dates', { date, timeZone: TIME_ZONE })).status).toBe(201)
+    expect((await call('POST', '/api/posts', { path: sourcePath, title: 'Source' })).status).toBe(201)
+
+    const rename = await callWithoutDiaryCapability('PATCH', `/api/posts/${sourcePath}`, { name: 'renamed' })
+
+    expect(rename.status).toBe(200)
+    await expect(fs.stat(path.join(vault, 'inbox', 'source.md'))).rejects.toThrow()
+    await expect(fs.readFile(path.join(vault, 'inbox', 'renamed.md'), 'utf8')).resolves.toBe('# Source\n')
+  })
+
+  it('allows an ordinary folder rename when updateReferences is omitted and Diary is locked', async () => {
+    const date = '2000-06-04'
+    const folderPath = 'inbox/project'
+    const documentPath = `${folderPath}/child`
+    expect((await call('POST', '/api/diary/dates', { date, timeZone: TIME_ZONE })).status).toBe(201)
+    expect((await call('POST', '/api/folders', { path: folderPath })).status).toBe(201)
+    expect((await call('POST', '/api/posts', { path: documentPath, title: 'Child' })).status).toBe(201)
+
+    const rename = await callWithoutDiaryCapability('PATCH', `/api/folders/${folderPath}`, {
+      newPath: 'inbox/project-renamed',
+    })
+
+    expect(rename.status).toBe(200)
+    await expect(fs.stat(path.join(vault, 'inbox', 'project', 'child.md'))).rejects.toThrow()
+    await expect(fs.readFile(path.join(vault, 'inbox', 'project-renamed', 'child.md'), 'utf8'))
+      .resolves.toBe('# Child\n')
+  })
+
+  it('keeps authorized reference rewrites fail-closed when a managed Diary exists', async () => {
+    const date = '2000-06-05'
+    const sourcePath = 'inbox/source'
+    expect((await call('POST', '/api/diary/dates', { date, timeZone: TIME_ZONE })).status).toBe(201)
+    expect((await call('POST', '/api/posts', { path: sourcePath, title: 'Source' })).status).toBe(201)
+
+    const rename = await call('PATCH', `/api/posts/${sourcePath}`, {
+      name: 'renamed',
+      updateReferences: true,
+    })
+
+    expect(rename.status).toBe(422)
+    expect(await rename.json()).toMatchObject({ code: 'diary-encrypted-reference-unsupported' })
+    await expect(fs.readFile(path.join(vault, 'inbox', 'source.md'), 'utf8')).resolves.toBe('# Source\n')
+    await expect(fs.stat(path.join(vault, 'inbox', 'renamed.md'))).rejects.toThrow()
   })
 
   it('fails closed for generic recovery even when a missing Diary path looks managed', async () => {
