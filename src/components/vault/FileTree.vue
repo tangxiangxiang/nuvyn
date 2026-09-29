@@ -298,14 +298,18 @@ function nodeKey(node: Pick<TreeNode, 'kind' | 'path'>): string {
   return `${node.kind}:${node.path}`
 }
 
-function setFocused(path: string, kind: 'file' | 'folder', focusDom = false) {
+function setFocused(path: string, kind: 'file' | 'folder') {
   focusedNodeKey.value = `${kind}:${path}`
-  if (focusDom) {
-    nextTick(() => {
-      const rows = document.querySelectorAll<HTMLElement>('.file-tree [data-tree-key]')
-      Array.from(rows).find((row) => row.dataset.treeKey === focusedNodeKey.value)?.focus()
-    })
-  }
+}
+
+function focusTreeRow(path: string, kind: 'file' | 'folder') {
+  const key = `${kind}:${path}`
+  setFocused(path, kind)
+  nextTick(() => {
+    const rows = fileTreeRootRef.value?.querySelectorAll<HTMLElement>('[data-tree-key]') ?? []
+    const row = Array.from(rows).find((candidate) => candidate.dataset.treeKey === key)
+    row?.focus({ preventScroll: true })
+  })
 }
 
 function onTreeKeydown(e: KeyboardEvent) {
@@ -343,7 +347,7 @@ function onTreeKeydown(e: KeyboardEvent) {
   } else return
   e.preventDefault()
   e.stopPropagation()
-  if (target) setFocused(target.node.path, target.node.kind, true)
+  if (target) focusTreeRow(target.node.path, target.node.kind)
 }
 
 watch([visibleItems, () => props.currentPath], ([items, currentPath]) => {
@@ -544,7 +548,9 @@ function filePaths(n: TreeNode): string[] {
 }
 
 // --- row event handlers ---
-async function onSelect(p: string) { emit('select', p) }
+async function onSelect(p: string) {
+  if (p !== props.currentPath) emit('select', p)
+}
 async function onToggle(p: string) { toggle(p) }
 
 async function onRename(oldPath: string, newName: string, kind: 'file' | 'folder') {
@@ -604,7 +610,7 @@ async function onRename(oldPath: string, newName: string, kind: 'file' | 'folder
         const focusedKind = remappedFocus.slice(0, separator)
         const focusedPath = remappedFocus.slice(separator + 1)
         if (focusedKind === 'file' || focusedKind === 'folder') {
-          setFocused(focusedPath, focusedKind, true)
+          focusTreeRow(focusedPath, focusedKind)
         }
       }
       for (const oldFilePath of filePaths(node)) {
@@ -632,7 +638,7 @@ async function onRename(oldPath: string, newName: string, kind: 'file' | 'folder
         : await patchPost(oldPath, body)
       const remappedFocus = remapFocusedNodeKey(focusedBeforeRename, oldPath, renamed.path, 'file')
       if (remappedFocus && remappedFocus !== focusedBeforeRename) {
-        setFocused(renamed.path, 'file', true)
+        focusTreeRow(renamed.path, 'file')
       }
       if (!lifecycle) {
         for (const updated of renamed.updatedReferences ?? []) {

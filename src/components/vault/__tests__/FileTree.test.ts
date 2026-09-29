@@ -126,6 +126,108 @@ describe('FileTree', () => {
     wrapper.unmount()
   })
 
+  it('gives an explicitly clicked row DOM focus and keeps logical focus in sync', async () => {
+    const wrapper = mount(FileTree, {
+      props: { tree: TREE, currentPath: null },
+      attachTo: document.body,
+    })
+    const externalInput = document.createElement('input')
+    document.body.append(externalInput)
+    externalInput.focus()
+
+    const row = wrapper.get('[data-tree-key="folder:inbox"]')
+    await row.get('.row-line').trigger('click')
+
+    expect(document.activeElement).toBe(row.element)
+    expect(row.attributes('tabindex')).toBe('0')
+    expect(row.attributes('aria-expanded')).toBe('true')
+
+    wrapper.unmount()
+    externalInput.remove()
+  })
+
+  it('returns filename-button clicks to the treeitem focus owner', async () => {
+    const wrapper = mount(FileTree, {
+      props: { tree: TREE, currentPath: null },
+      attachTo: document.body,
+    })
+    const inbox = wrapper.get('[data-tree-key="folder:inbox"]')
+    await inbox.get('.chevron').trigger('click')
+    const row = wrapper.get('[data-tree-key="file:inbox/draft"]')
+    const filename = row.get('.row-name')
+
+    expect((filename.element as HTMLButtonElement).tabIndex).toBe(-1)
+    await filename.trigger('click')
+
+    expect(document.activeElement).toBe(row.element)
+    expect(row.attributes('tabindex')).toBe('0')
+    wrapper.unmount()
+  })
+
+  it('focuses an already active file without reopening it', async () => {
+    const wrapper = mount(FileTree, {
+      props: { tree: TREE, currentPath: null },
+      attachTo: document.body,
+    })
+    await wrapper.get('[data-tree-key="folder:inbox"] .row-line').trigger('click')
+    const row = wrapper.get('[data-tree-key="file:inbox/draft"]')
+    await wrapper.setProps({ currentPath: 'inbox/draft' })
+
+    await row.get('.row-line').trigger('click')
+
+    expect(document.activeElement).toBe(row.element)
+    expect(row.attributes('tabindex')).toBe('0')
+    expect(wrapper.emitted('select')).toBeUndefined()
+    wrapper.unmount()
+  })
+
+  it('keeps folder-chevron toggling while focusing the folder treeitem', async () => {
+    const wrapper = mount(FileTree, {
+      props: { tree: TREE, currentPath: null },
+      attachTo: document.body,
+    })
+    const row = wrapper.get('[data-tree-key="folder:inbox"]')
+    const externalInput = document.createElement('input')
+    document.body.append(externalInput)
+    externalInput.focus()
+
+    await row.get('.chevron').trigger('click')
+
+    expect(document.activeElement).toBe(row.element)
+    expect(row.attributes('aria-expanded')).toBe('true')
+    wrapper.unmount()
+    externalInput.remove()
+  })
+
+  it('keeps the search input as the DOM focus owner when clicked', async () => {
+    const wrapper = mount(FileTree, {
+      props: { tree: TREE, currentPath: null },
+      attachTo: document.body,
+    })
+    const searchInput = wrapper.get('.search-input')
+    ;(searchInput.element as HTMLInputElement).focus()
+    await searchInput.trigger('click')
+
+    expect(document.activeElement).toBe(searchInput.element)
+    wrapper.unmount()
+  })
+
+  it('does not steal an external input focus during passive current-path sync', async () => {
+    const wrapper = mount(FileTree, {
+      props: { tree: TREE, currentPath: null },
+      attachTo: document.body,
+    })
+    const externalInput = document.createElement('input')
+    document.body.append(externalInput)
+    externalInput.focus()
+
+    await wrapper.setProps({ currentPath: 'inbox/draft' })
+
+    expect(document.activeElement).toBe(externalInput)
+    wrapper.unmount()
+    externalInput.remove()
+  })
+
   it('renders top-level folders and expands a folder from its row', async () => {
     const wrapper = mount(FileTree, { props: { tree: TREE, currentPath: null } })
     expect(wrapper.text()).toContain('inbox')

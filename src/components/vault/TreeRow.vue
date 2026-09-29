@@ -73,6 +73,7 @@ const emit = defineEmits<{
 }>()
 
 const { t } = useI18n()
+const treeItemRef = ref<HTMLElement | null>(null)
 
 const isFolder = computed(() => props.node.kind === 'folder')
 const isActive = computed(() => !isFolder.value && props.node.path === props.currentPath)
@@ -281,10 +282,21 @@ function menuAction(fn: () => void) {
   fn()
 }
 
+function focusTreeItemAfterActivation() {
+  treeItemRef.value?.focus({ preventScroll: true })
+}
+
+function activateRow() {
+  if (isFolder.value) emit('toggle', props.node.path)
+  else emit('select', props.node.path)
+  focusTreeItemAfterActivation()
+}
+
 </script>
 
 <template>
   <li
+    ref="treeItemRef"
     class="tree-row"
     :class="{ active: isActive, expanded: isExpanded, folder: isFolder, 'top-level': depth === 0, dragging: isDragging, 'drop-target': isDropTarget }"
     :style="{ '--depth': depth }"
@@ -320,14 +332,14 @@ function menuAction(fn: () => void) {
          actually hovers a child row. -->
     <div
       class="row-line"
-      @click="emit('focus', node.path, node.kind); isFolder ? emit('toggle', node.path) : emit('select', node.path)"
+      @click="activateRow"
     >
       <span
         v-if="isFolder"
         class="chevron"
         :class="{ expanded: isExpanded }"
         :aria-hidden="true"
-        @click.stop="emit('focus', node.path, node.kind); emit('toggle', node.path)"
+        @click.stop="activateRow"
       ><NIcon aria-hidden="true"><ChevronRight /></NIcon></span>
       <span v-else class="chevron-spacer" />
 
@@ -350,11 +362,12 @@ function menuAction(fn: () => void) {
           attr-type="button"
           text
           :bordered="false"
+          :focusable="false"
           class="row-name"
           :class="{ 'row-file-name': showFilename, 'row-file-name-hidden': !isFolder && !showFilename }"
           :title="matchTooltip"
           :aria-label="!isFolder ? `${displayTitle}, ${node.path}` : displayTitle"
-          @click.stop="emit('focus', node.path, node.kind); isFolder ? emit('toggle', node.path) : emit('select', node.path)"
+          @click.stop="activateRow"
         >
           <span class="row-name-text">{{ node.name }}</span>
         </NButton>

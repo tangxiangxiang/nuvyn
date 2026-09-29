@@ -710,6 +710,51 @@ test('Diary G B shortcut returns from the active diary to the same calendar mont
   expect(state.consoleErrors).toEqual([])
 })
 
+test('clicking a Diary FileTree row transfers focus out of Monaco for G B', async ({ page, request }) => {
+  const date = '2026-08-16'
+  const path = diaryPath(date)
+
+  try {
+    await seedDiary(request, date, `# FileTree focus handoff ${RUN_ID}\n`)
+    await openDiaryHome(page)
+    await moveToMonth(page, date)
+    await calendarDay(page.getByTestId('diary-calendar'), date).click()
+    await assertNativeRead(page, date)
+
+    const diaryTab = page.locator(`[role="tab"][data-tab-id="${path}"]`)
+    await page.locator('.vault').focus()
+    await page.keyboard.press('ControlOrMeta+e')
+    const editor = page.locator('.editor-pane .monaco-editor').first()
+    await expect(editor).toBeVisible()
+    await editor.click()
+    await expect.poll(() => page.evaluate(() => Boolean(
+      document.activeElement?.closest('.monaco-editor'),
+    ))).toBe(true)
+
+    const row = page.locator(`[data-tree-key="file:${path}"]`)
+    await expect(row).toBeVisible()
+    await row.locator('.row-line').click()
+    await expect.poll(() => page.evaluate(() => (
+      (document.activeElement as HTMLElement | null)?.dataset.treeKey ?? null
+    ))).toBe(`file:${path}`)
+    await expect(row).toHaveAttribute('tabindex', '0')
+
+    // The shared Diary E2E fixture freezes Date.now. Advance it by 1 ms so
+    // Vue's nested-listener timestamp guard behaves as it does during normal
+    // elapsed browser time before sending keyboard events through FileTree.
+    await page.clock.setSystemTime(new Date('2026-08-15T12:00:00.001+08:00'))
+
+    await page.keyboard.press('g')
+    await page.keyboard.press('b')
+
+    await expect(diaryTab).toHaveCount(0)
+    await expect(page.getByTestId('diary-workspace-shell')).toHaveAttribute('data-presentation-mode', 'home')
+    await expect(page.getByTestId('diary-calendar')).toBeVisible()
+  } finally {
+    await deletePost(request, path)
+  }
+})
+
 test('native READ and EDIT remain usable across panel states, breakpoints, and resize', async ({ page, request }) => {
   const date = localCivilDate()
   const path = diaryPath(date)
