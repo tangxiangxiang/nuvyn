@@ -13,6 +13,8 @@ Nuvyn first saves the selected open editor revisions, captures their content has
 
 The vault repository is initialized lazily the first time History is used. Nuvyn creates a vault `.git/`, a `.nuvyn/vault-id` marker, and default ignore files if they do not already exist. Git must be installed and reachable on `PATH`.
 
+Inbox is a draft area and does not record version history. The History tab explains this without requesting a file timeline. Move a note to Literature or Archive when you want it included in Create Version. New vaults ignore `/inbox/` in `.gitignore`; for an existing vault, Nuvyn preserves your `.gitignore` and adds the rule to its managed `.git/info/exclude` block.
+
 ## Browse and Compare
 
 The timeline groups versions by local calendar date. Open a version to compare it with its parent or with the current working tree. File History narrows the timeline to the active document. Historical views are read-only.

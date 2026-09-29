@@ -50,6 +50,7 @@ import {
   validateHistoryPaths,
 } from './validation.js'
 import { isManagedDiaryBodyPath, requireDiaryBodyAccess } from '../diaryAccess/guard.js'
+import { isInboxDraftPath } from '../../shared/historyPolicy.js'
 
 function rejectEncryptedDiaryHistory(c: any, path: string): Response | null {
   if (!isManagedDiaryBodyPath(path)) return null
@@ -58,6 +59,11 @@ function rejectEncryptedDiaryHistory(c: any, path: string): Response | null {
     error: 'Managed Diary body History is unavailable while encrypted History is not implemented.',
     code: 'diary-history-encrypted-unsupported',
   }, 422)
+}
+
+function rejectInboxDraftHistory(c: any, filePath: string): Response | null {
+  if (!isInboxDraftPath(filePath)) return null
+  return bad(c, 'Inbox drafts are excluded from History.', 422, 'HISTORY_INBOX_DRAFT_EXCLUDED')
 }
 
 /**
@@ -147,6 +153,7 @@ const STABLE_HISTORY_ERROR_CODES = new Set([
   'HISTORY_METADATA_REVISION_WITHDRAWN',
   'HISTORY_METADATA_TREE_MISMATCH',
   'HISTORY_METADATA_BODY_MISMATCH',
+  'HISTORY_INBOX_DRAFT_EXCLUDED',
   'diary-history-encrypted-unsupported',
 ])
 
@@ -263,6 +270,8 @@ history.post('/content-hashes', async (c) => {
   const paths = validateHistoryPaths(body?.paths)
   if (!paths) return bad(c, 'invalid paths')
   for (const filePath of paths) {
+    const inboxError = rejectInboxDraftHistory(c, filePath)
+    if (inboxError) return inboxError
     const historyError = rejectEncryptedDiaryHistory(c, filePath)
     if (historyError) return historyError
     const bodyAccess = requireDiaryBodyAccess(c, filePath)
@@ -398,6 +407,8 @@ history.post('/commits', async (c) => {
   const paths = validateHistoryPaths(body.paths)
   if (!paths) return bad(c, 'invalid path')
   for (const filePath of paths) {
+    const inboxError = rejectInboxDraftHistory(c, filePath)
+    if (inboxError) return inboxError
     const historyError = rejectEncryptedDiaryHistory(c, filePath)
     if (historyError) return historyError
     const bodyAccess = requireDiaryBodyAccess(c, filePath)

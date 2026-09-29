@@ -353,8 +353,8 @@ describeHistoryIntegration('Nuvyn Edit Program closure: cross-Edit contracts', (
   }, HISTORY_GIT_INTEGRATION_TIMEOUT_MS)
 
   it('Journey 5 — rename keeps documentId; the new path serves the same bytes; pre-rename revisions stay retrievable at the old git path; reusing the old path mints a new identity', async () => {
-    const slug = `inbox/epc-rename-${RUN}`
-    const renamedSlug = `inbox/epc-renamed-${RUN}`
+    const slug = `literature/epc-rename-${RUN}`
+    const renamedSlug = `literature/epc-renamed-${RUN}`
 
     // ── A with revision R1 committed to its history ────────────────
     const baseAtCreate = await createDoc(slug)

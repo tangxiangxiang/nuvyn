@@ -90,6 +90,7 @@ describeHistoryIntegration('ensureRepo', () => {
     const gi = await fs.readFile(path.join(root, '.gitignore'), 'utf8')
     expect(gi).toContain('data/')
     expect(gi).toContain('node_modules/')
+    expect(gi).toContain('/inbox/')
     // .gitattributes is intentionally empty — see repo.ts. We still
     // create the file (so future attribute edits have a stable home)
     // and assert it's empty rather than a non-existent file.
@@ -97,11 +98,31 @@ describeHistoryIntegration('ensureRepo', () => {
     expect(ga).toBe('')
   })
 
-  it('does not overwrite existing .gitignore on second call', async () => {
-    await fs.writeFile(path.join(root, '.gitignore'), '# my custom rule\n', 'utf8')
+  it('preserves an existing .gitignore and idempotently adds the Git-aware exclude block', async () => {
+    await git.initRepo(root)
+    const customIgnore = 'custom-rule/\n!important.txt\n'
+    await fs.writeFile(path.join(root, '.gitignore'), customIgnore, 'utf8')
     await ensureRepo(root)
     const gi = await fs.readFile(path.join(root, '.gitignore'), 'utf8')
-    expect(gi).toBe('# my custom rule\n')
+    expect(gi).toBe(customIgnore)
+
+    const excludeResult = await git.run(root, ['rev-parse', '--git-path', 'info/exclude'])
+    expect(excludeResult.status).toBe(0)
+    const excludePath = path.isAbsolute(excludeResult.stdout.trim())
+      ? excludeResult.stdout.trim()
+      : path.resolve(root, excludeResult.stdout.trim())
+    const first = await fs.readFile(excludePath, 'utf8')
+    expect(first).toContain('# Nuvyn managed history exclusions\n/inbox/\n# End Nuvyn managed history exclusions')
+
+    await ensureRepo(root)
+    const second = await fs.readFile(excludePath, 'utf8')
+    expect(second).toBe(first)
+    expect(second.match(/# Nuvyn managed history exclusions/g)).toHaveLength(1)
+
+    await write('inbox/draft.md', 'draft')
+    const status = await git.status(root)
+    expect(status.map((entry) => entry.path)).not.toContain('inbox/draft.md')
+    expect(await fs.readFile(path.join(root, '.gitignore'), 'utf8')).toBe(customIgnore)
   })
 
   it('creates one persistent UUID Vault ID and keeps it across repeated opens', async () => {
@@ -138,7 +159,7 @@ describeHistoryIntegration('ensureRepo', () => {
     await expect(git.ensureNuvynVaultId(root)).rejects.toThrow(/invalid Nuvyn Vault ID/)
   })
 
-  it('is a no-op on an existing repo', async () => {
+  it('reconciles draft exclusions on an existing repo without changing HEAD', async () => {
     await git.initRepo(root)
     await setUser()
     await write('foo.md', 'hello')
@@ -197,13 +218,13 @@ describeHistoryIntegration('ensureRepo', () => {
 describe('parsePorcelain', () => {
   it('parses a fresh-status output with modifications and an untracked file', () => {
     const text =
-      ' M inbox/note-a.md\n' +
-      'M  inbox/note-b.md\n' +
+      ' M notes/note-a.md\n' +
+      'M  notes/note-b.md\n' +
       '?? literature/new.md\n' +
       'D  archive/old.md\n'
     expect(git.parsePorcelain(text)).toEqual([
-      { index: ' ', worktree: 'M', path: 'inbox/note-a.md' },
-      { index: 'M', worktree: ' ', path: 'inbox/note-b.md' },
+      { index: ' ', worktree: 'M', path: 'notes/note-a.md' },
+      { index: 'M', worktree: ' ', path: 'notes/note-b.md' },
       { index: '?', worktree: '?', path: 'literature/new.md' },
       { index: 'D', worktree: ' ', path: 'archive/old.md' },
     ])
@@ -235,15 +256,27 @@ describeHistoryIntegration('status', () => {
   })
 
   it('reports modified, new, and untracked files', async () => {
-    await write('inbox/clean.md', 'tracked')
-    await git.addAndCommit(root, ['inbox/clean.md'], 'seed')
+    await write('literature/clean.md', 'tracked')
+    await git.addAndCommit(root, ['literature/clean.md'], 'seed')
     // Now modify clean.md and add a brand-new untracked file.
-    await write('inbox/clean.md', 'tracked (changed)')
-    await write('inbox/fresh.md', 'untracked')
+    await write('literature/clean.md', 'tracked (changed)')
+    await write('literature/fresh.md', 'untracked')
     const s = await git.status(root)
     const byPath = Object.fromEntries(s.map((e) => [e.path, e]))
-    expect(byPath['inbox/clean.md'].worktree).toBe('M')
-    expect(byPath['inbox/fresh.md']).toEqual({ index: '?', worktree: '?', path: 'inbox/fresh.md' })
+    expect(byPath['literature/clean.md'].worktree).toBe('M')
+    expect(byPath['literature/fresh.md']).toEqual({ index: '?', worktree: '?', path: 'literature/fresh.md' })
+  })
+
+  it('ignores only the root Inbox while keeping similarly named directories visible', async () => {
+    await write('inbox/draft.md', 'draft')
+    await write('inbox-old/note.md', 'ordinary')
+    await write('my-inbox/note.md', 'ordinary')
+
+    const status = await git.status(root)
+    const paths = status.map((entry) => entry.path)
+    expect(paths).not.toContain('inbox/draft.md')
+    expect(paths).toContain('inbox-old/note.md')
+    expect(paths).toContain('my-inbox/note.md')
   })
 })
 
@@ -251,11 +284,11 @@ describeHistoryIntegration('addAndCommit + log', () => {
   beforeEach(initAndSeed)
 
   it('creates a commit, returns its sha, and log reports it', async () => {
-    await write('inbox/a.md', 'one')
-    await write('inbox/b.md', 'two')
-    const r = await git.addAndCommit(root, ['inbox/a.md', 'inbox/b.md'], 'first commit')
+    await write('literature/a.md', 'one')
+    await write('literature/b.md', 'two')
+    const r = await git.addAndCommit(root, ['literature/a.md', 'literature/b.md'], 'first commit')
     expect(r.sha).toMatch(/^[0-9a-f]{40}$/)
-    expect(r.filesCommitted.sort()).toEqual(['inbox/a.md', 'inbox/b.md'])
+    expect(r.filesCommitted.sort()).toEqual(['literature/a.md', 'literature/b.md'])
     const log = await git.log(root)
     // No seed commit: initAndSeed leaves the working tree without an
     // initial commit, so the first user commit is also the only one.
@@ -265,11 +298,30 @@ describeHistoryIntegration('addAndCommit + log', () => {
     expect(log[0].parents).toEqual([])
     expect(log[0].author).toBe('Test User')
     expect(log[0].date).toMatch(/^\d{4}-\d{2}-\d{2}T/)
-    expect(log[0].files.sort()).toEqual(['inbox/a.md', 'inbox/b.md'])
+    expect(log[0].files.sort()).toEqual(['literature/a.md', 'literature/b.md'])
     const message = await git.run(root, ['show', '-s', '--format=%B', r.sha])
     expect(message.stdout).toContain('Nuvyn-Version: 1')
     expect(message.stdout).toContain('Nuvyn-Vault: ')
     expect(message.stdout).toContain('Nuvyn-Vault-Version: 1')
+  })
+
+  it('rejects Inbox drafts before changing HEAD or the Git index', async () => {
+    await write('inbox/draft.md', 'draft')
+    const headBefore = await git.currentHead(root)
+    let indexBefore: Buffer | null = null
+    try { indexBefore = await fs.readFile(path.join(root, '.git', 'index')) } catch (error: any) {
+      if (error?.code !== 'ENOENT') throw error
+    }
+
+    await expect(git.addAndCommit(root, ['inbox/draft.md'], 'must not commit'))
+      .rejects.toMatchObject({ code: 'HISTORY_INBOX_DRAFT_EXCLUDED' })
+
+    expect(await git.currentHead(root)).toBe(headBefore)
+    let indexAfter: Buffer | null = null
+    try { indexAfter = await fs.readFile(path.join(root, '.git', 'index')) } catch (error: any) {
+      if (error?.code !== 'ENOENT') throw error
+    }
+    expect(indexAfter).toEqual(indexBefore)
   })
 
   it('commits only selected paths when an unrelated file is already staged', async () => {

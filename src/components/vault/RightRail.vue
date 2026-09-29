@@ -25,6 +25,7 @@ import RightRailHistory from './RightRailHistory.vue'
 import { resolveFileHistoryTarget, type FileHistoryState } from '../../composables/vault/useFileHistory'
 import type { HistoryRevisionSelection } from '../../composables/vault/useHistoryComparisons'
 import type { RightRailTab } from '../../composables/vault/useVaultLayout'
+import { isInboxDraftPath } from '../../../shared/historyPolicy'
 
 const { tocHeadings, tocActiveId, tocScrollTo } = useVaultTocState()
 const { t } = useI18n()
@@ -79,7 +80,20 @@ watch(() => props.activeTab, (tab) => {
 function openHistoryForCurrentPath(force = false): void {
   const fileHistory = props.fileHistory
   const path = props.path
-  if (!fileHistory || !path || fileHistory.loading.value) return
+  if (!fileHistory) return
+  if (path && isInboxDraftPath(path)) {
+    if (
+      fileHistory.target.value !== null
+      || fileHistory.commits.value.length > 0
+      || fileHistory.loading.value
+      || fileHistory.loaded.value
+      || fileHistory.error.value !== null
+      || fileHistory.selectedCommitId.value !== null
+      || fileHistory.expandedDays.value.size > 0
+    ) fileHistory.clear()
+    return
+  }
+  if (!path || fileHistory.loading.value) return
 
   const targetMatches = fileHistory.target.value?.documentPath === path
   if (targetMatches && fileHistory.loaded.value && !(force && fileHistory.error.value)) return

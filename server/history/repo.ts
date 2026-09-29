@@ -1,6 +1,6 @@
 // Initialize the vault as a git repository the first time the history
-// feature is touched. Idempotent: if `.git` already exists, this is a
-// no-op. Writes `.gitignore` and `.gitattributes` next to `.git`.
+// feature is touched. Existing user dotfiles are preserved; the Nuvyn
+// Inbox exclusion is reconciled in Git's per-repository info/exclude.
 //
 // Where the files live:
 //   repoRoot = the vault root (the directory the user pointed Nuvyn at).
@@ -16,6 +16,7 @@
 //   - node_modules/, dist/, .vite/ : standard build artifacts.
 //   - .DS_Store, Thumbs.db, desktop.ini : OS junk.
 //   - *.log     : log files leak private paths and tend to churn.
+//   - /inbox/   : Inbox is Nuvyn's draft-only area, not versioned.
 //
 // What goes in .gitattributes:
 //   `* text=auto eol=lf` — make LF canonical regardless of OS, so
@@ -92,7 +93,17 @@ const GITIGNORE_LINES = [
   '# Logs',
   '*.log',
   '',
+  '# Nuvyn drafts',
+  '/inbox/',
+  '',
 ]
+
+const NUVYN_EXCLUDE_BLOCK = [
+  '# Nuvyn managed history exclusions',
+  '/inbox/',
+  '# End Nuvyn managed history exclusions',
+]
+const excludeTasks = new Map<string, Promise<void>>()
 
 const GITATTRIBUTES = ''
 // Intentionally empty. We rely on `core.autocrlf=false` (set in
@@ -104,8 +115,9 @@ const GITATTRIBUTES = ''
 // lines here.
 
 /**
- * Idempotent repo initialization. Steps:
- *   1. If already a git repo, do nothing.
+ * Idempotent repo initialization and policy reconciliation. Steps:
+ *   1. If already a git repo, preserve `.gitignore` and ensure the
+ *      Nuvyn-managed Inbox exclusion in `info/exclude`.
  *   2. If the directory sits inside an OUTER git repo, log a one-
  *      time warning and proceed anyway. Git treats the nested
  *      repo as a self-contained unit (the outer one ignores the
@@ -128,6 +140,7 @@ export async function ensureRepoWithinVaultMutation(repoRoot: string): Promise<v
   // git.isRepo (which uses rev-parse --is-inside-work-tree and
   // returns true for any nested directory of an outer repo).
   if (await hasOwnGitDir(repoRoot)) {
+    await ensureNuvynHistoryExclude(repoRoot)
     await git.ensureNuvynVaultId(repoRoot)
     return
   }
@@ -143,13 +156,17 @@ export async function ensureRepoWithinVaultMutation(repoRoot: string): Promise<v
   await writeIfMissing(path.join(repoRoot, '.gitignore'), GITIGNORE_LINES.join('\n'))
   await writeIfMissing(path.join(repoRoot, '.gitattributes'), GITATTRIBUTES)
   await git.initRepo(repoRoot)
+  await ensureNuvynHistoryExclude(repoRoot)
   await git.ensureNuvynVaultId(repoRoot)
 }
 
-/** Bootstrap is itself a Vault mutation. Existing repositories take the
- * read-only fast path; first initialization joins the global mutation order. */
+/** Bootstrap is itself a Vault mutation. First initialization joins the
+ * global mutation order; an existing repo only reconciles its exclude policy. */
 export async function ensureRepo(repoRoot: string): Promise<void> {
-  if (await hasOwnGitDir(repoRoot)) return
+  if (await hasOwnGitDir(repoRoot)) {
+    await ensureNuvynHistoryExclude(repoRoot)
+    return
+  }
   return withVaultMutation(repoRoot, () => ensureRepoWithinVaultMutation(repoRoot))
 }
 
@@ -158,5 +175,53 @@ async function writeIfMissing(p: string, content: string): Promise<void> {
     await fs.access(p)
   } catch {
     await fs.writeFile(p, content, 'utf8')
+  }
+}
+
+async function ensureNuvynHistoryExclude(repoRoot: string): Promise<void> {
+  const key = path.resolve(repoRoot)
+  const inFlight = excludeTasks.get(key)
+  if (inFlight) return inFlight
+
+  const task = (async () => {
+    const result = await git.run(repoRoot, ['rev-parse', '--git-path', 'info/exclude'])
+    if (result.status !== 0 || !result.stdout.trim()) {
+      throw new Error(`git rev-parse --git-path info/exclude failed: ${result.stderr.trim()}`)
+    }
+    const reportedPath = result.stdout.trim()
+    const excludePath = path.isAbsolute(reportedPath)
+      ? reportedPath
+      : path.resolve(repoRoot, reportedPath)
+    let content = ''
+    try {
+      content = await fs.readFile(excludePath, 'utf8')
+    } catch (error: any) {
+      if (error?.code !== 'ENOENT') throw error
+    }
+
+    const lines = content.split(/\r?\n/)
+    const blockExists = lines.some((line, index) => (
+      line === NUVYN_EXCLUDE_BLOCK[0]
+      && lines[index + 1] === NUVYN_EXCLUDE_BLOCK[1]
+      && lines[index + 2] === NUVYN_EXCLUDE_BLOCK[2]
+    ))
+    if (blockExists) return
+
+    await fs.mkdir(path.dirname(excludePath), { recursive: true })
+    const separator = content.length === 0
+      ? ''
+      : content.endsWith('\n\n')
+        ? ''
+        : content.endsWith('\n')
+          ? '\n'
+          : '\n\n'
+    await fs.appendFile(excludePath, `${separator}${NUVYN_EXCLUDE_BLOCK.join('\n')}\n`, 'utf8')
+  })()
+
+  excludeTasks.set(key, task)
+  try {
+    await task
+  } finally {
+    if (excludeTasks.get(key) === task) excludeTasks.delete(key)
   }
 }

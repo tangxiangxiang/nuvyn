@@ -644,6 +644,11 @@ const STRINGS: Strings = {
   'history.file_history_loading': { zh: '正在加载 {title} 的历史记录…', en: 'Loading history for {title}…' },
   'history.file_history_empty': { zh: '此文件还没有历史版本。', en: 'This file has no recorded versions yet.' },
   'history.file_history_failed': { zh: '无法加载此文件的历史记录。', en: 'Could not load history for this file.' },
+  'history.inbox_draft': { zh: 'Inbox 是草稿区', en: 'Inbox is a draft area' },
+  'history.inbox_draft_body': {
+    zh: '草稿不会记录版本历史。移动到 Literature 或 Archive 后，可以开始创建版本。',
+    en: 'Drafts are not included in version history. Move the document to Literature or Archive to start recording versions.',
+  },
   'history.open_file_version': { zh: '打开版本“{message}”', en: 'Open version “{message}”' },
   'history.commit_count_one': { zh: '（{count} 个提交）', en: '({count} commit)' },
   'history.commit_count_many': { zh: '（{count} 个提交）', en: '({count} commits)' },

@@ -27,6 +27,7 @@ import os from 'node:os'
 import { createHash, randomUUID } from 'node:crypto'
 import { readSafeRelativeFile } from '../paths.js'
 import { isManagedDiaryPath } from '../../shared/diaryProtocol.js'
+import { isInboxDraftPath } from '../../shared/historyPolicy.js'
 import {
   NUVYN_HISTORY_INDEX_DIRECTORY,
   NUVYN_VAULT_DIRECTORY,
@@ -76,6 +77,16 @@ export class ManagedDiaryHistoryUnsupportedError extends Error {
   constructor(path: string) {
     super(`managed Diary History is unsupported: ${path}`)
     this.name = 'ManagedDiaryHistoryUnsupportedError'
+  }
+}
+
+/** Mutation-owner rejection for Inbox paths excluded from Nuvyn versions. */
+export class InboxDraftHistoryExcludedError extends Error {
+  readonly code = 'HISTORY_INBOX_DRAFT_EXCLUDED'
+
+  constructor(filePath: string) {
+    super(`Inbox drafts are excluded from History: ${filePath}`)
+    this.name = 'InboxDraftHistoryExcludedError'
   }
 }
 
@@ -365,7 +376,7 @@ export function parsePorcelain(text: string): StatusEntry[] {
 export async function status(repoRoot: string): Promise<StatusEntry[]> {
   // `-uall` enumerates each file inside untracked directories. The
   // default (`normal`) collapses a wholly-untracked dir like
-  // `inbox/` into a single `?? inbox/` line, which would surface in
+  // `notes/` into a single `?? notes/` line, which would surface in
   // the History panel as one row representing the directory — useless
   // for selection, diff, or "Commit N files" counting. `-uall` still
   // honours `.gitignore` (files matching an ignore pattern remain
@@ -1402,8 +1413,10 @@ export async function addAndCommit(
     throw new Error('addAndCommit: message must not be empty')
   }
   // This is deliberately before withRepoMutation(), mkdtemp(), and every
-  // Git command.  Check the complete batch first so a Note + managed Diary
-  // selection is rejected atomically rather than committing a Note subset.
+  // Git command. Check the complete batch first so Inbox drafts and managed
+  // Diary paths are rejected atomically rather than committing a Note subset.
+  const inboxPath = paths.find(isInboxDraftPath)
+  if (inboxPath) throw new InboxDraftHistoryExcludedError(inboxPath)
   const managedPath = paths.find(isManagedDiaryHistoryPath)
   if (managedPath) throw new ManagedDiaryHistoryUnsupportedError(managedPath)
   return withRepoMutation(repoRoot, async () => {

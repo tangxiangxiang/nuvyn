@@ -1,8 +1,10 @@
 <script setup lang="ts">
+import { computed } from 'vue'
 import { NButton } from 'naive-ui'
 import type { FileHistoryCommitItem, FileHistoryState } from '../../composables/vault/useFileHistory'
 import type { HistoryRevisionSelection } from '../../composables/vault/useHistoryComparisons'
 import { useI18n } from '../../composables/useI18n'
+import { isInboxDraftPath } from '../../../shared/historyPolicy'
 import TimelineFileCommitRow from './TimelineFileCommitRow.vue'
 import TimelineGroup from './TimelineGroup.vue'
 
@@ -16,6 +18,7 @@ const emit = defineEmits<{
 }>()
 
 const { locale, t } = useI18n()
+const isDraftPath = computed(() => props.path !== null && isInboxDraftPath(props.path))
 
 function localeCode(): string {
   return locale.value === 'zh' ? 'zh-CN' : 'en-US'
@@ -62,6 +65,11 @@ function onTreeKeydown(event: KeyboardEvent): void {
 
     <div v-if="!path" class="right-rail-history-empty right-rail-empty-state">
       {{ t('rail.history_empty') }}
+    </div>
+
+    <div v-else-if="isDraftPath" class="history-empty-inline right-rail-history-draft" role="status">
+      <strong>{{ t('history.inbox_draft') }}</strong>
+      <p>{{ t('history.inbox_draft_body') }}</p>
     </div>
 
     <div v-else-if="fileHistory.error.value" class="history-error" role="alert">

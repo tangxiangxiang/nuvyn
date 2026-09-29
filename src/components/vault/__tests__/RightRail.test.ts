@@ -12,6 +12,12 @@ import type { FileHistoryState } from '../../../composables/vault/useFileHistory
 const posts = [{
   path: 'inbox/english/subject', title: '英语-主语', created: '', updated: '',
   tags: [], size: 0, mtime: 0,
+}, {
+  path: 'literature/english/subject', title: '英语-主语', created: '', updated: '',
+  tags: [], size: 0, mtime: 0,
+}, {
+  path: 'archive/english/subject', title: '英语-主语', created: '', updated: '',
+  tags: [], size: 0, mtime: 0,
 }]
 
 function mountPanel(activeTab: RightRailTab = 'toc', isReadMode = true) {
@@ -185,16 +191,40 @@ describe('unified document sidebar', () => {
   })
 
   it('renders the single-file history view in the fifth tab', () => {
-    const wrapper = mountPanel('history')
+    const fileHistory = {
+      target: ref(null),
+      commits: ref([]),
+      dayGroups: ref([]),
+      loading: ref(false),
+      loaded: ref(false),
+      error: ref(null),
+      expandedDays: ref(new Set<string>()),
+      selectedCommitId: ref(null),
+      open: vi.fn(),
+      refresh: vi.fn(),
+      clear: vi.fn(),
+      toggleDay: vi.fn(),
+      expandNewestDay: vi.fn(),
+      selectCommit: vi.fn(),
+    } as unknown as FileHistoryState
+    const wrapper = mount(RightRail, {
+      props: { path: 'inbox/english/subject', posts, activeTab: 'history', fileHistory },
+      global: { stubs: {
+        LinksPanel: { template: '<div />' },
+        AiPanel: { template: '<div />' },
+        DocumentMetadataForm: { template: '<div />' },
+      } },
+    })
     expect(wrapper.find('.history-slot').exists()).toBe(true)
-    expect(wrapper.text()).toContain('选择文档后查看历史记录')
+    expect(wrapper.text()).toContain('Inbox 是草稿区')
+    expect(wrapper.text()).toContain('草稿不会记录版本历史')
     expect(wrapper.get('[role="tab"][aria-selected="true"]').text()).toBe('历史')
   })
 
   it('loads history on the first click when the target exists but is not loaded yet', async () => {
     const open = vi.fn().mockResolvedValue(undefined)
     const fileHistory = {
-      target: ref({ documentPath: 'inbox/english/subject', documentTitle: '英语-主语' }),
+      target: ref({ documentPath: 'literature/english/subject', documentTitle: '英语-主语' }),
       commits: ref([]),
       dayGroups: ref([]),
       loading: ref(false),
@@ -210,7 +240,7 @@ describe('unified document sidebar', () => {
       selectCommit: vi.fn(),
     } as unknown as FileHistoryState
     const wrapper = mount(RightRail, {
-      props: { path: 'inbox/english/subject', posts, activeTab: 'toc', fileHistory },
+      props: { path: 'literature/english/subject', posts, activeTab: 'toc', fileHistory },
       global: {
         stubs: {
           LinksPanel: { template: '<div />' },
@@ -225,9 +255,83 @@ describe('unified document sidebar', () => {
 
     expect(open).toHaveBeenCalledTimes(1)
     expect(open).toHaveBeenCalledWith({
-      documentPath: 'inbox/english/subject',
+      documentPath: 'literature/english/subject',
       documentTitle: '英语-主语',
     })
+  })
+
+  it('shows Inbox draft policy without fetching history and resumes history outside Inbox', async () => {
+    const target = ref<{ documentPath: string; documentTitle: string } | null>({
+      documentPath: 'literature/english/subject',
+      documentTitle: '英语-主语',
+    })
+    const commits = ref([{ id: 'stale-commit' }])
+    const loading = ref(false)
+    const loaded = ref(true)
+    const error = ref<Error | null>(null)
+    const selectedCommitId = ref<string | null>('stale-commit')
+    const expandedDays = ref(new Set(['stale-day']))
+    const clear = vi.fn(() => {
+      target.value = null
+      commits.value = []
+      loading.value = false
+      loaded.value = false
+      error.value = null
+      selectedCommitId.value = null
+      expandedDays.value = new Set()
+    })
+    const open = vi.fn(async (next: { documentPath: string; documentTitle: string }) => {
+      loading.value = true
+      target.value = next
+      await Promise.resolve()
+      loading.value = false
+      loaded.value = true
+    })
+    const fileHistory = {
+      target,
+      commits,
+      dayGroups: ref([]),
+      loading,
+      loaded,
+      error,
+      expandedDays,
+      selectedCommitId,
+      open,
+      refresh: vi.fn().mockResolvedValue(undefined),
+      clear,
+      toggleDay: vi.fn(),
+      expandNewestDay: vi.fn(),
+      selectCommit: vi.fn(),
+    } as unknown as FileHistoryState
+    const wrapper = mount(RightRail, {
+      props: { path: 'inbox/english/subject', posts, activeTab: 'history', fileHistory },
+      global: { stubs: {
+        LinksPanel: { template: '<div />' },
+        AiPanel: { template: '<div />' },
+        DocumentMetadataForm: { template: '<div />' },
+      } },
+    })
+
+    await nextTick()
+    expect(open).not.toHaveBeenCalled()
+    expect(clear).toHaveBeenCalled()
+    expect(wrapper.text()).toContain('Inbox 是草稿区')
+    expect(wrapper.find('.right-rail-history-scroll').exists()).toBe(false)
+
+    await wrapper.setProps({ path: 'literature/english/subject' })
+    expect(open).toHaveBeenCalledWith({
+      documentPath: 'literature/english/subject',
+      documentTitle: '英语-主语',
+    })
+    await wrapper.setProps({ path: 'archive/english/subject' })
+    expect(open).toHaveBeenLastCalledWith({
+      documentPath: 'archive/english/subject',
+      documentTitle: '英语-主语',
+    })
+    await wrapper.setProps({ path: 'inbox/english/subject' })
+    expect(clear).toHaveBeenCalledTimes(2)
+    expect(open).toHaveBeenCalledTimes(2)
+    expect(commits.value).toEqual([])
   })
 
   it('renders empty TOC without affecting the other tabs', () => {

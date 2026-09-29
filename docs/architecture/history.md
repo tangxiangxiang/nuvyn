@@ -20,6 +20,8 @@ The vault repository is separate from the Nuvyn source repository. Running Nuvyn
 
 Creating a version is explicit. The client first coordinates and flushes relevant pending saves. The server hashes content, determines changes, creates a commit with the Nuvyn trailers, and returns the new timeline state. Autosave alone does not create a version.
 
+Inbox is a draft area and is excluded from version creation. New vaults include the root-anchored `/inbox/` rule in `.gitignore`; existing repositories keep their `.gitignore` unchanged and receive the same rule in Nuvyn's managed `.git/info/exclude` block. The content-hash and Create Version APIs, plus the Git mutation owner, reject Inbox paths so callers cannot bypass the policy. Literature and Archive remain versioned areas.
+
 ## Reading history
 
 The API exposes:

@@ -164,19 +164,19 @@ describeHistoryIntegration('GET /api/history/status', () => {
   })
 
   it('reports new and modified files', async () => {
-    await write('inbox/a.md', 'one')
-    await call('POST', '/commits', { paths: ['inbox/a.md'], message: 'seed' })
-    await write('inbox/a.md', 'one (changed)')
-    await write('inbox/b.md', 'new')
+    await write('literature/a.md', 'one')
+    await call('POST', '/commits', { paths: ['literature/a.md'], message: 'seed' })
+    await write('literature/a.md', 'one (changed)')
+    await write('literature/b.md', 'new')
     const r = await call('GET', '/status')
     const body = await r.json() as { dirty: { path: string; worktree: string; index: string }[] }
     const byPath = Object.fromEntries(body.dirty.map((e) => [e.path, e]))
-    expect(byPath['inbox/a.md'].worktree).toBe('M')
-    expect(byPath['inbox/b.md']).toEqual({ index: '?', worktree: '?', path: 'inbox/b.md' })
+    expect(byPath['literature/a.md'].worktree).toBe('M')
+    expect(byPath['literature/b.md']).toEqual({ index: '?', worktree: '?', path: 'literature/b.md' })
   })
 
   it('filters managed Diary bodies from Changes while retaining unmanaged diary files', async () => {
-    await write('inbox/a.md', 'ordinary')
+    await write('literature/a.md', 'ordinary')
     await write('diary/2026-08-25.md', 'opaque ciphertext envelope')
     await write('diary/legacy.md', 'legacy external body')
 
@@ -184,7 +184,17 @@ describeHistoryIntegration('GET /api/history/status', () => {
     expect(r.status).toBe(200)
     const body = await r.json() as { dirty: { path: string }[] }
     const paths = body.dirty.map((entry) => entry.path).sort()
-    expect(paths).toEqual(['diary/legacy.md', 'inbox/a.md'])
+    expect(paths).toEqual(['diary/legacy.md', 'literature/a.md'])
+  })
+
+  it('keeps new Inbox drafts out of Changes while showing versioned notes', async () => {
+    await write('inbox/draft.md', 'draft')
+    await write('literature/note.md', 'versioned note')
+
+    const r = await call('GET', '/status')
+    expect(r.status).toBe(200)
+    const body = await r.json() as { dirty: { path: string }[] }
+    expect(body.dirty.map((entry) => entry.path)).toEqual(['literature/note.md'])
   })
 
   it('returns no Changes entries for a managed-Diary-only working tree', async () => {
@@ -445,6 +455,42 @@ describeHistoryIntegration('POST /api/history/commits', () => {
     expect(dotfile.status).toBe(400)
   })
 
+  it('rejects Inbox paths from content hash capture, including a mixed selection', async () => {
+    await write('literature/note.md', 'versioned note')
+    const single = await call('POST', '/content-hashes', { paths: ['inbox/missing.md'] })
+    expect(single.status).toBe(422)
+    expect(await single.json()).toMatchObject({ code: 'HISTORY_INBOX_DRAFT_EXCLUDED' })
+
+    const mixed = await call('POST', '/content-hashes', {
+      paths: ['literature/note.md', 'inbox/draft.md'],
+    })
+    expect(mixed.status).toBe(422)
+    expect(await mixed.json()).toMatchObject({ code: 'HISTORY_INBOX_DRAFT_EXCLUDED' })
+  })
+
+  it('rejects Inbox drafts from single and mixed Create Version requests', async () => {
+    await write('inbox/draft.md', 'draft')
+    await write('literature/note.md', 'versioned note')
+    const headBefore = await historyGit.currentHead(root)
+
+    const single = await call('POST', '/commits', {
+      paths: ['inbox/draft.md'],
+      message: 'must reject draft',
+    })
+    expect(single.status).toBe(422)
+    expect(await single.json()).toMatchObject({ code: 'HISTORY_INBOX_DRAFT_EXCLUDED' })
+
+    const mixed = await call('POST', '/commits', {
+      paths: ['literature/note.md', 'inbox/draft.md'],
+      message: 'must reject whole batch',
+    })
+    expect(mixed.status).toBe(422)
+    expect(await mixed.json()).toMatchObject({ code: 'HISTORY_INBOX_DRAFT_EXCLUDED' })
+    expect(await historyGit.currentHead(root)).toBe(headBefore)
+    expect((await historyGit.log(root)).map((commit) => commit.subject)).toEqual([])
+    expect(await historyGit.rawAt(root, 'HEAD', 'literature/note.md')).toBeNull()
+  })
+
   it('returns a clear 409 when the selected path is no longer dirty', async () => {
     await write('a.md', 'x')
     await call('POST', '/commits', { paths: ['a.md'], message: 'first' })
@@ -497,11 +543,11 @@ describeHistoryIntegration('POST /api/history/commits', () => {
   })
 
   it('rejects a mixed Note + managed Diary commit before Git mutation', async () => {
-    await write('inbox/mixed-note.md', 'ordinary')
+    await write('literature/mixed-note.md', 'ordinary')
     await write('diary/2026-08-27.md', 'opaque ciphertext envelope')
 
     const r = await call('POST', '/commits', {
-      paths: ['inbox/mixed-note.md', 'diary/2026-08-27.md'],
+      paths: ['literature/mixed-note.md', 'diary/2026-08-27.md'],
       message: 'must reject mixed private batch',
     })
 
@@ -509,7 +555,7 @@ describeHistoryIntegration('POST /api/history/commits', () => {
     expect(await r.json()).toMatchObject({ code: 'diary-history-encrypted-unsupported' })
     const log = await (await call('GET', '/log')).json() as { commits: unknown[] }
     expect(log.commits).toEqual([])
-    expect(await read('inbox/mixed-note.md')).toBe('ordinary')
+    expect(await read('literature/mixed-note.md')).toBe('ordinary')
   })
 
   it('commits an externally deleted selected file', async () => {
