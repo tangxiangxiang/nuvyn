@@ -177,6 +177,8 @@ const route = useRoute()
 // and side-panel columns without a Diary-specific CSS offset.
 const sidebarLayoutVisible = ref(true)
 const statusBarLayoutVisible = ref(true)
+const activityBarLayoutVisible = ref(true)
+const forceSidePanelLayoutOpen = ref(false)
 const editorFocusWidthKey = NUVYN_BROWSER_STORAGE_KEYS.editorFocusWidth
 const fileTreeFilterKey = NUVYN_BROWSER_STORAGE_KEYS.fileTreeFilter
 const diaryFilterSeedKey = NUVYN_BROWSER_STORAGE_KEYS.diaryFilterSeed
@@ -217,6 +219,8 @@ const {
   rightRailCollapsed,
 } = useVaultLayout({
   sidebarVisible: sidebarLayoutVisible,
+  activityBarVisible: activityBarLayoutVisible,
+  forceSidePanelOpen: forceSidePanelLayoutOpen,
   statusBarVisible: statusBarLayoutVisible,
 })
 
@@ -989,7 +993,7 @@ watch(vaultId, (id) => {
     if (await recoveryManagement.refresh(id)) {
       warnedRecoveryReadVaults.delete(id)
       if (recoveryManagement.unsupportedCount.value > 0) {
-        activePanel.value = 'recovery'
+        openRecoveryManagement()
         toast.info(t('draft_recovery.unsupported_notice'), 7000)
       }
       const report = await recoveryManagement.cleanupNow()
@@ -1707,6 +1711,7 @@ async function showExternalDiff() {
 
 /* ---------- Diary presentation ---------- */
 const isDiaryScope = computed(() => activeScope.value === 'diary')
+const diaryRecoveryCenterVisible = ref(false)
 const documentPaths = computed(() => tabs.value.map((tab) => tab.path))
 const diaryWorkspacePresentation = useDiaryWorkspacePresentation({
   isDiaryScope,
@@ -1734,6 +1739,9 @@ const hasOpenDiaryDocument = computed(() => workspaceTabs.value.some((tab) => (
 const isDiaryCalendarVisible = computed(() => (
   isDiaryCalendarMode.value && !hasOpenDiaryDocument.value
 ))
+watch([isDiaryScope, isDiaryCalendarVisible], ([diary, calendarHome]) => {
+  if (!diary || calendarHome) diaryRecoveryCenterVisible.value = false
+}, { flush: 'sync' })
 const isDiaryPresentationPrimary = computed(() => isDiaryCalendarVisible.value)
 const isOrdinaryDocumentPresentation = computed(() => (
   !isDiaryPresentationPrimary.value
@@ -1799,10 +1807,41 @@ onBeforeUnmount(() => {
 const routeSidebarVisible = computed(() => route.meta.sidebar !== false)
 const workspaceSidebarVisible = computed(() => routeSidebarVisible.value && !isDiaryCalendarVisible.value)
 const workspaceLeftSidebarVisible = computed(() => workspaceSidebarVisible.value && leftSidebarVisible.value)
+const workspaceActivityBarVisible = computed(() => (
+  workspaceLeftSidebarVisible.value && !isDiaryScope.value
+))
+const filesPanelVisible = computed(() => (
+  workspaceLeftSidebarVisible.value
+  && (isDiaryScope.value
+    ? !diaryRecoveryCenterVisible.value
+    : activePanel.value === 'files')
+))
+const tagPanelVisible = computed(() => (
+  workspaceLeftSidebarVisible.value && !isDiaryScope.value && activePanel.value === 'tags'
+))
+const historyPanelVisible = computed(() => (
+  workspaceLeftSidebarVisible.value && !isDiaryScope.value && activePanel.value === 'history'
+))
+const recoveryPanelVisible = computed(() => (
+  workspaceLeftSidebarVisible.value
+  && (isDiaryScope.value
+    ? diaryRecoveryCenterVisible.value
+    : activePanel.value === 'recovery')
+))
 
-watch(workspaceSidebarVisible, (visible) => {
+function openRecoveryManagement(): void {
+  if (isDiaryScope.value) {
+    if (!isDiaryCalendarVisible.value) diaryRecoveryCenterVisible.value = true
+    return
+  }
+  selectPanel('recovery')
+}
+
+watch([workspaceSidebarVisible, isDiaryScope], ([visible, diary]) => {
   sidebarLayoutVisible.value = visible
-}, { immediate: true })
+  activityBarLayoutVisible.value = visible && !diary
+  forceSidePanelLayoutOpen.value = visible && diary
+}, { immediate: true, flush: 'sync' })
 
 // The empty workspace has no document status to report. Keep the layout's
 // optional footer row in sync with the same workspace-tab source that drives
@@ -2574,7 +2613,7 @@ watch(isReadMode, async (reading) => {
     @keydown="onVaultKeydown"
   >
     <ActivityBar
-      v-if="workspaceLeftSidebarVisible"
+      v-if="workspaceActivityBarVisible"
       :active-panel="activePanel"
       @select-panel="selectActivityPanel"
     />
@@ -2607,11 +2646,11 @@ watch(isReadMode, async (reading) => {
       @discard="discardRecoveryDraft"
       @later="draftRecovery.dismissForSession"
       @retry="retryManagedRecovery"
-      @manage="selectPanel('recovery')"
+      @manage="openRecoveryManagement"
     />
 
     <FileTree
-      v-if="workspaceLeftSidebarVisible && activePanel === 'files'"
+      v-if="filesPanelVisible"
       ref="fileTreeRef"
       :filter="filesFilter"
       :tree="tree"
@@ -2624,7 +2663,7 @@ watch(isReadMode, async (reading) => {
       @export-pdf="exportPdfDocument"
     />
     <TagPanel
-      v-else-if="workspaceLeftSidebarVisible && activePanel === 'tags'"
+      v-else-if="tagPanelVisible"
       v-model:filter="tagsFilter"
       :posts="posts"
       :selected-tag="selectedTag"
@@ -2633,7 +2672,7 @@ watch(isReadMode, async (reading) => {
       @open="openPost"
     />
     <HistoryPanel
-      v-else-if="workspaceLeftSidebarVisible && activePanel === 'history'"
+      v-else-if="historyPanelVisible"
       :history="history"
       :commit="historyCommit"
       :withdraw="historyWithdraw"
@@ -2645,7 +2684,7 @@ watch(isReadMode, async (reading) => {
       @open-diff="openWorkingTreeDiff"
     />
     <DraftRecoveryCenter
-      v-else-if="workspaceLeftSidebarVisible && activePanel === 'recovery'"
+      v-else-if="recoveryPanelVisible"
       :records="recoveryManagement.records.value"
       :items="draftRecovery.items.value"
       :capacity="recoveryManagement.capacity.value"
@@ -2654,12 +2693,14 @@ watch(isReadMode, async (reading) => {
       :protected-ids="recoveryManagement.protectedIds.value"
       :loading="recoveryManagement.loading.value"
       :error="recoveryManagement.error.value"
+      :show-back="isDiaryScope"
       @refresh="refreshRecoveryCenter"
       @delete-selected="deleteSelectedRecovery"
       @toggle="recoveryManagement.toggleSelected"
       @open="(id) => openRecoveryView(id, 'content')"
       @retry="retryManagedRecovery"
       @delete="deleteManagedRecovery"
+      @back="diaryRecoveryCenterVisible = false"
     />
 
     <div

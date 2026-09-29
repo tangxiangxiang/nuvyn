@@ -170,7 +170,8 @@ describe('VaultView editor tab wiring', () => {
   it('keeps the editor and tabs mounted while the History sidebar is active', () => {
     const source = readFileSync(fileURLToPath(new URL('../VaultView.vue', import.meta.url)), 'utf8')
 
-    expect(source).toContain('v-else-if="workspaceLeftSidebarVisible && activePanel === \'history\'"')
+    expect(source).toContain('const historyPanelVisible = computed(() => (')
+    expect(source).toContain('v-else-if="historyPanelVisible"')
     expect(source).toContain('@open-revision="openHistoryComparison"')
     expect(source).not.toContain('import DiffView')
     expect(source).not.toContain("activePanel !== 'history' && tabs.length > 0")
@@ -404,7 +405,8 @@ describe('VaultView editor tab wiring', () => {
     // real unsupported records: a storage read failure must leave the
     // user's current panel (Files, Tags, History) alone instead of
     // auto-opening the Center on top of its default empty inventory.
-    expect(startup?.match(/activePanel\.value = 'recovery'/g)).toHaveLength(1)
+    expect(startup?.match(/openRecoveryManagement\(\)/g)).toHaveLength(1)
+    expect(startup).not.toContain("activePanel.value = 'recovery'")
     expect(startup).toContain('warnRecoveryReadFailure(id)')
     // A successful read re-arms the notice for the next failure window.
     expect(startup).toContain('warnedRecoveryReadVaults.delete(id)')
@@ -645,7 +647,21 @@ describe('VaultView D3.2 Diary surface wiring', () => {
     expect(branch).toContain(':error="treeError"')
     expect(source).toContain('<FileTree')
     expect(source).toContain(':tree="tree"')
-    expect(source).toContain("v-if=\"workspaceLeftSidebarVisible && activePanel === 'files'\"")
+    expect(source).toContain('const workspaceActivityBarVisible = computed(() => (')
+    expect(source).toContain('v-if="workspaceActivityBarVisible"')
+    expect(source).toContain('const filesPanelVisible = computed(() => (')
+    expect(source).toContain('v-if="filesPanelVisible"')
+    expect(source).toContain('v-else-if="tagPanelVisible"')
+    expect(source).toContain('v-else-if="historyPanelVisible"')
+    expect(source).toContain('v-else-if="recoveryPanelVisible"')
+    expect(source).toContain('activityBarVisible: activityBarLayoutVisible')
+    expect(source).toContain('forceSidePanelOpen: forceSidePanelLayoutOpen')
+    expect(source).toContain('forceSidePanelLayoutOpen.value = visible && diary')
+    const presentationWatch = source.match(
+      /watch\(\[workspaceSidebarVisible, isDiaryScope\][\s\S]*?\n\}, \{ immediate: true, flush: 'sync' \}\)/,
+    )?.[0]
+    expect(presentationWatch).toBeDefined()
+    expect(presentationWatch).not.toContain('activePanel.value =')
   })
 
   it('routes D3.2 date intent to the D4 lifecycle owner', () => {
@@ -745,6 +761,9 @@ describe('VaultView D3.2 Diary surface wiring', () => {
     expect(source).toContain('const workspaceLeftSidebarVisible = computed(() => workspaceSidebarVisible.value && leftSidebarVisible.value)')
     expect(source).toContain('useVaultLayout({')
     expect(source).toContain('statusBarVisible: statusBarLayoutVisible')
+    expect(source).toContain('watch([workspaceSidebarVisible, isDiaryScope]')
+    expect(source).toContain('activityBarLayoutVisible.value = visible && !diary')
+    expect(source).toContain('forceSidePanelLayoutOpen.value = visible && diary')
     expect(source).toContain('v-if="workspaceSidebarVisible"')
     expect(styles).not.toContain('.vault.diary-calendar-mode > :is(.file-tree, .tag-panel, .history-panel, .recovery-center)')
     expect(styles).not.toContain('.vault.diary-calendar-mode > .right-rail-slot')
@@ -757,13 +776,39 @@ describe('VaultView D3.2 Diary surface wiring', () => {
     const styles = readFileSync(fileURLToPath(new URL('../../style.css', import.meta.url)), 'utf8')
 
     // The root class binding is the characterization seam for both runtime
-    // states: the existing layout owner supplies true while a panel is open
-    // and false when activePanel is null. CSS then selects the matching
-    // mobile grid without introducing another panel store.
+    // states: Diary always presents its FileTree unless the shared left-panel
+    // toggle collapses it.
     expect(source).toContain("'side-panel-open': sidePanelOpen")
     expect(styles).toContain('.vault.diary-native-document-mode.side-panel-open')
     expect(styles).toContain('.vault.diary-native-document-mode:not(.side-panel-open)')
-    expect(styles).not.toMatch(/\.vault\.diary-native-document-mode\s*\{\s*\n\s*grid-template-columns: 40px minmax\(136px, 42vw\)/)
+    expect(styles).toContain('grid-template-columns: minmax(136px, 42vw) 1px minmax(0, 1fr) !important')
+    expect(styles).toContain('grid-template-columns: minmax(0, 1fr) !important')
+    expect(styles).not.toMatch(/\.vault\.diary-native-document-mode[^}]*grid-template-columns:\s*40px/)
+  })
+})
+
+describe('Diary recovery presentation', () => {
+  it('temporarily replaces Diary FileTree and provides an explicit return path', () => {
+    const source = readFileSync(fileURLToPath(new URL('../VaultView.vue', import.meta.url)), 'utf8')
+    const recoveryCenter = readFileSync(fileURLToPath(new URL('../../components/vault/DraftRecoveryCenter.vue', import.meta.url)), 'utf8')
+    const translations = readFileSync(fileURLToPath(new URL('../../composables/useI18n.ts', import.meta.url)), 'utf8')
+    const handler = source.match(/function openRecoveryManagement\(\): void \{[\s\S]*?\n}/)?.[0]
+    const filesVisibility = source.match(/const filesPanelVisible = computed\(\(\) => \([\s\S]*?\n\)\)/)?.[0]
+    const recoveryVisibility = source.match(/const recoveryPanelVisible = computed\(\(\) => \([\s\S]*?\n\)\)/)?.[0]
+
+    expect(source).toContain('const diaryRecoveryCenterVisible = ref(false)')
+    expect(filesVisibility).toContain('!diaryRecoveryCenterVisible.value')
+    expect(filesVisibility).toContain("activePanel.value === 'files'")
+    expect(recoveryVisibility).toContain('diaryRecoveryCenterVisible.value')
+    expect(recoveryVisibility).toContain("activePanel.value === 'recovery'")
+    expect(source).toContain(':show-back="isDiaryScope"')
+    expect(source).toContain('@back="diaryRecoveryCenterVisible = false"')
+    expect(recoveryCenter).toContain("t('draft_recovery.center.back_to_files')")
+    expect(translations).toContain("'draft_recovery.center.back_to_files':")
+    expect(handler).toContain('if (isDiaryScope.value)')
+    expect(handler).toContain('diaryRecoveryCenterVisible.value = true')
+    expect(handler).toContain("selectPanel('recovery')")
+    expect(source).toMatch(/watch\(\[isDiaryScope, isDiaryCalendarVisible\][\s\S]*?if \(!diary \|\| calendarHome\) diaryRecoveryCenterVisible\.value = false/)
   })
 })
 

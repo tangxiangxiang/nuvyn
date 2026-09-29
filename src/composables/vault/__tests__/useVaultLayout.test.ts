@@ -6,11 +6,11 @@ import { __resetVaultLayoutState, useVaultLayout } from '../useVaultLayout'
 
 const STORAGE_KEY = 'nuvyn.vault.layout'
 
-function setup() {
+function setup(options: Parameters<typeof useVaultLayout>[0] = {}) {
   let layout!: ReturnType<typeof useVaultLayout>
   const wrapper = mount(defineComponent({
     setup() {
-      layout = useVaultLayout()
+      layout = useVaultLayout(options)
       return () => h('div')
     },
   }))
@@ -102,6 +102,44 @@ describe('useVaultLayout', () => {
     expect(layout.activePanel.value).toBe('tags')
     layout.toggleSidePanel()
     expect(layout.activePanel.value).toBe('tags')
+  })
+
+  it('omits the ActivityBar track and forces the shared side panel without changing Note selection', () => {
+    const activityBarVisible = ref(false)
+    const forceSidePanelOpen = ref(true)
+    let layout!: ReturnType<typeof useVaultLayout>
+    let navLayout!: ReturnType<typeof useVaultLayout>
+    const wrapper = mount(defineComponent({
+      setup() {
+        layout = useVaultLayout({ activityBarVisible, forceSidePanelOpen })
+        navLayout = useVaultLayout()
+        return () => h('div')
+      },
+    }))
+
+    layout.selectPanel('tags')
+    layout.selectPanel('tags')
+    expect(layout.activePanel.value).toBeNull()
+    expect(layout.sidePanelOpen.value).toBe(true)
+    expect(layout.vaultStyle.value.gridTemplateColumns).toBe('260px 1px 1fr 1px minmax(280px, max(280px, min(380px, 560px, 38vw)))')
+
+    navLayout.toggleSidePanel()
+    expect(layout.leftSidebarCollapsed.value).toBe(true)
+    expect(layout.activePanel.value).toBeNull()
+    expect(layout.sidePanelOpen.value).toBe(false)
+    expect(layout.vaultStyle.value.gridTemplateColumns).not.toContain('40px')
+
+    navLayout.toggleSidePanel()
+    expect(layout.leftSidebarCollapsed.value).toBe(false)
+    expect(layout.activePanel.value).toBeNull()
+    expect(layout.sidePanelOpen.value).toBe(true)
+
+    forceSidePanelOpen.value = false
+    navLayout.toggleSidePanel()
+    navLayout.toggleSidePanel()
+    expect(layout.activePanel.value).toBe('tags')
+    expect(layout.sidePanelOpen.value).toBe(true)
+    wrapper.unmount()
   })
 
   it('removes the right rail tracks when collapsed', () => {

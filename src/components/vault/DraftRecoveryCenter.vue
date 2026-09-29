@@ -9,7 +9,7 @@ import {
 } from '../../composables/vault/draft-recovery/draftCleanup'
 import type { DraftRecoveryItem } from '../../composables/vault/draft-recovery/useUnsavedDraftRecovery'
 
-const props = defineProps<{
+const props = withDefaults(defineProps<{
   records: readonly RecoveryRecordRef[]
   items: readonly DraftRecoveryItem[]
   capacity: DraftCapacitySnapshot
@@ -18,7 +18,10 @@ const props = defineProps<{
   protectedIds: ReadonlySet<string>
   loading: boolean
   error: string | null
-}>()
+  showBack?: boolean
+}>(), {
+  showBack: false,
+})
 
 const emit = defineEmits<{
   refresh: []
@@ -27,6 +30,7 @@ const emit = defineEmits<{
   open: [recoveryId: string]
   retry: [recoveryId: string]
   delete: [recoveryId: string]
+  back: []
 }>()
 
 const { t } = useI18n()
@@ -54,6 +58,9 @@ function decisionLabel(id: string): string {
     <header>
       <h2>{{ t('draft_recovery.center.title') }}</h2>
       <p>{{ t('draft_recovery.center.local_only') }}</p>
+      <NButton v-if="showBack" attr-type="button" :bordered="false" @click="emit('back')">
+        {{ t('draft_recovery.center.back_to_files') }}
+      </NButton>
     </header>
 
     <div v-if="loading" class="recovery-state" role="status">{{ t('draft_recovery.center.loading') }}</div>

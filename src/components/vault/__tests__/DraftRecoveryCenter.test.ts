@@ -23,7 +23,7 @@ function draft(): UnsavedDraft {
 const wrappers: Array<{ unmount(): void }> = []
 afterEach(() => wrappers.splice(0).forEach((wrapper) => wrapper.unmount()))
 
-function setup(protectedRecord = false) {
+function setup(protectedRecord = false, showBack = false) {
   const record = primaryRecoveryRecord(draft())
   const id = JSON.stringify(['vault', 'doc'])
   const wrapper = mount(DraftRecoveryCenter, {
@@ -44,6 +44,7 @@ function setup(protectedRecord = false) {
       protectedIds: protectedRecord ? new Set([id]) : new Set<string>(),
       loading: false,
       error: null,
+      showBack,
     },
   })
   wrappers.push(wrapper)
@@ -83,6 +84,15 @@ describe('DraftRecoveryCenter', () => {
     expect(wrapper.text()).toContain('1 unsaved item')
     expect(wrapper.text()).toContain('newer Nuvyn version')
     expect(wrapper.text()).not.toContain('local bytes')
+  })
+
+  it('offers an optional return-to-files action for Diary presentation', async () => {
+    const wrapper = setup(false, true)
+    const back = wrapper.findAll('button').find((button) => button.text() === 'Back to files')
+
+    expect(back).toBeDefined()
+    await back!.trigger('click')
+    expect(wrapper.emitted('back')).toHaveLength(1)
   })
 
   it('disables selection and deletion for protected records', () => {

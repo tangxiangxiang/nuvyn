@@ -151,7 +151,12 @@ async function assertNativeDiary(page: Page, date: string, expectedFilter?: stri
   await expect(page.locator(`[role="tab"][data-tab-id="${path}"]`)).toHaveAttribute('aria-selected', 'true')
   await expect(page.locator('.reading-pane')).toHaveCount(1)
   await expect(page.locator('.reading-pane')).toBeVisible()
-  await ensureExplorerVisible(page)
+  await expect(page.locator('.activity-bar')).toHaveCount(0)
+  await expect(page.locator('.file-tree')).toBeVisible({ timeout: 15_000 })
+  const columns = await page.locator('.vault').evaluate((element) => (
+    getComputedStyle(element).gridTemplateColumns.split(' ')
+  ))
+  expect(columns[0]).not.toBe('40px')
   if (expectedFilter !== undefined) await expect(page.locator('.search-input')).toHaveValue(expectedFilter)
   await expect(page.getByTestId('diary-calendar')).toBeAttached()
   await expect(page.getByTestId('diary-calendar')).toBeHidden()
@@ -187,6 +192,104 @@ test.beforeEach(async ({ page }) => {
   await page.evaluate(() => localStorage.clear())
   await clearDraftDatabase(page)
   await gotoVaultReady(page)
+})
+
+test('Diary documents replace ActivityBar with FileTree and preserve Note Tags and History panels', async ({ page, request }) => {
+  const date = localCivilDate()
+  const diary = diaryPath(date)
+  const note = `inbox/d65-panel-presentation-${RUN_ID}`
+
+  try {
+    await seedDiary(request, date, `# Panel presentation ${RUN_ID}\n`)
+    await seedNote(request, note, `# Note panel ${RUN_ID}\n`)
+    // The current VaultView loaded its document index before the fixture was
+    // created, so remount it to include the new Note in FileTree.
+    await page.goto('/vault')
+    await openNote(page, note)
+
+    for (const [panel, buttonIndex, panelSelector] of [
+      ['tags', 1, '.tag-panel'],
+      ['history', 2, '.history-panel'],
+    ] as const) {
+      await page.locator('.activity-bar .ab-btn').nth(buttonIndex).click()
+      await expect(page.locator(panelSelector)).toBeVisible()
+      await expect.poll(() => page.evaluate(() => (
+        JSON.parse(localStorage.getItem('nuvyn.vault.layout') ?? '{}').activePanel
+      ))).toBe(panel)
+
+      await selectScope(page, 'diary')
+      if (panel === 'tags') {
+        await expect(page.getByTestId('diary-calendar')).toBeVisible()
+        await clickDiaryDate(page, date)
+      } else {
+        await expect(page.getByTestId('diary-calendar')).toBeHidden()
+      }
+
+      await assertNativeDiary(page, date)
+      await expect(page.locator(panelSelector)).toHaveCount(0)
+      await expect(page.locator('.splitter:not(.splitter-toc)')).toHaveCount(1)
+
+      const leftToggle = page.getByTestId('left-panel-toggle')
+      await leftToggle.click()
+      await expect(page.locator('.file-tree')).toBeHidden()
+      await expect(page.locator('.activity-bar')).toHaveCount(0)
+      await leftToggle.click()
+      await expect(page.locator('.file-tree')).toBeVisible()
+      await expect(page.locator('.activity-bar')).toHaveCount(0)
+
+      await selectScope(page, 'note')
+      await expect(page.locator('.activity-bar')).toBeVisible()
+      await expect(page.locator(panelSelector)).toBeVisible()
+      await expect.poll(() => page.evaluate(() => (
+        JSON.parse(localStorage.getItem('nuvyn.vault.layout') ?? '{}').activePanel
+      ))).toBe(panel)
+    }
+  } finally {
+    await deletePost(request, diary)
+    await deletePost(request, note)
+  }
+})
+
+test('Diary fixed FileTree and left-panel toggle do not mutate a null Note panel', async ({ page, request }) => {
+  const date = localCivilDate()
+  const diary = diaryPath(date)
+  const note = `inbox/d65-null-panel-${RUN_ID}`
+
+  try {
+    await seedDiary(request, date, `# Null panel ${RUN_ID}\n`)
+    await seedNote(request, note, `# Null panel Note ${RUN_ID}\n`)
+    await page.goto('/vault')
+    await openNote(page, note)
+    await page.locator('.activity-bar .ab-btn[aria-pressed="true"]').click()
+    await expect(page.locator('.file-tree')).toHaveCount(0)
+    await expect.poll(() => page.evaluate(() => (
+      JSON.parse(localStorage.getItem('nuvyn.vault.layout') ?? '{}').activePanel
+    ))).toBeNull()
+
+    await selectScope(page, 'diary')
+    await clickDiaryDate(page, date)
+    await assertNativeDiary(page, date)
+
+    const leftToggle = page.getByTestId('left-panel-toggle')
+    await leftToggle.click()
+    await expect(page.locator('.file-tree')).toBeHidden()
+    await leftToggle.click()
+    await expect(page.locator('.file-tree')).toBeVisible()
+    await expect(page.locator('.activity-bar')).toHaveCount(0)
+    await expect.poll(() => page.evaluate(() => (
+      JSON.parse(localStorage.getItem('nuvyn.vault.layout') ?? '{}').activePanel
+    ))).toBeNull()
+
+    await selectScope(page, 'note')
+    await expect(page.locator('.activity-bar')).toBeVisible()
+    await expect(page.locator('.file-tree')).toHaveCount(0)
+    await expect.poll(() => page.evaluate(() => (
+      JSON.parse(localStorage.getItem('nuvyn.vault.layout') ?? '{}').activePanel
+    ))).toBeNull()
+  } finally {
+    await deletePost(request, diary)
+    await deletePost(request, note)
+  }
 })
 
 test('scope exit and re-entry preserve the document lifecycle without reopening Diary presentation', async ({ page, request }) => {

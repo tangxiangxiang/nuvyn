@@ -18,7 +18,7 @@
 //
 // The persisted shape is unchanged; only the storage namespace migrates.
 //
-import { computed, ref, watch, type Ref } from 'vue'
+import { computed, onScopeDispose, ref, watch, type Ref } from 'vue'
 import { useStorage } from '@vueuse/core'
 import type { SidePanel } from '../../components/vault/ActivityBar.vue'
 import { NUVYN_BROWSER_STORAGE_KEYS } from '../../technicalNamespace'
@@ -44,6 +44,10 @@ export interface UseVaultLayoutOptions {
    * can remove the tracks instead of hiding them with a page-level CSS hack.
    */
   sidebarVisible?: Readonly<Ref<boolean>>
+  /** Whether an ActivityBar grid track is part of this presentation. */
+  activityBarVisible?: Readonly<Ref<boolean>>
+  /** Keep the side panel presented independently of the selected Note panel. */
+  forceSidePanelOpen?: Readonly<Ref<boolean>>
   /**
    * Whether the document status bar occupies the final grid row. Empty
    * workspaces can omit that row so the editor surface uses the full height.
@@ -80,6 +84,12 @@ const DEFAULTS: VaultLayout = {
    consumers. localStorage is still the persistence boundary; it's
    driven by a single watcher below. */
 const _activePanel = ref<ActivePanel>(DEFAULTS.activePanel)
+// NavBar and VaultView each call this composable. A presentation override is
+// supplied by VaultView, while the NavBar owns the toggle handler; share the
+// current override source so that handler can collapse the panel without
+// mutating the persisted Note panel selection.
+let _forceSidePanelOpenSource: Readonly<Ref<boolean>> | null = null
+const _forceSidePanelOpenVersion = ref(0)
 // Remember the last panel the user had selected so the dedicated collapse
 // control can restore that panel instead of always forcing Files open.
 const _lastActivePanel = ref<SidePanel>(DEFAULTS.activePanel as SidePanel)
@@ -103,6 +113,8 @@ let _hydrated = false
    once and reattaches. */
 export function __resetVaultLayoutState(): void {
   _hydrated = false
+  _forceSidePanelOpenSource = null
+  _forceSidePanelOpenVersion.value += 1
   _activePanel.value = DEFAULTS.activePanel
   _lastActivePanel.value = DEFAULTS.activePanel as SidePanel
   _leftSidebarCollapsed.value = DEFAULTS.leftSidebarCollapsed
@@ -114,6 +126,22 @@ export function __resetVaultLayoutState(): void {
 
 export function useVaultLayout(options: UseVaultLayoutOptions = {}) {
   const sidebarVisible = options.sidebarVisible ?? ref(true)
+  const activityBarVisible = options.activityBarVisible ?? ref(true)
+  const forceSidePanelOpen = options.forceSidePanelOpen ?? computed(() => {
+    _forceSidePanelOpenVersion.value
+    return _forceSidePanelOpenSource?.value ?? false
+  })
+  if (options.forceSidePanelOpen) {
+    const owner = options.forceSidePanelOpen
+    _forceSidePanelOpenSource = owner
+    _forceSidePanelOpenVersion.value += 1
+    onScopeDispose(() => {
+      if (_forceSidePanelOpenSource === owner) {
+        _forceSidePanelOpenSource = null
+        _forceSidePanelOpenVersion.value += 1
+      }
+    })
+  }
   const statusBarVisible = options.statusBarVisible ?? ref(true)
   // useStorage handles the deep-compare-and-skip-noop write for us, so the
   // bidirectional watcher below doesn't ping-pong on rehydration. The
@@ -196,6 +224,7 @@ export function useVaultLayout(options: UseVaultLayoutOptions = {}) {
      side-splitter's v-show. */
   const sidePanelOpen = computed(() =>
     !_leftSidebarCollapsed.value && (
+      forceSidePanelOpen.value ||
       _activePanel.value === 'files' ||
       _activePanel.value === 'tags' ||
       _activePanel.value === 'history' ||
@@ -245,7 +274,7 @@ export function useVaultLayout(options: UseVaultLayoutOptions = {}) {
     // while the same presentation flag is false, so do not reserve a hidden
     // rail track here either.
     const right = sidebarVisible.value && !rightRailCollapsed.value ? ` 1px ${railTrack}` : ''
-    const activity = leftSidebarVisible.value ? '40px ' : ''
+    const activity = leftSidebarVisible.value && activityBarVisible.value ? '40px ' : ''
     return {
       gridTemplateColumns: `${activity}${left}1fr${right}`,
       gridTemplateRows: sidebarVisible.value && statusBarVisible.value ? '1fr 24px' : '1fr',
@@ -275,6 +304,10 @@ export function useVaultLayout(options: UseVaultLayoutOptions = {}) {
   }
 
   function toggleSidePanel() {
+    if (forceSidePanelOpen.value) {
+      leftSidebarCollapsed.value = !leftSidebarCollapsed.value
+      return
+    }
     if (!leftSidebarCollapsed.value) {
       if (activePanel.value) _lastActivePanel.value = activePanel.value
       leftSidebarCollapsed.value = true

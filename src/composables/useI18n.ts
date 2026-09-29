@@ -832,6 +832,7 @@ const STRINGS: Strings = {
   'draft_recovery.unsaved_draft': { zh: '未保存草稿', en: 'Unsaved Draft' },
   'draft_recovery.center.title': { zh: '未保存内容', en: 'Unsaved Content' },
   'draft_recovery.center.local_only': { zh: '恢复内容仅存储在此设备和浏览器中，不会自动写入磁盘。', en: 'Recovery content is stored only on this device and browser and is never written to disk automatically.' },
+  'draft_recovery.center.back_to_files': { zh: '返回文件', en: 'Back to files' },
   'draft_recovery.center.records': { zh: '记录', en: 'Records' },
   'draft_recovery.center.summary': { zh: '有 {count} 条未保存内容需要检查。', en: '{count} unsaved items need review.' },
   'draft_recovery.center.storage': { zh: '内容容量', en: 'Content storage' },

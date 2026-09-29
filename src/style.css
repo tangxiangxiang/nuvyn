@@ -1196,20 +1196,18 @@ main.container.auth-page-shell {
   }
 }
 
-/* Native Diary documents use the ordinary Vault chrome. On phone widths the
-   persisted desktop side+right-rail tracks cannot coexist without document
-   overflow, so keep the exact-context FileTree compact and temporarily hide
-   the right rail visually. Its open/collapsed state is not mutated and is
-   restored automatically when the viewport grows or Diary context ends.
-   `side-panel-open` mirrors the existing useVaultLayout state so a closed
-   Files/Tags/History panel does not retain phantom sidebar tracks. */
+/* Native Diary documents keep the fixed FileTree without an ActivityBar. On
+   phone widths the persisted desktop side+right-rail tracks cannot coexist
+   without document overflow, so keep the FileTree compact and temporarily
+   hide the right rail visually. Its open/collapsed state is not mutated and
+   is restored automatically when the viewport grows or Diary context ends. */
 @media (max-width: 600px) {
   .vault.diary-native-document-mode.side-panel-open {
-    grid-template-columns: 40px minmax(136px, 42vw) 1px minmax(0, 1fr) !important;
+    grid-template-columns: minmax(136px, 42vw) 1px minmax(0, 1fr) !important;
   }
 
   .vault.diary-native-document-mode:not(.side-panel-open) {
-    grid-template-columns: 40px minmax(0, 1fr) !important;
+    grid-template-columns: minmax(0, 1fr) !important;
   }
 
   .vault.diary-native-document-mode > .splitter-toc,
