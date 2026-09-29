@@ -260,6 +260,8 @@ test('Calendar click opens an existing Diary through the native Vault reading su
       .toContainText('D4 lifecycle integration evidence.', { timeout: 15_000 })
     await expect(page.locator('.reading-pane')).toHaveCount(1)
     await expect(page.locator('.file-tree')).toBeVisible()
+    await expect(page.locator('[data-tree-key="folder:diary"]')).toHaveCount(0)
+    await expect(page.locator(`[data-tree-key="file:${path}"]`)).toHaveAttribute('data-tree-path', path)
     await expect(page.locator('.search-input')).toHaveValue(date)
 
     const calendar = page.getByTestId('diary-calendar')

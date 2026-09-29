@@ -134,9 +134,6 @@ describe('FileTree prompt rename', () => {
     useScopeFilter().activeScope.value = 'diary'
     const w = mount(FileTree, { props: { tree: DIARY_TREE, currentPath: null } })
     await w.vm.$nextTick()
-    const diary = rowByLabel(w.findAll('.tree-row'), 'diary')
-    await diary.find('.chevron').trigger('click')
-    await w.vm.$nextTick()
     const legacy = rowByLabel(w.findAll('.tree-row'), 'legacy')
     await legacy.trigger('contextmenu', { clientX: 10, clientY: 10 })
     await clickRenameMenuButton()

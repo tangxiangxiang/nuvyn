@@ -35,7 +35,9 @@ const TREE: TreeNode[] = [
         ],
       },
       {
-        kind: 'folder', name: 'diary', path: 'diary', children: [],
+        kind: 'folder', name: 'diary', path: 'diary', children: [
+          { kind: 'file', name: '2026-08-24', path: 'diary/2026-08-24', title: 'Diary', mtime: 0 },
+        ],
       },
     ],
   },
@@ -259,7 +261,7 @@ describe('FileTree drag-move (sub-documents)', () => {
     w.unmount()
   })
 
-  it('blocks an ordinary file dropped onto the Diary root before calling the rename API', async () => {
+  it('keeps Diary rows unavailable as drop targets and blocks ordinary moves into Diary', async () => {
     const patchSpy = vi.spyOn(api, 'patchPost').mockResolvedValue({
       path: 'diary/test1', title: 'test1', created: '', updated: '', tags: [], size: 0, mtime: 0,
     })
@@ -274,11 +276,13 @@ describe('FileTree drag-move (sub-documents)', () => {
     await w.vm.$nextTick()
 
     // Diary is a separate exactly-one scope. Switch after preparing the
-    // ordinary source path so the reserved Diary root becomes visible without
-    // weakening the default note-scope contract.
+    // ordinary source path. Its root is hidden, while its rows retain the
+    // canonical Diary parent path for the existing move guard.
     useScopeFilter().activeScope.value = 'diary'
     await w.vm.$nextTick()
-    const diary = rowByLabel(w.findAll('li.tree-row'), 'diary')
+    const diary = w.find('[data-tree-key="file:diary/2026-08-24"]')
+    expect(diary.exists()).toBe(true)
+    expect(w.find('[data-tree-key="folder:diary"]').exists()).toBe(false)
 
     const dataTransfer = makeDT()
     dataTransfer.setData('text/x-nuvyn-path', 'inbox/test/test1')
@@ -293,7 +297,7 @@ describe('FileTree drag-move (sub-documents)', () => {
 
     expect(patchSpy).not.toHaveBeenCalled()
     const diaryComponent = w.findAllComponents(TreeRow)
-      .find((component) => component.attributes('data-tree-path') === 'diary')
+      .find((component) => component.attributes('data-tree-path') === 'diary/2026-08-24')
     expect(diaryComponent).toBeDefined()
     diaryComponent!.vm.$emit('move', 'inbox/test/test1', 'diary', 'file')
     await flushPromises()

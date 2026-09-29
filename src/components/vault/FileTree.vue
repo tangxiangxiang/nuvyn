@@ -105,6 +105,15 @@ const topLevel = computed<TreeNode[]>(() => {
     const roots = scopeRootsFor(activeScope.value)
     children = children.filter((c) => roots.includes(c.path))
   }
+  // Diary's protected root is a namespace boundary, not a useful navigation
+  // level. Project its children directly into the presentation tree while
+  // preserving each node's canonical `diary/...` path and identity.
+  if (activeScope.value === 'diary') {
+    const diaryRoot = children.find((node): node is Extract<TreeNode, { kind: 'folder' }> => (
+      node.kind === 'folder' && node.path === 'diary'
+    ))
+    children = diaryRoot?.children ?? []
+  }
   // The exact-path constraint is a generic presentation projection. It has
   // higher priority than the user's text/tag query but never mutates that
   // query, so leaving the detail context restores the search verbatim.
@@ -869,6 +878,7 @@ async function onCreateIn(folder: string, kind: 'file' | 'folder') {
         :expanded-set="effectiveExpanded"
         :matched-fields="matchedFields"
         :search-active="Boolean(effectiveQuery) && !exactPathFilterActive"
+        :show-path-hint="activeScope !== 'diary'"
         :compact="compactFileTree"
         :duplicate-titles="duplicateTitles"
         @select="onSelect"

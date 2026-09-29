@@ -26,13 +26,14 @@ import { nuvynBoardDragMime, readDataTransfer } from '../../technicalNamespace'
 const PATH_MIME = nuvynBoardDragMime('path')
 const KIND_MIME = nuvynBoardDragMime('kind')
 
-const props = defineProps<{
+const props = withDefaults(defineProps<{
   node: TreeNode
   depth: number
   currentPath: string | null
   focusedNodeKey: string | null
   expandedSet: Set<string>
   searchActive?: boolean
+  showPathHint?: boolean
   compact?: boolean
   duplicateTitles?: Set<string>
   // Path → per-file match annotation from FileTree's search filter.
@@ -43,7 +44,9 @@ const props = defineProps<{
   // absent from the map, and the lookup correctly returns undefined
   // for them.
   matchedFields?: Map<string, MatchInfo>
-}>()
+}>(), {
+  showPathHint: true,
+})
 
 const emit = defineEmits<{
   select: [path: string]
@@ -95,7 +98,7 @@ const displayTitle = computed(() => props.node.kind === 'file' && props.node.tit
 const showFilename = computed(() => props.node.kind === 'file' && displayTitle.value !== props.node.name)
 const isDuplicate = computed(() => props.node.kind === 'file' &&
   props.duplicateTitles?.has(displayTitle.value.toLocaleLowerCase()))
-const revealPath = computed(() => !isFolder.value && (
+const revealPath = computed(() => props.showPathHint && !isFolder.value && (
   props.searchActive || isDuplicate.value || (isActive.value && !props.compact)
 ))
 const visiblePath = computed(() => isDuplicate.value && !props.searchActive && !isActive.value
@@ -399,6 +402,7 @@ function menuAction(fn: () => void) {
         :expanded-set="expandedSet"
         :matched-fields="matchedFields"
         :search-active="searchActive"
+        :show-path-hint="showPathHint"
         :compact="compact"
         :duplicate-titles="duplicateTitles"
         @select="(p) => emit('select', p)"

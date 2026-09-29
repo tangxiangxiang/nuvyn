@@ -374,17 +374,21 @@ describe('Files filter', () => {
 })
 
 describe('Diary FileTree presentation boundary', () => {
-  it('keeps managed and invalid Diary files visible in the FileTree', async () => {
+  it('flattens the Diary root immediately while preserving canonical row identity', () => {
     useScopeFilter().activeScope.value = 'diary'
     const wrapper = mount(FileTree, { props: { tree: DIARY_TREE, currentPath: null } })
 
-    expect(wrapper.text()).toContain('diary')
-    await rowByName(wrapper, 'diary').find('.chevron').trigger('click')
-    expect(wrapper.text()).toContain('2026-08-24')
-    expect(wrapper.text()).toContain('legacy')
+    expect(wrapper.findAll('.tree-row')).toHaveLength(4)
+    expect(wrapper.find('[data-tree-key="folder:diary"]').exists()).toBe(false)
+    expect(wrapper.find('[data-tree-key="file:diary/2026-08-24"]').attributes('data-tree-path'))
+      .toBe('diary/2026-08-24')
+    expect(wrapper.find('[data-tree-key="file:diary/2026-08-25"]').exists()).toBe(true)
+    expect(wrapper.find('[data-tree-key="file:diary/2026-08-26"]').exists()).toBe(true)
+    expect(wrapper.find('[data-tree-key="file:diary/legacy"]').exists()).toBe(true)
+    wrapper.unmount()
   })
 
-  it('applies a generic exact-path filter and keeps only required ancestors', () => {
+  it('applies an exact Diary path to flattened rows without restoring the root', () => {
     useScopeFilter().activeScope.value = 'diary'
     const wrapper = mount(FileTree, {
       props: {
@@ -395,13 +399,12 @@ describe('Diary FileTree presentation boundary', () => {
       },
     })
 
-    expect(wrapper.text()).toContain('diary')
-    expect(wrapper.text()).toContain('2026-08-25')
-    expect(wrapper.text()).not.toContain('2026-08-24')
-    expect(wrapper.text()).not.toContain('2026-08-26')
-    expect(wrapper.text()).not.toContain('legacy')
+    expect(wrapper.findAll('.tree-row')).toHaveLength(1)
+    expect(wrapper.find('[data-tree-key="folder:diary"]').exists()).toBe(false)
+    expect(wrapper.find('[data-tree-key="file:diary/2026-08-25"]').exists()).toBe(true)
     expect(wrapper.find('[data-testid="file-tree-exact-context"]').exists()).toBe(false)
     expect(wrapper.find('.search-input').exists()).toBe(true)
+    wrapper.unmount()
   })
 
   it('does not fall back to the full tree when the exact path is missing', () => {
@@ -415,8 +418,71 @@ describe('Diary FileTree presentation boundary', () => {
     })
 
     expect(wrapper.findAll('.tree-row')).toHaveLength(0)
-    expect(wrapper.text()).not.toContain('2026-08-24')
-    expect(wrapper.text()).not.toContain('legacy')
+    expect(wrapper.find('[data-tree-key="folder:diary"]').exists()).toBe(false)
+    wrapper.unmount()
+  })
+
+  it('shows no content roots if the Diary namespace is missing', () => {
+    useScopeFilter().activeScope.value = 'diary'
+    const wrapper = mount(FileTree, { props: { tree: TREE, currentPath: null } })
+
+    expect(wrapper.findAll('.tree-row')).toHaveLength(0)
+    expect(wrapper.text()).not.toContain('inbox')
+    expect(wrapper.text()).not.toContain('literature')
+    expect(wrapper.text()).not.toContain('archive')
+    wrapper.unmount()
+  })
+
+  it('keeps Diary path search and hides path hints for active and searched rows', async () => {
+    useScopeFilter().activeScope.value = 'diary'
+    const wrapper = mount(FileTree, {
+      props: { tree: DIARY_TREE, currentPath: 'diary/2026-08-25' },
+    })
+
+    expect(wrapper.find('[data-tree-key="file:diary/2026-08-25"] .row-path-hint').exists()).toBe(false)
+
+    await wrapper.get('.search-input').setValue('diary')
+    expect(wrapper.findAll('.tree-row')).toHaveLength(4)
+    for (const row of wrapper.findAll('.tree-row')) {
+      expect(row.find('.row-path-hint').exists()).toBe(false)
+    }
+
+    await wrapper.get('.search-input').setValue('2026-08')
+    expect(wrapper.findAll('.tree-row')).toHaveLength(3)
+    expect(wrapper.find('[data-tree-key="file:diary/2026-08-24"]').exists()).toBe(true)
+    wrapper.unmount()
+  })
+
+  it('keeps Note roots and Note search path hints unchanged', async () => {
+    useScopeFilter().activeScope.value = 'note'
+    const wrapper = mount(FileTree, { props: { tree: TREE, currentPath: null } })
+
+    expect(wrapper.find('[data-tree-key="folder:inbox"]').exists()).toBe(true)
+    expect(wrapper.find('[data-tree-key="folder:literature"]').exists()).toBe(true)
+    expect(wrapper.find('[data-tree-key="folder:archive"]').exists()).toBe(true)
+
+    await wrapper.get('.search-input').setValue('backend')
+    expect(wrapper.find('[data-tree-key="file:inbox/backend/redis-note"] .row-path-hint').exists()).toBe(true)
+    wrapper.unmount()
+  })
+
+  it('reveals a Diary file with its real key and navigates between flattened rows', async () => {
+    const scrollIntoView = vi.fn()
+    HTMLElement.prototype.scrollIntoView = scrollIntoView
+    useScopeFilter().activeScope.value = 'diary'
+    const wrapper = mount(FileTree, {
+      props: { tree: DIARY_TREE, currentPath: null },
+      attachTo: document.body,
+    })
+
+    expect(await wrapper.vm.revealPath('diary/2026-08-25')).toBe(true)
+    expect(document.activeElement?.getAttribute('data-tree-key')).toBe('file:diary/2026-08-25')
+    expect(scrollIntoView).toHaveBeenCalledWith({ block: 'nearest' })
+    expect(wrapper.find('[data-tree-key="folder:diary"]').exists()).toBe(false)
+
+    await wrapper.find('[data-tree-key="file:diary/2026-08-25"]').trigger('keydown', { key: 'ArrowDown' })
+    expect(document.activeElement?.getAttribute('data-tree-key')).toBe('file:diary/2026-08-26')
+    wrapper.unmount()
   })
 
   it('keeps the user filter editable while exact path remains constrained', async () => {

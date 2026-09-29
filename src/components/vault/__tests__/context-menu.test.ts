@@ -243,28 +243,18 @@ describe('FileTree context menu — Diary presentation guards', () => {
     document.querySelectorAll('.tree-context-menu').forEach((el) => el.remove())
   })
 
-  it('hides generic create actions at the Diary root', async () => {
+  it('does not render the Diary root or expose a root context menu', async () => {
     const w = mount(FileTree, { props: { tree: DIARY_TREE, currentPath: null }, attachTo: document.body })
-    const diaryRow = w.findAll('li.tree-row').find((row: any) => row.find('.row-name')?.text() === 'diary')!
-    await diaryRow.trigger('contextmenu', { clientX: 100, clientY: 100 })
-    await w.vm.$nextTick()
-    await flushPromises()
-
-    const menu = document.querySelector('.tree-context-menu')
-    expect(menu).not.toBeNull()
-    expect(menu!.textContent).not.toContain('新建文件')
-    expect(menu!.textContent).not.toContain('新建文件夹')
-    expect(menu!.textContent).not.toContain('重命名')
-    expect(menu!.textContent).not.toContain('删除')
+    expect(w.find('[data-tree-key="folder:diary"]').exists()).toBe(false)
+    expect(w.find('[data-tree-key="file:diary/2026-08-24"]').exists()).toBe(true)
+    expect(document.querySelector('.tree-context-menu')).toBeNull()
     w.unmount()
   })
 
   it('hides managed Diary rename/move while retaining export and delete', async () => {
     const w = mount(FileTree, { props: { tree: DIARY_TREE, currentPath: null }, attachTo: document.body })
-    const diaryRow = w.findAll('li.tree-row').find((row: any) => row.find('.row-name')?.text() === 'diary')!
-    await diaryRow.find('.chevron').trigger('click')
-    await w.vm.$nextTick()
     const managedRow = w.findAll('li.tree-row').find((row: any) => row.find('.row-name')?.text() === '2026-08-24')!
+    expect(managedRow.exists()).toBe(true)
     await managedRow.trigger('contextmenu', { clientX: 100, clientY: 100 })
     await w.vm.$nextTick()
     await flushPromises()
@@ -281,10 +271,8 @@ describe('FileTree context menu — Diary presentation guards', () => {
 
   it('keeps ordinary file actions for an unmanaged Diary file without a history entry', async () => {
     const w = mount(FileTree, { props: { tree: DIARY_TREE, currentPath: null }, attachTo: document.body })
-    const diaryRow = w.findAll('li.tree-row').find((row: any) => row.find('.row-name')?.text() === 'diary')!
-    await diaryRow.find('.chevron').trigger('click')
-    await w.vm.$nextTick()
     const legacyRow = w.findAll('li.tree-row').find((row: any) => row.find('.row-name')?.text() === 'legacy')!
+    expect(legacyRow.exists()).toBe(true)
     await legacyRow.trigger('contextmenu', { clientX: 100, clientY: 100 })
     await w.vm.$nextTick()
     await flushPromises()
