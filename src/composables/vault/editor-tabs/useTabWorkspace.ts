@@ -136,11 +136,13 @@ export function useTabWorkspace(options: {
     return live ?? null
   }
 
-  async function openPost(path: string, openOptions: { refresh?: boolean } = {}) {
+  async function openPost(path: string, openOptions: { refresh?: boolean; activate?: boolean } = {}) {
     const existing = tabs.value.find((tab) => tab.path === path)
     if (existing) {
-      activePath.value = path
-      navigateTo(path)
+      if (openOptions.activate !== false) {
+        activePath.value = path
+        navigateTo(path)
+      }
       return
     }
     if (tabs.value.length >= TAB_HARD_LIMIT) {
@@ -152,8 +154,10 @@ export function useTabWorkspace(options: {
     }
     const plainTab = makeEmptyTab(path)
     tabs.value.push(plainTab)
-    activePath.value = path
-    navigateTo(path)
+    if (openOptions.activate !== false) {
+      activePath.value = path
+      navigateTo(path)
+    }
     try {
       const post = await getPost(path)
       // Race guard: the user may have closed this tab while getPost

@@ -52,6 +52,7 @@ const STRINGS: Strings = {
   'diary.future_missing': { zh: '未来日期尚未创建。到达该日期后才能新建日记。', en: 'Future diary dates are not created until that date arrives.' },
   'diary.open_busy': { zh: '该日期正在处理中，请稍后重试。', en: 'That Diary date is already being processed. Try again shortly.' },
   'diary.open_failed': { zh: '无法打开日记：{error}', en: 'Could not open Diary: {error}' },
+  'diary.switch_not_saved': { zh: '无法切换日期，请先解决当前日记的保存问题。', en: 'Could not switch Diary dates because the current entry is not safely saved.' },
   'diary.refresh_failed': { zh: '日记已创建，但日历标记刷新稍后重试。', en: 'The Diary was created, but the calendar marker will retry refreshing.' },
   'diary.workspace.return_calendar': { zh: '返回日历', en: 'Calendar' },
   'mood.label': { zh: '心情', en: 'Mood' },

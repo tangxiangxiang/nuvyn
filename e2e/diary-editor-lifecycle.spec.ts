@@ -195,16 +195,17 @@ test('Native Editor dirty lifecycle preserves identity and reveals Calendar only
     await clickDiaryDate(page, date)
     await assertNativeReader(page, date)
     await expect(page.locator(`[role="tab"][data-tab-id="${path}"]`)).toHaveCount(1)
+    await expect(page.locator('.tabs')).toBeHidden()
 
     await enterEditor(page)
     await setEditorContent(page, savedRaw)
-    await expect(page.locator(`[data-tab-id="${path}"][data-save-status="saved"]`)).toBeVisible({ timeout: 15_000 })
+    await expect(page.locator(`[data-tab-id="${path}"][data-save-status="saved"]`)).toHaveAttribute('data-save-status', 'saved', { timeout: 15_000 })
 
     await interceptAutosaveAborted(page, path)
     browserAutosaveInstalled = true
     await appendEditorText(page, dirtyMarker)
     const dirtyRaw = `${savedRaw}\n${dirtyMarker}`
-    await expect(page.locator(`[data-tab-id="${path}"][data-save-status="dirty"]`)).toBeVisible({ timeout: 15_000 })
+    await expect(page.locator(`[data-tab-id="${path}"][data-save-status="dirty"]`)).toHaveAttribute('data-save-status', 'dirty', { timeout: 15_000 })
     // D8.3 disables managed-Diary persistent Draft Store writes; the dirty
     // body remains only in the authorized editor tab until explicit save.
     await expect.poll(() => draftRowCount(page, dirtyMarker), { timeout: 15_000 }).toBe(0)
@@ -238,7 +239,7 @@ test('Native Editor dirty lifecycle preserves identity and reveals Calendar only
     browserAutosaveInstalled = false
     await page.locator('.vault').focus()
     await page.keyboard.press('Control+s')
-    await expect(page.locator(`[data-tab-id="${path}"][data-save-status="saved"]`)).toBeVisible({ timeout: 15_000 })
+    await expect(page.locator(`[data-tab-id="${path}"][data-save-status="saved"]`)).toHaveAttribute('data-save-status', 'saved', { timeout: 15_000 })
     const saved = await (await request.get(`/api/posts/${path}`)).json()
     expect(normalizeLineEndings(saved.raw)).toBe(dirtyRaw)
     expect(saved.metadata.id).toBe(document.documentId)
@@ -249,14 +250,16 @@ test('Native Editor dirty lifecycle preserves identity and reveals Calendar only
     await interceptAutosaveAborted(page, path)
     browserAutosaveInstalled = true
     await appendEditorText(page, closeMarker)
-    await expect(page.locator(`[data-tab-id="${path}"][data-save-status="dirty"]`)).toBeVisible({ timeout: 15_000 })
-    await page.locator(`[data-tab-id="${path}"] .tab-close`).click()
+    await expect(page.locator(`[data-tab-id="${path}"][data-save-status="dirty"]`)).toHaveAttribute('data-save-status', 'dirty', { timeout: 15_000 })
+    await page.locator('.vault').focus()
+    await page.keyboard.press('ControlOrMeta+W')
     const confirmation = page.locator('.n-dialog[role="dialog"]')
     await expect(confirmation).toBeVisible()
     await confirmation.getByRole('button', { name: 'Cancel', exact: true }).click()
     await expect(confirmation).not.toBeVisible()
-    await expect(page.locator(`[data-tab-id="${path}"][data-save-status="dirty"]`)).toBeVisible()
-    await page.locator(`[data-tab-id="${path}"] .tab-close`).click()
+    await expect(page.locator(`[data-tab-id="${path}"][data-save-status="dirty"]`)).toHaveAttribute('data-save-status', 'dirty')
+    await page.locator('.vault').focus()
+    await page.keyboard.press('ControlOrMeta+W')
     await expect(confirmation).toBeVisible()
     await confirmation.getByRole('button').last().click()
     await expect(page.locator(`[data-tab-id="${path}"]`)).toHaveCount(0)
@@ -589,7 +592,7 @@ test('external conflict stays on the native Diary tab and resolves via the exist
     await interceptAutosaveHeld(page, path, autosave, gate)
     browserAutosaveInstalled = true
     await appendEditorText(page, localMarker)
-    await expect(page.locator(`[data-tab-id="${path}"][data-save-status="dirty"]`)).toBeVisible({ timeout: 15_000 })
+    await expect(page.locator(`[data-tab-id="${path}"][data-save-status="dirty"]`)).toHaveAttribute('data-save-status', 'dirty', { timeout: 15_000 })
     await expect.poll(() => autosave.seen, { timeout: 15_000 }).toBe(true)
 
     const externalWrite = await request.put(`/api/posts/${path}`, {
@@ -601,7 +604,7 @@ test('external conflict stays on the native Diary tab and resolves via the exist
     releaseAutosave()
     await expect.poll(() => autosave.statuses.length, { timeout: 15_000 }).toBe(1)
     expect(autosave.statuses[0]).toBe(409)
-    await expect(page.locator(`[data-tab-id="${path}"][data-save-status="external"]`)).toBeVisible({ timeout: 15_000 })
+    await expect(page.locator(`[data-tab-id="${path}"][data-save-status="external"]`)).toHaveAttribute('data-save-status', 'external', { timeout: 15_000 })
 
     await expect(page.getByTestId('diary-calendar')).toBeHidden()
     await expect(page.locator(`[data-tab-id="${path}"][data-save-status="external"]`)).toHaveCount(1)
@@ -614,7 +617,7 @@ test('external conflict stays on the native Diary tab and resolves via the exist
     const keepLocal = page.locator('button[aria-label="Keep local version and overwrite disk"]')
     await expect(keepLocal).toBeVisible({ timeout: 15_000 })
     await keepLocal.click()
-    await expect(page.locator(`[data-tab-id="${path}"][data-save-status="saved"]`)).toBeVisible({ timeout: 15_000 })
+    await expect(page.locator(`[data-tab-id="${path}"][data-save-status="saved"]`)).toHaveAttribute('data-save-status', 'saved', { timeout: 15_000 })
     const resolved = await (await request.get(`/api/posts/${path}`)).json()
     expect(normalizeLineEndings(resolved.raw)).toBe(localRaw)
     expect(resolved.metadata.id).toBe(document.documentId)

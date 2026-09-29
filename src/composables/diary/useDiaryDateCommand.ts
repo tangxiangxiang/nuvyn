@@ -16,7 +16,7 @@ export type DiaryDateEnsureResult =
 export interface DiaryDateCommandOptions {
   getPost: (path: string) => Promise<Pick<PostDetail, 'path'>>
   createDiaryDate: (input: { date: DiaryDate; timeZone: string }) => Promise<DiaryDateCreateResult>
-  openPost: (path: string, options?: { refresh?: boolean }) => Promise<void>
+  openPost: (path: string, options?: { refresh?: boolean }) => Promise<void | boolean>
   refresh: () => Promise<void>
   fileChanges?: Pick<VaultFileChanges, 'publish'>
   mutationLock?: { acquire: (paths: readonly string[]) => (() => void) | null }
@@ -126,7 +126,9 @@ export function useDiaryDateCommand(options: DiaryDateCommandOptions) {
           // visible native document can be closed immediately instead of a
           // concurrent close being rejected as busy after the reader mounts.
           releaseMutationLock()
-          if (openDocument) await options.openPost(path)
+          if (openDocument && await options.openPost(path) === false) {
+            return { status: 'error', date, path, error: new Error('Diary document switch was rejected') }
+          }
           return { status: 'existing', date, path }
         } catch (error) {
           return fail(error, date, path)
@@ -158,7 +160,9 @@ export function useDiaryDateCommand(options: DiaryDateCommandOptions) {
             const post = await options.getPost(path)
             if (post.path !== path) return fail(new Error('Diary conflict resolved to a non-canonical path'), date, path)
             releaseMutationLock()
-            if (openDocument) await options.openPost(path)
+            if (openDocument && await options.openPost(path) === false) {
+              return { status: 'error', date, path, error: new Error('Diary document switch was rejected') }
+            }
             return { status: 'existing', date, path }
           } catch (readError) {
             return fail(readError, date, path)
@@ -190,7 +194,9 @@ export function useDiaryDateCommand(options: DiaryDateCommandOptions) {
       releaseMutationLock()
       if (openDocument) {
         try {
-          await options.openPost(path, { refresh: false })
+          if (await options.openPost(path, { refresh: false }) === false) {
+            return { status: 'error', date, path, error: new Error('Diary document switch was rejected') }
+          }
         } catch (error) {
           return fail(error, date, path)
         }

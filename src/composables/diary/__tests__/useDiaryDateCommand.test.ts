@@ -102,6 +102,18 @@ describe('useDiaryDateCommand', () => {
     expect(state.publish).not.toHaveBeenCalled()
   })
 
+  it('does not report an existing date as opened when its document switch is rejected', async () => {
+    const path = 'diary/2026-08-24'
+    const state = harness({ existing: [path], openPost: vi.fn(async () => false) })
+
+    const result = await state.openDiaryDate('2026-08-24')
+
+    expect(result.status).toBe('error')
+    expect(result.path).toBe(path)
+    expect(state.createDiaryDate).not.toHaveBeenCalled()
+    expect(state.onError).not.toHaveBeenCalled()
+  })
+
   it('releases the path mutation lock before adopting native Vault presentation', async () => {
     const path = 'diary/2026-08-24'
     let pathLocked = false

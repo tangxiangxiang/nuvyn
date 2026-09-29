@@ -363,6 +363,165 @@ describe('useEditorTabs', () => {
     expect(h.tabs.value).toHaveLength(1)
   })
 
+  it('replaces a managed Diary date only after saving the current entry', async () => {
+    const first = 'diary/2026-09-15'
+    const second = 'diary/2026-09-16'
+    const saved: string[] = []
+    vi.stubGlobal('fetch', stubFetch({
+      'GET /api/tree': () => [],
+      'GET /api/posts': () => [],
+      [`GET /api/posts/${first}`]: () => ({ path: first, raw: 'first', content: 'first', frontmatter: {}, size: 5, mtime: 1 }),
+      [`GET /api/posts/${second}`]: () => ({ path: second, raw: 'second', content: 'second', frontmatter: {}, size: 6, mtime: 2 }),
+      [`PUT /api/posts/${first}`]: (body) => {
+        const raw = (body as { raw: string }).raw
+        saved.push(raw)
+        return saveResult(first, raw)
+      },
+    }))
+    const h = await setup({ singleManagedDiaryDocument: true })
+
+    await h.openPost(first)
+    h.onEditorChange(first, 'first edited')
+    await h.openPost(second)
+
+    expect(saved).toEqual(['first edited'])
+    expect(h.tabs.value.map((tab) => tab.path)).toEqual([second])
+    expect(h.activePath.value).toBe(second)
+    expect(h.tabs.value[0].raw).toBe('second')
+    expect(confirmResolve).toBeNull()
+    h.unmount()
+  })
+
+  it('flushes edits made to the current Diary while the target date is loading', async () => {
+    const first = 'diary/2026-09-15'
+    const second = 'diary/2026-09-16'
+    const targetPost = deferred<unknown>()
+    const targetRequested = deferred<void>()
+    const saved: string[] = []
+    vi.stubGlobal('fetch', stubFetch({
+      'GET /api/tree': () => [],
+      'GET /api/posts': () => [],
+      [`GET /api/posts/${first}`]: () => ({ path: first, raw: 'first', content: 'first', frontmatter: {}, size: 5, mtime: 1 }),
+      [`GET /api/posts/${second}`]: () => {
+        targetRequested.resolve()
+        return targetPost.promise
+      },
+      [`PUT /api/posts/${first}`]: (body) => {
+        const raw = (body as { raw: string }).raw
+        saved.push(raw)
+        return saveResult(first, raw)
+      },
+    }))
+    const h = await setup({ singleManagedDiaryDocument: true })
+    await h.openPost(first)
+    h.onEditorChange(first, 'saved before target load')
+
+    const opening = h.openPost(second)
+    await targetRequested.promise
+    expect(h.activePath.value).toBe(first)
+    h.onEditorChange(first, 'edited during target load')
+    targetPost.resolve({
+      path: second,
+      raw: 'second',
+      content: 'second',
+      frontmatter: {},
+      size: 6,
+      mtime: 2,
+    })
+    await opening
+
+    expect(saved).toEqual(['saved before target load', 'edited during target load'])
+    expect(h.tabs.value.map((tab) => tab.path)).toEqual([second])
+    expect(h.tabs.value[0].raw).toBe('second')
+    h.unmount()
+  })
+
+  it('aborts a Diary date switch when the old entry cannot be saved', async () => {
+    const first = 'diary/2026-09-15'
+    const second = 'diary/2026-09-16'
+    let targetReads = 0
+    vi.stubGlobal('fetch', stubFetch({
+      'GET /api/tree': () => [],
+      'GET /api/posts': () => [],
+      [`GET /api/posts/${first}`]: () => ({ path: first, raw: 'first', content: 'first', frontmatter: {}, size: 5, mtime: 1 }),
+      [`GET /api/posts/${second}`]: () => {
+        targetReads++
+        return { path: second, raw: 'second', content: 'second', frontmatter: {}, size: 6, mtime: 2 }
+      },
+      [`PUT /api/posts/${first}`]: () => { throw new Error('HTTP 500') },
+    }))
+    const h = await setup({ singleManagedDiaryDocument: true })
+    await h.openPost(first)
+    h.onEditorChange(first, 'unsaved body')
+
+    await h.openPost(second)
+
+    expect(targetReads).toBe(0)
+    expect(h.activePath.value).toBe(first)
+    expect(h.tabs.value.map((tab) => tab.path)).toEqual([first])
+    expect(h.tabs.value[0].raw).toBe('unsaved body')
+    expect(h.tabs.value[0].saveStatus).toBe('error')
+    expect(confirmResolve).toBeNull()
+    expect(toastCalls).toContainEqual({
+      type: 'info',
+      message: '无法切换日期，请先解决当前日记的保存问题。',
+    })
+    h.unmount()
+  })
+
+  it('keeps the previous Diary active and removes a failed target placeholder', async () => {
+    const first = 'diary/2026-09-15'
+    const second = 'diary/2026-09-16'
+    vi.stubGlobal('fetch', stubFetch({
+      'GET /api/tree': () => [],
+      'GET /api/posts': () => [],
+      [`GET /api/posts/${first}`]: () => ({ path: first, raw: 'first', content: 'first', frontmatter: {}, size: 5, mtime: 1 }),
+      [`GET /api/posts/${second}`]: () => { throw new Error('target unavailable') },
+    }))
+    const h = await setup({ singleManagedDiaryDocument: true })
+    await h.openPost(first)
+
+    await h.openPost(second)
+
+    expect(h.activePath.value).toBe(first)
+    expect(h.tabs.value.map((tab) => tab.path)).toEqual([first])
+    expect(confirmResolve).toBeNull()
+    expect(toastCalls).toContainEqual({
+      type: 'error',
+      message: '无法打开日记：target unavailable',
+    })
+    h.unmount()
+  })
+
+  it('keeps Note tabs when replacing a managed Diary document', async () => {
+    const diaryA = 'diary/2026-09-15'
+    const diaryB = 'diary/2026-09-16'
+    vi.stubGlobal('fetch', stubFetch({
+      'GET /api/tree': () => [],
+      'GET /api/posts': () => [],
+      'GET /api/posts/inbox/a': () => ({ path: 'inbox/a', raw: 'A', content: 'A', frontmatter: {}, size: 1, mtime: 1 }),
+      'GET /api/posts/literature/b': () => ({ path: 'literature/b', raw: 'B', content: 'B', frontmatter: {}, size: 1, mtime: 1 }),
+      [`GET /api/posts/${diaryA}`]: () => ({ path: diaryA, raw: 'first', content: 'first', frontmatter: {}, size: 5, mtime: 1 }),
+      [`GET /api/posts/${diaryB}`]: () => ({ path: diaryB, raw: 'second', content: 'second', frontmatter: {}, size: 6, mtime: 2 }),
+    }))
+    const h = await setup({ singleManagedDiaryDocument: true })
+    await h.openPost('inbox/a')
+    await h.openPost('literature/b')
+    await h.openPost(diaryA)
+    await h.openPost(diaryB)
+
+    expect(h.tabs.value.map((tab) => tab.path)).toEqual([
+      'inbox/a',
+      'literature/b',
+      diaryB,
+    ])
+    await h.openPost('inbox/a')
+    expect(h.activePath.value).toBe('inbox/a')
+    expect(h.tabs.value.map((tab) => tab.path)).toContain('literature/b')
+    expect(h.tabs.value.map((tab) => tab.path)).not.toContain(diaryA)
+    h.unmount()
+  })
+
   it('strictly reorders existing document proxies and persists immediately', async () => {
     vi.stubGlobal('fetch', stubFetch({
       'GET /api/tree': () => [],
@@ -1855,6 +2014,103 @@ describe('useEditorTabs — tab persistence', () => {
     expect(h.tabs.value[0].raw).toBe('A')
     expect(h.tabs.value[1].raw).toBe('B')
     expect(h.activePath.value).toBe('a')
+  })
+
+  it('restores only the persisted active managed Diary path', async () => {
+    const paths = [
+      'diary/2026-09-14',
+      'diary/2026-09-15',
+      'diary/2026-09-16',
+    ]
+    stubFetchForPaths(Object.fromEntries(paths.map((path) => [path, path])))
+    localStorage.setItem(PERSIST_KEY, JSON.stringify({
+      v: 1,
+      paths,
+      active: paths[1],
+    }))
+
+    const h = await setup({ singleManagedDiaryDocument: true })
+
+    expect(h.tabs.value.map((tab) => tab.path)).toEqual([paths[1]])
+    expect(h.activePath.value).toBe(paths[1])
+    h.unmount()
+  })
+
+  it('gives a managed Diary route precedence over legacy persisted Diary tabs', async () => {
+    const routeTarget = 'diary/2026-09-16'
+    const paths = [
+      'diary/2026-09-14',
+      'diary/2026-09-15',
+      routeTarget,
+      'inbox/keep',
+    ]
+    const reads: string[] = []
+    vi.stubGlobal('fetch', stubFetch({
+      'GET /api/tree': () => [],
+      'GET /api/posts': () => [],
+      ...Object.fromEntries(paths.map((path) => [
+        `GET /api/posts/${path}`,
+        () => {
+          reads.push(path)
+          return { path, raw: path, content: path, frontmatter: {}, size: path.length, mtime: 1 }
+        },
+      ])),
+    }))
+    localStorage.setItem(PERSIST_KEY, JSON.stringify({
+      v: 1,
+      paths,
+      active: 'diary/2026-09-14',
+    }))
+
+    const h = await setup({ singleManagedDiaryDocument: true }, `/vault/${routeTarget}`)
+
+    expect(h.tabs.value.map((tab) => tab.path)).toEqual(['inbox/keep', routeTarget])
+    expect(h.activePath.value).toBe(routeTarget)
+    expect(reads).not.toContain('diary/2026-09-14')
+    expect(reads).not.toContain('diary/2026-09-15')
+    h.unmount()
+  })
+
+  it('defers only one legacy managed Diary tab and resumes its active path', async () => {
+    let ready = false
+    const paths = [
+      'diary/2026-09-14',
+      'diary/2026-09-15',
+      'diary/2026-09-16',
+    ]
+    let diaryBodyReads = 0
+    vi.stubGlobal('fetch', stubFetch({
+      'GET /api/tree': () => [],
+      'GET /api/posts': () => [],
+      ...Object.fromEntries(paths.map((path) => [
+        `GET /api/posts/${path}`,
+        () => {
+          diaryBodyReads++
+          return { path, raw: path, content: path, frontmatter: {}, size: path.length, mtime: 1 }
+        },
+      ])),
+    }))
+    localStorage.setItem(PERSIST_KEY, JSON.stringify({
+      v: 1,
+      paths,
+      active: paths[2],
+    }))
+
+    const h = await setup({
+      singleManagedDiaryDocument: true,
+      isDiaryAccessReady: () => ready,
+      authorizeDocumentPath: vi.fn(async () => true),
+    })
+
+    expect(h.tabs.value).toEqual([])
+    expect(diaryBodyReads).toBe(0)
+    ready = true
+    await h.resumeDeferredDiaryTabs()
+
+    expect(diaryBodyReads).toBe(1)
+    expect(h.tabs.value.map((tab) => tab.path)).toEqual([paths[2]])
+    expect(h.activePath.value).toBe(paths[2])
+    h.unmount()
   })
 
   it('defers persisted managed Diary tabs without reading their body while locked', async () => {

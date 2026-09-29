@@ -104,6 +104,31 @@ describe('useDocumentSave successful transaction', () => {
     }))
   })
 
+  it('flushes a specified path while another document is active', async () => {
+    const path = 'diary/2026-09-15'
+    const fetchMock = vi.fn().mockResolvedValue(ok('diary edited', { path }))
+    vi.stubGlobal('fetch', fetchMock)
+    const h = setupSave([makeTab(path), makeTab('inbox/other', 'other')])
+    h.activePath.value = 'inbox/other'
+    h.save.onEditorChange(path, 'diary edited')
+
+    await h.save.doSaveNow(path)
+
+    expect(fetchMock).toHaveBeenCalledWith(`/api/posts/${path}`, expect.objectContaining({
+      method: 'PUT',
+      body: JSON.stringify({ raw: 'diary edited', baseRaw: 'saved' }),
+    }))
+    expect(h.tabs.value[0]).toMatchObject({
+      raw: 'diary edited',
+      originalRaw: 'diary edited',
+      revision: 1,
+      savedRevision: 1,
+      savingRevision: null,
+      saveStatus: 'saved',
+    })
+    expect(h.activePath.value).toBe('inbox/other')
+  })
+
   it('publishes exactly one editor-save event without newRaw after PUT succeeds', async () => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(ok('changed')))
     const h = setupSave()

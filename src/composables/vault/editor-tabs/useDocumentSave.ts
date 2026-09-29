@@ -413,8 +413,7 @@ export function useDocumentSave(options: {
     event.returnValue = ''
   }
 
-  async function doSaveNow() {
-    const path = options.activePath.value
+  async function doSaveNow(path = options.activePath.value) {
     if (!path) return
     cancelScheduledSave(path)
     await doSave(path)

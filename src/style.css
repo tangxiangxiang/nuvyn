@@ -4102,6 +4102,12 @@ body:has(.ledger-detail-sheet-card) .n-modal-mask {
   grid-template-rows: minmax(0, 1fr);
 }
 
+/* A native Diary document uses the date tree as navigation. Hide the tab
+   strip without leaving its fixed 36px grid track above the document. */
+.editor-area.is-no-tab-strip {
+  grid-template-rows: minmax(0, 1fr);
+}
+
 /* Tabs */
 .editor-tabs-shell {
   display: flex;

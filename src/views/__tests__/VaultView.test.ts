@@ -847,7 +847,9 @@ describe('D7.3 Calendar mood integration wiring', () => {
     expect(calendarBranch).toContain(':posts="posts"')
     expect(calendarBranch).toContain(':mood-busy="diaryMoodBusy"')
     expect(calendarBranch).toContain('@mood-change="updateDiaryCalendarMood"')
-    expect(source).toContain('import { classifyDiaryPath, diaryLogicalPathForDate, type DiaryDate } from')
+    expect(source).toContain('diaryDateFromPath,')
+    expect(source).toContain('classifyDiaryPath,')
+    expect(source).toContain('diaryLogicalPathForDate,')
     expect(source).toContain('async function updateDiaryCalendarMood(date: DiaryDate, mood: MoodId | null)')
     expect(source).toContain('const path = diaryLogicalPathForDate(date)')
     expect(source).toContain('const dateResult = await ensureDiaryDate(date)')
@@ -880,5 +882,65 @@ describe('D7.3 Calendar mood integration wiring', () => {
     expect(calendar).toContain('<DiaryMoodPicker')
     expect(calendar).toContain('emit(\'mood-change\', activeMoodDate.value, mood)')
     expect(calendar).toContain('diary-calendar-day-content')
+  })
+})
+
+describe('Diary Single Document Policy', () => {
+  it('owns managed Diary replacement in the shared Editor Tab lifecycle', () => {
+    const tabs = readFileSync(fileURLToPath(new URL('../../composables/vault/useEditorTabs.ts', import.meta.url)), 'utf8')
+    const view = readFileSync(fileURLToPath(new URL('../VaultView.vue', import.meta.url)), 'utf8')
+    const openManaged = tabs.match(/async function openManagedDiaryPost[\s\S]*?\n  }/)?.[0]
+
+    expect(view).toContain('singleManagedDiaryDocument: true')
+    expect(openManaged).toBeDefined()
+    expect(openManaged).toContain("classifyDiaryPath(tab.path) === 'managed'")
+    expect(tabs).toContain('await doSaveNow(path)')
+    expect(openManaged).toContain('flushManagedDiaryTabs(oldDiaryPaths)')
+    expect(tabs).toContain('requiresCloseConfirmation(tab!)')
+    expect(openManaged).toContain('activate: false')
+    expect(openManaged).toContain('selectTab(path)')
+    expect(openManaged).toContain('closeManyConfirmedWithDrafts(previousDiaryPaths)')
+    expect(openManaged).not.toContain("path.startsWith('diary/')")
+  })
+
+  it('routes Diary FileTree selection through the date command without replacing the query', () => {
+    const source = readFileSync(fileURLToPath(new URL('../VaultView.vue', import.meta.url)), 'utf8')
+    const handler = source.match(/async function openFileTreeDocument[\s\S]*?\n}/)?.[0]
+
+    expect(handler).toBeDefined()
+    expect(handler).toContain("classifyDiaryPath(path) === 'managed'")
+    expect(handler).toContain('diaryDateFromPath(path)')
+    expect(handler).toContain('openDiaryDate(date)')
+    expect(handler).toContain('presentDiaryDateResult(result, intent)')
+    expect(handler).not.toContain('filesFilter.value =')
+    expect(source).toContain('@select="openFileTreeDocument"')
+  })
+
+  it('hides only the ordinary Diary document tab strip and collapses its grid row', () => {
+    const source = readFileSync(fileURLToPath(new URL('../VaultView.vue', import.meta.url)), 'utf8')
+    const styles = readFileSync(fileURLToPath(new URL('../../style.css', import.meta.url)), 'utf8')
+    const stripPolicy = source.match(/const workspaceTabStripVisible = computed\(\(\) => \{[\s\S]*?\n\}\)/)?.[0]
+
+    expect(stripPolicy).toBeDefined()
+    expect(source).toContain('isDiaryDocumentMode.value || isManagedDiaryDocumentActive.value')
+    expect(source).toContain('activeHistoryComparison.value')
+    expect(source).toContain('activeWorkingTreeDiff.value')
+    expect(source).toContain('activeDraftRecovery.value')
+    expect(stripPolicy).toContain('!specialWorkspaceSurfaceActive.value')
+    expect(source).toContain('v-show="workspaceTabStripVisible"')
+    expect(source).toContain("'is-no-tab-strip': !workspaceTabStripVisible")
+    expect(styles).toContain('.editor-area.is-no-tab-strip {\n  grid-template-rows: minmax(0, 1fr);')
+  })
+
+  it('leaves native Cmd/Ctrl+Tab alone in an ordinary Diary document', () => {
+    const source = readFileSync(fileURLToPath(new URL('../VaultView.vue', import.meta.url)), 'utf8')
+    const handler = source.match(/function onVaultKeydown\(event: KeyboardEvent\): void \{[\s\S]*?\n}/)?.[0]
+    const nativeTabGuard = "ordinaryDiaryDocument && meta && event.key === 'Tab'"
+    const workspaceCycling = "if (meta && event.key === 'Tab' && workspaceTabs.value.length > 0)"
+
+    expect(handler).toBeDefined()
+    expect(handler).toContain(nativeTabGuard)
+    expect(handler).toContain(workspaceCycling)
+    expect(handler!.indexOf(nativeTabGuard)).toBeLessThan(handler!.indexOf(workspaceCycling))
   })
 })

@@ -78,7 +78,12 @@ import {
 import { DiaryAccessContextKey } from '../composables/diary/diaryAccessContext'
 import { AppShellContextKey } from '../composables/appShellContext'
 import { localCivilToday } from '../components/diary/diaryCalendarAdapter'
-import { classifyDiaryPath, diaryLogicalPathForDate, type DiaryDate } from '../../shared/diaryProtocol'
+import {
+  classifyDiaryPath,
+  diaryDateFromPath,
+  diaryLogicalPathForDate,
+  type DiaryDate,
+} from '../../shared/diaryProtocol'
 import { scopeRootsFor } from '../../shared/scopeProtocol'
 import type { DiaryMoodId as MoodId } from '../../shared/diaryMood'
 import { handleDiaryHomeKeydown } from './diaryHomeKeyboard'
@@ -392,6 +397,7 @@ const {
   draftPersistence,
   authorizeDocumentPath: authorizeDiaryDocumentPath,
   isDiaryAccessReady: () => diaryAccess.isUnlocked.value,
+  singleManagedDiaryDocument: true,
 })
 
 watch(searchablePosts, (next) => {
@@ -1358,6 +1364,15 @@ async function openPost(path: string, options: { refresh?: boolean } = {}): Prom
   await openEditorPost(path, options)
 }
 
+async function openDiaryDatePost(
+  path: string,
+  options: { refresh?: boolean } = {},
+): Promise<boolean> {
+  await openPost(path, options)
+  const tab = tabs.value.find((candidate) => candidate.path === path)
+  return activePath.value === path && Boolean(tab && !tab.loading && !tab.loadError)
+}
+
 function openLinkedDocument(path: string, anchor?: string): void {
   void vaultContext.editor.openLink(path, anchor)
 }
@@ -1369,7 +1384,7 @@ function openEditorLink(target: { path: string; anchor?: string }): void {
 const { ensureDiaryDate, openDiaryDate } = useDiaryDateCommand({
   getPost,
   createDiaryDate,
-  openPost,
+  openPost: openDiaryDatePost,
   refresh,
   fileChanges,
   mutationLock: historyMutationLock,
@@ -1381,6 +1396,18 @@ const { ensureDiaryDate, openDiaryDate } = useDiaryDateCommand({
   })),
   onRefreshError: () => toast.info(t('diary.refresh_failed')),
 })
+
+async function openFileTreeDocument(path: string): Promise<void> {
+  if (isDiaryScope.value && classifyDiaryPath(path) === 'managed') {
+    const date = diaryDateFromPath(path)
+    if (!date) return
+    const intent = diaryWorkspacePresentation.beginDateIntent()
+    const result = await openDiaryDate(date)
+    await presentDiaryDateResult(result, intent)
+    return
+  }
+  await openPost(path)
+}
 
 async function selectWorkspaceTab(id: string, focusViewer = true): Promise<void> {
   if (recoveryTabs.tabs.value.some((recovery) => recovery.tabId === id)) {
@@ -1517,6 +1544,11 @@ function onVaultKeydown(event: KeyboardEvent): void {
   }
 
   const meta = event.metaKey || event.ctrlKey
+  const ordinaryDiaryDocument = isDiaryScope.value
+    && (isDiaryDocumentMode.value || isManagedDiaryDocumentActive.value)
+    && !specialWorkspaceSurfaceActive.value
+  if (ordinaryDiaryDocument && meta && event.key === 'Tab') return
+
   const readOnlyTab = activeDraftRecovery.value
     ?? activeHistoryComparison.value
     ?? activeWorkingTreeDiff.value
@@ -1725,7 +1757,6 @@ const {
   presentationMode,
   diaryPresentationEligible,
   isDocument: isDiaryDocumentMode,
-  selectedDiaryDate,
   backingPath,
   isHome: isDiaryCalendarMode,
 } = diaryWorkspacePresentation
@@ -1733,12 +1764,26 @@ const {
 // moves visibility to the Diary presentation owner while preserving this
 // scope-only mount rule.
 const isDiaryCalendarMounted = computed(() => isDiaryScope.value)
-const hasOpenDiaryDocument = computed(() => workspaceTabs.value.some((tab) => (
-  tab.kind === 'document' && classifyDiaryPath(tab.documentPath) === 'managed'
-)))
-const isDiaryCalendarVisible = computed(() => (
-  isDiaryCalendarMode.value && !hasOpenDiaryDocument.value
+const specialWorkspaceSurfaceActive = computed(() => Boolean(
+  activeHistoryComparison.value
+  || activeWorkingTreeDiff.value
+  || activeDraftRecovery.value
 ))
+const isManagedDiaryDocumentActive = computed(() => (
+  isDiaryScope.value && classifyDiaryPath(activePath.value ?? '') === 'managed'
+))
+// Keep an inactive Diary tab from trapping the user in a hidden document when
+// they return to Diary with a Note selected. That state safely returns Home;
+// an active managed path continues to own the native document surface.
+const isDiaryCalendarVisible = computed(() => (
+  isDiaryCalendarMode.value && !isManagedDiaryDocumentActive.value
+))
+const workspaceTabStripVisible = computed(() => {
+  if (workspaceTabs.value.length === 0 || isDiaryPresentationPrimary.value) return false
+  return !(isDiaryScope.value
+    && (isDiaryDocumentMode.value || isManagedDiaryDocumentActive.value)
+    && !specialWorkspaceSurfaceActive.value)
+})
 watch([isDiaryScope, isDiaryCalendarVisible], ([diary, calendarHome]) => {
   if (!diary || calendarHome) diaryRecoveryCenterVisible.value = false
 }, { flush: 'sync' })
@@ -1984,25 +2029,6 @@ watch(() => activePath.value, (path, previousPath) => {
     clearPendingMoodFirstPresentation()
   }
 }, { flush: 'sync' })
-
-watch(selectedDiaryDate, (date) => {
-  if (!isDiaryScope.value || !date) return
-  // Follow Calendar date navigation only while the query still contains the
-  // last system-seeded date. Once the user edits it, the FileTree query is
-  // fully user-owned and must remain untouched.
-  if (diaryFilterOwnership.value === 'user') return
-  if (
-    !filesFilter.value
-    || (
-      diaryFilterOwnership.value === 'calendar'
-      && filesFilter.value === diaryFilterSeed.value
-    )
-  ) {
-    diaryFilterSeed.value = date
-    diaryFilterOwnership.value = 'calendar'
-    filesFilter.value = date
-  }
-})
 
 // Calendar stays mounted across the Diary/native-document handoff. Its
 // Teleport picker is presentation-local, however, so any transition away
@@ -2658,7 +2684,7 @@ watch(isReadMode, async (reading) => {
       :current-path="activePath"
       :exact-path-filter="diaryExactPathFilter"
       @update:filter="onFilesFilterEdited"
-      @select="openPost"
+      @select="openFileTreeDocument"
       @refresh="refresh"
       @export-pdf="exportPdfDocument"
     />
@@ -2714,11 +2740,11 @@ watch(isReadMode, async (reading) => {
 
     <section
       class="editor-area"
-      :class="{ 'is-read': isReadMode, 'is-empty': workspaceTabs.length === 0, 'is-diary-home': isDiaryCalendarVisible }"
+      :class="{ 'is-read': isReadMode, 'is-empty': workspaceTabs.length === 0, 'is-diary-home': isDiaryCalendarVisible, 'is-no-tab-strip': !workspaceTabStripVisible }"
     >
       <EditorTabs
         v-if="workspaceTabs.length > 0"
-        v-show="!isDiaryPresentationPrimary"
+        v-show="workspaceTabStripVisible"
         ref="editorTabsRef"
         :tabs="workspaceTabs"
         :active-path="activeWorkspaceTabId"

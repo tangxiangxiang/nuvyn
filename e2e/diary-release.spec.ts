@@ -360,7 +360,7 @@ test('Diary Calendar navigation exposes keyboard-only focus indicators', async (
   expect(consoleErrors).toEqual([])
 })
 
-test('Diary scope keeps Calendar hidden while managed document tabs are open', async ({ page, request }) => {
+test('Diary scope returns to Calendar Home when a Note is active and retains both documents', async ({ page, request }) => {
   const date = localCivilDate()
   const diary = diaryPath(date)
   const note = 'inbox/d6-hidden-shortcut-note'
@@ -384,12 +384,10 @@ test('Diary scope keeps Calendar hidden while managed document tabs are open', a
     await expect(page).toHaveURL(new RegExp(`/vault/${note.replace('/', '\\/')}(?:[?#]|$)`))
 
     await page.locator('.scope-chip').filter({ hasText: 'diary' }).click()
-    await expect(page.getByTestId('diary-calendar')).toBeHidden()
-    await expect(page.locator('.tabs')).toBeVisible()
+    await expect(page.getByTestId('diary-calendar')).toBeVisible()
+    await expect(page.locator('.tabs')).toBeHidden()
     await expect(page.locator(`[role="tab"][data-tab-id="${diary}"]`)).toHaveCount(1)
     await expect(page.locator(`[role="tab"][data-tab-id="${note}"]`)).toHaveCount(1)
-    await expect(page.getByTestId('view-toggle')).toBeEnabled()
-    await expect(page.locator('.right-rail-toggle')).toBeEnabled()
   } finally {
     await deleteDiaryDate(request, date)
     const removed = await request.delete(`/api/posts/${note}`)
@@ -455,7 +453,8 @@ test('Diary Calendar keyboard flow does not strand focus in the hidden surface',
       return Boolean(active && hiddenCalendar?.contains(active))
     })).toBe(false)
 
-    await tab.locator('.tab-close').click()
+    await page.locator('.vault').focus()
+    await page.keyboard.press('ControlOrMeta+W')
     await expect(tab).toHaveCount(0)
     await expect(calendar).toBeVisible()
 
@@ -463,7 +462,8 @@ test('Diary Calendar keyboard flow does not strand focus in the hidden surface',
     await page.keyboard.press('Space')
     await expect(tab).toHaveCount(1)
     await expect(page.locator('.reading-pane')).toHaveCount(1)
-    await tab.locator('.tab-close').click()
+    await page.locator('.vault').focus()
+    await page.keyboard.press('ControlOrMeta+W')
     await expect(tab).toHaveCount(0)
     await expect(calendar).toBeVisible()
 
@@ -535,7 +535,8 @@ test('Existing Diary lifecycle remains stable across five repeated opens', async
         .toContainText('D5 release evidence.', { timeout: 15_000 })
       await expect(page.locator('.reading-pane')).toHaveCount(1)
       await expect(page.getByTestId('diary-calendar')).toBeHidden()
-      await tab.locator('.tab-close').click()
+      await page.locator('.vault').focus()
+      await page.keyboard.press('ControlOrMeta+W')
       await expect(tab).toHaveCount(0)
       await expect(page.getByTestId('diary-calendar')).toBeVisible()
     }
