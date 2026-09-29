@@ -139,7 +139,6 @@ const STRINGS: Strings = {
   'file_tree.exporting_pdf': { zh: '正在准备 PDF…', en: 'Preparing PDF…' },
   'file_tree.export_not_ready': { zh: '文档仍在渲染，请稍后重试。', en: 'The document is still rendering. Try again in a moment.' },
   'file_tree.export_failed': { zh: '无法准备 PDF 导出，请稍后重试。', en: 'Could not prepare the PDF export. Try again later.' },
-  'file_tree.view_history': { zh: '查看文件历史', en: 'View File History' },
   'vault.resize_sidebar': { zh: '拖动调整侧栏宽度', en: 'Drag to resize sidebar' },
   'vault.resize_right_rail': { zh: '拖动调整右侧栏宽度', en: 'Drag to resize right rail' },
   'vault.loading_document': { zh: '正在加载 {path}…', en: 'Loading {path}…' },

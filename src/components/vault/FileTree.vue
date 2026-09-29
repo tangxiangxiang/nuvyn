@@ -45,7 +45,6 @@ const emit = defineEmits<{
   // ordinary move operations can also target archive/.
   'archive-note': [path: string]
   'export-pdf': [path: string]
-  'open-history': [path: string]
   'clear-exact-path-filter': []
 }>()
 
@@ -881,7 +880,6 @@ async function onCreateIn(folder: string, kind: 'file' | 'folder') {
         @create-in="onCreateIn"
         @archive-note="onArchiveNote"
         @export-pdf="(path) => emit('export-pdf', path)"
-        @open-history="(path) => emit('open-history', path)"
         @focus="setFocused"
       />
     </ul>

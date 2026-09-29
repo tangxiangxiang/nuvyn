@@ -9,7 +9,6 @@ import {
   FileText,
   Folder,
   FolderPlus,
-  History,
   Pencil,
   Trash,
 } from '@vicons/tabler'
@@ -67,14 +66,12 @@ const emit = defineEmits<{
   // workflow distinct from an ordinary drag/move operation.
   'archive-note': [path: string]
   'export-pdf': [path: string]
-  'open-history': [path: string]
   focus: [path: string, kind: 'file' | 'folder']
 }>()
 
 const { t } = useI18n()
 
 const isFolder = computed(() => props.node.kind === 'folder')
-const canViewHistory = computed(() => !isFolder.value && !isManagedDiaryPath(props.node.path))
 const isActive = computed(() => !isFolder.value && props.node.path === props.currentPath)
 const isExpanded = computed(() => isFolder.value && props.expandedSet.has(props.node.path))
 // Narrow the discriminated union for the children list. The computed
@@ -386,7 +383,6 @@ function menuAction(fn: () => void) {
         <NButton v-if="canArchive" attr-type="button" text :bordered="false" @click="menuAction(() => emit('archive-note', node.path))"><NIcon class="menu-icon" aria-hidden="true"><Archive /></NIcon>{{ t('file_tree.archive') }}</NButton>
         <div v-if="!isFolder" class="tree-menu-label">{{ t('file_tree.document') }}</div>
         <NButton v-if="!isFolder" attr-type="button" text :bordered="false" @click="menuAction(() => emit('export-pdf', node.path))"><NIcon class="menu-icon" aria-hidden="true"><FileExport /></NIcon>{{ t('file_tree.export_pdf') }}</NButton>
-        <NButton v-if="canViewHistory" attr-type="button" text :bordered="false" @click="menuAction(() => emit('open-history', node.path))"><NIcon class="menu-icon" aria-hidden="true"><History /></NIcon>{{ t('file_tree.view_history') }}</NButton>
         <div v-if="canDeleteRow" class="tree-menu-label">{{ t('file_tree.danger') }}</div>
         <NButton v-if="canDeleteRow" attr-type="button" text :bordered="false" class="danger" @click="menuAction(() => emit('delete', node.path, node.kind))"><NIcon class="menu-icon" aria-hidden="true"><Trash /></NIcon>{{ t('file_tree.delete') }}<kbd>Delete</kbd></NButton>
       </div>
@@ -414,7 +410,6 @@ function menuAction(fn: () => void) {
         @create-in="(folder, kind) => emit('create-in', folder, kind)"
         @archive-note="(p) => emit('archive-note', p)"
         @export-pdf="(p) => emit('export-pdf', p)"
-        @open-history="(p) => emit('open-history', p)"
         @focus="(p, kind) => emit('focus', p, kind)"
       />
     </ul>

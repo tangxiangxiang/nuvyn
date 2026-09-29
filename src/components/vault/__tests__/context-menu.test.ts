@@ -102,8 +102,8 @@ describe('FileTree context menu', () => {
     const menu = document.querySelector('.tree-context-menu')
     expect(menu).not.toBeNull()
     expect(menu!.textContent).toContain('重命名')
-    expect(menu!.textContent).toContain('查看文件历史')
     expect(menu!.textContent).toContain('导出 PDF')
+    expect(menu!.textContent).not.toContain('查看文件历史')
     expect(menu!.textContent).not.toContain('文档属性')
     expect(menu!.textContent).toContain('删除')
     const exportPdf = Array.from(menu!.querySelectorAll('button'))
@@ -111,16 +111,6 @@ describe('FileTree context menu', () => {
     exportPdf.click()
     await flushPromises()
     expect(w.emitted('export-pdf')).toEqual([['inbox/hello']])
-
-    await helloRow.trigger('contextmenu', { clientX: 100, clientY: 100 })
-    await w.vm.$nextTick()
-    await flushPromises()
-    const reopenedMenu = document.querySelector('.tree-context-menu')!
-    const history = Array.from(reopenedMenu.querySelectorAll('button'))
-      .find((button) => button.textContent?.includes('查看文件历史')) as HTMLButtonElement
-    history.click()
-    await flushPromises()
-    expect(w.emitted('open-history')).toEqual([['inbox/hello']])
 
     w.unmount()
   })
@@ -269,7 +259,7 @@ describe('FileTree context menu — Diary presentation guards', () => {
     w.unmount()
   })
 
-  it('hides managed Diary rename/history/move while retaining export and delete', async () => {
+  it('hides managed Diary rename/move while retaining export and delete', async () => {
     const w = mount(FileTree, { props: { tree: DIARY_TREE, currentPath: null }, attachTo: document.body })
     const diaryRow = w.findAll('li.tree-row').find((row: any) => row.find('.row-name')?.text() === 'diary')!
     await diaryRow.find('.chevron').trigger('click')
@@ -289,7 +279,7 @@ describe('FileTree context menu — Diary presentation guards', () => {
     w.unmount()
   })
 
-  it('keeps file history visible for an unmanaged diary file', async () => {
+  it('keeps ordinary file actions for an unmanaged Diary file without a history entry', async () => {
     const w = mount(FileTree, { props: { tree: DIARY_TREE, currentPath: null }, attachTo: document.body })
     const diaryRow = w.findAll('li.tree-row').find((row: any) => row.find('.row-name')?.text() === 'diary')!
     await diaryRow.find('.chevron').trigger('click')
@@ -301,7 +291,10 @@ describe('FileTree context menu — Diary presentation guards', () => {
 
     const menu = document.querySelector('.tree-context-menu')
     expect(menu).not.toBeNull()
-    expect(menu!.textContent).toContain('查看文件历史')
+    expect(menu!.textContent).not.toContain('查看文件历史')
+    expect(menu!.textContent).toContain('重命名')
+    expect(menu!.textContent).toContain('导出 PDF')
+    expect(menu!.textContent).toContain('删除')
     w.unmount()
   })
 })

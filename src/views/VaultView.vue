@@ -29,7 +29,7 @@ import { deriveDocumentSavePresentation } from '../composables/vault/editor-tabs
 import { useHistory } from '../composables/vault/useHistory'
 import { useHistoryCommit } from '../composables/vault/useHistoryCommit'
 import { useHistoryWithdraw } from '../composables/vault/useHistoryWithdraw'
-import { resolveFileHistoryTarget, useFileHistory } from '../composables/vault/useFileHistory'
+import { useFileHistory } from '../composables/vault/useFileHistory'
 import { createPathMutationLock } from '../composables/vault/pathMutationLock'
 import {
   useHistoryRestore,
@@ -1093,11 +1093,6 @@ async function deleteSelectedRecovery(): Promise<void> {
 const history = useHistory(vaultContext)
 const sidebarFileHistory = useFileHistory(locale)
 const rightRailFileHistory = useFileHistory(locale)
-
-function openFileHistory(path: string): void {
-  void sidebarFileHistory.open(resolveFileHistoryTarget(path, posts.value))
-  selectPanel('history')
-}
 
 function showAllHistory(): void {
   sidebarFileHistory.clear()
@@ -2627,7 +2622,6 @@ watch(isReadMode, async (reading) => {
       @select="openPost"
       @refresh="refresh"
       @export-pdf="exportPdfDocument"
-      @open-history="openFileHistory"
     />
     <TagPanel
       v-else-if="workspaceLeftSidebarVisible && activePanel === 'tags'"

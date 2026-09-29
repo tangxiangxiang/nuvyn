@@ -177,16 +177,14 @@ describe('VaultView editor tab wiring', () => {
     expect(source).not.toContain("activePanel === 'history'\" class=\"content content-diff\"")
   })
 
-  it('owns a fixed file-history target independently from active editor tabs', () => {
+  it('keeps sidebar and right-rail file history independent from active editor tabs', () => {
     const source = readFileSync(fileURLToPath(new URL('../VaultView.vue', import.meta.url)), 'utf8')
-    const openHandler = source.match(/function openFileHistory[\s\S]*?\n}/)?.[0]
 
     expect(source).toContain('const sidebarFileHistory = useFileHistory(locale)')
     expect(source).toContain('const rightRailFileHistory = useFileHistory(locale)')
-    expect(source).toContain('resolveFileHistoryTarget(path, posts.value)')
-    expect(openHandler).toContain('sidebarFileHistory.open(resolveFileHistoryTarget(path, posts.value))')
-    expect(openHandler).toContain("selectPanel('history')")
-    expect(source).toContain('@open-history="openFileHistory"')
+    expect(source).not.toContain('function openFileHistory')
+    expect(source).not.toContain('@open-history="openFileHistory"')
+    expect(source).not.toContain('resolveFileHistoryTarget')
     expect(source).toContain(':file-history="sidebarFileHistory"')
     expect(source).toContain(':file-history="rightRailFileHistory"')
     expect(source).toContain('@show-all-history="showAllHistory"')
