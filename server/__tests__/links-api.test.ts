@@ -280,6 +280,29 @@ describe('write routes update the index', () => {
     expect(snap.paths).toContain('fresh')
   })
 
+  it('POST target creation restores backlinks from a broken reference after cold indexing', async () => {
+    await fs.writeFile(path.join(sandbox, 'a.md'), '# a\nsee [[future]]', 'utf8')
+    __resetLinkIndexForTesting()
+
+    const cold = await get('/api/links/index')
+    expect(cold.status).toBe(200)
+    expect((await cold.json() as { outgoing: Record<string, unknown[]> }).outgoing['a']).toBeUndefined()
+
+    const created = await fetchApp(new Request('http://localhost/api/posts', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ path: 'future', title: 'Future' }),
+    }))
+    expect(created.status).toBe(201)
+
+    const backlinks = await get('/api/backlinks?path=future')
+    expect((await backlinks.json() as Array<{ source: string }>).map((item) => item.source)).toEqual(['a'])
+    const refreshed = await get('/api/links/index')
+    expect((await refreshed.json() as {
+      outgoing: Record<string, Array<{ target: string }>>
+    }).outgoing['a']?.map((item) => item.target)).toEqual(['future'])
+  })
+
   it('PATCH /api/folders cascades the index', async () => {
     // Build a 'notes' subtree.
     await fs.mkdir(path.join(sandbox, 'notes'))

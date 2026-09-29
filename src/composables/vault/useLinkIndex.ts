@@ -43,6 +43,7 @@ interface LinkIndexStore {
   activeStop: (() => void) | null
   subInstallCount: number
   generation: number
+  refreshRun: number
 }
 
 let stores = new WeakMap<VaultFileChanges, LinkIndexStore>()
@@ -59,7 +60,13 @@ function getStore(fileChanges?: VaultFileChanges): LinkIndexStore {
   const owner = resolveFileChanges(fileChanges)
   let store = stores.get(owner)
   if (!store) {
-    store = { state: shallowRef(makeInitialState()), activeStop: null, subInstallCount: 0, generation: 0 }
+    store = {
+      state: shallowRef(makeInitialState()),
+      activeStop: null,
+      subInstallCount: 0,
+      generation: 0,
+      refreshRun: 0,
+    }
     stores.set(owner, store)
   }
   return store
@@ -77,9 +84,10 @@ export async function refreshLinkIndex(fileChanges?: VaultFileChanges): Promise<
   const owner = resolveFileChanges(fileChanges)
   const store = getStore(owner)
   const generation = store.generation
+  const run = ++store.refreshRun
   try {
     const snap: LinkIndexSnapshot = await getLinkIndexSnapshot()
-    if (store.generation !== generation) return
+    if (store.generation !== generation || store.refreshRun !== run) return
     const outgoing = Object.fromEntries(Object.entries(snap.outgoing ?? {})
       .filter(([source]) => !isManagedDiaryPath(source))
       .map(([source, links]) => [source, links.filter((link) => !isManagedDiaryPath(link.target))]))
@@ -95,7 +103,7 @@ export async function refreshLinkIndex(fileChanges?: VaultFileChanges): Promise<
     }
     // Always initialize this Vault's store (so a refresh called before
     // any consumer reads `getLinkIndex()` still produces state).
-    getLinkIndex(fileChanges).value = next
+    store.state.value = next
   } catch {
     // ignore — keep the previous state
   }
@@ -107,6 +115,7 @@ export async function refreshLinkIndex(fileChanges?: VaultFileChanges): Promise<
 export function clearLinkIndex(fileChanges?: VaultFileChanges): void {
   const store = getStore(fileChanges)
   store.generation += 1
+  store.refreshRun += 1
   store.state.value = makeInitialState()
 }
 

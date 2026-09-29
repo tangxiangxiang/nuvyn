@@ -42,6 +42,7 @@ const fileBus = vaultContext?.fileChanges.events ?? getFallbackVaultFileChanges(
 const { linksEmpty } = useVaultTocState()
 
 const backlinks = ref<BacklinkRecord[]>([])
+let backlinksRun = 0
 
 /** Path of the outgoing section. Stored separately from `props.path`
  *  so the debounce doesn't fire a re-fetch on every keystroke when
@@ -95,13 +96,16 @@ const outgoingDisplay = computed(() => {
 })
 
 async function refetchBacklinks() {
+  const run = ++backlinksRun
   const p = activePath.value
   if (!p) {
     backlinks.value = []
     return
   }
   try {
-    backlinks.value = await fetchBacklinks(p)
+    const result = await fetchBacklinks(p)
+    if (run !== backlinksRun || activePath.value !== p) return
+    backlinks.value = result
   } catch {
     // Network blip; keep the previous list. The next debounce will retry.
   }
@@ -133,6 +137,7 @@ onMounted(() => {
 })
 
 onBeforeUnmount(() => {
+  backlinksRun += 1
   if (busStop) {
     busStop()
     busStop = null
@@ -142,11 +147,15 @@ onBeforeUnmount(() => {
 // Re-fetch when the active path changes (no debounce — switching
 // notes is a discrete user action).
 watch(activePath, () => {
+  // A path switch must never present the previous note's backlinks while
+  // the new request is pending or if it fails. Same-path refreshes leave
+  // the current presentation untouched on transient errors.
+  backlinks.value = []
   // Cancel any pending debounce — a path change overrides it.
   const d = debouncedRefetch as { cancel?: () => void }
   d.cancel?.()
   void refetchBacklinks()
-})
+}, { flush: 'sync' })
 
 const isEmpty = computed(() =>
   !activePath.value ||

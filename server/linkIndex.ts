@@ -4,6 +4,8 @@
 //
 // Storage shape:
 //   forward: Map<sourcePath, Link[]>  — every resolved outbound link
+//   references: Map<sourcePath, LinkReference[]> — lightweight parsed
+//               candidates, including currently broken links
 //   paths:   Set<allKnownPaths>        — existence check
 //
 // We store only the forward map and compute the reverse map on demand.
@@ -65,6 +67,16 @@ export interface LinkIndexSnapshot {
   titles: Record<string, string>
 }
 
+/** A parsed vault-internal reference before checking whether its target
+ * currently exists. Keeping these candidates lets path membership changes
+ * restore links without rereading the source Markdown. */
+interface LinkReference {
+  ref: string
+  alias?: string
+  anchor?: string
+  kind: 'wiki' | 'md'
+}
+
 // ---------- extraction ----------
 
 // Wiki link: [[ref]] / [[ref#anchor]] / [[ref|alias]] / [[ref#anchor|alias]]
@@ -121,25 +133,12 @@ function isExternalHref(href: string): boolean {
   return false
 }
 
-/** Extract every inter-note link from a raw .md source. The `sourcePath`
- *  is needed for same-dir resolution; `allPaths` is the set of known
- *  vault paths used by the resolver. Broken links (target not in
- *  `allPaths`) are silently dropped — the renderer uses `hasPath` to
- *  mark them as missing in the UI.
- *
- *  Duplicates (same target + anchor, regardless of syntax or alias)
- *  are collapsed to the first occurrence, in document order. The
- *  LinksPanel and the wiki-link renderer should never show the same
- *  destination twice from the same source file — that's almost
- *  always an authoring slip, not an intentional annotation. */
-export function extractLinks(
-  raw: string,
-  sourcePath: string,
-  allPaths: string[],
-): Link[] {
+/** Parse vault-internal link syntax without resolving targets. The source
+ * order is retained across Wiki and Markdown forms so the resolution stage
+ * can apply the existing first-occurrence dedupe contract. */
+function extractLinkReferences(raw: string): LinkReference[] {
   const body = stripCode(stripFrontmatter(raw))
-  const out: Link[] = []
-  const seen = new Set<string>()
+  const ordered: Array<{ offset: number; reference: LinkReference }> = []
 
   // Wiki links
   for (const m of body.matchAll(WIKI_LINK_RE)) {
@@ -147,12 +146,7 @@ export function extractLinks(
     if (!ref) continue
     const anchor = m[2]?.trim() || undefined
     const alias = m[3]?.trim() || undefined
-    const resolved = resolveWikiTarget(ref, sourcePath, allPaths)
-    if (!resolved) continue
-    const key = resolved + '\0' + (anchor ?? '')
-    if (seen.has(key)) continue
-    seen.add(key)
-    out.push({ target: resolved, alias, anchor, kind: 'wiki' })
+    ordered.push({ offset: m.index, reference: { ref, alias, anchor, kind: 'wiki' } })
   }
 
   // Standard markdown links — only vault-internal ones count.
@@ -168,21 +162,55 @@ export function extractLinks(
     const queryIdx = pathPart.indexOf('?')
     const cleanPath = queryIdx === -1 ? pathPart : pathPart.slice(0, queryIdx)
     if (!cleanPath) continue
-    const resolved = resolveWikiTarget(cleanPath, sourcePath, allPaths)
-    if (!resolved) continue
-    const key = resolved + '\0' + (anchor ?? '')
-    if (seen.has(key)) continue
-    seen.add(key)
-    out.push({ target: resolved, alias: text, anchor, kind: 'md' })
+    ordered.push({ offset: m.index, reference: { ref: cleanPath, alias: text, anchor, kind: 'md' } })
   }
 
+  ordered.sort((a, b) => a.offset - b.offset)
+  return ordered.map(({ reference }) => reference)
+}
+
+/** Resolve parsed candidates against the current vault path membership.
+ * Broken links remain in the source candidate store, but never enter the
+ * public relationship projection until they resolve. */
+function resolveLinkReferences(
+  references: LinkReference[],
+  sourcePath: string,
+  allPaths: string[],
+): Link[] {
+  const out: Link[] = []
+  const seen = new Set<string>()
+  for (const reference of references) {
+    const resolved = resolveWikiTarget(reference.ref, sourcePath, allPaths)
+    if (!resolved) continue
+    const key = resolved + '\0' + (reference.anchor ?? '')
+    if (seen.has(key)) continue
+    seen.add(key)
+    out.push({
+      target: resolved,
+      alias: reference.alias,
+      anchor: reference.anchor,
+      kind: reference.kind,
+    })
+  }
   return out
+}
+
+/** Extract every currently resolvable inter-note link. The public helper
+ * keeps its existing wire-compatible behavior; unresolved references are
+ * retained only by LinkIndex's private candidate map. */
+export function extractLinks(
+  raw: string,
+  sourcePath: string,
+  allPaths: string[],
+): Link[] {
+  return resolveLinkReferences(extractLinkReferences(raw), sourcePath, allPaths)
 }
 
 // ---------- index ----------
 
 export class LinkIndex {
   private forward = new Map<string, Link[]>()
+  private references = new Map<string, LinkReference[]>()
   private paths = new Set<string>()
   private titles = new Map<string, string>()
 
@@ -195,6 +223,7 @@ export class LinkIndex {
     canReadBody?: (path: string) => boolean,
   ): Promise<void> {
     this.forward.clear()
+    this.references.clear()
     this.paths.clear()
     this.titles.clear()
     const posts = await listPostsFlat(rootDir, useMetadataDb ? getDb() : null)
@@ -205,12 +234,13 @@ export class LinkIndex {
       // index, even transiently during a cold rebuild.
       this.titles.set(p.path, isManagedDiaryPath(p.path) ? nameFromPath(p.path) : p.title)
     }
-    const allPaths = Array.from(this.paths)
     if (canReadBody) {
       const denied = posts.find((p) =>
         classifyDiaryPath(p.path) === 'managed' && !canReadBody(p.path))
       if (denied) throw new LinkIndexBodyAccessError(denied.path)
     }
+    // Extract ordinary source candidates only after structural listing has
+    // completed, and resolve them together against that complete path set.
     for (const p of posts) {
       // Managed Diary bytes are ciphertext envelopes.  Structural listing
       // already registered the path/title above, so deliberately skip the
@@ -228,17 +258,20 @@ export class LinkIndex {
         // will be consistent.
         continue
       }
-      const links = extractLinks(raw, p.path, allPaths)
-      if (links.length > 0) this.forward.set(p.path, links)
+      const references = extractLinkReferences(raw)
+      if (references.length > 0) this.references.set(p.path, references)
     }
+    this.recomputeAllSources()
   }
 
   /** Add a path to the existence set without extracting. Used by
    *  tests (and any caller that needs to pre-register a target
    *  before writing a file that links to it). */
   registerPath(path: string, title = nameFromPath(path)): void {
+    const isNew = !this.paths.has(path)
     this.paths.add(path)
     this.titles.set(path, isManagedDiaryPath(path) ? nameFromPath(path) : title)
+    if (isNew) this.recomputeAllSources()
   }
 
   setTitle(path: string, title: string): void {
@@ -250,68 +283,117 @@ export class LinkIndex {
   /** Re-extract links for a single file. Used after a write or after
    *  a rename (with the new path). */
   applyWrite(path: string, raw: string): void {
-    this.forward.delete(path)
+    const isNew = !this.paths.has(path)
     this.paths.add(path)
     if (isManagedDiaryPath(path)) {
       // Structural/no-op semantics for managed Diary.  The caller may have
       // an authorized plaintext buffer in memory, but it must never enter
       // this process-wide derived state.
+      this.references.delete(path)
+      this.forward.delete(path)
       this.titles.set(path, nameFromPath(path))
+      if (isNew) this.recomputeAllSources()
       return
     }
     this.titles.set(path, titleFromRaw(path, raw))
-    const allPaths = Array.from(this.paths)
-    const links = extractLinks(raw, path, allPaths)
-    if (links.length > 0) this.forward.set(path, links)
+    const references = extractLinkReferences(raw)
+    if (references.length > 0) this.references.set(path, references)
+    else this.references.delete(path)
+    if (isNew) this.recomputeAllSources()
+    else this.recomputeSource(path)
   }
 
-  /** Remove a file from the index. Also drops any dangling references
-   *  in other files' forward entries (a file linking to a now-deleted
-   *  note is no longer a valid inter-note link). */
+  /** Remove a file from the index and re-project every retained reference
+   * against the new membership. References from remaining sources are kept
+   * so deleting and recreating a target restores their relationships. */
   applyDelete(path: string): void {
-    this.forward.delete(path)
-    this.paths.delete(path)
-    this.titles.delete(path)
-    for (const [source, links] of this.forward) {
-      const filtered = links.filter((l) => l.target !== path)
-      if (filtered.length === 0) {
-        this.forward.delete(source)
-      } else if (filtered.length !== links.length) {
-        this.forward.set(source, filtered)
-      }
-    }
+    this.removePathState(path)
+    this.recomputeAllSources()
   }
 
-  /** Rename: drop the old path, re-extract at the new path. The new
-   *  path's outbound links are resolved against the updated `paths`
-   *  set; other files that previously linked to the old path lose
-   *  those dangling references via `applyDelete`. */
+  /** Rename: change membership, parse the supplied new source at its new
+   * path, then re-project all candidates once against the final path set. */
   applyRename(oldPath: string, newPath: string, newRaw: string): void {
-    this.applyDelete(oldPath)
-    this.applyWrite(newPath, newRaw)
+    this.removePathState(oldPath)
+    this.registerPathWithoutRecompute(newPath, isManagedDiaryPath(newPath)
+      ? nameFromPath(newPath)
+      : titleFromRaw(newPath, newRaw))
+    this.setReferencesFromRaw(newPath, newRaw)
+    this.recomputeAllSources()
   }
 
   /** Cascade delete for a folder subtree. */
   applyFolderDelete(paths: string[]): void {
-    for (const p of paths) this.applyDelete(p)
+    for (const p of paths) this.removePathState(p)
+    this.recomputeAllSources()
   }
 
-  /** Cascade rename: every file in `oldToNew` is dropped from its old
-   *  path and re-extracted at its new path. The new paths are
-   *  pre-registered BEFORE the writes run so that extraction during
-   *  `applyWrite` can resolve inter-cascade links (e.g. a file moving
-   *  to a new folder that links to a sibling in the same cascade). */
+  /** Cascade rename: remove old memberships, install all new paths and
+   * candidates, then project once so inter-cascade links resolve against
+   * the final tree (including siblings moved in the same operation). */
   applyFolderRename(
     oldToNew: Array<{ oldPath: string; newPath: string; newRaw: string }>,
   ): void {
-    for (const { oldPath } of oldToNew) this.applyDelete(oldPath)
-    for (const { newPath } of oldToNew) this.paths.add(newPath)
-    for (const { newPath, newRaw } of oldToNew) this.applyWrite(newPath, newRaw)
+    for (const { oldPath } of oldToNew) this.removePathState(oldPath)
+    for (const { newPath, newRaw } of oldToNew) {
+      const title = isManagedDiaryPath(newPath) ? nameFromPath(newPath) : titleFromRaw(newPath, newRaw)
+      this.registerPathWithoutRecompute(newPath, title)
+      this.setReferencesFromRaw(newPath, newRaw)
+    }
+    this.recomputeAllSources()
+  }
+
+  private registerPathWithoutRecompute(path: string, title = nameFromPath(path)): void {
+    this.paths.add(path)
+    this.titles.set(path, isManagedDiaryPath(path) ? nameFromPath(path) : title)
+  }
+
+  private removePathState(path: string): void {
+    this.references.delete(path)
+    this.forward.delete(path)
+    this.paths.delete(path)
+    this.titles.delete(path)
+  }
+
+  private setReferencesFromRaw(path: string, raw: string): void {
+    if (isManagedDiaryPath(path)) {
+      this.references.delete(path)
+      this.forward.delete(path)
+      return
+    }
+    const references = extractLinkReferences(raw)
+    if (references.length > 0) this.references.set(path, references)
+    else this.references.delete(path)
+  }
+
+  private recomputeSource(sourcePath: string, allPaths = Array.from(this.paths)): void {
+    if (isManagedDiaryPath(sourcePath)) {
+      this.references.delete(sourcePath)
+      this.forward.delete(sourcePath)
+      return
+    }
+    const references = this.references.get(sourcePath)
+    if (!references?.length || !this.paths.has(sourcePath)) {
+      this.forward.delete(sourcePath)
+      return
+    }
+    const links = resolveLinkReferences(references, sourcePath, allPaths)
+      .filter((link) => !isManagedDiaryPath(link.target))
+    if (links.length > 0) this.forward.set(sourcePath, links)
+    else this.forward.delete(sourcePath)
+  }
+
+  private recomputeAllSources(): void {
+    const allPaths = Array.from(this.paths)
+    for (const sourcePath of Array.from(this.forward.keys())) {
+      if (!this.references.has(sourcePath)) this.forward.delete(sourcePath)
+    }
+    for (const sourcePath of Array.from(this.references.keys())) this.recomputeSource(sourcePath, allPaths)
   }
 
   /** Reverse lookup. Returns one record per source file. The forward
    *  map already dedupes on (target, anchor) per source via
-   *  `extractLinks`, so a source that links to the same target twice
+   *  resolution projection, so a source that links to the same target twice
    *  appears here only once. */
   getBacklinks(target: string): BacklinkRecord[] {
     // A managed Diary target is private body-derived relation data.  The
@@ -359,6 +441,9 @@ export class LinkIndex {
    *  retained by a pre-D8.3 warm index. Filtering only at the response layer
    *  would still leave private links/titles in process memory. */
   purgeManagedDiaryState(): void {
+    for (const source of this.references.keys()) {
+      if (isManagedDiaryPath(source)) this.references.delete(source)
+    }
     for (const [source, links] of this.forward) {
       if (isManagedDiaryPath(source)) {
         this.forward.delete(source)

@@ -203,6 +203,16 @@ describe('extractLinks', () => {
     expect(links[0].alias).toBe('greeting')
   })
 
+  it('dedupes mixed syntax by document order after resolution', () => {
+    const links = extractLinks(
+      'see [first](hello.md) then [[hello|second]]',
+      'notes/draft',
+      allPaths,
+    )
+    expect(links).toHaveLength(1)
+    expect(links[0]).toMatchObject({ target: 'hello', alias: 'first', kind: 'md' })
+  })
+
   it('strips trailing .md from md-link hrefs before resolving', () => {
     const links = extractLinks('see [t](hello.md)', 'notes/draft', allPaths)
     expect(links).toHaveLength(1)
@@ -248,6 +258,62 @@ describe('LinkIndex', () => {
 
     idx.applyWrite('a', '# a (rewritten, no links)')
     expect(idx.getBacklinks('b')).toEqual([])
+  })
+
+  it('restores a broken Wiki reference when its target is created', () => {
+    const idx = new LinkIndex()
+    idx.applyWrite('a', 'see [[future]]')
+    expect(idx.snapshot().outgoing['a']).toBeUndefined()
+    expect(idx.getBacklinks('future')).toEqual([])
+
+    idx.applyWrite('future', '# Future')
+
+    expect(idx.snapshot().outgoing['a']).toEqual([
+      { target: 'future', alias: undefined, anchor: undefined, kind: 'wiki' },
+    ])
+    expect(idx.getBacklinks('future')).toEqual([
+      { source: 'a', alias: undefined, anchor: undefined, kind: 'wiki' },
+    ])
+  })
+
+  it('restores references after a target is deleted and recreated at the same path', () => {
+    const idx = new LinkIndex()
+    idx.applyWrite('b', '# B')
+    idx.applyWrite('a', '[[b]]')
+    expect(idx.snapshot().outgoing['a']?.[0]?.target).toBe('b')
+
+    idx.applyDelete('b')
+    expect(idx.snapshot().outgoing['a']).toBeUndefined()
+    expect(idx.getBacklinks('b')).toEqual([])
+
+    idx.applyWrite('b', '# New B')
+    expect(idx.snapshot().outgoing['a']?.[0]?.target).toBe('b')
+    expect(idx.getBacklinks('b').map((item) => item.source)).toEqual(['a'])
+  })
+
+  it('restores a broken standard Markdown reference when its target is created', () => {
+    const idx = new LinkIndex()
+    idx.applyWrite('a', 'see [Future](future.md)')
+    expect(idx.snapshot().outgoing['a']).toBeUndefined()
+
+    idx.applyWrite('future', '# Future')
+
+    expect(idx.snapshot().outgoing['a']).toEqual([
+      { target: 'future', alias: 'Future', anchor: undefined, kind: 'md' },
+    ])
+    expect(idx.getBacklinks('future').map((item) => item.source)).toEqual(['a'])
+  })
+
+  it('retains broken candidates from a cold rebuild for later path resolution', async () => {
+    await writeFile('a.md', '# A\nsee [[future]]')
+    const idx = new LinkIndex()
+    await idx.rebuild(sandbox)
+    expect(idx.snapshot().outgoing['a']).toBeUndefined()
+
+    idx.applyWrite('future', '# Future')
+
+    expect(idx.snapshot().outgoing['a']?.[0]?.target).toBe('future')
+    expect(idx.getBacklinks('future').map((item) => item.source)).toEqual(['a'])
   })
 
   it('applyDelete removes the source AND drops dangling references in other files', () => {

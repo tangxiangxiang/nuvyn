@@ -8,6 +8,7 @@ import { mount } from '@vue/test-utils'
 import {
   getLinkIndex,
   refreshLinkIndex,
+  clearLinkIndex,
   useLinkIndexSubscription,
   __resetLinkIndexForTesting,
   __resetLinkIndexSubscriptionForTesting,
@@ -16,11 +17,29 @@ import { __resetFallbackFileChangesForTesting, createVaultFileChanges } from '..
 
 type FetchCall = { url: string; init: RequestInit }
 type FetchResponse = { status: number; body: unknown }
+type QueuedResponse = FetchResponse | (() => Promise<Response>)
 
 let calls: FetchCall[] = []
-let responses: FetchResponse[] = []
-let pendingRoutes: Map<string, FetchResponse> = new Map()
+let responses: QueuedResponse[] = []
+let pendingRoutes: Map<string, QueuedResponse> = new Map()
 let testFileChanges = createVaultFileChanges()
+
+function deferred<T>() {
+  let resolve!: (value: T) => void
+  let reject!: (reason?: unknown) => void
+  const promise = new Promise<T>((res, rej) => {
+    resolve = res
+    reject = rej
+  })
+  return { promise, resolve, reject }
+}
+
+function indexResponse(paths: string[]): Response {
+  return new Response(JSON.stringify({ paths, outgoing: {}, titles: {} }), {
+    status: 200,
+    headers: { 'content-type': 'application/json' },
+  })
+}
 
 function enqueue(method: string, path: string, response: FetchResponse) {
   pendingRoutes.set(`${method} ${path}`, response)
@@ -39,6 +58,7 @@ beforeEach(() => {
     calls.push({ url: u, init: init ?? {} })
     const key = `${m} ${u}`
     const next = pendingRoutes.get(key) ?? responses.shift() ?? { status: 200, body: {} }
+    if (typeof next === 'function') return next()
     return new Response(JSON.stringify(next.body), { status: next.status, headers: { 'content-type': 'application/json' } })
   }) as unknown as typeof fetch
 })
@@ -126,6 +146,58 @@ describe('useLinkIndex', () => {
       const after = getLinkIndex().value
       expect(after.paths).toBe(before.paths)
       expect(after.lastFetched).toBe(before.lastFetched)
+    })
+
+    it('only lets the latest concurrent refresh publish its snapshot', async () => {
+      const oldResponse = deferred<Response>()
+      const newResponse = deferred<Response>()
+      const owner = createVaultFileChanges()
+      responses.push(() => oldResponse.promise, () => newResponse.promise)
+
+      const oldRun = refreshLinkIndex(owner)
+      const newRun = refreshLinkIndex(owner)
+      newResponse.resolve(indexResponse(['new']))
+      await newRun
+      expect(Array.from(getLinkIndex(owner).value.paths)).toEqual(['new'])
+
+      oldResponse.resolve(indexResponse(['old']))
+      await oldRun
+      expect(Array.from(getLinkIndex(owner).value.paths)).toEqual(['new'])
+    })
+
+    it('does not publish an older success after the latest refresh fails', async () => {
+      const oldResponse = deferred<Response>()
+      const newResponse = deferred<Response>()
+      const owner = createVaultFileChanges()
+      const baseline = getLinkIndex(owner)
+      baseline.value = { paths: new Set(['baseline']), outgoing: {}, titles: {}, lastFetched: 1 }
+      responses.push(() => oldResponse.promise, () => newResponse.promise)
+
+      const oldRun = refreshLinkIndex(owner)
+      const newRun = refreshLinkIndex(owner)
+      newResponse.reject(new Error('latest request failed'))
+      await newRun
+      oldResponse.resolve(indexResponse(['old']))
+      await oldRun
+
+      expect(Array.from(baseline.value.paths)).toEqual(['baseline'])
+      expect(baseline.value.lastFetched).toBe(1)
+    })
+
+    it('keeps a pre-clear response from repopulating the store', async () => {
+      const response = deferred<Response>()
+      const owner = createVaultFileChanges()
+      const state = getLinkIndex(owner)
+      state.value = { paths: new Set(['before']), outgoing: {}, titles: {}, lastFetched: 1 }
+      responses.push(() => response.promise)
+
+      const pending = refreshLinkIndex(owner)
+      clearLinkIndex(owner)
+      response.resolve(indexResponse(['stale']))
+      await pending
+
+      expect(state.value.paths.size).toBe(0)
+      expect(state.value.lastFetched).toBe(0)
     })
   })
 
