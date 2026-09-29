@@ -643,3 +643,8 @@ export const test = authTest.extend<{}, {
 
 export { expect }
 export type { APIRequestContext }
+
+export async function closeCurrentDiaryDocument(page: Page): Promise<void> {
+  await page.locator('.vault').focus()
+  await page.keyboard.press('ControlOrMeta+W')
+}

@@ -113,9 +113,9 @@ async function openDiaryHome(page: Page): Promise<void> {
 async function ensureExplorerVisible(page: Page): Promise<void> {
   const fileTree = page.locator('.file-tree')
   if (!(await fileTree.isVisible())) {
-    const explorer = page.locator('button.ab-btn[aria-label^="Explorer"], button.ab-btn[aria-label^="文件资源管理器"]').first()
-    await expect(explorer).toBeVisible()
-    if (await explorer.getAttribute('aria-pressed') !== 'true') await explorer.click()
+    const leftPanelToggle = page.getByTestId('left-panel-toggle')
+    await expect(leftPanelToggle).toBeVisible()
+    if (await leftPanelToggle.getAttribute('aria-pressed') !== 'true') await leftPanelToggle.click()
   }
   await expect(fileTree).toBeVisible({ timeout: 15_000 })
 }
@@ -179,7 +179,7 @@ test.beforeEach(async ({ page }) => {
   await gotoVaultReady(page)
 })
 
-test('Native Editor dirty lifecycle preserves identity and reveals Calendar only after final tab close', async ({ page, request }) => {
+test('Native Editor dirty lifecycle preserves identity and reveals Calendar after Cmd/Ctrl+W close', async ({ page, request }) => {
   const date = localCivilDate()
   const path = diaryPath(date)
   const baseRaw = `# D6.4 Native Editor ${RUN_ID} — Initial body ${RUN_ID}`
@@ -216,8 +216,8 @@ test('Native Editor dirty lifecycle preserves identity and reveals Calendar only
     await expect(page.locator(`[role="tab"][data-tab-id="${path}"]`)).toHaveAttribute('aria-selected', 'true')
     await expect(page.locator('.n-dialog[role="dialog"]')).toHaveCount(0)
 
-    // Calendar Home remains hidden while a managed Diary tab is open. A real
-    // dirty tab close continues to use the existing confirmation policy.
+    // Calendar Home remains hidden while a managed Diary document is open.
+    // Cmd/Ctrl+W continues to use the existing dirty confirmation policy.
     await page.locator('.vault').focus()
     await page.keyboard.press('ControlOrMeta+W')
     const calendarCloseConfirmation = page.locator('.n-dialog[role="dialog"]')
@@ -308,7 +308,7 @@ test.skip('D8.2: managed Diary History Comparison waits for an adapter-aware own
     autosaveInstalled = true
     await setEditorContent(page, liveRaw)
     await appendEditorText(page, dirtyMarker)
-    await expect(page.locator(`[data-tab-id="${path}"][data-save-status="dirty"]`)).toBeVisible({ timeout: 15_000 })
+    await expect(page.locator(`[role="tab"][data-tab-id="${path}"]`)).toHaveAttribute('data-save-status', 'dirty', { timeout: 15_000 })
     await expect.poll(() => draftRowCount(page, dirtyMarker), { timeout: 15_000 }).toBeGreaterThanOrEqual(1)
 
     historyActive = true
@@ -376,7 +376,7 @@ test.skip('D8.2: managed Diary Recovery waits for an encrypted recovery adapter'
     autosaveInstalled = true
     await setEditorContent(page, baseRaw)
     await appendEditorText(page, draftMarker)
-    await expect(page.locator(`[data-tab-id="${path}"][data-save-status="dirty"]`)).toBeVisible({ timeout: 15_000 })
+    await expect(page.locator(`[role="tab"][data-tab-id="${path}"]`)).toHaveAttribute('data-save-status', 'dirty', { timeout: 15_000 })
     await expect.poll(() => draftRowCount(page, draftMarker), { timeout: 15_000 }).toBeGreaterThanOrEqual(1)
 
     await fs.appendFile(
@@ -533,7 +533,7 @@ test.skip('D8.2: managed Diary baseline Recovery waits for an encrypted recovery
     await interceptAutosaveAborted(page, path)
     browserAutosaveInstalled = true
     await setEditorContent(page, recoveredRaw)
-    await expect(page.locator(`[data-tab-id="${path}"][data-save-status="dirty"]`)).toBeVisible({ timeout: 15_000 })
+    await expect(page.locator(`[role="tab"][data-tab-id="${path}"]`)).toHaveAttribute('data-save-status', 'dirty', { timeout: 15_000 })
     await expect.poll(() => draftRowCount(page, recoveredMarker), { timeout: 15_000 }).toBeGreaterThanOrEqual(1)
 
     await page.reload()
@@ -555,7 +555,7 @@ test.skip('D8.2: managed Diary baseline Recovery waits for an encrypted recovery
     browserAutosaveInstalled = false
     await page.locator('.vault').focus()
     await page.keyboard.press('Control+s')
-    await expect(page.locator(`[data-tab-id="${path}"][data-save-status="saved"]`)).toBeVisible({ timeout: 15_000 })
+    await expect(page.locator(`[role="tab"][data-tab-id="${path}"]`)).toHaveAttribute('data-save-status', 'saved', { timeout: 15_000 })
     const saved = await (await request.get(`/api/posts/${path}`)).json()
     expect(saved.raw).toBe(recoveredRaw)
     expect(saved.metadata.id).toBe(document.documentId)

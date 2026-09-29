@@ -1,4 +1,4 @@
-import { expect, test, type APIRequestContext, type Page } from './fixtures/diary'
+import { closeCurrentDiaryDocument, expect, test, type APIRequestContext, type Page } from './fixtures/diary'
 import {
   appendEditorText,
   clearDraftDatabase,
@@ -131,9 +131,16 @@ async function activateDiaryDate(page: Page, date: string, method: 'mouse' | 'ke
 async function ensureExplorerVisible(page: Page): Promise<void> {
   const fileTree = page.locator('.file-tree')
   if (!(await fileTree.isVisible())) {
-    const explorer = page.getByRole('button', { name: /Explorer|文件资源管理器/i })
-    await expect(explorer).toBeVisible()
-    if (await explorer.getAttribute('aria-pressed') !== 'true') await explorer.click()
+    const diaryScope = page.locator('.scope-chip').filter({ hasText: 'diary' })
+    if (await diaryScope.getAttribute('aria-pressed') === 'true') {
+      const leftPanelToggle = page.getByTestId('left-panel-toggle')
+      await expect(leftPanelToggle).toBeVisible()
+      if (await leftPanelToggle.getAttribute('aria-pressed') !== 'true') await leftPanelToggle.click()
+    } else {
+      const explorer = page.getByRole('button', { name: /Explorer|文件资源管理器/i })
+      await expect(explorer).toBeVisible()
+      if (await explorer.getAttribute('aria-pressed') !== 'true') await explorer.click()
+    }
   }
   await expect(fileTree).toBeVisible({ timeout: 15_000 })
 }
@@ -480,10 +487,11 @@ test('mobile Calendar-to-native keyboard journey preserves focus, shortcuts, and
 
     const editorMarker = `KEYBOARD_SAVE_${RUN_ID}`
     await appendEditorText(page, editorMarker)
-    await expect(page.locator(`[data-tab-id="${path}"][data-save-status="dirty"]`)).toBeVisible({ timeout: 15_000 })
+    await expect(tab).toHaveCount(1)
+    await expect(tab).toHaveAttribute('data-save-status', 'dirty', { timeout: 15_000 })
     await page.locator('.vault').focus()
     await page.keyboard.press('ControlOrMeta+s')
-    await expect(page.locator(`[data-tab-id="${path}"][data-save-status="saved"]`)).toBeVisible({ timeout: 15_000 })
+    await expect(tab).toHaveAttribute('data-save-status', 'saved', { timeout: 15_000 })
     const saved = await (await request.get(`/api/posts/${path}`)).json() as { raw: string; metadata?: { id?: string } }
     expect(saved.raw).toContain(editorMarker)
     expect(saved.metadata?.id).toBe(seeded.documentId)
@@ -492,7 +500,7 @@ test('mobile Calendar-to-native keyboard journey preserves focus, shortcuts, and
     await expect(page.locator('.reading-pane')).toBeVisible()
     await expect(page.getByRole('textbox', { name: 'Editor content' })).toHaveCount(0)
 
-    await tab.locator('.tab-close').click()
+    await closeCurrentDiaryDocument(page)
     await expect(tab).toHaveCount(0)
     await expect(page.getByTestId('diary-calendar')).toBeVisible()
     await expect(page.getByTestId('diary-workspace-shell')).toHaveAttribute('data-presentation-mode', 'home')
@@ -711,10 +719,11 @@ test('native READ and EDIT remain usable across panel states, breakpoints, and r
 
     await page.setViewportSize({ width: 375, height: 812 })
     await assertNativeRead(page, date)
-    const filesButton = page.getByRole('button', { name: /Explorer|文件资源管理器/i })
-    await expect(filesButton).toHaveAttribute('aria-pressed', 'true')
-    await filesButton.click()
-    await expect(filesButton).toHaveAttribute('aria-pressed', 'false')
+    const leftPanelToggle = page.getByTestId('left-panel-toggle')
+    await expect(leftPanelToggle).toBeVisible()
+    await expect(leftPanelToggle).toHaveAttribute('aria-pressed', 'true')
+    await leftPanelToggle.click()
+    await expect(leftPanelToggle).toHaveAttribute('aria-pressed', 'false')
     await expect(page.locator('.file-tree')).toBeHidden()
     await expect(page.locator('.reading-pane')).toBeVisible()
     for (const viewport of [
@@ -743,7 +752,7 @@ test('native READ and EDIT remain usable across panel states, breakpoints, and r
     expect(closedWide.fileTreeWidth).toBe(0)
     expect(closedWide.rightRailVisible).toBe(true)
 
-    await filesButton.click()
+    await leftPanelToggle.click()
     await expect(page.locator('.file-tree')).toBeVisible()
     const routeBeforeResize = new URL(page.url()).pathname
     const sequence = [
@@ -798,11 +807,12 @@ test('FileTree search keeps keyboard semantics and the user filter across Diary 
     await page.keyboard.press('Enter')
     await expect(page.locator(`[role="tab"][data-tab-id="${diary}"]`)).toHaveAttribute('aria-selected', 'true')
     await expect(search).toHaveValue(userQuery)
+    await expect(page.locator('.vault')).toHaveClass(/diary-native-document-mode/)
 
     const tab = page.locator(`[role="tab"][data-tab-id="${diary}"]`)
-    await tab.locator('.tab-close').click()
-    await expect(tab).toHaveCount(0)
+    await closeCurrentDiaryDocument(page)
     await expect(page.getByTestId('diary-calendar')).toBeVisible()
+    await expect(tab).toHaveCount(0)
     await expect(search).toHaveCount(0)
     await expect(page.locator('.activity-bar')).toHaveCount(0)
   } finally {
@@ -855,7 +865,7 @@ test('ten mixed Calendar focus cycles remain stable without runtime errors', asy
         const root = document.querySelector<HTMLElement>('[data-testid="diary-calendar"]')
         return Boolean(root && document.activeElement && root.contains(document.activeElement))
       })).toBe(false)
-      await tab.locator('.tab-close').click()
+      await closeCurrentDiaryDocument(page)
       await expect(tab).toHaveCount(0)
       await expect(calendar).toBeVisible()
       await expect(page.getByTestId('diary-workspace-shell')).toHaveAttribute('data-presentation-mode', 'home')

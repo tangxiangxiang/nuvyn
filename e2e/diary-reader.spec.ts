@@ -1,6 +1,6 @@
 import { mkdir, rm, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
-import { expect, test, type APIRequestContext, type Page } from './fixtures/diary'
+import { closeCurrentDiaryDocument, expect, test, type APIRequestContext, type Page } from './fixtures/diary'
 import { CALENDAR_TEST_DATE, CALENDAR_TEST_TIME_ZONE, calendarDay } from './helpers/calendar-clock'
 
 const TEST_TIME_ZONE = CALENDAR_TEST_TIME_ZONE
@@ -173,7 +173,7 @@ test('Calendar opens the native Vault reader with the Diary date filter', async 
     await expect(page.locator('.status-bar-row')).toBeVisible()
 
     const tab = page.locator(`[role="tab"][data-tab-id="${path}"]`)
-    await tab.locator('.tab-close').click()
+    await closeCurrentDiaryDocument(page)
     await expect(tab).toHaveCount(0)
     await expect(page.getByTestId('diary-calendar')).toBeVisible()
     await expect(page.getByTestId('diary-calendar')).toHaveAttribute('data-month', monthBefore ?? '')
@@ -204,8 +204,8 @@ test('mobile native Diary documents fill the viewport when the side panel is clo
     await clickDiaryDate(page, date)
     await assertNativeReader(page, date)
 
-    const filesButton = page.getByRole('button', { name: /Explorer|文件资源管理器/i })
-    await expect(filesButton).toHaveAttribute('aria-pressed', 'true')
+    const leftPanelToggle = page.getByTestId('left-panel-toggle')
+    await expect(leftPanelToggle).toHaveAttribute('aria-pressed', 'true')
 
     await page.setViewportSize({ width: 375, height: 812 })
     const openMetrics = await page.evaluate(() => {
@@ -230,8 +230,8 @@ test('mobile native Diary documents fill the viewport when the side panel is clo
     expect(openMetrics.editorLeft).toBeGreaterThanOrEqual(openMetrics.activityBarWidth - 1)
     expect(openMetrics.scrollWidth).toBeLessThanOrEqual(openMetrics.viewportWidth + 1)
 
-    await filesButton.click()
-    await expect(filesButton).toHaveAttribute('aria-pressed', 'false')
+    await leftPanelToggle.click()
+    await expect(leftPanelToggle).toHaveAttribute('aria-pressed', 'false')
     await expect(page.locator('.vault')).not.toHaveClass(/side-panel-open/)
     await expect(page.locator('.file-tree')).toBeHidden()
     await expect(page.locator('.reading-pane')).toBeVisible()
@@ -272,8 +272,8 @@ test('mobile native Diary documents fill the viewport when the side panel is clo
     await page.getByTestId('view-toggle').click()
     await expect(page.locator('.reading-pane')).toBeVisible()
 
-    await filesButton.click()
-    await expect(filesButton).toHaveAttribute('aria-pressed', 'true')
+    await leftPanelToggle.click()
+    await expect(leftPanelToggle).toHaveAttribute('aria-pressed', 'true')
     await expect(page.locator('.file-tree')).toBeVisible()
     await expect(page.locator('.search-input')).toHaveValue(date)
     await expect(page.locator(`[data-tree-key="file:${path}"]`)).toHaveCount(1)
@@ -304,7 +304,7 @@ test('existing today/past enter native READ while unsupported future files and m
       await clickDiaryDate(page, date)
       await assertNativeReader(page, date)
       const tab = page.locator(`[role="tab"][data-tab-id="${diaryPath(date)}"]`)
-      await tab.locator('.tab-close').click()
+      await closeCurrentDiaryDocument(page)
       await expect(tab).toHaveCount(0)
       await expect(page.getByTestId('diary-calendar')).toBeVisible()
     }
@@ -473,7 +473,7 @@ test('native document handoff remains stable across five cycles without dayIndex
       await clickDiaryDate(page, date)
       await assertNativeReader(page, date)
       const tab = page.locator(`[role="tab"][data-tab-id="${diaryPath(date)}"]`)
-      await tab.locator('.tab-close').click()
+      await closeCurrentDiaryDocument(page)
       await expect(tab).toHaveCount(0)
       await expect(page.getByTestId('diary-calendar')).toBeVisible()
     }

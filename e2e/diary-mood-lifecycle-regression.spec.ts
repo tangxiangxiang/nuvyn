@@ -2,7 +2,7 @@ import { createHash } from 'node:crypto'
 import { promises as fs } from 'node:fs'
 import nodePath from 'node:path'
 import Database from 'better-sqlite3'
-import { expect, test, type APIRequestContext, type Page } from './fixtures/diary'
+import { closeCurrentDiaryDocument, expect, test, type APIRequestContext, type Page } from './fixtures/diary'
 import {
   appendEditorText,
   clearDraftDatabase,
@@ -243,9 +243,16 @@ async function openDiaryHome(page: Page): Promise<void> {
 async function ensureExplorerVisible(page: Page): Promise<void> {
   const fileTree = page.locator('.file-tree')
   if (!(await fileTree.isVisible())) {
-    const explorer = page.locator('button.ab-btn[aria-label^="Explorer"], button.ab-btn[aria-label^="文件资源管理器"]').first()
-    await expect(explorer).toBeVisible()
-    if (await explorer.getAttribute('aria-pressed') !== 'true') await explorer.click()
+    const diaryScope = page.locator('.scope-chip').filter({ hasText: 'diary' })
+    if (await diaryScope.getAttribute('aria-pressed') === 'true') {
+      const leftPanelToggle = page.getByTestId('left-panel-toggle')
+      await expect(leftPanelToggle).toBeVisible()
+      if (await leftPanelToggle.getAttribute('aria-pressed') !== 'true') await leftPanelToggle.click()
+    } else {
+      const explorer = page.locator('button.ab-btn[aria-label^="Explorer"], button.ab-btn[aria-label^="文件资源管理器"]').first()
+      await expect(explorer).toBeVisible()
+      if (await explorer.getAttribute('aria-pressed') !== 'true') await explorer.click()
+    }
   }
   await expect(fileTree).toBeVisible({ timeout: 15_000 })
 }
@@ -287,13 +294,6 @@ async function selectScope(page: Page, scope: 'note' | 'diary'): Promise<void> {
   if (await chip.getAttribute('aria-pressed') !== 'true') await chip.click()
 }
 
-async function selectWorkspaceTab(page: Page, path: string): Promise<void> {
-  const tab = page.locator(`[role="tab"][data-tab-id="${path}"]`)
-  await expect(tab).toHaveCount(1)
-  await tab.click()
-  await expect(tab).toHaveAttribute('aria-selected', 'true')
-}
-
 async function enterEditor(page: Page): Promise<void> {
   const toggle = page.getByTestId('view-toggle')
   const label = await toggle.getAttribute('aria-label')
@@ -333,7 +333,7 @@ test('Mood set/change/clear stays separate from a dirty native Diary body', asyn
     await interceptAutosaveAborted(page, path)
     autosaveInstalled = true
     await appendEditorText(page, dirtyMarker)
-    await expect(page.locator(`[data-tab-id="${path}"][data-save-status="dirty"]`)).toBeVisible({ timeout: 15_000 })
+    await expect(page.locator(`[role="tab"][data-tab-id="${path}"]`)).toHaveAttribute('data-save-status', 'dirty', { timeout: 15_000 })
     // Managed Diary drafts are memory-only in D8.3; no IndexedDB row may be
     // created while the tab is dirty.
     await expect.poll(() => draftRowCount(page, dirtyMarker), { timeout: 15_000 }).toBe(0)
@@ -357,7 +357,7 @@ test('Mood set/change/clear stays separate from a dirty native Diary body', asyn
     autosaveInstalled = false
     await page.locator('.vault').focus()
     await page.keyboard.press('Control+s')
-    await expect(page.locator(`[data-tab-id="${path}"][data-save-status="saved"]`)).toBeVisible({ timeout: 15_000 })
+    await expect(page.locator(`[role="tab"][data-tab-id="${path}"]`)).toHaveAttribute('data-save-status', 'saved', { timeout: 15_000 })
     const saved = await readDiary(request, date)
     expect(normalizeLineEndings(saved.raw)).toBe(normalizeLineEndings(dirtyRaw))
     expect(saved.metadata.mood).toBeNull()
@@ -453,7 +453,7 @@ test('external metadata conflict leaves a dirty native body untouched', async ({
     await interceptAutosaveAborted(page, path)
     autosaveInstalled = true
     await appendEditorText(page, dirtyMarker)
-    await expect(page.locator(`[data-tab-id="${path}"][data-save-status="dirty"]`)).toBeVisible({ timeout: 15_000 })
+    await expect(page.locator(`[role="tab"][data-tab-id="${path}"]`)).toHaveAttribute('data-save-status', 'dirty', { timeout: 15_000 })
     // Managed Diary drafts are memory-only in D8.3; no IndexedDB row may be
     // created while the tab is dirty.
     await expect.poll(() => draftRowCount(page, dirtyMarker), { timeout: 15_000 }).toBe(0)
@@ -495,7 +495,7 @@ test('external metadata conflict leaves a dirty native body untouched', async ({
     autosaveInstalled = false
     await page.locator('.vault').focus()
     await page.keyboard.press('Control+s')
-    await expect(page.locator(`[data-tab-id="${path}"][data-save-status="saved"]`)).toBeVisible({ timeout: 15_000 })
+    await expect(page.locator(`[role="tab"][data-tab-id="${path}"]`)).toHaveAttribute('data-save-status', 'saved', { timeout: 15_000 })
 
     const saved = await readDiary(request, date)
     expect(normalizeLineEndings(saved.raw)).toBe(normalizeLineEndings(dirtyRaw))
@@ -535,7 +535,7 @@ test('native body conflict preserves Mood while resolving through the existing s
     await interceptAutosaveHeld(page, path, autosave, gate)
     browserAutosaveInstalled = true
     await appendEditorText(page, localMarker)
-    await expect(page.locator(`[data-tab-id="${path}"][data-save-status="dirty"]`)).toBeVisible({ timeout: 15_000 })
+    await expect(page.locator(`[role="tab"][data-tab-id="${path}"]`)).toHaveAttribute('data-save-status', 'dirty', { timeout: 15_000 })
     await expect.poll(() => autosave.seen, { timeout: 15_000 }).toBe(true)
 
     const externalWrite = await request.put(`/api/posts/${path}`, {
@@ -551,7 +551,7 @@ test('native body conflict preserves Mood while resolving through the existing s
     releaseAutosave()
     await expect.poll(() => autosave.statuses.length, { timeout: 15_000 }).toBe(1)
     expect(autosave.statuses[0]).toBe(409)
-    await expect(page.locator(`[data-tab-id="${path}"][data-save-status="external"]`)).toBeVisible({ timeout: 15_000 })
+    await expect(page.locator(`[role="tab"][data-tab-id="${path}"]`)).toHaveAttribute('data-save-status', 'external', { timeout: 15_000 })
 
     const conflicted = await readDiary(request, date)
     expect(conflicted.raw).toBe(externalRaw)
@@ -569,7 +569,7 @@ test('native body conflict preserves Mood while resolving through the existing s
     const keepLocal = page.locator('button[aria-label="Keep local version and overwrite disk"]')
     await expect(keepLocal).toBeVisible({ timeout: 15_000 })
     await keepLocal.click()
-    await expect(page.locator(`[data-tab-id="${path}"][data-save-status="saved"]`)).toBeVisible({ timeout: 15_000 })
+    await expect(page.locator(`[role="tab"][data-tab-id="${path}"]`)).toHaveAttribute('data-save-status', 'saved', { timeout: 15_000 })
 
     const resolved = await readDiary(request, date)
     expect(normalizeLineEndings(resolved.raw)).toBe(normalizeLineEndings(localRaw))
@@ -577,7 +577,7 @@ test('native body conflict preserves Mood while resolving through the existing s
     expect(resolved.metadata.mood).toBe('sad')
 
     const tab = page.locator(`[role="tab"][data-tab-id="${path}"]`)
-    await tab.locator('.tab-close').click()
+    await closeCurrentDiaryDocument(page)
     await expect(tab).toHaveCount(0)
     await expect(page.getByTestId('diary-calendar')).toBeVisible()
     await expect(page.locator(`[data-testid="diary-calendar-mood"][data-date="${date}"] img`)).toHaveAttribute('src', '/emoji/伤心.svg')
@@ -616,7 +616,7 @@ test('unknown Mood survives native save, refresh, close, and reopen', async ({ p
     await assertNativeReader(page, date)
     await enterEditor(page)
     await appendEditorText(page, savedMarker)
-    await expect(page.locator(`[data-tab-id="${path}"][data-save-status="saved"]`)).toBeVisible({ timeout: 15_000 })
+    await expect(page.locator(`[role="tab"][data-tab-id="${path}"]`)).toHaveAttribute('data-save-status', 'saved', { timeout: 15_000 })
 
     const saved = await readDiary(request, date)
     expect(normalizeLineEndings(saved.raw)).toBe(normalizeLineEndings(savedRaw))
@@ -638,7 +638,7 @@ test('unknown Mood survives native save, refresh, close, and reopen', async ({ p
     expect(refreshed.metadata.mood).toBe(unknownMood)
 
     const tab = page.locator(`[role="tab"][data-tab-id="${path}"]`)
-    await tab.locator('.tab-close').click()
+    await closeCurrentDiaryDocument(page)
     await expect(tab).toHaveCount(0)
     await expect(page.getByTestId('diary-calendar')).toBeVisible()
     const closedMoodButton = page.locator(`[data-testid="diary-calendar-mood"][data-date="${date}"]`)
@@ -651,7 +651,7 @@ test('unknown Mood survives native save, refresh, close, and reopen', async ({ p
     expect(reopened.metadata.id).toBe(document.documentId)
     expect(reopened.metadata.mood).toBe(unknownMood)
 
-    await page.locator(`[role="tab"][data-tab-id="${path}"] .tab-close`).click()
+    await closeCurrentDiaryDocument(page)
     await expect(page.getByTestId('diary-calendar')).toBeVisible()
     await expect(page.locator(`[data-testid="diary-calendar-mood"][data-date="${date}"]`)).toHaveText('?')
   } finally {
@@ -724,7 +724,7 @@ test.skip('D8.2: managed Diary Mood History restore waits for an adapter-aware o
     await diffTab.locator('.tab-close').click()
     const diaryTab = page.locator(`[role="tab"][data-tab-id="${path}"]`)
     await expect(diaryTab).toHaveCount(1)
-    await diaryTab.locator('.tab-close').click()
+    await closeCurrentDiaryDocument(page)
     await expect(page.getByTestId('diary-calendar')).toBeVisible()
     await expect(page.locator(`[data-testid="diary-calendar-mood"][data-date="${date}"] img`)).toHaveAttribute('src', '/emoji/开心.svg')
   } finally {
@@ -754,7 +754,7 @@ test.skip('D8.2: managed Diary Mood baseline Recovery waits for an encrypted rec
     await interceptAutosaveAborted(page, path)
     autosaveInstalled = true
     await appendEditorText(page, recoveredMarker)
-    await expect(page.locator(`[data-tab-id="${path}"][data-save-status="dirty"]`)).toBeVisible({ timeout: 15_000 })
+    await expect(page.locator(`[role="tab"][data-tab-id="${path}"]`)).toHaveAttribute('data-save-status', 'dirty', { timeout: 15_000 })
     await expect.poll(() => draftRowCount(page, recoveredMarker), { timeout: 15_000 }).toBeGreaterThanOrEqual(1)
 
     await page.reload()
@@ -772,7 +772,7 @@ test.skip('D8.2: managed Diary Mood baseline Recovery waits for an encrypted rec
     autosaveInstalled = false
     await page.locator('.vault').focus()
     await page.keyboard.press('Control+s')
-    await expect(page.locator(`[data-tab-id="${path}"][data-save-status="saved"]`)).toBeVisible({ timeout: 15_000 })
+    await expect(page.locator(`[role="tab"][data-tab-id="${path}"]`)).toHaveAttribute('data-save-status', 'saved', { timeout: 15_000 })
     const saved = await readDiary(request, date)
     expect(normalizeLineEndings(saved.raw)).toBe(normalizeLineEndings(recoveredRaw))
     expect(saved.metadata.id).toBe(document.documentId)
@@ -806,7 +806,7 @@ test.skip('D8.2: managed Diary Mood divergent Recovery waits for an encrypted re
     await interceptAutosaveAborted(page, path)
     autosaveInstalled = true
     await appendEditorText(page, draftMarker)
-    await expect(page.locator(`[data-tab-id="${path}"][data-save-status="dirty"]`)).toBeVisible({ timeout: 15_000 })
+    await expect(page.locator(`[role="tab"][data-tab-id="${path}"]`)).toHaveAttribute('data-save-status', 'dirty', { timeout: 15_000 })
     await expect.poll(() => draftRowCount(page, draftMarker), { timeout: 15_000 }).toBeGreaterThanOrEqual(1)
 
     await fs.appendFile(nodePath.join(E2E_VAULT, `${path}.md`), `\n${diskMarker}\n`, 'utf8')
@@ -881,7 +881,7 @@ test('Mood CAS rejects stale metadata and managed direct delete removes the same
   }
 })
 
-test('navigation preserves same-date Diary identity and Calendar visibility across managed tabs', async ({ page, request }) => {
+test('route navigation preserves Diary identity with one managed document and a hidden tab strip', async ({ page, request }) => {
   const firstDate = await findUnusedDiaryDate(request)
   const secondDate = await findUnusedDiaryDate(request, [firstDate])
   const firstPath = diaryPath(firstDate)
@@ -910,33 +910,30 @@ test('navigation preserves same-date Diary identity and Calendar visibility acro
     await openDiaryHome(page)
     await clickDiaryDate(page, firstDate)
     await assertNativeReader(page, firstDate)
-    await expect(page.locator(`[role="tab"][data-tab-id="${firstPath}"]`)).toHaveCount(1)
+    const firstTab = page.locator(`[role="tab"][data-tab-id="${firstPath}"]`)
+    const secondTab = page.locator(`[role="tab"][data-tab-id="${secondPath}"]`)
+    await expect(firstTab).toHaveCount(1)
+    await expect(page.locator('.tabs')).toBeHidden()
     await expect(page.getByTestId('diary-calendar')).toBeHidden()
 
-    // Opening another existing Diary follows the generic route/tab owner and
-    // must not create a second copy of the first document.
+    // Route navigation switches the single managed Diary slot while keeping
+    // the ordinary workspace tabs underneath it.
     await page.goto(`/vault/${secondPath}`)
     await assertNativeReader(page, secondDate, firstDate)
-    await expect(page.locator(`[role="tab"][data-tab-id="${firstPath}"]`)).toHaveCount(1)
-    await expect(page.locator(`[role="tab"][data-tab-id="${secondPath}"]`)).toHaveCount(1)
+    await expect(firstTab).toHaveCount(0)
+    await expect(secondTab).toHaveCount(1)
+    await expect(page.locator('.tabs')).toBeHidden()
     await expect(page.getByTestId('diary-calendar')).toBeHidden()
 
-    await selectWorkspaceTab(page, firstPath)
+    await page.goto(`/vault/${firstPath}`)
     await assertNativeReader(page, firstDate, firstDate)
-    await expect(page.getByTestId('diary-calendar')).toBeHidden()
-    await selectWorkspaceTab(page, secondPath)
-    await assertNativeReader(page, secondDate, firstDate)
-    await expect(page.getByTestId('diary-calendar')).toBeHidden()
-
-    await page.locator(`[role="tab"][data-tab-id="${secondPath}"] .tab-close`).click()
-    await expect(page.locator(`[role="tab"][data-tab-id="${secondPath}"]`)).toHaveCount(0)
-    await expect(page.locator(`[role="tab"][data-tab-id="${firstPath}"]`)).toHaveAttribute('aria-selected', 'true')
-    await assertNativeReader(page, firstDate, firstDate)
+    await expect(firstTab).toHaveCount(1)
+    await expect(secondTab).toHaveCount(0)
+    await expect(page.locator('.tabs')).toBeHidden()
     await expect(page.getByTestId('diary-calendar')).toBeHidden()
 
-    // Only the final managed Diary close may reveal Calendar Home.
-    await page.locator(`[role="tab"][data-tab-id="${firstPath}"] .tab-close`).click()
-    await expect(page.locator(`[role="tab"][data-tab-id="${firstPath}"]`)).toHaveCount(0)
+    await closeCurrentDiaryDocument(page)
+    await expect(firstTab).toHaveCount(0)
     await expect(page.getByTestId('diary-calendar')).toBeVisible()
     await expect(page.getByTestId('diary-calendar')).toHaveCount(1)
 
@@ -944,10 +941,11 @@ test('navigation preserves same-date Diary identity and Calendar visibility acro
     // it does not create or mutate anything merely by navigating.
     await clickDiaryDate(page, firstDate)
     await assertNativeReader(page, firstDate, firstDate)
-    await expect(page.locator(`[role="tab"][data-tab-id="${firstPath}"]`)).toHaveCount(1)
+    await expect(firstTab).toHaveCount(1)
+    await expect(page.locator('.tabs')).toBeHidden()
     await expect(page.getByTestId('diary-calendar')).toBeHidden()
     await expect(page.getByTestId('diary-calendar')).toHaveCount(1)
-    await page.locator(`[role="tab"][data-tab-id="${firstPath}"] .tab-close`).click()
+    await closeCurrentDiaryDocument(page)
     await expect(page.getByTestId('diary-calendar')).toBeVisible()
 
     const reopened = await readDiary(request, firstDate)
@@ -965,7 +963,7 @@ test('navigation preserves same-date Diary identity and Calendar visibility acro
   expect(state.consoleErrors).toEqual([])
 })
 
-test('scope switching and ordinary tab selection preserve the user FileTree query', async ({ page, request }) => {
+test('scope switching and route navigation preserve the user FileTree query', async ({ page, request }) => {
   const firstDate = await findUnusedDiaryDate(request)
   const secondDate = await findUnusedDiaryDate(request, [firstDate])
   const firstPath = diaryPath(firstDate)
@@ -994,6 +992,8 @@ test('scope switching and ordinary tab selection preserve the user FileTree quer
     await assertNativeReader(page, firstDate)
     await page.goto(`/vault/${secondPath}`)
     await assertNativeReader(page, secondDate, firstDate)
+    await expect(page.locator(`[role="tab"][data-tab-id="${firstPath}"]`)).toHaveCount(0)
+    await expect(page.locator(`[role="tab"][data-tab-id="${secondPath}"]`)).toHaveCount(1)
     await page.goto(`/vault/${notePath}`)
     await expect(page.locator(`[role="tab"][data-tab-id="${notePath}"]`)).toHaveAttribute('aria-selected', 'true')
 
@@ -1003,17 +1003,21 @@ test('scope switching and ordinary tab selection preserve the user FileTree quer
     await search.fill(customQuery)
     await expect(search).toHaveValue(customQuery)
 
-    // Selecting a native Diary tab is generic workspace navigation, not a
-    // Calendar date intent, so the user query must remain untouched.
-    await selectWorkspaceTab(page, firstPath)
-    expect(new URL(page.url()).pathname).toBe(`/vault/${firstPath}`)
+    // Route navigation is not a Calendar date selection, so the user query
+    // remains untouched while the single Diary slot changes documents.
+    await selectScope(page, 'diary')
+    await expect(page.getByTestId('diary-calendar')).toBeVisible()
+    await page.goto(`/vault/${firstPath}`)
+    await assertNativeReader(page, firstDate, customQuery)
     await expect(search).toHaveValue(customQuery)
-    await selectWorkspaceTab(page, secondPath)
-    expect(new URL(page.url()).pathname).toBe(`/vault/${secondPath}`)
+    await page.goto(`/vault/${secondPath}`)
+    await assertNativeReader(page, secondDate, customQuery)
     await expect(search).toHaveValue(customQuery)
+    await expect(page.locator(`[role="tab"][data-tab-id="${firstPath}"]`)).toHaveCount(0)
+    await expect(page.locator(`[role="tab"][data-tab-id="${secondPath}"]`)).toHaveCount(1)
 
     // Leaving and re-entering Diary must not erase ordinary user-owned
-    // FileTree state. Existing managed Diary tabs still keep Calendar hidden.
+    // FileTree state while the current managed Diary document keeps Calendar hidden.
     await selectScope(page, 'diary')
     await expect(page.getByTestId('diary-calendar')).toBeHidden()
     await ensureExplorerVisible(page)
@@ -1026,10 +1030,8 @@ test('scope switching and ordinary tab selection preserve the user FileTree quer
     await ensureExplorerVisible(page)
     await expect(page.locator('.file-tree .search-input')).toHaveValue(customQuery)
 
-    await page.locator(`[role="tab"][data-tab-id="${secondPath}"] .tab-close`).click()
+    await closeCurrentDiaryDocument(page)
     await expect(page.locator(`[role="tab"][data-tab-id="${secondPath}"]`)).toHaveCount(0)
-    await page.locator(`[role="tab"][data-tab-id="${firstPath}"] .tab-close`).click()
-    await expect(page.locator(`[role="tab"][data-tab-id="${firstPath}"]`)).toHaveCount(0)
     await expect(page.getByTestId('diary-calendar')).toBeVisible()
     expect(diaryCreateRequests).toBe(0)
     expect(moodPatchRequests).toBe(0)
@@ -1186,9 +1188,9 @@ test('refresh, deep link, and browser Back/Forward preserve Diary identity, Mood
     expect(afterRefresh.metadata.id).toBe(seeded.documentId)
     expect(afterRefresh.metadata.mood).toBe('happy')
 
-    // Closing the only Diary tab reveals Home, but the query remains ordinary
-    // FileTree state and is not replaced by a route-derived date.
-    await page.locator(`[role="tab"][data-tab-id="${path}"] .tab-close`).click()
+    // Cmd/Ctrl+W reveals Home, while the query remains ordinary FileTree
+    // state instead of becoming a route-derived date.
+    await closeCurrentDiaryDocument(page)
     await expect(page.getByTestId('diary-calendar')).toBeVisible()
     await expect(page.locator('.file-tree .search-input')).toHaveCount(0)
     await expect.poll(() => page.evaluate(() => localStorage.getItem('nuvyn.file-tree.filter')))
@@ -1225,7 +1227,7 @@ test('refresh, deep link, and browser Back/Forward preserve Diary identity, Mood
     expect(afterHistory.metadata.id).toBe(seeded.documentId)
     expect(afterHistory.metadata.mood).toBe('happy')
 
-    await page.locator(`[role="tab"][data-tab-id="${path}"] .tab-close`).click()
+    await closeCurrentDiaryDocument(page)
     await expect(page.getByTestId('diary-calendar')).toBeVisible()
     expect(diaryCreateRequests).toBe(0)
     expect(moodPatchRequests).toBe(0)
@@ -1238,7 +1240,7 @@ test('refresh, deep link, and browser Back/Forward preserve Diary identity, Mood
   expect(state.consoleErrors).toEqual([])
 })
 
-test('dirty Diary body survives generic tab selection without losing Mood or identity', async ({ page, request }) => {
+test('dirty Diary body survives a rejected single-document route switch without losing Mood or identity', async ({ page, request }) => {
   const firstDate = await findUnusedDiaryDate(request)
   const secondDate = await findUnusedDiaryDate(request, [firstDate])
   const firstPath = diaryPath(firstDate)
@@ -1257,54 +1259,64 @@ test('dirty Diary body survives generic tab selection without losing Mood or ide
     await openDiaryHome(page)
     await clickDiaryDate(page, firstDate)
     await assertNativeReader(page, firstDate)
-    await page.goto(`/vault/${secondPath}`)
-    await assertNativeReader(page, secondDate, firstDate)
-    await selectWorkspaceTab(page, firstPath)
-    await assertNativeReader(page, firstDate, firstDate)
-
     await enterEditor(page)
     await interceptAutosaveAborted(page, firstPath)
     autosaveInstalled = true
     await appendEditorText(page, dirtyMarker)
-    await expect(page.locator(`[data-tab-id="${firstPath}"][data-save-status="dirty"]`)).toBeVisible({ timeout: 15_000 })
+
+    const firstTab = page.locator(`[role="tab"][data-tab-id="${firstPath}"]`)
+    const secondTab = page.locator(`[role="tab"][data-tab-id="${secondPath}"]`)
+    await expect(firstTab).toHaveAttribute('data-save-status', 'dirty', { timeout: 15_000 })
+    await expect(page.locator('.tabs')).toBeHidden()
     // Managed Diary drafts are memory-only in D8.3; no IndexedDB row may be
     // created while the tab is dirty.
     await expect.poll(() => draftRowCount(page, dirtyMarker), { timeout: 15_000 }).toBe(0)
 
-    const beforeSelection = await readDiary(request, firstDate)
-    expect(beforeSelection.raw).toBe(baseRaw)
-    expect(beforeSelection.metadata.id).toBe(first.documentId)
-    expect(beforeSelection.metadata.mood).toBe('happy')
+    const beforeSwitch = await readDiary(request, firstDate)
+    expect(beforeSwitch.raw).toBe(baseRaw)
+    expect(beforeSwitch.metadata.id).toBe(first.documentId)
+    expect(beforeSwitch.metadata.mood).toBe('happy')
 
-    await selectWorkspaceTab(page, secondPath)
-    await expect(page).toHaveURL(new RegExp(`/vault/${secondPath.replace('/', '\\/')}(?:[?#]|$)`))
-    await expect(page.locator(`[data-tab-id="${firstPath}"] .tab-dirty-indicator`)).toHaveCount(1)
-    await expect(page.getByTestId('diary-calendar')).toBeHidden()
-
-    await selectWorkspaceTab(page, firstPath)
-    await expect(page).toHaveURL(new RegExp(`/vault/${firstPath.replace('/', '\\/')}(?:[?#]|$)`))
-    await expect(page.locator(`[data-tab-id="${firstPath}"] .tab-dirty-indicator`)).toHaveCount(1)
+    // A failed save rejects the route change and keeps the current document
+    // selected. The hidden tab strip is never used as a switching surface.
+    await page.goto(`/vault/${secondPath}`)
+    await expect(page).toHaveURL(new RegExp(firstPath.replace('/', '\\/')))
+    await expect(firstTab).toHaveCount(1)
+    await expect(firstTab).toHaveAttribute('aria-selected', 'true')
+    await expect(firstTab).toHaveAttribute('data-save-status', 'dirty')
+    await expect(secondTab).toHaveCount(0)
+    await expect(page.locator('.tabs')).toBeHidden()
     await expect(page.locator('.editor-pane .monaco-editor .view-lines').first()).toContainText(dirtyMarker)
     await expect(page.getByTestId('diary-calendar')).toBeHidden()
-
-    const afterSelection = await readDiary(request, firstDate)
-    expect(afterSelection.raw).toBe(baseRaw)
-    expect(afterSelection.metadata.id).toBe(first.documentId)
-    expect(afterSelection.metadata.mood).toBe('happy')
-    const secondAfterSelection = await readDiary(request, secondDate)
-    expect(secondAfterSelection.metadata.id).toBe(second.documentId)
-    expect(secondAfterSelection.metadata.mood).toBe('sad')
 
     await page.unroute(`**/api/posts/${firstPath}`)
     autosaveInstalled = false
     await page.locator('.vault').focus()
     await page.keyboard.press('Control+s')
-    await expect(page.locator(`[data-tab-id="${firstPath}"][data-save-status="saved"]`)).toBeVisible({ timeout: 15_000 })
+    await expect(firstTab).toHaveAttribute('data-save-status', 'saved', { timeout: 15_000 })
     const saved = await readDiary(request, firstDate)
     expect(normalizeLineEndings(saved.raw)).toContain(dirtyMarker)
     expect(saved.metadata.id).toBe(first.documentId)
     expect(saved.metadata.mood).toBe('happy')
     await expect.poll(() => draftRowCount(page, dirtyMarker), { timeout: 15_000 }).toBe(0)
+
+    await page.goto(`/vault/${secondPath}`)
+    await assertNativeReader(page, secondDate, firstDate)
+    await expect(firstTab).toHaveCount(0)
+    await expect(secondTab).toHaveCount(1)
+    await expect(page.locator('.tabs')).toBeHidden()
+    const secondAfterSwitch = await readDiary(request, secondDate)
+    expect(secondAfterSwitch.metadata.id).toBe(second.documentId)
+    expect(secondAfterSwitch.metadata.mood).toBe('sad')
+
+    await page.goto(`/vault/${firstPath}`)
+    await assertNativeReader(page, firstDate, firstDate)
+    await expect(firstTab).toHaveCount(1)
+    await expect(secondTab).toHaveCount(0)
+    const reopened = await readDiary(request, firstDate)
+    expect(normalizeLineEndings(reopened.raw)).toContain(dirtyMarker)
+    expect(reopened.metadata.id).toBe(first.documentId)
+    expect(reopened.metadata.mood).toBe('happy')
   } finally {
     if (autosaveInstalled) await page.unroute(`**/api/posts/${firstPath}`)
     await deletePost(request, firstPath)
@@ -1314,7 +1326,6 @@ test('dirty Diary body survives generic tab selection without losing Mood or ide
   expect(state.pageErrors).toEqual([])
   expect(state.consoleErrors).toEqual([])
 })
-
 test('refresh preserves Calendar-seed provenance so Diary scope exit clears it', async ({ page, request }) => {
   const date = await findUnusedDiaryDate(request)
   const path = diaryPath(date)

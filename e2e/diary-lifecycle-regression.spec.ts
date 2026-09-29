@@ -1,4 +1,4 @@
-import { expect, test, type APIRequestContext, type Page } from './fixtures/diary'
+import { closeCurrentDiaryDocument, expect, test, type APIRequestContext, type Page } from './fixtures/diary'
 import { clearDraftDatabase, gotoVaultReady } from './helpers/edit-program'
 import { CALENDAR_TEST_DATE, CALENDAR_TEST_TIME_ZONE, calendarDay } from './helpers/calendar-clock'
 
@@ -375,7 +375,7 @@ test('route navigation replaces the managed Diary document and preserves Note ta
   expect(state.consoleErrors).toEqual([])
 })
 
-test('tab close and reopen use existing fallback and stable document identity', async ({ page, request }) => {
+test('Cmd/Ctrl+W close and reopen use existing fallback and stable document identity', async ({ page, request }) => {
   const date = localCivilDate()
   const path = diaryPath(date)
   const note = `inbox/d65-close-${RUN_ID}`
@@ -393,7 +393,7 @@ test('tab close and reopen use existing fallback and stable document identity', 
     await assertNativeDiary(page, date)
 
     await selectScope(page, 'note')
-    await page.locator(`[role="tab"][data-tab-id="${path}"] .tab-close`).click()
+    await closeCurrentDiaryDocument(page)
     await expect(page.locator(`[role="tab"][data-tab-id="${path}"]`)).toHaveCount(0)
     await expect(page.locator(`[role="tab"][data-tab-id="${note}"]`)).toHaveAttribute('aria-selected', 'true')
     await expect(page).toHaveURL(new RegExp(`/vault/${note.replace('/', '\\/')}(?:[?#]|$)`))
@@ -410,7 +410,7 @@ test('tab close and reopen use existing fallback and stable document identity', 
     await page.locator(`[role="tab"][data-tab-id="${note}"] .tab-close`).click()
     await expect(page.locator(`[role="tab"][data-tab-id="${note}"]`)).toHaveCount(0)
     await expect(page.locator(`[role="tab"][data-tab-id="${path}"]`)).toHaveAttribute('aria-selected', 'true')
-    await page.locator(`[role="tab"][data-tab-id="${path}"] .tab-close`).click()
+    await closeCurrentDiaryDocument(page)
     await expect(page.locator(`[role="tab"][data-tab-id="${path}"]`)).toHaveCount(0)
     await expect(page).toHaveURL(/\/vault(?:[?#]|$)/)
 
