@@ -283,7 +283,7 @@ function menuAction(fn: () => void) {
 <template>
   <li
     class="tree-row"
-    :class="{ active: isActive, focused: !isFolder && focusedNodeKey === `file:${node.path}`, expanded: isExpanded, folder: isFolder, 'top-level': depth === 0, dragging: isDragging, 'drop-target': isDropTarget }"
+    :class="{ active: isActive, expanded: isExpanded, folder: isFolder, 'top-level': depth === 0, dragging: isDragging, 'drop-target': isDropTarget }"
     :style="{ '--depth': depth }"
     :data-tree-path="node.path"
     :data-tree-kind="node.kind"

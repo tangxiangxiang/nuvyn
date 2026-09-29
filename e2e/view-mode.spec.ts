@@ -87,6 +87,32 @@ test.describe('View mode toggle', () => {
     await expect(page.locator('[data-testid="view-toggle"]')).toHaveAttribute('aria-label', 'Switch to read')
   })
 
+  test('keeps the tree roving stop after tab close without a persistent focus ring', async ({ page }) => {
+    await openShortcutDocument(page)
+
+    const row = page.locator(`[data-tree-key="file:${TEST_DOC_PATH}"]`)
+    await expect(row).toHaveAttribute('tabindex', '0')
+
+    await page.locator(`[role="tab"][data-tab-id="${TEST_DOC_PATH}"] .tab-close`).click()
+
+    await expect(row).not.toHaveClass(/active/)
+    await expect(row).not.toHaveClass(/focused/)
+    await expect(row).toHaveAttribute('tabindex', '0')
+
+    await page.locator('.file-tree .search-input').focus()
+    let rowFocused = false
+    for (let attempt = 0; attempt < 40 && !rowFocused; attempt += 1) {
+      await page.keyboard.press('Tab')
+      rowFocused = await row.evaluate((element) => element === document.activeElement)
+    }
+    expect(rowFocused).toBe(true)
+    await expect(row).toBeFocused()
+    await expect.poll(() => row.evaluate((element) => element.matches(':focus-visible'))).toBe(true)
+    await expect.poll(() => row.locator(':scope > .row-line').evaluate((element) => (
+      getComputedStyle(element).outlineStyle
+    ))).toBe('solid')
+  })
+
   test('clicking the NavBar toggle button switches to read mode', async ({ page }) => {
     await openShortcutDocument(page)
     await page.locator('[data-testid="view-toggle"]').click()

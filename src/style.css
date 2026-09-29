@@ -3431,7 +3431,7 @@ body:has(.ledger-detail-sheet-card) .n-modal-mask {
 }
 .vault .file-tree .row-line:hover::before { background: var(--vs-hover-bg); }
 .vault .file-tree .tree-row.active .row-line::before { background: var(--vs-active-bg); }
-.vault .file-tree .tree-row.focused > .row-line {
+.vault .file-tree .tree-row:focus-visible > .row-line {
   outline: 1px solid color-mix(in srgb, var(--vs-accent) 72%, transparent);
   outline-offset: -1px;
 }
