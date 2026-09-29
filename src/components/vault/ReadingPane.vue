@@ -175,7 +175,7 @@ function revealAnchor(id: string, isCurrent: () => boolean = () => true): boolea
 
 function scrollToHeading(id: string) {
   if (!revealAnchor(id)) return
-  if (history.replaceState) history.replaceState(null, '', `#${id}`)
+  if (history.replaceState) history.replaceState(history.state, '', `#${id}`)
 }
 
 function onArticleRendered(el: HTMLElement | null) {

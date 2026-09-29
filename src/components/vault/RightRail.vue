@@ -53,10 +53,8 @@ const emit = defineEmits<{
   'open-history-revision': [selection: HistoryRevisionSelection]
 }>()
 
-// Keep the rail outline compact: the first three heading levels provide
-// enough document structure without flooding the narrow sidebar with
-// deeply nested details.
-const visibleHeadings = computed(() => tocHeadings.value.filter((heading) => heading.level <= 3))
+// Keep the rail outline compact while matching the rendered h2-h4 TOC.
+const visibleHeadings = computed(() => tocHeadings.value.filter((heading) => heading.level >= 2 && heading.level <= 4))
 const hasHeadings = computed(() => visibleHeadings.value.length > 0)
 const currentPost = computed(() => props.posts.find((post) => post.path === props.path) ?? null)
 const aiHasOpened = ref(props.activeTab === 'ai')
@@ -173,6 +171,7 @@ function onHistoryTabClick(): void {
             class="toc-panel-link"
             :href="`#${h.id}`"
             :title="h.text"
+            :aria-current="tocActiveId === h.id ? 'location' : undefined"
             @click.prevent="onTocClick(h.id)"
           >
             <span class="toc-panel-link-text">{{ h.text }}</span>

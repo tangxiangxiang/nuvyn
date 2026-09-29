@@ -65,6 +65,7 @@ afterEach(() => {
   tocHeadings.value = []
   tocActiveId.value = ''
   tocScrollTo.value = null
+  window.history.replaceState(null, '', '/')
 })
 
 /* ----- Fixture: mount ReadingPane with a stubbed RenderedMarkdown --------
@@ -158,6 +159,30 @@ describe('ReadingPane scroll-spy', () => {
     expect(tocActiveId.value).toBe('safe-id-2')
     expect(window.location.hash).toBe('')
     expect((wrapper.vm as any).revealAnchor('missing')).toBe(false)
+    wrapper.unmount()
+  })
+
+  it('preserves router history state when the TOC updates the URL hash', () => {
+    const { wrapper, headingEls } = setupFixture([
+      { id: 'section', text: 'Target section', level: 2 },
+    ])
+    setRect(headingEls[0], 200)
+
+    const routerState = {
+      back: null,
+      current: '/vault/notes/current',
+      forward: null,
+      position: 4,
+      replaced: true,
+      scroll: null,
+      marker: 'preserve-me',
+    }
+    window.history.replaceState(routerState, '', '/vault/notes/current')
+
+    tocScrollTo.value?.('section')
+
+    expect(window.location.hash).toBe('#section')
+    expect(window.history.state).toEqual(routerState)
     wrapper.unmount()
   })
 

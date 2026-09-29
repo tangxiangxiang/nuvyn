@@ -4,6 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { nextTick, ref } from 'vue'
 import RightRail from '../RightRail.vue'
 import { tocActiveId, tocHeadings, tocScrollTo } from '../../../composables/vault/useTocState'
+import type { Heading } from '../../../composables/vault/useMarkdownRender'
 import type { RightRailTab } from '../../../composables/vault/useVaultLayout'
 import { useI18n } from '../../../composables/useI18n'
 import type { FileHistoryState } from '../../../composables/vault/useFileHistory'
@@ -51,16 +52,26 @@ describe('unified document sidebar', () => {
     expect(wrapper.find('.toc-panel-item.active').text()).toBe('例句')
   })
 
-  it('only renders the first three heading levels', () => {
+  it('renders h2 through h4 and exposes only the active heading as current', async () => {
     tocHeadings.value = [
       { id: 'intro', text: '介绍', level: 1 },
       { id: 'details', text: '详情', level: 2 },
       { id: 'example', text: '例句', level: 3 },
       { id: 'note', text: '补充说明', level: 4 },
+      { id: 'deep-note', text: '深层补充', level: 5 } as unknown as Heading,
     ]
+    tocActiveId.value = 'note'
     const wrapper = mountPanel()
-    expect(wrapper.findAll('.toc-panel-item').map((item) => item.text())).toEqual(['介绍', '详情', '例句'])
-    expect(wrapper.text()).not.toContain('补充说明')
+    expect(wrapper.findAll('.toc-panel-item').map((item) => item.text())).toEqual(['详情', '例句', '补充说明'])
+    expect(wrapper.text()).not.toContain('介绍')
+    expect(wrapper.text()).not.toContain('深层补充')
+    expect(wrapper.find('a[href="#note"]').attributes('aria-current')).toBe('location')
+    expect(wrapper.find('a[href="#details"]').attributes('aria-current')).toBeUndefined()
+
+    tocActiveId.value = 'details'
+    await nextTick()
+    expect(wrapper.find('a[href="#details"]').attributes('aria-current')).toBe('location')
+    expect(wrapper.find('a[href="#note"]').attributes('aria-current')).toBeUndefined()
   })
 
   it('renders tabs in 助手 → 目录 → 引用 → 属性 → 历史 order', () => {
