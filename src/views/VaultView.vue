@@ -124,6 +124,11 @@ import { disposeManagedDiaryModels } from '../components/vault/monacoModels'
 import StatusBar from '../components/vault/StatusBar.vue'
 import { requireVaultId } from '../lib/vault-identity'
 import {
+  buildTagIndex,
+  resolveTagBrowseSelection,
+  toggleTagBrowseSelection,
+} from '../lib/tags'
+import {
   downloadPdfDocument,
   preparePdfArticleHtml,
   resolvePdfDocumentLabel,
@@ -2136,12 +2141,17 @@ async function presentDiaryDateResult(
 const selectedTag = ref<string | null>(null)
 const tagManagementPanelRef = ref<{ canLeave: boolean } | null>(null)
 const tagManagementCanLeave = computed(() => tagManagementPanelRef.value?.canLeave ?? true)
+const tagBrowsingIndex = computed(() => buildTagIndex(posts.value))
+watch(tagBrowsingIndex, (index) => {
+  const reconciled = resolveTagBrowseSelection(index, selectedTag.value)
+  if (reconciled !== selectedTag.value) selectedTag.value = reconciled
+})
 // Phase 2 management dialogs use this local monotonic epoch to distinguish
 // an actual user selection change from an asynchronous Apply completion.
 // The manager remains owned by VaultView while Settings provides its page host.
 const tagSelectionEpoch = ref(0)
 function selectTag(tag: string): void {
-  selectedTag.value = selectedTag.value === tag ? null : tag
+  selectedTag.value = toggleTagBrowseSelection(selectedTag.value, tag)
   tagSelectionEpoch.value += 1
 }
 

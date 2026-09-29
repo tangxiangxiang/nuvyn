@@ -6,7 +6,9 @@ import {
   normalizeTag,
   normalizeTagDisplay,
   parseTagQuery,
+  resolveTagBrowseSelection,
   sortTagsByCountDescThenName,
+  toggleTagBrowseSelection,
   updateDocumentTags,
   type SearchableDoc,
   type TagIndex,
@@ -513,6 +515,40 @@ describe('buildTagIndex', () => {
     expect(idx.tags.get('人工智能')?.displayName).toBe('人工智能')
     expect(idx.tags.get('人工智能')?.count).toBe(1)
     expectTagIndexConsistent(idx)
+  })
+})
+
+describe('tag browsing selection', () => {
+  const index = buildTagIndex([
+    { path: 'math.md', tags: ['Math'] },
+    { path: 'java.md', tags: ['Java'] },
+  ])
+
+  it('toggles the same normalized identity and preserves a different clicked display form', () => {
+    expect(toggleTagBrowseSelection('math', 'Math')).toBeNull()
+    expect(toggleTagBrowseSelection('MATH', '#Math')).toBeNull()
+    expect(toggleTagBrowseSelection('Java', 'Redis')).toBe('Redis')
+    expect(toggleTagBrowseSelection(null, 'Math')).toBe('Math')
+  })
+
+  it('resolves surviving normalized identities to the index display form', () => {
+    expect(resolveTagBrowseSelection(index, 'math')).toBe('Math')
+    expect(resolveTagBrowseSelection(index, '#JAVA')).toBe('Java')
+    expect(resolveTagBrowseSelection(index, null)).toBeNull()
+    expect(resolveTagBrowseSelection(index, 'missing')).toBeNull()
+    expect(resolveTagBrowseSelection(index, '#')).toBeNull()
+  })
+
+  it('clears a vanished selection so a later matching tag does not revive it', () => {
+    const withoutJava = buildTagIndex([{ path: 'math.md', tags: ['Math'] }])
+    const cleared = resolveTagBrowseSelection(withoutJava, 'Java')
+    const withJavaAgain = buildTagIndex([
+      { path: 'math.md', tags: ['Math'] },
+      { path: 'java.md', tags: ['Java'] },
+    ])
+
+    expect(cleared).toBeNull()
+    expect(resolveTagBrowseSelection(withJavaAgain, cleared)).toBeNull()
   })
 })
 

@@ -319,6 +319,29 @@ export function buildTagIndex(
   return { tags, documentTags, tagDocuments }
 }
 
+/** Toggle the browsing selection by normalized identity while keeping the
+ * selected display value in the form supplied by the current TagPanel row. */
+export function toggleTagBrowseSelection(
+  current: string | null,
+  clickedDisplayName: string,
+): string | null {
+  const clickedKey = normalizeTag(clickedDisplayName)
+  const currentKey = normalizeTag(current)
+  return clickedKey && currentKey === clickedKey ? null : clickedDisplayName
+}
+
+/** Reconcile a display selection against the current posts-derived browsing
+ * index. Missing tags are cleared; surviving identities use the index's
+ * canonical display form. */
+export function resolveTagBrowseSelection(
+  index: TagIndex,
+  current: string | null,
+): string | null {
+  const key = normalizeTag(current)
+  if (!key) return null
+  return index.tags.get(key)?.displayName ?? null
+}
+
 /**
  * Apply a new tag set to a single document and return a NEW
  * `TagIndex` reflecting the change. The input index is NOT

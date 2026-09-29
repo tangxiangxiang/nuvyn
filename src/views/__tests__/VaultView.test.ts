@@ -117,6 +117,20 @@ describe('VaultView editor tab wiring', () => {
     expect(undoRecovery).not.toContain('applyUndo')
   })
 
+  it('keeps browsing selection normalized and reconciles it from the posts TagIndex', () => {
+    const source = readFileSync(fileURLToPath(new URL('../VaultView.vue', import.meta.url)), 'utf8')
+    const selectionHandler = source.match(/function selectTag\(tag: string\): void \{[\s\S]*?\n\}/)?.[0]
+    const browsingWatcher = source.match(/watch\(tagBrowsingIndex, \(index\) => \{[\s\S]*?\n\}\)/)?.[0]
+
+    expect(source).toContain("import {\n  buildTagIndex,\n  resolveTagBrowseSelection,\n  toggleTagBrowseSelection,\n} from '../lib/tags'")
+    expect(source).toContain('const tagBrowsingIndex = computed(() => buildTagIndex(posts.value))')
+    expect(selectionHandler).toContain('toggleTagBrowseSelection(selectedTag.value, tag)')
+    expect(selectionHandler).toContain('tagSelectionEpoch.value += 1')
+    expect(browsingWatcher).toContain('resolveTagBrowseSelection(index, selectedTag.value)')
+    expect(browsingWatcher).toContain('if (reconciled !== selectedTag.value) selectedTag.value = reconciled')
+    expect(browsingWatcher).not.toContain('tagSelectionEpoch')
+  })
+
   it('derives one save presentation per document and shares the active result with StatusBar', () => {
     const source = readFileSync(fileURLToPath(new URL('../VaultView.vue', import.meta.url)), 'utf8')
 
