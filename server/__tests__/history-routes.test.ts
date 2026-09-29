@@ -197,6 +197,26 @@ describeHistoryIntegration('GET /api/history/status', () => {
     expect(body.dirty.map((entry) => entry.path)).toEqual(['literature/note.md'])
   })
 
+  it('hides forced-staged Inbox drafts while retaining versioned dirty files', async () => {
+    await write('inbox/forced.md', 'forced Inbox draft')
+    await write('literature/visible.md', 'versioned note')
+
+    const addInbox = await historyGit.run(root, ['add', '-f', '--', 'inbox/forced.md'])
+    expect(addInbox.status).toBe(0)
+
+    const rawStatus = await historyGit.status(root)
+    expect(rawStatus.map((entry) => entry.path)).toContain('inbox/forced.md')
+    expect(rawStatus.map((entry) => entry.path)).toContain('literature/visible.md')
+
+    const r = await call('GET', '/status')
+    expect(r.status).toBe(200)
+    const body = await r.json() as { dirty: { path: string }[] }
+    const paths = body.dirty.map((entry) => entry.path)
+
+    expect(paths).not.toContain('inbox/forced.md')
+    expect(paths).toContain('literature/visible.md')
+  })
+
   it('returns no Changes entries for a managed-Diary-only working tree', async () => {
     await write('diary/2026-08-26.md', 'opaque ciphertext envelope')
 

@@ -243,6 +243,7 @@ history.get('/status', async (c) => {
     const dirty = (await git.status(repoRoot()))
       .filter((entry) => !isManagedHistoryPath(entry.path)
         && !isManagedDiaryBodyPath(entry.path)
+        && !isInboxDraftPath(entry.path)
         && isValidHistoryPath(entry.path))
     return c.json({ dirty, available: true })
   } catch (e: any) {
