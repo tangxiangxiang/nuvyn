@@ -527,6 +527,8 @@ describe('TagManagementPanel', () => {
     await settle()
     expect(mocks.listManagedTags).toHaveBeenCalledTimes(1)
     expect(wrapper.get('[data-tag-management-panel]').attributes('data-state')).toBe('ready')
+    expect(wrapper.get('[data-tag-management-panel]').attributes('data-diagnostic-stage')).toBe('ready')
+    expect(wrapper.find('.tag-management-diagnostic').exists()).toBe(false)
     expect(tagSelectOptionValues(wrapper, 'tag-management-source')).toHaveLength(3)
     expect(wrapper.find('.tag-management-header').exists()).toBe(false)
     expect(wrapper.get('[data-tag-management-panel]').attributes('aria-labelledby')).toBe('settings-tags-title')
@@ -1301,6 +1303,8 @@ describe('TagManagementPanel', () => {
     expect(mocks.applyTagOperation).toHaveBeenCalledWith(mergeOperation, 'a'.repeat(64))
     expect(wrapper.get('.tag-management-state-success').attributes('data-selected-tag')).toBe('Python')
     expect(wrapper.text()).toContain('Surviving destination tag: Python')
+    expect(selectedTagSelectValue(wrapper, 'tag-management-source')).toBe('20')
+    expect(selectedTagSelectValue(wrapper, 'tag-management-destination')).toBe('')
   })
 
   it('shows Remove without destination controls and previews the exact destructive impact', async () => {
@@ -1368,6 +1372,7 @@ describe('TagManagementPanel', () => {
     expect(mocks.applyTagOperation).toHaveBeenCalledTimes(1)
     expect(mocks.applyTagOperation).toHaveBeenCalledWith(removeOperation, 'a'.repeat(64))
     expect(wrapper.get('.tag-management-state-success').attributes('data-selected-tag')).toBeUndefined()
+    expect(selectedTagSelectValue(wrapper, 'tag-management-source')).toBe('')
     expect(wrapper.text()).toContain('#Java was removed')
     expect(wrapper.text()).not.toContain('Final display name')
   })
@@ -1750,6 +1755,10 @@ describe('TagManagementPanel', () => {
     expect(wrapper.text()).toContain('Final display name: Backend')
     expect(wrapper.get('.tag-management-live').text()).toContain('Tags are synchronized')
     expect(wrapper.get('.tag-management-state-success').attributes('data-selected-tag')).toBe('Backend')
+    expect(selectedTagSelectValue(wrapper, 'tag-management-source')).toBe('7')
+    const sourceOption = (getTagSelect(wrapper, 'tag-management-source').props('options') as Array<{ value: string; label: string }>)
+      .find((option) => option.value === '7')
+    expect(sourceOption?.label).toContain('#Backend')
   })
 
   it('labels server-authoritative Display Rename and explains identity preservation', async () => {

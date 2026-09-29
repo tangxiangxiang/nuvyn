@@ -360,36 +360,6 @@ const finalDisplayName = computed(() => {
   return result.survivorDisplayName ?? result.sourceDisplayName
 })
 
-const diagnosticLabel = computed(() => {
-  const labels: Record<string, string> = {
-    loading: t('tags.manage.diagnostic_loading'),
-    ready: t('tags.manage.diagnostic_ready'),
-    unavailable: t('tags.manage.diagnostic_unavailable'),
-    'load-failure': t('tags.manage.diagnostic_load_failure'),
-    'preview-loading': t('tags.manage.diagnostic_preview_loading'),
-    'preview-page-loading': t('tags.manage.diagnostic_preview_page_loading'),
-    'preview-ready': t('tags.manage.diagnostic_preview_ready'),
-    'preview-failure': t('tags.manage.diagnostic_preview_failure'),
-    'preview-stale': t('tags.manage.diagnostic_preview_stale'),
-    applying: t('tags.manage.diagnostic_applying'),
-    syncing: t('tags.manage.diagnostic_syncing'),
-    success: t('tags.manage.diagnostic_success'),
-    'apply-failure': t('tags.manage.diagnostic_apply_failure'),
-    'sync-pending': t('tags.manage.diagnostic_sync_pending'),
-    'undo-preview-loading': t('tags.manage.diagnostic_undo_preview_loading'),
-    'undo-preview-ready': t('tags.manage.diagnostic_undo_preview_ready'),
-    'undo-conflict': t('tags.manage.diagnostic_undo_conflict'),
-    'undo-stale': t('tags.manage.diagnostic_undo_stale'),
-    'undo-applying': t('tags.manage.diagnostic_undo_applying'),
-    'undo-refreshing': t('tags.manage.diagnostic_undo_refreshing'),
-    'undo-pending': t('tags.manage.diagnostic_undo_pending'),
-    'undo-success': t('tags.manage.diagnostic_undo_success'),
-    'undo-superseded': t('tags.manage.diagnostic_undo_superseded'),
-    'undo-terminal': t('tags.manage.diagnostic_undo_terminal'),
-  }
-  return labels[diagnosticStage.value] ?? diagnosticStage.value
-})
-
 const canEdit = computed(() => ![
   'loading', 'previewing', 'applying', 'syncing', 'sync-pending', 'unavailable',
 ].includes(state.value) && !undoLocksEditing.value)
@@ -1346,7 +1316,11 @@ async function runSynchronization(result: TagOperationApplyResult): Promise<void
     finalTags.value = synchronized.managedTags
     managedTags.value = synchronized.managedTags
     reconciledSelectedTag.value = synchronized.selectedTag
+    selectInitialSource(synchronized.managedTags, synchronized.selectedTag)
+    reconcileDestinationWithTags(synchronized.managedTags)
     if (synchronized.undoAvailability) setUndoAvailability(synchronized.undoAvailability)
+    await nextTick()
+    if (run !== syncRun || !isMounted.value) return
     state.value = 'success'
     setDiagnostic('success')
     announce(finalDisplayName.value
@@ -2087,9 +2061,6 @@ onBeforeUnmount(() => {
             </p>
           </template>
 
-          <p class="tag-management-diagnostic" :data-code="diagnosticCode ?? undefined">
-            {{ t('tags.manage.diagnostic', { stage: diagnosticLabel }) }}
-          </p>
     </div>
   </section>
 </template>
@@ -2193,7 +2164,6 @@ onBeforeUnmount(() => {
 .tag-management-sample li span { color: var(--text-muted); font-family: var(--mono); font-size: 0.7rem; }
 .tag-management-sample > p { margin: 0; color: var(--text-muted); font-size: 0.76rem; }
 .tag-management-empty { margin: 18px 0 0; color: var(--text-muted); font-size: 0.78rem; }
-.tag-management-diagnostic { margin: 18px 0 0; color: var(--text-muted); font-size: 0.68rem; }
 @media (max-width: 600px) {
   .tag-management-summary, .tag-management-undo-summary { grid-template-columns: minmax(0, 1fr); }
   .tag-management-undo-section-heading { align-items: flex-start; flex-direction: column; gap: 2px; }
