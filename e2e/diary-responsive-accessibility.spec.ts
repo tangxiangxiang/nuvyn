@@ -128,6 +128,50 @@ async function activateDiaryDate(page: Page, date: string, method: 'mouse' | 'ke
   }
 }
 
+test('active Diary re-selection returns to Calendar Home on desktop and mobile', async ({ page, request }) => {
+  const date = localCivilDate()
+  const path = diaryPath(date)
+
+  try {
+    await seedDiary(request, date, `# Diary re-select ${RUN_ID}\n`)
+    await gotoVaultReady(page)
+
+    for (const viewport of [
+      { width: 1280, height: 800 },
+      { width: 375, height: 812 },
+    ]) {
+      await page.setViewportSize(viewport)
+      await openDiaryHome(page)
+      const calendar = page.getByTestId('diary-calendar')
+      const initialMonth = await calendar.getAttribute('data-month')
+      await expect(page).toHaveURL(/\/vault(?:[?#]|$)/)
+
+      // Re-selecting Calendar Home is a no-op: it preserves route/month and
+      // does not open or close a managed Diary document.
+      await page.locator('.scope-chip').filter({ hasText: 'diary' }).click()
+      await expect(page).toHaveURL(/\/vault(?:[?#]|$)/)
+      await expect(calendar).toBeVisible()
+      await expect(calendar).toHaveAttribute('data-month', initialMonth!)
+      await expect(page.locator(`[role="tab"][data-tab-id="${path}"]`)).toHaveCount(0)
+
+      await activateDiaryDate(page, date)
+      await assertNativeRead(page, date)
+      const diaryTab = page.locator(`[role="tab"][data-tab-id="${path}"]`)
+      await expect(diaryTab).toHaveAttribute('aria-selected', 'true')
+
+      // The exact same active navigation item invokes Diary Back on both
+      // viewport sizes; no extra mobile control or close policy is involved.
+      await page.locator('.scope-chip').filter({ hasText: 'diary' }).click()
+      await expect(diaryTab).toHaveCount(0)
+      await expect(calendar).toBeVisible()
+      await expect(page.getByTestId('diary-workspace-home')).toBeVisible()
+      await expect(page).toHaveURL(/\/vault(?:[?#]|$)/)
+    }
+  } finally {
+    await deletePost(request, path)
+  }
+})
+
 async function ensureExplorerVisible(page: Page): Promise<void> {
   const fileTree = page.locator('.file-tree')
   if (!(await fileTree.isVisible())) {

@@ -39,6 +39,7 @@ const { activeScope, selectScope } = useScopeFilter()
 const settingsRequestTick = ref(0)
 const ledgerSettingsOpen = ref(false)
 const diaryCalendarVisible = ref(false)
+const diaryBackCommand = ref<(() => void | Promise<void>) | null>(null)
 const globalSearchHost = ref<{ show: () => void } | null>(null)
 const boardRecoveryStore = createIndexedDbBoardCheckpointStore()
 
@@ -54,6 +55,7 @@ function onOpenSearch(): void {
 provide(AppShellContextKey, {
   settingsRequestTick,
   diaryCalendarVisible,
+  diaryBackCommand,
   openGlobalSearch: onOpenSearch,
 })
 

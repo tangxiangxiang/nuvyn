@@ -178,6 +178,18 @@ function onScopeClick(scope: ScopeKey): void {
     void router.push({ name: 'vault' })
     return
   }
+  if (
+    scope === 'diary'
+    && isVault.value
+    && props.diaryUnlocked
+    && activeScope.value === 'diary'
+  ) {
+    // The Vault owns whether this is an ordinary Diary document eligible for
+    // Back. Calendar Home and special surfaces intentionally turn this into
+    // a no-op; the navbar never duplicates document-close policy.
+    appShell?.diaryBackCommand?.value?.()
+    return
+  }
   if (scope === 'diary' && diaryAccess) {
     void diaryAccess.requestScopeChange(scope).then(() => {
       if (isBoard.value && activeScope.value === scope) void router.push({ name: 'vault' })

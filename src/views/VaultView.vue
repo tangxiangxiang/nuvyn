@@ -1822,16 +1822,33 @@ function onReadingPaneRendered(path: string | null): void {
   readingPaneReady.value = true
 }
 
+function backToDiaryHome(): Promise<void> | void {
+  if (
+    !isDiaryScope.value
+    || !isDiaryDocumentMode.value
+    || classifyDiaryPath(activePath.value ?? '') !== 'managed'
+  ) return
+  const activeId = activeWorkspaceTabId.value
+  if (activeId) return closeWorkspaceTab(activeId)
+}
+
+const registeredDiaryBackCommand = () => { void backToDiaryHome() }
+if (appShell?.diaryBackCommand) {
+  appShell.diaryBackCommand.value = registeredDiaryBackCommand
+}
+onBeforeUnmount(() => {
+  if (appShell?.diaryBackCommand?.value === registeredDiaryBackCommand) {
+    appShell.diaryBackCommand.value = null
+  }
+})
+
 const diaryBackChord = createDiaryShortcutChord({
   isDiaryDocument: () => isDiaryScope.value
     && isDiaryDocumentMode.value
     && classifyDiaryPath(activePath.value ?? '') === 'managed',
   isTextEntryContext: isDiaryTextEntryContext,
   isBlocked: isDiaryShortcutBlocked,
-  goBack: () => {
-    const activeId = activeWorkspaceTabId.value
-    if (activeId) return closeWorkspaceTab(activeId)
-  },
+  goBack: backToDiaryHome,
 })
 
 watch([isDiaryScope, isDiaryDocumentMode, activeWorkspaceTabId], () => {

@@ -18,6 +18,8 @@ export interface AppShellContext {
    * displayed.
    */
   readonly diaryCalendarVisible: Ref<boolean>
+  /** Vault-owned semantic action used by the global workspace navigation. */
+  readonly diaryBackCommand?: Ref<(() => void | Promise<void>) | null>
 }
 
 export const AppShellContextKey: InjectionKey<AppShellContext> = Symbol('nuvyn.app-shell')

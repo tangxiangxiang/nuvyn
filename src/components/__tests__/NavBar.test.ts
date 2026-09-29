@@ -269,6 +269,81 @@ describe('NavBar — scope chips', () => {
     expect(chips[1].attributes('aria-label')).toBe('Current scope: diary')
   })
 
+  it('routes an active unlocked Diary re-selection through the shared Diary Back command', async () => {
+    const router = createRouter({
+      history: createMemoryHistory(),
+      routes: [
+        { path: '/vault', name: 'vault', component: { template: '<div />' } },
+        { path: '/vault/:pathMatch(.*)*', name: 'vault-doc', component: { template: '<div />' } },
+      ],
+    })
+    await router.push('/vault/diary/2026-09-30')
+    await router.isReady()
+    const scope = useScopeFilter()
+    scope.activeScope.value = 'diary'
+    const diaryBackCommand = vi.fn()
+    const wrapper = mount(NavBar, {
+      props: { isVault: true, diaryUnlocked: true },
+      global: {
+        plugins: [router],
+        provide: {
+          [VaultViewModeKey as symbol]: makeViewModeApi(),
+          [AppShellContextKey as symbol]: {
+            settingsRequestTick: ref(0),
+            diaryCalendarVisible: ref(false),
+            diaryBackCommand: ref(diaryBackCommand),
+          },
+        },
+      },
+    })
+
+    const diaryChip = wrapper.findAll('.scope-chip')[1]
+    expect(diaryChip.element.tagName).toBe('BUTTON')
+    expect(diaryChip.attributes('aria-pressed')).toBe('true')
+    await diaryChip.trigger('click')
+
+    expect(diaryBackCommand).toHaveBeenCalledOnce()
+    expect(scope.activeScope.value).toBe('diary')
+    expect(router.currentRoute.value.path).toBe('/vault/diary/2026-09-30')
+    wrapper.unmount()
+  })
+
+  it('keeps Note to Diary as a normal workspace switch', async () => {
+    const router = createRouter({
+      history: createMemoryHistory(),
+      routes: [
+        { path: '/vault', name: 'vault', component: { template: '<div />' } },
+        { path: '/vault/:pathMatch(.*)*', name: 'vault-doc', component: { template: '<div />' } },
+      ],
+    })
+    await router.push('/vault/inbox/example')
+    await router.isReady()
+    const scope = useScopeFilter()
+    scope.activeScope.value = 'note'
+    const diaryBackCommand = vi.fn()
+    const wrapper = mount(NavBar, {
+      props: { isVault: true, diaryUnlocked: true },
+      global: {
+        plugins: [router],
+        provide: {
+          [VaultViewModeKey as symbol]: makeViewModeApi(),
+          [AppShellContextKey as symbol]: {
+            settingsRequestTick: ref(0),
+            diaryCalendarVisible: ref(false),
+            diaryBackCommand: ref(diaryBackCommand),
+          },
+        },
+      },
+    })
+
+    await wrapper.findAll('.scope-chip')[1].trigger('click')
+
+    expect(diaryBackCommand).not.toHaveBeenCalled()
+    expect(scope.activeScope.value).toBe('diary')
+    expect(router.currentRoute.value.path).toBe('/vault/inbox/example')
+    wrapper.unmount()
+  })
+
   it('uses the ledger scope chip as the canonical Ledger entry', async () => {
     const api = makeViewModeApi()
     const router = createRouter({

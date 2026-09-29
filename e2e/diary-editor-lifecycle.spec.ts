@@ -216,6 +216,18 @@ test('Native Editor dirty lifecycle preserves identity and reveals Calendar afte
     await expect(page.locator(`[role="tab"][data-tab-id="${path}"]`)).toHaveAttribute('aria-selected', 'true')
     await expect(page.locator('.n-dialog[role="dialog"]')).toHaveCount(0)
 
+    // Re-selecting the active Diary navigation item shares the same dirty
+    // close lifecycle as the Diary Back chord. Cancelling keeps the document
+    // visible and does not reveal Calendar Home.
+    await page.locator('.scope-chip').filter({ hasText: 'diary' }).click()
+    const diaryReselectConfirmation = page.locator('.n-dialog[role="dialog"]')
+    await expect(diaryReselectConfirmation).toBeVisible()
+    await diaryReselectConfirmation.getByRole('button', { name: 'Cancel', exact: true }).click()
+    await expect(diaryReselectConfirmation).not.toBeVisible()
+    await expect(page.locator(`[role="tab"][data-tab-id="${path}"]`)).toHaveCount(1)
+    await expect(page.getByRole('textbox', { name: 'Editor content' })).toBeVisible()
+    await expect(calendar).toBeHidden()
+
     // Calendar Home remains hidden while a managed Diary document is open.
     // Cmd/Ctrl+W continues to use the existing dirty confirmation policy.
     await page.locator('.vault').focus()
