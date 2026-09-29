@@ -10,6 +10,7 @@ export interface VaultEditorContext {
   activePath: Ref<string | null>
   activeTab: ComputedRef<Tab | null>
   openPost: (path: string) => Promise<void>
+  openLink: (path: string, anchor?: string) => Promise<void>
   getLiveContent: (path: string) => string | null
 }
 

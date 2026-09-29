@@ -9,6 +9,7 @@ import { createVaultContext } from '../createVaultContext'
 import { provideVaultContext, useVaultContext } from '../useVaultContext'
 import { createVaultFileChanges } from '../fileChanges'
 import { useAiHistory } from '../../useAiHistory'
+import { clearLinkNavigation, linkNavigationIntent } from '../../../useLinkNavigation'
 
 function tab(path: string, raw: string): Tab {
   return {
@@ -29,6 +30,36 @@ function tab(path: string, raw: string): Tab {
 }
 
 describe('Vault context', () => {
+  it('creates a fresh one-shot navigation intent for every anchored link click', async () => {
+    clearLinkNavigation()
+    const activePath = ref<string | null>('notes/source')
+    const tabs = ref<Tab[]>([])
+    const opened: string[] = []
+    const context = createVaultContext({
+      vaultId: ref('vault'),
+      fileChanges: createVaultFileChanges(),
+      tabs,
+      activePath,
+      activeTab: computed(() => null),
+      openPost: async (path) => {
+        opened.push(path)
+        activePath.value = path
+      },
+      captureAiContext: () => ({ status: 'none' }),
+    })
+
+    await context.editor.openLink('notes/target', 'section')
+    const first = linkNavigationIntent.value
+    expect(first).toMatchObject({ path: 'notes/target', anchor: 'section' })
+
+    await context.editor.openLink('notes/target', 'section')
+    const second = linkNavigationIntent.value
+    expect(second).toMatchObject({ path: 'notes/target', anchor: 'section' })
+    expect(second?.id).not.toBe(first?.id)
+    expect(opened).toEqual(['notes/target', 'notes/target'])
+    clearLinkNavigation()
+  })
+
   it('keeps independently created workspace state and navigation isolated', async () => {
     const tabsA = ref([tab('a', 'A')])
     const tabsB = ref([tab('b', 'B')])

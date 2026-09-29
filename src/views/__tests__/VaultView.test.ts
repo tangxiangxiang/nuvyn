@@ -157,8 +157,11 @@ describe('VaultView editor tab wiring', () => {
     const editorPane = source.match(/<EditorPane[\s\S]*?\/>/)?.[0]
 
     expect(source).toContain("import { watchSearchRevealHandoff } from '../composables/vault/useSearchRevealHandoff'")
-    expect(source).toContain('const editorPaneRef = ref<{ revealText(text: string): boolean } | null>(null)')
+    expect(source).toContain('const editorPaneRef = ref<{')
+    expect(source).toContain('revealText(text: string): boolean')
+    expect(source).toContain('revealAnchor(anchor: string, isCurrent?: () => boolean): boolean | Promise<boolean>')
     expect(source).toContain('watchSearchRevealHandoff({')
+    expect(source).toContain('watchLinkNavigationHandoff({')
     expect(source).toContain('isOrdinaryPresentation: isOrdinaryDocumentPresentation')
     expect(editorPane).toContain('ref="editorPaneRef"')
     expect(source).not.toContain('ReadingPane ref=')

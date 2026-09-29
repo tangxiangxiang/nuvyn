@@ -8,6 +8,7 @@ import { bindMarkdownProviderContext, unbindMarkdownProviderContext } from './mo
 import { resolveWikiTarget } from '../../../shared/linkResolve'
 import { getPost } from '../../lib/api'
 import { parseDoc } from '../../lib/frontmatter'
+import { findMarkdownHeadingSourceLine } from '../../composables/vault/useMarkdownRender'
 import { useEditorPreferences } from '../../composables/vault/useEditorPreferences'
 import {
   indentMarkdownLine,
@@ -48,7 +49,7 @@ const preferences = useEditorPreferences()
 const isLargeDocument = computed(() => props.modelValue.length >= 500_000)
 const emit = defineEmits<{
   'update:modelValue': [value: string]
-  'open-link': [path: string]
+  'open-link': [target: { path: string; anchor?: string }]
   'create-link': [ref: string]
   'toggle-view-mode': []
 }>()
@@ -62,6 +63,7 @@ let decorationIds: string[] = []
 let pasteHandler: ((event: ClipboardEvent) => void) | null = null
 let rememberLinkCommand: string | null = null
 let composing = false
+let revealAnchorSequence = 0
 let decorationTimer: ReturnType<typeof setTimeout> | null = null
 const VIEW_STATE_KEY = NUVYN_BROWSER_STORAGE_KEYS.editorMonacoViewState
 const RECENT_LINKS_KEY = NUVYN_BROWSER_STORAGE_KEYS.editorRecentWikiLinks
@@ -375,14 +377,14 @@ const hoverProvider: monaco.languages.HoverProvider = {
   provideHover(currentModel, position) {
     if (currentModel !== model) return null
     const line = currentModel.getLineContent(position.lineNumber)
-    const path = wikiLinkAtColumn(line, position.column - 1)
-    if (!path) return null
-    const resolvedPath = resolvedWikiPath(path)
+    const targetRef = wikiLinkAtColumn(line, position.column - 1)
+    if (!targetRef) return null
+    const resolvedPath = resolvedWikiPath(targetRef.ref)
     const target = resolvedPath ? targetsByPath.get(resolvedPath) : undefined
     return {
       contents: target
         ? [{ value: `**${target.title || target.path}**` }, { value: `\`${target.path}\`` }]
-        : [{ value: '**Missing note**' }, { value: `\`${path}\`` }, { value: 'Cmd/Ctrl-click to create it in `inbox/`.' }],
+        : [{ value: '**Missing note**' }, { value: `\`${targetRef.ref}\`` }, { value: 'Cmd/Ctrl-click to create it in `inbox/`.' }],
     }
   },
 }
@@ -571,15 +573,15 @@ onMounted(() => {
   editor.onMouseDown((event) => {
     const position = event.target.position
     if (!model || !position || (!event.event.ctrlKey && !event.event.metaKey)) return
-    const ref = wikiLinkAtColumn(model.getLineContent(position.lineNumber), position.column - 1)
-    if (!ref) return
-    const path = resolvedWikiPath(ref)
+    const targetRef = wikiLinkAtColumn(model.getLineContent(position.lineNumber), position.column - 1)
+    if (!targetRef) return
+    const path = resolvedWikiPath(targetRef.ref)
     if (!path) {
-      emit('create-link', ref)
+      emit('create-link', targetRef.ref)
       return
     }
     recordRecentLink(path)
-    emit('open-link', path)
+    emit('open-link', { path, ...(targetRef.anchor ? { anchor: targetRef.anchor } : {}) })
   })
   pasteHandler = (event) => {
     if (!editor || !model) return
@@ -652,9 +654,33 @@ onBeforeUnmount(() => {
   model = null
 })
 
+async function revealAnchor(anchor: string, isCurrent: () => boolean = () => true): Promise<boolean> {
+  if (!editor || !model || !anchor) return false
+  const run = ++revealAnchorSequence
+  const targetEditor = editor
+  const targetModel = model
+  const targetPath = props.path
+  const targetRaw = targetModel.getValue()
+  const lineNumber = await findMarkdownHeadingSourceLine(targetRaw, anchor, {
+    sourcePath: targetPath,
+  })
+  if (
+    !lineNumber
+    || run !== revealAnchorSequence
+    || editor !== targetEditor
+    || model !== targetModel
+    || props.path !== targetPath
+    || targetModel.getValue() !== targetRaw
+    || !isCurrent()
+  ) return false
+  targetEditor.revealLineInCenter(lineNumber)
+  return true
+}
+
 defineExpose({
   focus: () => editor?.focus(),
   revealText,
+  revealAnchor,
 })
 </script>
 

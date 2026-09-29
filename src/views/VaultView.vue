@@ -12,6 +12,8 @@ import { useConfirm } from '../composables/useConfirm'
 import { useI18n } from '../composables/useI18n'
 import { useAuth, type WorkspaceAuthTransitionAdapter } from '../composables/useAuth'
 import { useEditorTabs } from '../composables/vault/useEditorTabs'
+import { watchLinkNavigationHandoff } from '../composables/vault/useLinkNavigationHandoff'
+import { clearLinkNavigation, linkNavigationIntent } from '../composables/useLinkNavigation'
 import { createDraftStore } from '../composables/vault/draft-recovery/draftStore'
 import { createUnsavedDraftPersistence } from '../composables/vault/draft-recovery/useUnsavedDraftPersistence'
 import { createServerDocumentPathResolver } from '../composables/vault/draft-recovery/serverDocumentResolver'
@@ -158,7 +160,14 @@ import {
 // Monaco is the heaviest client dependency. Load it only when edit mode
 // actually mounts an editor, keeping navigation/read-only startup lean.
 const EditorPane = defineAsyncComponent(() => import('../components/vault/EditorPane.vue'))
-const editorPaneRef = ref<{ revealText(text: string): boolean } | null>(null)
+const editorPaneRef = ref<{
+  revealText(text: string): boolean
+  revealAnchor(anchor: string, isCurrent?: () => boolean): boolean | Promise<boolean>
+} | null>(null)
+const readingPaneRef = ref<{
+  revealAnchor(anchor: string, isCurrent?: () => boolean): boolean | Promise<boolean>
+} | null>(null)
+const readingPaneReady = ref(false)
 
 const settingsOpen = ref(false)
 const appShell = inject(AppShellContextKey, null)
@@ -1343,10 +1352,19 @@ async function reorderWorkspaceTabs(request: WorkspaceTabReorderRequest): Promis
 }
 
 async function openPost(path: string, options: { refresh?: boolean } = {}): Promise<void> {
+  if (linkNavigationIntent.value && linkNavigationIntent.value.path !== path) clearLinkNavigation()
   recoveryTabs.deactivate()
   historyComparisons.deactivate()
   workingTreeDiffs.deactivate()
   await openEditorPost(path, options)
+}
+
+function openLinkedDocument(path: string, anchor?: string): void {
+  void vaultContext.editor.openLink(path, anchor)
+}
+
+function openEditorLink(target: { path: string; anchor?: string }): void {
+  openLinkedDocument(target.path, target.anchor)
 }
 
 const { ensureDiaryDate, openDiaryDate } = useDiaryDateCommand({
@@ -1729,6 +1747,10 @@ const isOrdinaryDocumentPresentation = computed(() => (
   && !activeDraftRecovery.value
 ))
 
+watch([activePath, () => activeTab.value?.raw, isReadMode], () => {
+  readingPaneReady.value = false
+}, { flush: 'sync' })
+
 watchSearchRevealHandoff({
   activePath,
   activeTab,
@@ -1736,6 +1758,21 @@ watchSearchRevealHandoff({
   isReadMode,
   isOrdinaryPresentation: isOrdinaryDocumentPresentation,
 })
+
+watchLinkNavigationHandoff({
+  activePath,
+  activeTab,
+  editorPane: editorPaneRef,
+  readingPane: readingPaneRef,
+  readingPaneReady,
+  isReadMode,
+  isOrdinaryPresentation: isOrdinaryDocumentPresentation,
+})
+
+function onReadingPaneRendered(path: string | null): void {
+  if (path !== activePath.value) return
+  readingPaneReady.value = true
+}
 
 const diaryBackChord = createDiaryShortcutChord({
   isDiaryDocument: () => isDiaryScope.value
@@ -2705,7 +2742,7 @@ watch(isReadMode, async (reading) => {
             :focus-width="editorFocusWidth"
             :link-targets="editorLinkTargets"
             @update:model-value="(val: string) => onEditorChange(activeTab!.path, val)"
-            @open-link="openPost"
+            @open-link="openEditorLink"
             @create-link="createMissingWikiNote"
             @toggle-view-mode="viewModeApi?.toggle()"
           />
@@ -2741,9 +2778,11 @@ watch(isReadMode, async (reading) => {
           class="reading-slot"
         >
           <ReadingPane
+            ref="readingPaneRef"
             :raw="activeTab.raw"
             :resolver="wikiResolver"
             :source-path="activeTab.path"
+            @rendered="onReadingPaneRendered"
           />
         </div>
         <div v-if="!tabs.length" class="content-empty">
@@ -2810,7 +2849,7 @@ watch(isReadMode, async (reading) => {
       :metadata-readonly="metadataReadonly"
       :summary-source="metadataSummaryContent"
       @update:active-tab="rightRailTab = $event"
-      @link-navigate="openPost"
+      @link-navigate="openLinkedDocument"
       @metadata-saved="onMetadataSaved"
       @switch-to-read="switchToReadMode"
       @open-history-revision="openHistoryComparison"

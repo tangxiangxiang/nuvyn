@@ -86,6 +86,8 @@ export interface ExpandedMarkdown {
   markdown: string
   /** One source identity per flattened Markdown line. */
   sourcePathByLine: Array<string | undefined>
+  /** One source line number per flattened Markdown line. */
+  sourceLineByLine: Array<number | undefined>
 }
 
 function byteLength(value: string): number {
@@ -548,9 +550,10 @@ async function readTextResource(
 
 function addLines(
   context: ExpansionContext,
-  target: Array<{ text: string; sourcePath?: string }>,
+  target: Array<{ text: string; sourcePath?: string; sourceLine?: number }>,
   text: string,
   sourcePath: string | undefined,
+  sourceLineStart: number,
 ): void {
   const lines = text.replace(/\r\n?/gu, '\n').split('\n')
   let nextBudget = context.budgetUsed
@@ -566,7 +569,11 @@ function addLines(
   }
   context.budgetUsed = nextBudget
   context.emittedLineCount = nextLineCount
-  for (const line of lines) target.push({ text: line, ...(sourcePath ? { sourcePath } : {}) })
+  lines.forEach((line, index) => target.push({
+    text: line,
+    ...(sourcePath ? { sourcePath } : {}),
+    sourceLine: sourceLineStart + index,
+  }))
 }
 
 async function expandSource(
@@ -574,12 +581,12 @@ async function expandSource(
   sourcePath: string | undefined,
   depth: number,
   context: ExpansionContext,
-): Promise<Array<{ text: string; sourcePath?: string }>> {
+): Promise<Array<{ text: string; sourcePath?: string; sourceLine?: number }>> {
   throwIfAborted(context.signal)
   const normalized = source.replace(/\r\n?/gu, '\n')
   const lines = normalized.split('\n')
   const { opaqueLines, singleLineHtmlBlocks, codeSpanDirectiveLines } = collectOpaqueLines(context.md, normalized)
-  const output: Array<{ text: string; sourcePath?: string }> = []
+  const output: Array<{ text: string; sourcePath?: string; sourceLine?: number }> = []
 
   for (let index = 0; index < lines.length; index += 1) {
     throwIfAborted(context.signal)
@@ -588,16 +595,16 @@ async function expandSource(
     // directive parsing. A standalone-looking slice owned by code_inline is
     // literal source, never a resource read or a local error placeholder.
     if (codeSpanDirectiveLines.has(index)) {
-      addLines(context, output, line, sourcePath)
+      addLines(context, output, line, sourcePath, index + 1)
       continue
     }
     const directive = parseMarkdownResourceDirective(line)
     if (!isDirectiveLineAllowed(index, directive, opaqueLines, singleLineHtmlBlocks)) {
       if (!directive && looksLikeResourceDirective(line) && !opaqueLines.has(index)) {
-        addLines(context, output, placeholder(), sourcePath)
+        addLines(context, output, placeholder(), sourcePath, index + 1)
         continue
       }
-      addLines(context, output, line, sourcePath)
+      addLines(context, output, line, sourcePath, index + 1)
       continue
     }
 
@@ -629,7 +636,7 @@ async function expandSource(
       }
 
       if (current.kind === 'snippet') {
-        addLines(context, output, buildSnippetFence(selected, resourcePath, current), resourcePath)
+        addLines(context, output, buildSnippetFence(selected, resourcePath, current), resourcePath, index + 1)
       } else {
         context.stack.add(resourcePath)
         try {
@@ -643,7 +650,7 @@ async function expandSource(
       if (isAbortError(error)) throw error
       context.budgetUsed = beforeBudget
       context.emittedLineCount = beforeEmittedLineCount
-      addLines(context, output, placeholder(), sourcePath)
+      addLines(context, output, placeholder(), sourcePath, index + 1)
     }
   }
   return output
@@ -677,6 +684,7 @@ export async function expandMarkdownResources(
   return {
     markdown: expandedMarkdown,
     sourcePathByLine: lines.map(({ sourcePath: path }) => path),
+    sourceLineByLine: lines.map(({ sourceLine }) => sourceLine),
   }
 }
 

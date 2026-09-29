@@ -9,8 +9,8 @@
 //     spy, RightRail only renders the active-highlighted list).
 //   - The Links panel is a full embed of <LinksPanel>. It needs
 //     `path` and `posts` props, which VaultView passes through.
-//     We forward `navigate` to VaultView as `link-navigate` so the
-//     parent can route through openPost.
+//     We forward outgoing destinations, including their anchor, to
+//     VaultView so the document and section can be opened together.
 
 import { computed, nextTick, ref, watch } from 'vue'
 import { NButton } from 'naive-ui'
@@ -46,7 +46,7 @@ const props = defineProps<{
 
 const emit = defineEmits<{
   /** Emitted when the user clicks a row in the Links panel. */
-  'link-navigate': [path: string]
+  'link-navigate': [path: string, anchor?: string]
   'metadata-saved': [metadata: DocumentMetadata]
   'update:activeTab': [tab: RightRailTab]
   'switch-to-read': []
@@ -105,8 +105,9 @@ function onTocClick(id: string) {
   tocScrollTo.value?.(id)
 }
 
-function onLinkNavigate(p: string) {
-  emit('link-navigate', p)
+function onLinkNavigate(p: string, anchor?: string) {
+  if (anchor) emit('link-navigate', p, anchor)
+  else emit('link-navigate', p)
 }
 
 function onHistoryTabClick(): void {

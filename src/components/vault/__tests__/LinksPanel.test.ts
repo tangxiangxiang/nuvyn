@@ -6,7 +6,7 @@ import { useI18n } from '../../../composables/useI18n'
 import { __resetFallbackFileChangesForTesting, getFallbackVaultFileChanges } from '../../../composables/vault/context/fileChanges'
 
 const mocks = vi.hoisted(() => ({
-  index: { value: { paths: [], outgoing: {} as Record<string, Array<{ target: string; kind: 'wiki' }>> } },
+  index: { value: { paths: [], outgoing: {} as Record<string, Array<{ target: string; anchor?: string; kind: 'wiki' }>> } },
   fetchBacklinks: vi.fn(),
 }))
 
@@ -35,8 +35,8 @@ describe('LinksPanel', () => {
   beforeEach(() => {
     useI18n().setLocale('zh')
     __resetFallbackFileChangesForTesting()
-    mocks.index.value = { paths: [], outgoing: { 'inbox/current': [{ target: 'inbox/english/object', kind: 'wiki' }] } }
-    mocks.fetchBacklinks.mockReset().mockResolvedValue([{ source: 'archive/grammar/predicate' }])
+    mocks.index.value = { paths: [], outgoing: { 'inbox/current': [{ target: 'inbox/english/object', anchor: 'source-section', kind: 'wiki' }] } }
+    mocks.fetchBacklinks.mockReset().mockResolvedValue([{ source: 'archive/grammar/predicate', anchor: 'target-section' }])
   })
   afterEach(() => useI18n().setLocale('zh'))
 
@@ -45,10 +45,15 @@ describe('LinksPanel', () => {
     await flushPromises()
     expect(wrapper.text()).toContain('被引用（1）')
     expect(wrapper.text()).toContain('引用（1）')
+    expect(wrapper.text()).toContain('#source-section')
     expect(wrapper.findAll('.link-path')).toHaveLength(2)
     expect(wrapper.findAll('.link-entry')[0].attributes('title')).toBe('archive/grammar/predicate')
     await wrapper.findAll('.link-entry')[0].trigger('click')
-    expect(wrapper.emitted('navigate')).toEqual([['archive/grammar/predicate']])
+    await wrapper.findAll('.link-entry')[1].trigger('click')
+    expect(wrapper.emitted('navigate')).toEqual([
+      ['archive/grammar/predicate'],
+      ['inbox/english/object', 'source-section'],
+    ])
   })
 
   it('renders an empty relationship state', async () => {

@@ -19,7 +19,8 @@
 import { describe, it, expect } from 'vitest'
 import { defineComponent, h, ref } from 'vue'
 import { mount } from '@vue/test-utils'
-import { useMarkdownRender, __testing__ } from '../useMarkdownRender'
+import { findMarkdownHeadingSourceLine, useMarkdownRender, __testing__ } from '../useMarkdownRender'
+import type { MarkdownResourceResolver } from '../../../lib/markdownResources'
 
 const { extractHeadings } = __testing__
 
@@ -115,5 +116,54 @@ describe('useMarkdownRender (public API smoke)', () => {
       { id: 'java-guide', text: 'Java Guide', level: 2 },
       { id: 'usage', text: 'Usage', level: 2 },
     ])
+  })
+})
+
+describe('Markdown heading source mapping', () => {
+  it('maps title-injected and custom-collision ids to raw frontmatter-aware lines', async () => {
+    const raw = [
+      '---',
+      'title: Hello',
+      '---',
+      '## Hello',
+      '## Display {#stable-id}',
+      '## stable-id',
+      '## Other {#stable-id}',
+    ].join('\n')
+
+    await expect(findMarkdownHeadingSourceLine(raw, 'hello-2', { sourcePath: 'notes/a' })).resolves.toBe(4)
+    await expect(findMarkdownHeadingSourceLine(raw, 'stable-id-2', { sourcePath: 'notes/a' })).resolves.toBe(6)
+    await expect(findMarkdownHeadingSourceLine(raw, 'missing', { sourcePath: 'notes/a' })).resolves.toBeNull()
+  })
+
+  it('accounts for leading blank body lines removed after a generated title', async () => {
+    const raw = [
+      '---',
+      'title: Hello',
+      '---',
+      '',
+      '',
+      '## Section',
+    ].join('\n')
+
+    await expect(findMarkdownHeadingSourceLine(raw, 'section', { sourcePath: 'notes/a' })).resolves.toBe(6)
+  })
+
+  it('uses the final allocator after resource expansion while mapping local headings to raw lines', async () => {
+    const resolver: MarkdownResourceResolver = {
+      async read({ kind, path }) {
+        return { kind, path, content: '## Section' }
+      },
+    }
+    const raw = '<!--@include: ./part.md-->\n\n## Section'
+
+    await expect(findMarkdownHeadingSourceLine(raw, 'section', {
+      sourcePath: 'notes/a',
+      resourceResolver: resolver,
+    })).resolves.toBeNull()
+    await expect(findMarkdownHeadingSourceLine(raw, 'section-2', {
+      sourcePath: 'notes/a',
+      resourceResolver: resolver,
+    })).resolves.toBe(3)
   })
 })

@@ -47,6 +47,7 @@ const mocks = vi.hoisted(() => {
     getScrollTop: vi.fn(() => 250),
     getLayoutInfo: vi.fn(() => ({ height: 500 })),
     setScrollTop: vi.fn(),
+    revealLineInCenter: vi.fn(),
     getVisibleRanges: vi.fn(() => [{ startLineNumber: 1, endLineNumber: 20 }]),
     addCommand: vi.fn(() => 'remember-link-command'),
     addAction: vi.fn(),
@@ -738,6 +739,37 @@ describe('Monaco EditorPane', () => {
     }))
     await wrapper.vm.$nextTick()
     expect(wrapper.emitted('create-link')).toEqual([['missing-note']])
+    wrapper.unmount()
+  })
+
+  it('preserves the Wiki Link anchor when Cmd-clicking a resolved target', async () => {
+    mocks.model.getLineContent.mockReturnValue('[[docs/target#section|Target]]')
+    const wrapper = mount(EditorPane, {
+      props: {
+        modelValue: '[[docs/target#section|Target]]',
+        path: 'inbox/source',
+        linkTargets: [{ path: 'docs/target', title: 'Target' }],
+      },
+    })
+    mocks.mouseDownListeners.forEach((listener) => listener({
+      target: { position: { lineNumber: 1, column: 6 } },
+      event: { ctrlKey: true, metaKey: false },
+    }))
+    await wrapper.vm.$nextTick()
+
+    expect(wrapper.emitted('open-link')).toEqual([[{ path: 'docs/target', anchor: 'section' }]])
+    wrapper.unmount()
+  })
+
+  it('reveals an exact renderer-generated heading id without editing or focusing the document', async () => {
+    const raw = '## First {#stable-id}\n## stable-id'
+    const wrapper = mount(EditorPane, { props: { modelValue: raw, path: 'notes/target' } })
+
+    await expect((wrapper.vm as any).revealAnchor('stable-id-2')).resolves.toBe(true)
+    expect(mocks.editor.revealLineInCenter).toHaveBeenCalledWith(2)
+    expect(mocks.model.getValue()).toBe(raw)
+    expect(mocks.editor.focus).not.toHaveBeenCalled()
+    expect(mocks.editor.setSelection).not.toHaveBeenCalled()
     wrapper.unmount()
   })
 

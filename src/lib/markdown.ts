@@ -418,6 +418,17 @@ export interface MarkdownRenderOptions {
   signal?: AbortSignal
 }
 
+export interface RenderedMarkdownHeadingSource {
+  id: string
+  sourcePath?: string
+  sourceLine?: number
+}
+
+export interface RenderedMarkdownWithHeadingSources {
+  html: string
+  headingSources: RenderedMarkdownHeadingSource[]
+}
+
 /**
  * Discover only MarkdownIt's actual fenced-code tokens. The discovery parse
  * receives a fresh empty env on every call, so wiki-link parsing can use its
@@ -442,7 +453,10 @@ export function discoverFenceMetas(md: MarkdownIt, markdown: string): FenceMeta[
     .map((token) => parseFenceMeta(token.info ?? ''))
 }
 
-export async function render(markdown: string, options: MarkdownRenderOptions = {}): Promise<string> {
+async function renderWithMetadata(
+  markdown: string,
+  options: MarkdownRenderOptions = {},
+): Promise<RenderedMarkdownWithHeadingSources> {
   const md = await getMd()
   const expanded = await expandMarkdownResources(markdown, {
     md,
@@ -464,7 +478,39 @@ export async function render(markdown: string, options: MarkdownRenderOptions = 
     resourceSourcePathByLine: expanded.sourcePathByLine,
     deferWikiResolution: expanded.sourcePathByLine.some(Boolean),
   }
-  const html = md.render(expanded.markdown, env)
+  // Parse once, then render those exact tokens. Heading IDs are assigned by
+  // markdown-it-anchor during this parse, so the source map below is based on
+  // the same final allocator and token pipeline as the HTML shown in Reader.
+  const tokens = md.parse(expanded.markdown, env)
+  const headingSources: RenderedMarkdownHeadingSource[] = []
+  for (const token of tokens) {
+    if (token.type !== 'heading_open') continue
+    const id = token.attrGet('id')
+    const sourceLineIndex = token.map?.[0]
+    if (!id || sourceLineIndex === undefined) continue
+    const sourcePath = expanded.sourcePathByLine[sourceLineIndex]
+    const sourceLine = expanded.sourceLineByLine[sourceLineIndex]
+    headingSources.push({
+      id,
+      ...(sourcePath ? { sourcePath } : {}),
+      ...(sourceLine !== undefined ? { sourceLine } : {}),
+    })
+  }
+  const html = md.renderer.render(tokens, md.options, env)
   syncGeneratedShikiStylesheet()
-  return sanitizeMarkdownHtml(html, externalLinkProvenance)
+  return {
+    html: sanitizeMarkdownHtml(html, externalLinkProvenance),
+    headingSources,
+  }
+}
+
+export async function render(markdown: string, options: MarkdownRenderOptions = {}): Promise<string> {
+  return (await renderWithMetadata(markdown, options)).html
+}
+
+export async function renderWithHeadingSources(
+  markdown: string,
+  options: MarkdownRenderOptions = {},
+): Promise<RenderedMarkdownWithHeadingSources> {
+  return renderWithMetadata(markdown, options)
 }

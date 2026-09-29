@@ -185,8 +185,9 @@ describe('Monaco Markdown helpers', () => {
   })
 
   it('finds a Wiki Link target under the pointer', () => {
-    expect(wikiLinkAtColumn('See [[notes/idea|Idea]] now', 10)).toBe('notes/idea')
-    expect(wikiLinkAtColumn('See [[notes/idea#part]] now', 12)).toBe('notes/idea')
+    expect(wikiLinkAtColumn('See [[notes/idea|Idea]] now', 10)).toEqual({ ref: 'notes/idea' })
+    expect(wikiLinkAtColumn('See [[notes/idea#part]] now', 12)).toEqual({ ref: 'notes/idea', anchor: 'part' })
+    expect(wikiLinkAtColumn('See [[notes/idea#part|Idea]] now', 12)).toEqual({ ref: 'notes/idea', anchor: 'part' })
     expect(wikiLinkAtColumn('plain text', 3)).toBeNull()
   })
 

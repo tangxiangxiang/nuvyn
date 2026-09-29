@@ -54,7 +54,7 @@ function onArticleClick(event: MouseEvent) {
   const destination = anchor?.dataset.target
   if (!destination) return
   event.preventDefault()
-  void vaultContext.editor.openPost(destination)
+  void vaultContext.editor.openLink(destination, anchor.dataset.anchor)
 }
 
 defineExpose({ el: articleEl })

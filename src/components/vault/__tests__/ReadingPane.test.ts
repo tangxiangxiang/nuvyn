@@ -138,6 +138,29 @@ function setRect(el: HTMLElement, top: number) {
 }
 
 describe('ReadingPane scroll-spy', () => {
+  it('reports an empty document as rendered so missing anchors can be consumed', async () => {
+    const wrapper = mount(ReadingPane, { props: { raw: '', sourcePath: 'notes/empty' } })
+    await nextTick()
+    expect(wrapper.emitted('rendered')).toEqual([['notes/empty', null]])
+    wrapper.unmount()
+  })
+
+  it('reveals the exact rendered DOM anchor without changing the URL', () => {
+    const { wrapper, pane, headingEls } = setupFixture([
+      { id: 'safe-id-2', text: 'Rendered custom heading', level: 2 },
+    ])
+    setRect(pane, 100)
+    setRect(headingEls[0], 260)
+    setScrollState(pane, 0, 400, 1200)
+
+    expect((wrapper.vm as any).revealAnchor('safe-id-2')).toBe(true)
+    expect(pane.scrollTop).toBe(160)
+    expect(tocActiveId.value).toBe('safe-id-2')
+    expect(window.location.hash).toBe('')
+    expect((wrapper.vm as any).revealAnchor('missing')).toBe(false)
+    wrapper.unmount()
+  })
+
   it('activates the last heading whose top has crossed the trigger line', async () => {
     const { pane, headingEls } = setupFixture([
       { id: 'h-a', text: 'A', level: 2 },

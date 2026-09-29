@@ -8,9 +8,9 @@
 // outgoing comes from the snapshot's `outgoing[path]` (no round-trip),
 // backlinks come from a per-path fetch of `/api/backlinks?path=…`.
 //
-// Click on any item emits `navigate` with the target path so the
-// parent (VaultView) can route through `useEditorTabs.openPost`.
-// Same shape as FileTree / TagPanel emits.
+// Clicks emit the target path. Outgoing links also carry their destination
+// anchor; backlink anchors belong to the target Note and are never navigated
+// on the source Note.
 
 import { computed, ref, watch, watchEffect, onMounted, onBeforeUnmount } from 'vue'
 import { NButton, NIcon } from 'naive-ui'
@@ -32,7 +32,7 @@ const props = defineProps<{
 }>()
 
 const emit = defineEmits<{
-  navigate: [path: string]
+  navigate: [path: string, anchor?: string]
 }>()
 const { t } = useI18n()
 
@@ -224,12 +224,13 @@ watchEffect(() => {
               attr-type="button"
               text
               :bordered="false"
-              :title="l.target"
-              @click="emit('navigate', l.target)"
+              :title="l.anchor ? `${l.target}#${l.anchor}` : l.target"
+              @click="l.anchor ? emit('navigate', l.target, l.anchor) : emit('navigate', l.target)"
             >
               <NIcon class="link-icon" aria-hidden="true"><FileText /></NIcon>
               <span class="link-copy">
                 <span class="link-title">{{ l.label }}</span>
+                <span v-if="l.anchor" class="link-anchor">#{{ l.anchor }}</span>
                 <span class="link-path">{{ directoryLabel(l.target) }}</span>
               </span>
             </NButton>
@@ -307,6 +308,14 @@ watchEffect(() => {
   overflow: hidden;
   text-overflow: ellipsis;
   max-width: 100%;
+}
+.link-anchor {
+  color: var(--vs-text-2, var(--text-muted));
+  font-size: 0.72rem;
+  margin-left: 5px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 .link-path {
   font-size: 0.7rem;

@@ -9,7 +9,7 @@
 // IntersectionObserver scroll-spy and publishes heading state via
 // useTocState so RightRail can render the active-highlighted list.
 
-import { ref, computed, watch, onBeforeUnmount } from 'vue'
+import { ref, computed, watch, onBeforeUnmount, nextTick } from 'vue'
 import RenderedMarkdown from './RenderedMarkdown.vue'
 import type { Heading } from '../../composables/vault/useMarkdownRender'
 import { useVaultTocState } from '../../composables/vault/useTocState'
@@ -24,6 +24,9 @@ const props = defineProps<{
   resolver?: WikiResolver
   sourcePath?: string
   resourceResolver?: MarkdownResourceResolver
+}>()
+const emit = defineEmits<{
+  rendered: [path: string | null, el: HTMLElement | null]
 }>()
 const headings = ref<Heading[]>([])
 
@@ -152,10 +155,10 @@ function cssEscape(id: string): string {
 
 /* Scroll-to handler published to RightRail via tocScrollTo. Smooth-scrolls
    the target heading into view inside the .reading-pane scroll container. */
-function scrollToHeading(id: string) {
-  if (!articleEl.value) return
+function revealAnchor(id: string, isCurrent: () => boolean = () => true): boolean {
+  if (!isCurrent() || !articleEl.value) return false
   const target = articleEl.value.querySelector<HTMLElement>(`#${cssEscape(id)}`)
-  if (!target) return
+  if (!target) return false
   freezeActiveUntil = Date.now() + 800
   tocActiveId.value = id
   const pane = readingPaneEl.value
@@ -167,7 +170,17 @@ function scrollToHeading(id: string) {
   } else {
     target.scrollIntoView({ behavior: 'smooth', block: 'start' })
   }
+  return true
+}
+
+function scrollToHeading(id: string) {
+  if (!revealAnchor(id)) return
   if (history.replaceState) history.replaceState(null, '', `#${id}`)
+}
+
+function onArticleRendered(el: HTMLElement | null) {
+  articleEl.value = el
+  emit('rendered', props.sourcePath ?? null, el)
 }
 
 /* Publish heading state to the shared module. RightRail reads these
@@ -177,12 +190,20 @@ function scrollToHeading(id: string) {
 watch(headings, (h) => { tocHeadings.value = h }, { immediate: true })
 tocScrollTo.value = scrollToHeading
 
+watch(isEmpty, async (empty) => {
+  if (!empty) return
+  await nextTick()
+  emit('rendered', props.sourcePath ?? null, null)
+}, { flush: 'post', immediate: true })
+
 onBeforeUnmount(() => {
   disconnectObserver()
   tocHeadings.value = []
   tocActiveId.value = ''
   tocScrollTo.value = null
 })
+
+defineExpose({ revealAnchor })
 
 watch([articleEl, readingPaneEl, headings], () => attachObserver(), { flush: 'post' })
 watch(() => props.raw, () => {
@@ -210,7 +231,7 @@ watch(() => props.raw, () => {
           :resource-resolver="resourceResolver"
           tag="article"
           @update:headings="headings = $event"
-          @rendered="articleEl = $event"
+          @rendered="onArticleRendered"
         />
       </div>
     </template>

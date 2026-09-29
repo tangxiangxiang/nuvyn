@@ -21,7 +21,11 @@
 
 import { ref, watchEffect, type Ref } from 'vue'
 import { parseDoc } from '../../lib/frontmatter'
-import { render, type MarkdownRenderOptions } from '../../lib/markdown'
+import {
+  render,
+  renderWithHeadingSources,
+  type MarkdownRenderOptions,
+} from '../../lib/markdown'
 import type { Resolver as WikiResolver } from '../../lib/wikiLinks'
 import { isManagedDiaryPath } from '../../../shared/diaryProtocol'
 import { captureDiarySessionGeneration, isDiarySessionGenerationCurrent } from '../diary/useDiaryAccessSession'
@@ -38,6 +42,59 @@ export interface MarkdownRender {
   headings: Ref<Heading[]>
   /** True only after the current source has finished rendering. */
   ready: Ref<boolean>
+}
+
+interface MarkdownBodyForRender {
+  markdown: string
+  rawBodyStartLine: number
+  insertedTitleLines: number
+  removedLeadingBodyLines: number
+}
+
+/** Keep frontmatter-title handling shared between Reader and source reveals. */
+function markdownBodyForRender(raw: string): MarkdownBodyForRender {
+  const { frontmatter, content } = parseDoc(raw)
+  const bodyStartOffset = raw.length - content.length
+  const rawBodyStartLine = raw.slice(0, bodyStartOffset).split(/\r\n|\r|\n/).length
+  const title = typeof frontmatter.title === 'string' ? frontmatter.title.trim() : ''
+  const startsWithH1 = /^#\s+\S/.test(content.trimStart())
+  if (!title || startsWithH1) {
+    return { markdown: content, rawBodyStartLine, insertedTitleLines: 0, removedLeadingBodyLines: 0 }
+  }
+  const body = content.replace(/^\n+/, '')
+  const removedLeadingBodyLines = content.length - body.length
+  return {
+    markdown: `# ${title}\n\n${body}`,
+    rawBodyStartLine,
+    insertedTitleLines: 2,
+    removedLeadingBodyLines,
+  }
+}
+
+/**
+ * Resolve the Reader's final heading id back to a source line using the same
+ * expanded MarkdownIt parse used for HTML. Only headings owned by this raw
+ * document can reveal in Monaco; included resource headings belong elsewhere.
+ */
+export async function findMarkdownHeadingSourceLine(
+  raw: string,
+  anchorId: string,
+  options: Omit<MarkdownRenderOptions, 'signal'> = {},
+): Promise<number | null> {
+  if (!anchorId) return null
+  const body = markdownBodyForRender(raw)
+  const { headingSources } = await renderWithHeadingSources(body.markdown, options)
+  const expectedSourcePath = options.sourcePath
+    ? (options.sourcePath.endsWith('.md') ? options.sourcePath : `${options.sourcePath}.md`)
+    : undefined
+  for (const heading of headingSources) {
+    if (heading.id !== anchorId || heading.sourceLine === undefined) continue
+    if (expectedSourcePath && heading.sourcePath !== expectedSourcePath) continue
+    const bodyLine = heading.sourceLine - body.insertedTitleLines + body.removedLeadingBodyLines
+    if (bodyLine <= 0) return null
+    return body.rawBodyStartLine + bodyLine - 1
+  }
+  return null
 }
 
 /* Match opening + closing h1..h4 with an `id` attribute. Slugs come
@@ -121,13 +178,8 @@ export function useMarkdownRender(
       controller.abort()
     })
     try {
-      const { frontmatter, content } = parseDoc(raw)
-      const title = typeof frontmatter.title === 'string' ? frontmatter.title.trim() : ''
-      const startsWithH1 = /^#\s+\S/.test(content.trimStart())
-      const body = !startsWithH1 && title
-        ? `# ${title}\n\n${content.replace(/^\n+/, '')}`
-        : content
-      const rendered = await render(body, { ...options, resolver, signal: controller.signal })
+      const body = markdownBodyForRender(raw)
+      const rendered = await render(body.markdown, { ...options, resolver, signal: controller.signal })
       // A managed-Diary render may have awaited a resource request while the
       // authoritative session was locked/replaced. Do not publish that E1
       // HTML/TOC into the reader after the generation advanced; ordinary Note

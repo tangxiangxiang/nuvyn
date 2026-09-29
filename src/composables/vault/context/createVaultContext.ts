@@ -6,6 +6,8 @@ import type { VaultFileChanges } from './fileChanges'
 import { createVaultTocState } from '../useTocState'
 import type { DocumentLifecycle } from '../useDocumentLifecycle'
 import { isManagedDiaryPath } from '../../../../shared/diaryProtocol'
+import { clearLinkNavigation, consumeLinkNavigation, requestLinkNavigation } from '../../useLinkNavigation'
+import { clearSearchReveal } from '../../useSearchReveal'
 
 export function createVaultContext(options: {
   vaultId: Ref<string | null>
@@ -34,6 +36,18 @@ export function createVaultContext(options: {
       activePath: options.activePath,
       activeTab: options.activeTab,
       openPost: options.openPost,
+      async openLink(path: string, anchor?: string): Promise<void> {
+        clearSearchReveal()
+        if (!anchor) clearLinkNavigation()
+        const intent = anchor
+          ? requestLinkNavigation({ path, anchor })
+          : null
+        try {
+          await options.openPost(path)
+        } finally {
+          if (intent && options.activePath.value !== path) consumeLinkNavigation(intent.id)
+        }
+      },
       getLiveContent(path: string): string | null {
         if (isManagedDiaryPath(path.replace(/\.md$/, ''))) return null
         const tab = options.tabs.value.find((candidate) => candidate.path === path)

@@ -8,7 +8,7 @@
 // async Shiki language preparation).
 import { afterEach, beforeEach, describe, it, expect, vi } from 'vitest'
 import { createHighlighter, type Highlighter } from 'shiki'
-import { createMarkdownSanitizer, render } from '../markdown'
+import { createMarkdownSanitizer, render, renderWithHeadingSources } from '../markdown'
 import type { Resolver as WikiResolver } from '../wikiLinks'
 import { EXTERNAL_LINK_PROVENANCE_ATTR } from '../wikiLinks'
 import { __testing__ as shikiTesting, getGeneratedShikiCss } from '../shiki'
@@ -1215,6 +1215,36 @@ describe('markdown H4 style-to-class and security closure', () => {
 })
 
 describe('markdown anchors, links, and images', () => {
+  it('maps final renderer heading ids to their original source lines', async () => {
+    const source = [
+      '## Hello',
+      '## Hello',
+      '## Display {#stable-id}',
+      '## stable-id',
+      '## Other {#stable-id}',
+      '## 中文标题',
+      '## **Rich** `inline` heading',
+      '```md',
+      '## Hidden',
+      '```',
+      '::: note',
+      '## Container heading',
+      ':::',
+    ].join('\n')
+    const rendered = await render(source)
+    const withSources = await renderWithHeadingSources(source)
+    const renderedIds = Array.from(new DOMParser().parseFromString(rendered, 'text/html').querySelectorAll('h1,h2,h3,h4,h5,h6'))
+      .map((heading) => heading.id)
+
+    expect(withSources.html).toBe(rendered)
+    expect(withSources.headingSources.map((heading) => heading.id)).toEqual(renderedIds)
+    expect(withSources.headingSources.map((heading) => heading.sourceLine)).toEqual([1, 2, 3, 4, 5, 6, 7, 12])
+    expect(renderedIds).toEqual([
+      'hello', 'hello-2', 'stable-id', 'stable-id-2', 'stable-id-3',
+      '中文标题', 'rich-inline-heading', 'container-heading',
+    ])
+  })
+
   it('supports narrow custom anchors and the id/id-2/id-3 collision contract', async () => {
     const automatic = await render('## Hello\n## Hello\n## Hello')
     expect(Array.from(new DOMParser().parseFromString(automatic, 'text/html').querySelectorAll('h2'))

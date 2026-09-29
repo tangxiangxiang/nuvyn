@@ -408,11 +408,21 @@ export function rankWikiTargets<T extends { path: string; title: string }>(
     .map(({ target }) => target)
 }
 
-export function wikiLinkAtColumn(line: string, column: number): string | null {
-  for (const match of line.matchAll(/\[\[([^\]|#\n]+)(?:#[^\]|\n]+)?(?:\|[^\]\n]+)?\]\]/g)) {
+export interface WikiLinkReference {
+  ref: string
+  anchor?: string
+}
+
+export function wikiLinkAtColumn(line: string, column: number): WikiLinkReference | null {
+  for (const match of line.matchAll(/\[\[([^\]|#\n]+)(?:#([^\]|\n]+))?(?:\|[^\]\n]+)?\]\]/g)) {
     const start = match.index ?? 0
     const end = start + match[0].length
-    if (column >= start && column <= end) return match[1]
+    if (column >= start && column <= end) {
+      const ref = match[1]?.trim()
+      if (!ref) return null
+      const anchor = match[2]?.trim()
+      return { ref, ...(anchor ? { anchor } : {}) }
+    }
   }
   return null
 }

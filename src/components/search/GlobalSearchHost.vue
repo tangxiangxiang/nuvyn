@@ -9,6 +9,7 @@ import { createBoardSearchProvider, type BoardSearchPayload } from '../../featur
 import { isNuvynShortcutBlocked } from '../../lib/keyboard'
 import { workspaceKindForPath, type WorkspaceKind } from '../../lib/workspace'
 import { clearSearchReveal, requestSearchReveal } from '../../composables/useSearchReveal'
+import { clearLinkNavigation } from '../../composables/useLinkNavigation'
 
 const router = useRouter()
 const route = useRoute()
@@ -49,6 +50,7 @@ function commit(result: SearchResult): void {
     const payload = result.payload as { path?: unknown; match?: unknown; bodyQuery?: unknown }
     const path = payload.path
     if (typeof path === 'string' && path.length > 0) {
+      clearLinkNavigation()
       if (payload.match === 'body' && typeof payload.bodyQuery === 'string' && payload.bodyQuery.trim()) {
         requestSearchReveal({ path, text: payload.bodyQuery })
       } else {
@@ -60,6 +62,7 @@ function commit(result: SearchResult): void {
   }
   if (result.type === 'board') {
     clearSearchReveal()
+    clearLinkNavigation()
     const boardId = (result.payload as Partial<BoardSearchPayload>).boardId
     if (typeof boardId === 'string' && boardId.length > 0) {
       void router.push({ name: 'board-editor', params: { boardId } })
