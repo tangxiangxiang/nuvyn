@@ -1,6 +1,6 @@
 import { mkdir, rm, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
-import { closeCurrentDiaryDocument, expect, test, type APIRequestContext, type Page } from './fixtures/diary'
+import { expect, goBackFromDiaryDocument, test, type APIRequestContext, type Page } from './fixtures/diary'
 import { CALENDAR_TEST_DATE, CALENDAR_TEST_TIME_ZONE, calendarDay } from './helpers/calendar-clock'
 
 const TEST_TIME_ZONE = CALENDAR_TEST_TIME_ZONE
@@ -173,7 +173,7 @@ test('Calendar opens the native Vault reader with the Diary date filter', async 
     await expect(page.locator('.status-bar-row')).toBeVisible()
 
     const tab = page.locator(`[role="tab"][data-tab-id="${path}"]`)
-    await closeCurrentDiaryDocument(page)
+    await goBackFromDiaryDocument(page)
     await expect(tab).toHaveCount(0)
     await expect(page.getByTestId('diary-calendar')).toBeVisible()
     await expect(page.getByTestId('diary-calendar')).toHaveAttribute('data-month', monthBefore ?? '')
@@ -304,7 +304,7 @@ test('existing today/past enter native READ while unsupported future files and m
       await clickDiaryDate(page, date)
       await assertNativeReader(page, date)
       const tab = page.locator(`[role="tab"][data-tab-id="${diaryPath(date)}"]`)
-      await closeCurrentDiaryDocument(page)
+      await goBackFromDiaryDocument(page)
       await expect(tab).toHaveCount(0)
       await expect(page.getByTestId('diary-calendar')).toBeVisible()
     }
@@ -473,7 +473,7 @@ test('native document handoff remains stable across five cycles without dayIndex
       await clickDiaryDate(page, date)
       await assertNativeReader(page, date)
       const tab = page.locator(`[role="tab"][data-tab-id="${diaryPath(date)}"]`)
-      await closeCurrentDiaryDocument(page)
+      await goBackFromDiaryDocument(page)
       await expect(tab).toHaveCount(0)
       await expect(page.getByTestId('diary-calendar')).toBeVisible()
     }

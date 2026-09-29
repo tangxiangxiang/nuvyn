@@ -1,4 +1,4 @@
-import { closeCurrentDiaryDocument, expect, test, type APIRequestContext, type Page } from './fixtures/diary'
+import { closeCurrentWorkspaceDocument, expect, test, type APIRequestContext, type Page } from './fixtures/diary'
 import { clearDraftDatabase, gotoVaultReady } from './helpers/edit-program'
 import { CALENDAR_TEST_DATE, CALENDAR_TEST_TIME_ZONE, calendarDay } from './helpers/calendar-clock'
 
@@ -393,7 +393,7 @@ test('Cmd/Ctrl+W close and reopen use existing fallback and stable document iden
     await assertNativeDiary(page, date)
 
     await selectScope(page, 'note')
-    await closeCurrentDiaryDocument(page)
+    await closeCurrentWorkspaceDocument(page)
     await expect(page.locator(`[role="tab"][data-tab-id="${path}"]`)).toHaveCount(0)
     await expect(page.locator(`[role="tab"][data-tab-id="${note}"]`)).toHaveAttribute('aria-selected', 'true')
     await expect(page).toHaveURL(new RegExp(`/vault/${note.replace('/', '\\/')}(?:[?#]|$)`))
@@ -410,7 +410,7 @@ test('Cmd/Ctrl+W close and reopen use existing fallback and stable document iden
     await page.locator(`[role="tab"][data-tab-id="${note}"] .tab-close`).click()
     await expect(page.locator(`[role="tab"][data-tab-id="${note}"]`)).toHaveCount(0)
     await expect(page.locator(`[role="tab"][data-tab-id="${path}"]`)).toHaveAttribute('aria-selected', 'true')
-    await closeCurrentDiaryDocument(page)
+    await closeCurrentWorkspaceDocument(page)
     await expect(page.locator(`[role="tab"][data-tab-id="${path}"]`)).toHaveCount(0)
     await expect(page).toHaveURL(/\/vault(?:[?#]|$)/)
 

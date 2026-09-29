@@ -1,4 +1,4 @@
-import { closeCurrentDiaryDocument, expect, test, type APIRequestContext, type Page } from './fixtures/diary'
+import { closeCurrentWorkspaceDocument, expect, goBackFromDiaryDocument, test, type APIRequestContext, type Page } from './fixtures/diary'
 import {
   appendEditorText,
   clearDraftDatabase,
@@ -500,7 +500,7 @@ test('mobile Calendar-to-native keyboard journey preserves focus, shortcuts, and
     await expect(page.locator('.reading-pane')).toBeVisible()
     await expect(page.getByRole('textbox', { name: 'Editor content' })).toHaveCount(0)
 
-    await closeCurrentDiaryDocument(page)
+    await goBackFromDiaryDocument(page)
     await expect(tab).toHaveCount(0)
     await expect(page.getByTestId('diary-calendar')).toBeVisible()
     await expect(page.getByTestId('diary-workspace-shell')).toHaveAttribute('data-presentation-mode', 'home')
@@ -556,11 +556,10 @@ test('Native DOCUMENT Cmd/Ctrl+W closes through the existing focus and dirty pol
     const fallbackTab = page.locator(`[role="tab"][data-tab-id="${note}"]`)
     // Leave Diary scope before the close assertion so the fallback workspace
     // tab remains a visible native Vault focus target. The Diary tab itself
-    // remains the active document and is closed by the same Vault shortcut.
+    // remains the active document and is closed with the generic shortcut.
     await selectScope(page, 'note')
     await expect(page.getByTestId('diary-calendar')).toHaveCount(0)
-    await page.locator('.vault').focus()
-    await page.keyboard.press('ControlOrMeta+w')
+    await closeCurrentWorkspaceDocument(page)
 
     await expect(diaryTab).toHaveCount(0)
     await expect(fallbackTab).toHaveAttribute('aria-selected', 'true')
@@ -810,7 +809,7 @@ test('FileTree search keeps keyboard semantics and the user filter across Diary 
     await expect(page.locator('.vault')).toHaveClass(/diary-native-document-mode/)
 
     const tab = page.locator(`[role="tab"][data-tab-id="${diary}"]`)
-    await closeCurrentDiaryDocument(page)
+    await goBackFromDiaryDocument(page)
     await expect(page.getByTestId('diary-calendar')).toBeVisible()
     await expect(tab).toHaveCount(0)
     await expect(search).toHaveCount(0)
@@ -865,7 +864,7 @@ test('ten mixed Calendar focus cycles remain stable without runtime errors', asy
         const root = document.querySelector<HTMLElement>('[data-testid="diary-calendar"]')
         return Boolean(root && document.activeElement && root.contains(document.activeElement))
       })).toBe(false)
-      await closeCurrentDiaryDocument(page)
+      await goBackFromDiaryDocument(page)
       await expect(tab).toHaveCount(0)
       await expect(calendar).toBeVisible()
       await expect(page.getByTestId('diary-workspace-shell')).toHaveAttribute('data-presentation-mode', 'home')

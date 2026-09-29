@@ -1,4 +1,4 @@
-import { expect, test, type APIRequestContext, type Page } from './fixtures/diary'
+import { expect, goBackFromDiaryDocument, test, type APIRequestContext, type Page } from './fixtures/diary'
 import { CALENDAR_TEST_DATE, CALENDAR_TEST_MONTH, CALENDAR_TEST_TIME_ZONE, calendarDay } from './helpers/calendar-clock'
 
 const TEST_TIME_ZONE = CALENDAR_TEST_TIME_ZONE
@@ -453,8 +453,7 @@ test('Diary Calendar keyboard flow does not strand focus in the hidden surface',
       return Boolean(active && hiddenCalendar?.contains(active))
     })).toBe(false)
 
-    await page.locator('.vault').focus()
-    await page.keyboard.press('ControlOrMeta+W')
+    await goBackFromDiaryDocument(page)
     await expect(tab).toHaveCount(0)
     await expect(calendar).toBeVisible()
 
@@ -462,8 +461,7 @@ test('Diary Calendar keyboard flow does not strand focus in the hidden surface',
     await page.keyboard.press('Space')
     await expect(tab).toHaveCount(1)
     await expect(page.locator('.reading-pane')).toHaveCount(1)
-    await page.locator('.vault').focus()
-    await page.keyboard.press('ControlOrMeta+W')
+    await goBackFromDiaryDocument(page)
     await expect(tab).toHaveCount(0)
     await expect(calendar).toBeVisible()
 
@@ -535,8 +533,7 @@ test('Existing Diary lifecycle remains stable across five repeated opens', async
         .toContainText('D5 release evidence.', { timeout: 15_000 })
       await expect(page.locator('.reading-pane')).toHaveCount(1)
       await expect(page.getByTestId('diary-calendar')).toBeHidden()
-      await page.locator('.vault').focus()
-      await page.keyboard.press('ControlOrMeta+W')
+      await goBackFromDiaryDocument(page)
       await expect(tab).toHaveCount(0)
       await expect(page.getByTestId('diary-calendar')).toBeVisible()
     }

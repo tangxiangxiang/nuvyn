@@ -1,4 +1,4 @@
-import { expect, test, type APIRequestContext, type Page } from './fixtures/diary'
+import { expect, goBackFromDiaryDocument, test, type APIRequestContext, type Page } from './fixtures/diary'
 import {
   CALENDAR_TEST_DATE,
   CALENDAR_TEST_MONTH,
@@ -272,8 +272,7 @@ test('Calendar click opens an existing Diary through the native Vault reading su
     expect(createMethods).toEqual([])
     expect((await request.get(`/api/posts/${diaryPath(`${date}-2`)}`)).status()).toBe(404)
 
-    await page.locator('.vault').focus()
-    await page.keyboard.press('ControlOrMeta+W')
+    await goBackFromDiaryDocument(page)
     await expect(tab).toHaveCount(0)
     await expect(calendar).toBeVisible()
     await expect(page).toHaveURL(/\/vault(?:[?#]|$)/)
@@ -609,14 +608,13 @@ test('failed Mood-first repair intent is invalidated by explicit Diary navigatio
     const repairMood = calendarMoodButton(surface, date)
     await expect(repairMood).toHaveText('?')
 
-    // Explicit date navigation abandons the failed repair intent. Closing the
-    // native tab returns to Calendar Home without changing that ownership.
+    // Explicit date navigation abandons the failed repair intent. Diary Back
+    // returns to Calendar Home without changing that ownership.
     await dateButton.click()
     await expect(page).toHaveURL(new RegExp(`/vault/${path.replace('/', '\\/')}(?:[?#]|$)`))
     const tab = page.locator(`[role="tab"][data-tab-id="${path}"]`)
     await expect(tab).toHaveAttribute('aria-selected', 'true')
-    await page.locator('.vault').focus()
-    await page.keyboard.press('ControlOrMeta+W')
+    await goBackFromDiaryDocument(page)
     await expect(tab).toHaveCount(0)
     await expect(surface).toBeVisible()
     await expect(page).toHaveURL(/\/vault(?:[?#]|$)/)
@@ -697,8 +695,7 @@ test('missing today and past dates require Mood before create and then open the 
       await expect(page.locator(`[role="tab"][data-tab-id="${diaryPath(date)}"]`)).toHaveAttribute('aria-selected', 'true')
       await expect(page.locator('.search-input')).toHaveValue(date)
       const tab = page.locator(`[role="tab"][data-tab-id="${diaryPath(date)}"]`)
-      await page.locator('.vault').focus()
-      await page.keyboard.press('ControlOrMeta+W')
+      await goBackFromDiaryDocument(page)
       await expect(tab).toHaveCount(0)
       await expect(surface).toBeVisible()
       await expect(page).toHaveURL(/\/vault(?:[?#]|$)/)

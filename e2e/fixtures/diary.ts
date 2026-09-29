@@ -644,7 +644,17 @@ export const test = authTest.extend<{}, {
 export { expect }
 export type { APIRequestContext }
 
-export async function closeCurrentDiaryDocument(page: Page): Promise<void> {
-  await page.locator('.vault').focus()
+export async function goBackFromDiaryDocument(page: Page): Promise<void> {
+  const vault = page.locator('.vault')
+  await vault.focus()
+  await expect(vault).toBeFocused()
+  await page.keyboard.press('g')
+  await page.keyboard.press('b')
+}
+
+export async function closeCurrentWorkspaceDocument(page: Page): Promise<void> {
+  const vault = page.locator('.vault')
+  await vault.focus()
+  await expect(vault).toBeFocused()
   await page.keyboard.press('ControlOrMeta+W')
 }

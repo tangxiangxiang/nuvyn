@@ -1,4 +1,4 @@
-import { closeCurrentDiaryDocument, expect, test, type APIRequestContext, type Page } from './fixtures/diary'
+import { expect, goBackFromDiaryDocument, test, type APIRequestContext, type Page } from './fixtures/diary'
 import { clearDraftDatabase, gotoVaultReady } from './helpers/edit-program'
 import {
   CALENDAR_TEST_DATE,
@@ -421,7 +421,7 @@ async function runResponsiveMatrix(page: Page, date: string): Promise<void> {
 
     await dateButton().click()
     await assertNativeDiaryNoOverflow(page, date, viewport)
-    await closeCurrentDiaryDocument(page)
+    await goBackFromDiaryDocument(page)
     await expect(page.locator(`[role="tab"][data-tab-id="${diaryPath(date)}"]`)).toHaveCount(0)
     await expect(calendar).toBeVisible()
   }

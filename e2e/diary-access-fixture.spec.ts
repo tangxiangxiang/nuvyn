@@ -1,4 +1,4 @@
-import { closeCurrentDiaryDocument, expect, test, DIARY_ACCESS_CAPABILITY_HEADER } from './fixtures/diary'
+import { expect, goBackFromDiaryDocument, test, DIARY_ACCESS_CAPABILITY_HEADER } from './fixtures/diary'
 
 // Diary fixtures carry a live capability in memory. Do not let the
 // repository-wide retain-on-failure setting serialize request headers into a
@@ -167,9 +167,8 @@ test('full Diary navigation waits for route-led workspace hydration', async ({ p
     await navigation
     await page.unroute(hydrationApi)
     if (created) {
-      // The ordinary Diary tab strip is intentionally hidden, so close through
-      // the workspace shortcut before removing the fixture document.
-      await closeCurrentDiaryDocument(page)
+      // Use Diary's Back command because the ordinary tab strip is hidden.
+      await goBackFromDiaryDocument(page)
       await expect(page.locator(`[role="tab"][data-tab-id="${path}"]`)).toHaveCount(0)
       const deleted = await request.delete(`/api/posts/${path}`)
       expect(deleted.status(), await deleted.text()).toBe(200)

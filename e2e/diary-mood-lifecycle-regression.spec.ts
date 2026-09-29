@@ -2,7 +2,7 @@ import { createHash } from 'node:crypto'
 import { promises as fs } from 'node:fs'
 import nodePath from 'node:path'
 import Database from 'better-sqlite3'
-import { closeCurrentDiaryDocument, expect, test, type APIRequestContext, type Page } from './fixtures/diary'
+import { expect, goBackFromDiaryDocument, test, type APIRequestContext, type Page } from './fixtures/diary'
 import {
   appendEditorText,
   clearDraftDatabase,
@@ -577,7 +577,7 @@ test('native body conflict preserves Mood while resolving through the existing s
     expect(resolved.metadata.mood).toBe('sad')
 
     const tab = page.locator(`[role="tab"][data-tab-id="${path}"]`)
-    await closeCurrentDiaryDocument(page)
+    await goBackFromDiaryDocument(page)
     await expect(tab).toHaveCount(0)
     await expect(page.getByTestId('diary-calendar')).toBeVisible()
     await expect(page.locator(`[data-testid="diary-calendar-mood"][data-date="${date}"] img`)).toHaveAttribute('src', '/emoji/伤心.svg')
@@ -638,7 +638,7 @@ test('unknown Mood survives native save, refresh, close, and reopen', async ({ p
     expect(refreshed.metadata.mood).toBe(unknownMood)
 
     const tab = page.locator(`[role="tab"][data-tab-id="${path}"]`)
-    await closeCurrentDiaryDocument(page)
+    await goBackFromDiaryDocument(page)
     await expect(tab).toHaveCount(0)
     await expect(page.getByTestId('diary-calendar')).toBeVisible()
     const closedMoodButton = page.locator(`[data-testid="diary-calendar-mood"][data-date="${date}"]`)
@@ -651,7 +651,7 @@ test('unknown Mood survives native save, refresh, close, and reopen', async ({ p
     expect(reopened.metadata.id).toBe(document.documentId)
     expect(reopened.metadata.mood).toBe(unknownMood)
 
-    await closeCurrentDiaryDocument(page)
+    await goBackFromDiaryDocument(page)
     await expect(page.getByTestId('diary-calendar')).toBeVisible()
     await expect(page.locator(`[data-testid="diary-calendar-mood"][data-date="${date}"]`)).toHaveText('?')
   } finally {
@@ -724,7 +724,7 @@ test.skip('D8.2: managed Diary Mood History restore waits for an adapter-aware o
     await diffTab.locator('.tab-close').click()
     const diaryTab = page.locator(`[role="tab"][data-tab-id="${path}"]`)
     await expect(diaryTab).toHaveCount(1)
-    await closeCurrentDiaryDocument(page)
+    await goBackFromDiaryDocument(page)
     await expect(page.getByTestId('diary-calendar')).toBeVisible()
     await expect(page.locator(`[data-testid="diary-calendar-mood"][data-date="${date}"] img`)).toHaveAttribute('src', '/emoji/开心.svg')
   } finally {
@@ -932,7 +932,7 @@ test('route navigation preserves Diary identity with one managed document and a 
     await expect(page.locator('.tabs')).toBeHidden()
     await expect(page.getByTestId('diary-calendar')).toBeHidden()
 
-    await closeCurrentDiaryDocument(page)
+    await goBackFromDiaryDocument(page)
     await expect(firstTab).toHaveCount(0)
     await expect(page.getByTestId('diary-calendar')).toBeVisible()
     await expect(page.getByTestId('diary-calendar')).toHaveCount(1)
@@ -945,7 +945,7 @@ test('route navigation preserves Diary identity with one managed document and a 
     await expect(page.locator('.tabs')).toBeHidden()
     await expect(page.getByTestId('diary-calendar')).toBeHidden()
     await expect(page.getByTestId('diary-calendar')).toHaveCount(1)
-    await closeCurrentDiaryDocument(page)
+    await goBackFromDiaryDocument(page)
     await expect(page.getByTestId('diary-calendar')).toBeVisible()
 
     const reopened = await readDiary(request, firstDate)
@@ -1030,7 +1030,7 @@ test('scope switching and route navigation preserve the user FileTree query', as
     await ensureExplorerVisible(page)
     await expect(page.locator('.file-tree .search-input')).toHaveValue(customQuery)
 
-    await closeCurrentDiaryDocument(page)
+    await goBackFromDiaryDocument(page)
     await expect(page.locator(`[role="tab"][data-tab-id="${secondPath}"]`)).toHaveCount(0)
     await expect(page.getByTestId('diary-calendar')).toBeVisible()
     expect(diaryCreateRequests).toBe(0)
@@ -1188,9 +1188,9 @@ test('refresh, deep link, and browser Back/Forward preserve Diary identity, Mood
     expect(afterRefresh.metadata.id).toBe(seeded.documentId)
     expect(afterRefresh.metadata.mood).toBe('happy')
 
-    // Cmd/Ctrl+W reveals Home, while the query remains ordinary FileTree
+    // Diary Back reveals Home, while the query remains ordinary FileTree
     // state instead of becoming a route-derived date.
-    await closeCurrentDiaryDocument(page)
+    await goBackFromDiaryDocument(page)
     await expect(page.getByTestId('diary-calendar')).toBeVisible()
     await expect(page.locator('.file-tree .search-input')).toHaveCount(0)
     await expect.poll(() => page.evaluate(() => localStorage.getItem('nuvyn.file-tree.filter')))
@@ -1227,7 +1227,7 @@ test('refresh, deep link, and browser Back/Forward preserve Diary identity, Mood
     expect(afterHistory.metadata.id).toBe(seeded.documentId)
     expect(afterHistory.metadata.mood).toBe('happy')
 
-    await closeCurrentDiaryDocument(page)
+    await goBackFromDiaryDocument(page)
     await expect(page.getByTestId('diary-calendar')).toBeVisible()
     expect(diaryCreateRequests).toBe(0)
     expect(moodPatchRequests).toBe(0)
