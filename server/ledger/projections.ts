@@ -440,6 +440,8 @@ function normalizeTransactionQuery(
     cursor: query.cursor === undefined
       ? undefined
       : parseLedgerTransactionCursor(query.cursor),
+    sortBy: query.sortBy,
+    sortDirection: query.sortDirection,
   }
 }
 
@@ -482,10 +484,12 @@ export function createLedgerProjections(
     const hasNextPage = rows.length > queryOptions.limit
     const returnedRows = hasNextPage ? rows.slice(0, queryOptions.limit) : rows
     const last = returnedRows[returnedRows.length - 1]
+    const supportsCursor = queryOptions.sortBy !== 'amount'
+      && queryOptions.sortDirection !== 'asc'
     return {
       rows: returnedRows,
       page: {
-        nextCursor: hasNextPage && last !== undefined
+        nextCursor: supportsCursor && hasNextPage && last !== undefined
           ? encodeCursor(last)
           : null,
         ...(summary ?? {}),

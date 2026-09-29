@@ -14,6 +14,10 @@ import {
   assertSafeMinor,
   checkedAddMinor,
 } from './money.js'
+import type {
+  LedgerTransactionSortBy,
+  LedgerTransactionSortDirection,
+} from '../../shared/ledgerProtocol.js'
 
 const SELECT_SETTINGS = `
   SELECT singleton_id, base_currency, timezone, has_created_account,
@@ -507,6 +511,8 @@ export interface LedgerTransactionQueryOptions {
     readonly createdAt: number
     readonly id: string
   }
+  readonly sortBy?: LedgerTransactionSortBy
+  readonly sortDirection?: LedgerTransactionSortDirection
 }
 
 export interface LedgerTransactionQuerySummary {
@@ -1069,6 +1075,14 @@ function transactionQueryFilter(
   return { clauses, params }
 }
 
+function transactionOrderBy(options: LedgerTransactionQueryOptions): string {
+  const direction = options.sortDirection === 'asc' ? 'ASC' : 'DESC'
+  if (options.sortBy === 'amount') {
+    return `CASE WHEN type = 'expense' THEN -amount_minor ELSE amount_minor END ${direction}, occurred_at DESC, created_at DESC, id DESC`
+  }
+  return `occurred_at ${direction}, created_at DESC, id DESC`
+}
+
 export function createLedgerRepository(db: DatabaseT): LedgerRepository {
   const statements = {
     getSettings: db.prepare(SELECT_SETTINGS),
@@ -1391,7 +1405,7 @@ export function createLedgerRepository(db: DatabaseT): LedgerRepository {
                deleted_at, version, created_at, updated_at
         FROM ledger_transactions
         ${clauses.length === 0 ? '' : `WHERE ${clauses.join('\n          AND ')}`}
-        ORDER BY occurred_at DESC, created_at DESC, id DESC
+        ORDER BY ${transactionOrderBy(options)}
         LIMIT @limit OFFSET @offset
       `
       return db.prepare(sql).all(params).map(ledgerTransactionFromRow)

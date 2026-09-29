@@ -91,10 +91,19 @@ describe('Ledger frontend API boundary', () => {
     expect(new Headers(init?.headers).get('Idempotency-Key')).toBe('key-a')
 
     mockedAuthFetch.mockResolvedValue(response({ transactions: [], page: { nextCursor: null } }))
-    await listLedgerTransactions({ type: 'expense', accountId: 'account 1', limit: 10, offset: 20 })
+    await listLedgerTransactions({
+      type: 'expense',
+      accountId: 'account 1',
+      limit: 10,
+      offset: 20,
+      sortBy: 'amount',
+      sortDirection: 'desc',
+    })
     expect(mockedAuthFetch.mock.calls.at(-1)?.[0]).toContain('type=expense')
     expect(mockedAuthFetch.mock.calls.at(-1)?.[0]).toContain('accountId=account+1')
     expect(mockedAuthFetch.mock.calls.at(-1)?.[0]).toContain('offset=20')
+    expect(mockedAuthFetch.mock.calls.at(-1)?.[0]).toContain('sortBy=amount')
+    expect(mockedAuthFetch.mock.calls.at(-1)?.[0]).toContain('sortDirection=desc')
   })
 
   it('uses idempotent PUT/DELETE set-state requests for statistics exclusion', async () => {

@@ -20,6 +20,8 @@ import type {
   LedgerTransactionCursor,
   LedgerTransactionFilterType,
   LedgerTransactionQuery,
+  LedgerTransactionSortBy,
+  LedgerTransactionSortDirection,
   LedgerTransactionType,
   LedgerTransferFeeMode,
   LedgerTransferKind,
@@ -666,6 +668,18 @@ export function parseTransactionTypeFilter(value: unknown): LedgerTransactionFil
   return value
 }
 
+export function parseTransactionSortBy(value: unknown): LedgerTransactionSortBy | undefined {
+  if (value === undefined) return undefined
+  if (value === 'occurredAt' || value === 'amount') return value
+  throw ledgerValidationError('sortBy has an unsupported transaction sort field', { field: 'sortBy' })
+}
+
+export function parseTransactionSortDirection(value: unknown): LedgerTransactionSortDirection | undefined {
+  if (value === undefined) return undefined
+  if (value === 'asc' || value === 'desc') return value
+  throw ledgerValidationError('sortDirection must be asc or desc', { field: 'sortDirection' })
+}
+
 function parseQueryId(record: UnknownRecord, key: string): string | undefined {
   if (!hasOwn(record, key)) return undefined
   const value = record[key]
@@ -709,7 +723,7 @@ function parseQueryOffset(record: UnknownRecord): number | undefined {
 export function parseTransactionQuery(value: UnknownRecord): LedgerTransactionQuery {
   assertExactKeys(value, [
     'type', 'accountId', 'categoryId', 'from', 'to', 'search',
-    'groupId', 'includeDeleted', 'limit', 'cursor', 'offset',
+    'groupId', 'includeDeleted', 'limit', 'cursor', 'offset', 'sortBy', 'sortDirection',
   ], [])
 
   const from = parseUtcQueryValue(value.from, 'from')
@@ -720,8 +734,16 @@ export function parseTransactionQuery(value: UnknownRecord): LedgerTransactionQu
 
   const cursor = parseQueryCursor(value)
   const offset = parseQueryOffset(value)
+  const sortBy = parseTransactionSortBy(value.sortBy)
+  const sortDirection = parseTransactionSortDirection(value.sortDirection)
   if (cursor !== undefined && offset !== undefined) {
     throw ledgerValidationError('cursor and offset cannot be used together', { field: 'offset' })
+  }
+  if (
+    cursor !== undefined
+    && (sortBy === 'amount' || sortDirection === 'asc')
+  ) {
+    throw ledgerValidationError('cursor cannot be used with custom transaction sorting', { field: 'cursor' })
   }
 
   return {
@@ -736,6 +758,8 @@ export function parseTransactionQuery(value: UnknownRecord): LedgerTransactionQu
     limit: parseLimit(value.limit),
     cursor,
     offset,
+    sortBy,
+    sortDirection,
   }
 }
 

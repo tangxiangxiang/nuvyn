@@ -642,6 +642,37 @@ describe('Ledger transaction query projections', () => {
       'ledger-validation-failed',
     )
   })
+
+  it('sorts the full transaction result by signed amount before applying the offset', () => {
+    const fixture = freshFixture()
+    const asset = account(fixture, 'amount-sort-account')
+    const expenseCategory = firstCategory(fixture, 'expense')
+    const incomeCategory = firstCategory(fixture, 'income')
+    const smallIncome = transaction(fixture, 'amount-sort-small-income', {
+      type: 'income', amountMinor: 100, accountId: asset.id, categoryId: incomeCategory.id,
+      occurredAt: TEST_NOW - 3_000, payee: 'small income',
+    })
+    const expense = transaction(fixture, 'amount-sort-expense', {
+      type: 'expense', amountMinor: 500, accountId: asset.id, categoryId: expenseCategory.id,
+      occurredAt: TEST_NOW - 2_000, payee: 'expense',
+    })
+    const largeIncome = transaction(fixture, 'amount-sort-large-income', {
+      type: 'income', amountMinor: 1_000, accountId: asset.id, categoryId: incomeCategory.id,
+      occurredAt: TEST_NOW - 1_000, payee: 'large income',
+    })
+
+    const descending = fixture.projections.listTransactions(query({
+      sortBy: 'amount', sortDirection: 'desc', limit: '2', offset: '0',
+    }))
+    expect(descending.transactions.map((row) => row.id)).toEqual([largeIncome.id, smallIncome.id])
+
+    const ascending = fixture.projections.listTransactions(query({
+      sortBy: 'amount', sortDirection: 'asc', limit: '2', offset: '0',
+    }))
+    expect(ascending.transactions.map((row) => row.id)).toEqual([expense.id, smallIncome.id])
+    expect(descending.page.nextCursor).toBeNull()
+    expect(ascending.page.nextCursor).toBeNull()
+  })
 })
 
 describe('Ledger Account Detail projections', () => {

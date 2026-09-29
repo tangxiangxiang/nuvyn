@@ -223,6 +223,13 @@ describe('Ledger stateless request validation', () => {
     expect(() => parseTransactionQuery({ limit: '2', cursor, offset: '10' })).toThrow()
     expect(() => parseTransactionQuery({ offset: '-1' })).toThrow()
     expect(parseTransactionQuery({ limit: '2', cursor })).toMatchObject({ cursor })
+    expect(parseTransactionQuery({ sortBy: 'amount', sortDirection: 'asc' })).toMatchObject({
+      sortBy: 'amount',
+      sortDirection: 'asc',
+    })
+    expect(() => parseTransactionQuery({ sortBy: 'unknown' })).toThrow()
+    expect(() => parseTransactionQuery({ sortDirection: 'sideways' })).toThrow()
+    expect(() => parseTransactionQuery({ cursor, sortBy: 'amount' })).toThrow()
     expect(parseLedgerTransactionCursor(cursor)).toEqual({
       occurredAt,
       createdAt: occurredAt - 1,

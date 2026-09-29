@@ -15,6 +15,8 @@ import {
   NSelect,
   NSpin,
   type DataTableColumns,
+  type DataTableSortOrder,
+  type DataTableSortState,
   type SelectGroupOption,
   type SelectOption,
 } from 'naive-ui'
@@ -63,6 +65,10 @@ const paginationLoading = ref(false)
 const filterError = ref('')
 const tablePage = ref(1)
 const tablePageSize = ref(25)
+type TransactionTableSortKey = 'time' | 'amount'
+type TransactionTableSortDirection = 'asc' | 'desc'
+const transactionSortKey = ref<TransactionTableSortKey>('time')
+const transactionSortDirection = ref<TransactionTableSortDirection>('desc')
 
 type TransactionContextMenuAction = 'view' | 'exclude' | 'restore'
 const contextMenuOpen = ref(false)
@@ -438,6 +444,27 @@ function formatTransactionTableTime(instantMs: number): string {
   return formatLedgerTransactionDateTime(instantMs, store.settings.value?.timezone ?? 'UTC')
 }
 
+function tableSortOrder(key: TransactionTableSortKey): DataTableSortOrder {
+  if (transactionSortKey.value !== key) return false
+  return transactionSortDirection.value === 'asc' ? 'ascend' : 'descend'
+}
+
+function nextTableSortOrder(order: DataTableSortOrder): DataTableSortOrder {
+  return order === 'ascend' ? 'descend' : 'ascend'
+}
+
+function changeTableSort(sorter: DataTableSortState | DataTableSortState[] | null): void {
+  const next = Array.isArray(sorter) ? sorter[0] : sorter
+  const nextKey = next?.columnKey === 'amount' || next?.columnKey === 'time'
+    ? next.columnKey
+    : 'time'
+  const nextDirection: TransactionTableSortDirection = next?.order === 'ascend' ? 'asc' : 'desc'
+  if (nextKey === transactionSortKey.value && nextDirection === transactionSortDirection.value) return
+  transactionSortKey.value = nextKey
+  transactionSortDirection.value = nextDirection
+  void loadTransactions(1)
+}
+
 function buildQuery(pageNumber = tablePage.value): LedgerTransactionQuery {
   const timezone = store.settings.value?.timezone ?? 'UTC'
   const offset = (pageNumber - 1) * tablePageSize.value
@@ -450,6 +477,12 @@ function buildQuery(pageNumber = tablePage.value): LedgerTransactionQuery {
     ...(filterFrom.value ? { from: instantFromLedgerDate(filterFrom.value, timezone, 'start') } : {}),
     ...(filterTo.value ? { to: instantFromLedgerDate(filterTo.value, timezone, 'end') } : {}),
     ...(filterSearch.value.trim() ? { search: filterSearch.value.trim() } : {}),
+    ...(transactionSortKey.value !== 'time' || transactionSortDirection.value !== 'desc'
+      ? {
+          sortBy: transactionSortKey.value === 'amount' ? 'amount' as const : 'occurredAt' as const,
+          sortDirection: transactionSortDirection.value,
+        }
+      : {}),
   }
 }
 
@@ -597,7 +630,7 @@ function transactionRowProps(transaction: LedgerTransactionDto) {
   }
 }
 
-const transactionColumns: DataTableColumns<LedgerTransactionDto> = [
+const transactionColumns = computed<DataTableColumns<LedgerTransactionDto>>(() => [
   {
     key: 'transaction',
     title: '交易对象',
@@ -642,6 +675,9 @@ const transactionColumns: DataTableColumns<LedgerTransactionDto> = [
     key: 'time',
     title: '时间',
     width: 175,
+    sorter: true,
+    sortOrder: tableSortOrder('time'),
+    customNextSortOrder: nextTableSortOrder,
     render: (transaction) => h('span', {
       class: 'ledger-transaction-date',
       title: formatLedgerDateTime(transaction.occurredAt, store.settings.value?.timezone ?? 'UTC'),
@@ -652,6 +688,9 @@ const transactionColumns: DataTableColumns<LedgerTransactionDto> = [
     title: '金额',
     width: 145,
     align: 'right',
+    sorter: true,
+    sortOrder: tableSortOrder('amount'),
+    customNextSortOrder: nextTableSortOrder,
     render: (transaction) => {
       const amountMinor = transaction.type === 'expense' ? -transaction.amountMinor : transaction.amountMinor
       return h('strong', { class: ['ledger-transaction-amount', `is-${presentationKind(transaction)}`] }, [
@@ -665,7 +704,7 @@ const transactionColumns: DataTableColumns<LedgerTransactionDto> = [
       ])
     },
   },
-]
+])
 </script>
 
 <template>
@@ -804,6 +843,8 @@ const transactionColumns: DataTableColumns<LedgerTransactionDto> = [
         aria-label="交易记录表格"
         :data="visibleTransactions"
         :columns="transactionColumns"
+        remote
+        @update:sorter="changeTableSort"
         :row-key="(transaction) => transaction.id"
         :row-props="transactionRowProps"
         :loading="loading || paginationLoading"

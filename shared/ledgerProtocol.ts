@@ -83,6 +83,8 @@ export type LedgerTransactionType = 'income' | 'expense' | 'transfer' | 'adjustm
 export type LedgerTransactionFilterType = 'income' | 'expense' | 'transfer'
 export type LedgerTransferKind = 'general' | 'repayment' | 'withdrawal'
 export type LedgerTransferFeeMode = 'extra' | 'deducted'
+export type LedgerTransactionSortBy = 'occurredAt' | 'amount'
+export type LedgerTransactionSortDirection = 'asc' | 'desc'
 export type LedgerPeriodName = 'today' | 'week' | 'month' | 'year'
 export type LedgerOverviewScope = LedgerPeriodName | 'all'
 
@@ -330,6 +332,8 @@ export interface LedgerTransactionQuery {
   readonly limit?: number
   readonly cursor?: string
   readonly offset?: number
+  readonly sortBy?: LedgerTransactionSortBy
+  readonly sortDirection?: LedgerTransactionSortDirection
 }
 
 export interface LedgerTransactionPageDto {

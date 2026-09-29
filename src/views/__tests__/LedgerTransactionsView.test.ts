@@ -353,6 +353,40 @@ describe('Ledger live transaction history workspace', () => {
     expect(table.props('maxHeight')).toBe(268)
   })
 
+  it('uses remote single-column sorting for time and signed amount before pagination', async () => {
+    const wrapper = await mountView()
+    const table = wrapper.findComponent(NDataTable)
+
+    expect(table.props('remote')).toBe(true)
+    await table.vm.$emit('update:sorter', {
+      columnKey: 'amount',
+      order: 'descend',
+      sorter: true,
+    })
+    await flushPromises()
+
+    expect(api.listLedgerTransactions).toHaveBeenLastCalledWith({
+      type: 'all',
+      limit: 25,
+      sortBy: 'amount',
+      sortDirection: 'desc',
+    })
+
+    await table.vm.$emit('update:sorter', {
+      columnKey: 'time',
+      order: 'ascend',
+      sorter: true,
+    })
+    await flushPromises()
+
+    expect(api.listLedgerTransactions).toHaveBeenLastCalledWith({
+      type: 'all',
+      limit: 25,
+      sortBy: 'occurredAt',
+      sortDirection: 'asc',
+    })
+  })
+
   it('sends supported type, entity, and Ledger-timezone date filters to the API', async () => {
     const wrapper = await mountView()
 
