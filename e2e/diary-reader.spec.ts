@@ -208,6 +208,10 @@ test('mobile native Diary documents fill the viewport when the side panel is clo
     await expect(leftPanelToggle).toHaveAttribute('aria-pressed', 'true')
 
     await page.setViewportSize({ width: 375, height: 812 })
+    await expect(leftPanelToggle).toHaveAttribute('aria-pressed', 'false')
+    await expect(page.locator('.right-rail-slot, .right-rail-toggle')).toHaveCount(0)
+    await leftPanelToggle.click()
+    await expect(leftPanelToggle).toHaveAttribute('aria-pressed', 'true')
     const openMetrics = await page.evaluate(() => {
       const root = document.querySelector<HTMLElement>('.vault')
       const activityBar = document.querySelector<HTMLElement>('.activity-bar')
@@ -227,7 +231,8 @@ test('mobile native Diary documents fill the viewport when the side panel is clo
     expect(openMetrics.rootClass).toMatch(/side-panel-open/)
     expect(openMetrics.fileTreeWidth).toBeGreaterThan(100)
     expect(openMetrics.editorWidth).toBeGreaterThan(0)
-    expect(openMetrics.editorLeft).toBeGreaterThanOrEqual(openMetrics.activityBarWidth - 1)
+    expect(openMetrics.editorLeft).toBeLessThanOrEqual(1)
+    expect(openMetrics.editorRight).toBeGreaterThanOrEqual(openMetrics.viewportWidth - 1)
     expect(openMetrics.scrollWidth).toBeLessThanOrEqual(openMetrics.viewportWidth + 1)
 
     await leftPanelToggle.click()

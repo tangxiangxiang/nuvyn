@@ -5,7 +5,7 @@
 // module-level refs — a tiny singleton pattern that keeps the storage key and
 // watchers in one place instead of two.
 
-import { ref, watch } from 'vue'
+import { computed, ref, watch } from 'vue'
 import { SCOPE_ROOTS, type ScopeKey } from '../../../shared/scopeProtocol'
 import { NUVYN_BROWSER_STORAGE_KEYS, readStorageKey, writeStorageKey } from '../../technicalNamespace'
 
@@ -34,6 +34,8 @@ function loadScope(): ScopeKey {
 }
 
 const activeScope = ref<ScopeKey>(loadScope())
+// One scope policy drives rail mounting, layout width, and toggle commands.
+const workspaceRightPanelAvailable = computed(() => activeScope.value !== 'diary')
 let persistenceWired = false
 
 export function useScopeFilter() {
@@ -49,5 +51,5 @@ export function useScopeFilter() {
     activeScope.value = scope
   }
 
-  return { activeScope, selectScope }
+  return { activeScope, selectScope, workspaceRightPanelAvailable }
 }

@@ -1138,7 +1138,6 @@ main.container.auth-page-shell {
     flex-shrink: 0;
     gap: 2px;
   }
-
 }
 
 /* The shared workspace navbar keeps the full set of navigation actions on
@@ -1190,29 +1189,27 @@ main.container.auth-page-shell {
   .navbar.is-workspace .nav-actions {
     gap: 2px;
   }
-
-  .navbar.is-vault.diary-calendar-mode .right-rail-toggle {
-    display: none;
-  }
 }
 
-/* Native Diary documents keep the fixed FileTree without an ActivityBar. On
-   phone widths the persisted desktop side+right-rail tracks cannot coexist
-   without document overflow, so keep the FileTree compact and temporarily
-   hide the right rail visually. Its open/collapsed state is not mutated and
-   is restored automatically when the viewport grows or Diary context ends. */
+/* Mobile Diary reuses the existing FileTree and its toggle as temporary
+   navigation. The document retains the full grid surface underneath. */
 @media (max-width: 600px) {
-  .vault.diary-native-document-mode.side-panel-open {
-    grid-template-columns: minmax(136px, 42vw) 1px minmax(0, 1fr) !important;
-  }
-
-  .vault.diary-native-document-mode:not(.side-panel-open) {
+  .vault.diary-native-document-mode {
+    position: relative;
     grid-template-columns: minmax(0, 1fr) !important;
   }
 
-  .vault.diary-native-document-mode > .splitter-toc,
-  .vault.diary-native-document-mode > .right-rail-slot {
-    display: none !important;
+  .vault.diary-native-document-mode > .file-tree,
+  .vault.diary-native-document-mode > .recovery-center {
+    position: absolute;
+    inset: 0 auto 24px 0;
+    width: min(280px, 85vw);
+    z-index: 5;
+    box-shadow: 8px 0 24px #0003;
+  }
+
+  .vault.diary-native-document-mode > .splitter:not(.splitter-toc) {
+    display: none;
   }
 }
 

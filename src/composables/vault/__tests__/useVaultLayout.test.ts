@@ -4,6 +4,8 @@ import { defineComponent, h, nextTick, ref } from 'vue'
 import { mount } from '@vue/test-utils'
 import { __resetVaultLayoutState, useVaultLayout } from '../useVaultLayout'
 
+import { useScopeFilter } from '../useScopeFilter'
+
 const STORAGE_KEY = 'nuvyn.vault.layout'
 
 function setup(options: Parameters<typeof useVaultLayout>[0] = {}) {
@@ -19,6 +21,7 @@ function setup(options: Parameters<typeof useVaultLayout>[0] = {}) {
 
 describe('useVaultLayout', () => {
   beforeEach(() => {
+    useScopeFilter().activeScope.value = 'note'
     localStorage.clear()
     __resetVaultLayoutState()
   })
@@ -31,6 +34,22 @@ describe('useVaultLayout', () => {
     expect(layout.rightRailWidth.value).toBe(380)
     expect(layout.rightRailCollapsed.value).toBe(false)
     expect(layout.vaultStyle.value.gridTemplateColumns).toBe('40px 260px 1px 1fr 1px minmax(280px, max(280px, min(380px, 560px, 38vw)))')
+  })
+
+  it('omits Diary rail tracks and ignores toggles while preserving Note state', () => {
+    const { layout } = setup()
+    layout.rightRailTab.value = 'history'
+    layout.rightRailWidth.value = 420
+    const noteColumns = layout.vaultStyle.value.gridTemplateColumns
+    useScopeFilter().activeScope.value = 'diary'
+    expect(layout.workspaceRightPanelAvailable.value).toBe(false)
+    expect(layout.vaultStyle.value.gridTemplateColumns).toBe('40px 260px 1px 1fr')
+    layout.toggleRightRail()
+    expect(layout.rightRailCollapsed.value).toBe(false)
+    expect(layout.rightRailTab.value).toBe('history')
+    useScopeFilter().activeScope.value = 'note'
+    expect(layout.vaultStyle.value.gridTemplateColumns).toBe(noteColumns)
+    expect(layout.rightRailWidth.value).toBe(420)
   })
 
   it('migrates legacy file tree and TOC width fields', () => {

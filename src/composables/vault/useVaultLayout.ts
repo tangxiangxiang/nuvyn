@@ -21,6 +21,7 @@
 import { computed, onScopeDispose, ref, watch, type Ref } from 'vue'
 import { useStorage } from '@vueuse/core'
 import type { SidePanel } from '../../components/vault/ActivityBar.vue'
+import { useScopeFilter } from './useScopeFilter'
 import { NUVYN_BROWSER_STORAGE_KEYS } from '../../technicalNamespace'
 
 export type ActivePanel = SidePanel | null
@@ -125,6 +126,7 @@ export function __resetVaultLayoutState(): void {
 }
 
 export function useVaultLayout(options: UseVaultLayoutOptions = {}) {
+  const { workspaceRightPanelAvailable } = useScopeFilter()
   const sidebarVisible = options.sidebarVisible ?? ref(true)
   const activityBarVisible = options.activityBarVisible ?? ref(true)
   const forceSidePanelOpen = options.forceSidePanelOpen ?? computed(() => {
@@ -270,10 +272,9 @@ export function useVaultLayout(options: UseVaultLayoutOptions = {}) {
     // meaningful below the normal desktop range; max(280px, ...) keeps
     // the rail usable on very narrow screens.
     const railTrack = `minmax(280px, max(280px, min(${rightRailWidth.value}px, 560px, 38vw)))`
-    // Calendar Home is a canvas-first surface. Its right rail is not mounted
-    // while the same presentation flag is false, so do not reserve a hidden
-    // rail track here either.
-    const right = sidebarVisible.value && !rightRailCollapsed.value ? ` 1px ${railTrack}` : ''
+    // Diary has no contextual rail capability. Calendar Home also removes
+    // workspace chrome; neither presentation reserves an unused rail track.
+    const right = sidebarVisible.value && workspaceRightPanelAvailable.value && !rightRailCollapsed.value ? ` 1px ${railTrack}` : ''
     const activity = leftSidebarVisible.value && activityBarVisible.value ? '40px ' : ''
     return {
       gridTemplateColumns: `${activity}${left}1fr${right}`,
@@ -318,6 +319,7 @@ export function useVaultLayout(options: UseVaultLayoutOptions = {}) {
   }
 
   function toggleRightRail() {
+    if (!workspaceRightPanelAvailable.value) return
     rightRailCollapsed.value = !rightRailCollapsed.value
   }
 
@@ -330,6 +332,7 @@ export function useVaultLayout(options: UseVaultLayoutOptions = {}) {
     rightRailTab,
     rightRailWidth,
     rightRailCollapsed,
+    workspaceRightPanelAvailable,
     vaultStyle,
     selectPanel,
     toggleSidePanel,

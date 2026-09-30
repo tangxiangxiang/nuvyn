@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { ref, inject, shallowRef, watch, computed, defineAsyncComponent, onBeforeUnmount, onMounted, nextTick } from 'vue'
-import { useStorage } from '@vueuse/core'
+import { useMediaQuery, useStorage } from '@vueuse/core'
 import { useRoute } from 'vue-router'
 import { useShortcutDisplay } from '../composables/useShortcutDisplay'
 import { useVaultLayout } from '../composables/vault/useVaultLayout'
@@ -184,6 +184,7 @@ const sidebarLayoutVisible = ref(true)
 const statusBarLayoutVisible = ref(true)
 const activityBarLayoutVisible = ref(true)
 const forceSidePanelLayoutOpen = ref(false)
+const isMobileDiaryViewport = useMediaQuery('(max-width: 600px)')
 const editorFocusWidthKey = NUVYN_BROWSER_STORAGE_KEYS.editorFocusWidth
 const fileTreeFilterKey = NUVYN_BROWSER_STORAGE_KEYS.fileTreeFilter
 const diaryFilterSeedKey = NUVYN_BROWSER_STORAGE_KEYS.diaryFilterSeed
@@ -216,12 +217,14 @@ const {
   activePanel,
   sidePanelOpen,
   leftSidebarVisible,
+  leftSidebarCollapsed,
   sidePanelWidth,
   rightRailWidth,
   vaultStyle,
   selectPanel,
   rightRailTab,
   rightRailCollapsed,
+  workspaceRightPanelAvailable,
 } = useVaultLayout({
   sidebarVisible: sidebarLayoutVisible,
   activityBarVisible: activityBarLayoutVisible,
@@ -238,7 +241,7 @@ const { startDrag } = useSplitterDrag({
 })
 
 /* The unified rail remains available in edit and read modes. */
-const rightRailVisible = computed(() => !rightRailCollapsed.value)
+const rightRailVisible = computed(() => workspaceRightPanelAvailable.value && !rightRailCollapsed.value)
 // Side-panel filters are temporary view state. Keep the Files value here so
 // switching to Tags or History can unmount FileTree without losing it.
 const filesFilter = useStorage(fileTreeFilterKey, '')
@@ -1397,6 +1400,12 @@ const { ensureDiaryDate, openDiaryDate } = useDiaryDateCommand({
   onRefreshError: () => toast.info(t('diary.refresh_failed')),
 })
 
+function closeMobileDiaryNavigation(): void {
+  if (!isDiaryScope.value || !isMobileDiaryViewport.value) return
+  leftSidebarCollapsed.value = true
+  void nextTick(() => vaultRef.value?.focus())
+}
+
 async function openFileTreeDocument(path: string): Promise<void> {
   if (isDiaryScope.value && classifyDiaryPath(path) === 'managed') {
     const activeDocument = activeTab.value
@@ -1408,6 +1417,7 @@ async function openFileTreeDocument(path: string): Promise<void> {
       && !activeDocument.loadError
       && !specialWorkspaceSurfaceActive.value
     ) {
+      closeMobileDiaryNavigation()
       // Re-selecting the already active Diary is a workspace no-op. Avoid
       // starting an exact-path probe that briefly locks the document against
       // G+B while the FileTree click's async date command is still resolving.
@@ -1422,6 +1432,7 @@ async function openFileTreeDocument(path: string): Promise<void> {
     const intent = diaryWorkspacePresentation.beginDateIntent()
     const result = await openDiaryDate(date)
     await presentDiaryDateResult(result, intent, { focusVault: false })
+    if (activePath.value === path) closeMobileDiaryNavigation()
     return
   }
   await openPost(path)
@@ -1938,6 +1949,11 @@ watch(
   },
   { immediate: true },
 )
+
+// Reuse the existing left-panel state for temporary mobile Diary navigation.
+watch([isDiaryDocumentMode, isMobileDiaryViewport], ([diary, mobile]) => {
+  if (diary && mobile) leftSidebarCollapsed.value = true
+}, { immediate: true })
 
 // NavBar lives above RouterView, while SettingsModal remains owned by this
 // view because its embedded sections use the live Vault context. Bridge the
@@ -2939,7 +2955,7 @@ watch(isReadMode, async (reading) => {
       @pointerdown="startDrag(vaultRef!, 'rightRail', $event)"
     />
     <RightRail
-      v-if="workspaceSidebarVisible"
+      v-if="workspaceSidebarVisible && workspaceRightPanelAvailable"
       v-show="rightRailVisible"
       class="right-rail-slot"
       :path="metadataPath"

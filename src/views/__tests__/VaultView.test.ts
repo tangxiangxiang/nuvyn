@@ -775,7 +775,7 @@ describe('VaultView D3.2 Diary surface wiring', () => {
     expect(source).toContain('watch([workspaceSidebarVisible, isDiaryScope]')
     expect(source).toContain('activityBarLayoutVisible.value = visible && !diary')
     expect(source).toContain('forceSidePanelLayoutOpen.value = visible && diary')
-    expect(source).toContain('v-if="workspaceSidebarVisible"')
+    expect(source).toContain('v-if="workspaceSidebarVisible && workspaceRightPanelAvailable"')
     expect(styles).not.toContain('.vault.diary-calendar-mode > :is(.file-tree, .tag-panel, .history-panel, .recovery-center)')
     expect(styles).not.toContain('.vault.diary-calendar-mode > .right-rail-slot')
     expect(styles).not.toContain('.vault.diary-calendar-mode > .status-bar-row')
@@ -786,13 +786,12 @@ describe('VaultView D3.2 Diary surface wiring', () => {
     const source = readFileSync(fileURLToPath(new URL('../VaultView.vue', import.meta.url)), 'utf8')
     const styles = readFileSync(fileURLToPath(new URL('../../style.css', import.meta.url)), 'utf8')
 
-    // The root class binding is the characterization seam for both runtime
-    // states: Diary always presents its FileTree unless the shared left-panel
-    // toggle collapses it.
+    // Mobile navigation reuses the shared left-panel toggle over a full-width document.
     expect(source).toContain("'side-panel-open': sidePanelOpen")
-    expect(styles).toContain('.vault.diary-native-document-mode.side-panel-open')
-    expect(styles).toContain('.vault.diary-native-document-mode:not(.side-panel-open)')
-    expect(styles).toContain('grid-template-columns: minmax(136px, 42vw) 1px minmax(0, 1fr) !important')
+    expect(styles).toContain('.vault.diary-native-document-mode > .file-tree')
+    expect(source).toContain('watch([isDiaryDocumentMode, isMobileDiaryViewport]')
+    expect(source).toContain('closeMobileDiaryNavigation()')
+    expect(source).toContain('workspaceRightPanelAvailable.value && !rightRailCollapsed.value')
     expect(styles).toContain('grid-template-columns: minmax(0, 1fr) !important')
     expect(styles).not.toMatch(/\.vault\.diary-native-document-mode[^}]*grid-template-columns:\s*40px/)
   })

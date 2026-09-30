@@ -34,6 +34,7 @@ function mountNavBar(initial: VaultViewMode = 'edit') {
 
 describe('NavBar — view-toggle button', () => {
   beforeEach(() => {
+    useScopeFilter().activeScope.value = 'note'
     vi.clearAllMocks()
     useI18n().setLocale('en')
     useTheme().set('light')
@@ -185,6 +186,18 @@ describe('NavBar — view-toggle button', () => {
     await nextTick()
     expect(wrapper.find('[data-testid="view-toggle"]').exists()).toBe(true)
     expect(wrapper.find('[data-testid="left-panel-toggle"]').exists()).toBe(true)
+    expect(wrapper.find('.right-rail-toggle').exists()).toBe(true)
+    wrapper.unmount()
+  })
+
+  it('omits the contextual toggle in Diary documents and restores it in Note', async () => {
+    const { wrapper } = mountNavBar()
+    useScopeFilter().activeScope.value = 'diary'
+    await nextTick()
+    expect(wrapper.find('.right-rail-toggle').exists()).toBe(false)
+    expect(wrapper.find('[data-testid="left-panel-toggle"]').exists()).toBe(true)
+    useScopeFilter().activeScope.value = 'note'
+    await nextTick()
     expect(wrapper.find('.right-rail-toggle').exists()).toBe(true)
     wrapper.unmount()
   })

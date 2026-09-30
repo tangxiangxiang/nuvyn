@@ -29,6 +29,9 @@ const CALENDAR_BREAKPOINT_VIEWPORTS: Viewport[] = [
 
 const DOCUMENT_VIEWPORTS: Viewport[] = [
   ...CALENDAR_VIEWPORTS,
+  { name: 'mobile-390', width: 390, height: 844 },
+  { name: 'desktop-1440', width: 1440, height: 900 },
+  { name: 'wide', width: 2560, height: 1440 },
 ]
 
 function localCivilDate(): string {
@@ -306,8 +309,8 @@ async function assertNativeRead(page: Page, date: string, expectedFilter = date)
   await expect(page.locator(`[role="tab"][data-tab-id="${path}"]`)).toHaveAttribute('aria-selected', 'true')
   await expect(page.locator('.reading-pane')).toHaveCount(1)
   await expect(page.locator('.reading-pane')).toBeVisible()
-  await ensureExplorerVisible(page)
-  await expect(page.locator('.search-input')).toHaveValue(expectedFilter)
+  if ((page.viewportSize()?.width ?? 1280) > 600) await ensureExplorerVisible(page)
+  if (await page.locator('.search-input').count()) await expect(page.locator('.search-input')).toHaveValue(expectedFilter)
   await expect(page.getByTestId('diary-calendar')).toBeAttached()
   await expect(page.getByTestId('diary-calendar')).toBeHidden()
 }
@@ -849,6 +852,41 @@ test('clicking a Diary FileTree row transfers focus out of Monaco for G B', asyn
   }
 })
 
+test('Diary has no contextual rail and preserves the Note rail selection', async ({ page, request }) => {
+  const date = localCivilDate()
+  const note = `inbox/diary-rail-contract-${RUN_ID}`
+  try {
+    await seedDiary(request, date, '# Quiet Diary\n')
+    expect((await request.post('/api/posts', { data: { path: note, title: 'Rail contract', content: '## Note heading\n' } })).ok()).toBe(true)
+    await openNoteDocument(page, note)
+    await expect(page.locator('.right-rail-slot')).toBeVisible()
+    await page.locator('.right-rail [data-tab="history"]').click()
+    await selectScope(page, 'diary')
+    await expect(page.getByTestId('diary-calendar')).toBeVisible()
+    await expect(page.locator('.right-rail-slot, .splitter-toc, .right-rail-toggle')).toHaveCount(0)
+    await activateDiaryDate(page, date)
+    await expect(page.locator('.reading-pane')).toBeVisible()
+    await expect(page.locator('.right-rail-slot, .splitter-toc, .right-rail-toggle')).toHaveCount(0)
+    await page.setViewportSize({ width: 390, height: 844 })
+    await expect(page.locator('.file-tree')).toHaveCount(0)
+    const metrics = await documentMetrics(page)
+    expect(metrics.editorAreaLeft).toBeLessThanOrEqual(1)
+    expect(metrics.editorAreaRight).toBeGreaterThanOrEqual(389)
+    await assertNoDocumentOverflow(page)
+    await goBackFromDiaryDocument(page)
+    await page.setViewportSize({ width: 1280, height: 800 })
+    await selectScope(page, 'note')
+    await expect(page.locator('.right-rail-toggle')).toBeVisible()
+    await expect(page.locator('.right-rail [data-tab="history"]')).toHaveAttribute('aria-selected', 'true')
+    for (const tab of ['ai', 'toc', 'links', 'properties', 'history']) {
+      await expect(page.locator(`.right-rail [data-tab="${tab}"]`)).toHaveCount(1)
+    }
+  } finally {
+    await deletePost(request, note)
+    await deletePost(request, diaryPath(date))
+  }
+})
+
 test('native READ and EDIT remain usable across panel states, breakpoints, and resize', async ({ page, request }) => {
   const date = localCivilDate()
   const path = diaryPath(date)
@@ -867,14 +905,12 @@ test('native READ and EDIT remain usable across panel states, breakpoints, and r
       const readMetrics = await documentMetrics(page)
       expect(readMetrics.editorAreaWidth, `${viewport.name} READ width`).toBeGreaterThan(0)
       expect(readMetrics.editorAreaLeft, `${viewport.name} READ starts after Activity Bar`).toBeGreaterThanOrEqual(readMetrics.activityRight - 1)
-      if (viewport.width <= 600) {
-        expect(readMetrics.editorAreaRight, `${viewport.name} READ reaches viewport`).toBeGreaterThanOrEqual(viewport.width - 1)
-        expect(readMetrics.rightRailVisible, `${viewport.name} right rail is visually hidden`).toBe(false)
-      } else {
-        expect(readMetrics.editorAreaRight, `${viewport.name} READ has usable right edge`).toBeGreaterThan(readMetrics.editorAreaLeft)
-        expect(readMetrics.rightRailVisible, `${viewport.name} right rail remains visible`).toBe(true)
+      expect(readMetrics.editorAreaRight, `${viewport.name} READ reaches viewport`).toBeGreaterThanOrEqual(viewport.width - 1)
+      await expect(page.locator('.right-rail-slot, .splitter-toc, .right-rail-toggle')).toHaveCount(0)
+      expect(readMetrics.rightRailVisible).toBe(false)
+      if (viewport.width > 600 && await page.getByTestId('left-panel-toggle').getAttribute('aria-pressed') === 'true') {
+        expect(readMetrics.fileTreeWidth).toBeGreaterThan(0)
       }
-      expect(readMetrics.fileTreeWidth, `${viewport.name} exact FileTree`).toBeGreaterThan(0)
       await assertNoDocumentOverflow(page)
 
       const toggle = page.getByTestId('view-toggle')
@@ -903,6 +939,7 @@ test('native READ and EDIT remain usable across panel states, breakpoints, and r
     await assertNativeRead(page, date)
     const leftPanelToggle = page.getByTestId('left-panel-toggle')
     await expect(leftPanelToggle).toBeVisible()
+    await ensureExplorerVisible(page)
     await expect(leftPanelToggle).toHaveAttribute('aria-pressed', 'true')
     await leftPanelToggle.click()
     await expect(leftPanelToggle).toHaveAttribute('aria-pressed', 'false')
@@ -927,12 +964,18 @@ test('native READ and EDIT remain usable across panel states, breakpoints, and r
       await expect(page.locator('.reading-pane')).toBeVisible()
     }
 
+    await ensureExplorerVisible(page)
+    await page.locator('.file-tree [role="treeitem"]').filter({ hasText: date }).first().click()
+    await expect(page.locator('.file-tree')).toHaveCount(0)
+    await expect(page.locator('.reading-pane')).toBeVisible()
+    await expect(leftPanelToggle).toHaveAttribute('aria-pressed', 'false')
+
     await page.setViewportSize({ width: 1280, height: 800 })
     await expect(page.locator('.file-tree')).toBeHidden()
     await expect(page.locator('.reading-pane')).toBeVisible()
     const closedWide = await documentMetrics(page)
     expect(closedWide.fileTreeWidth).toBe(0)
-    expect(closedWide.rightRailVisible).toBe(true)
+    expect(closedWide.rightRailVisible).toBe(false)
 
     await leftPanelToggle.click()
     await expect(page.locator('.file-tree')).toBeVisible()
@@ -949,7 +992,7 @@ test('native READ and EDIT remain usable across panel states, breakpoints, and r
       await expect(tab).toHaveCount(1)
       await expect(tab).toHaveAttribute('aria-selected', 'true')
       await expect(page.locator('.reading-pane')).toBeVisible()
-      await expect(page.locator('.search-input')).toHaveValue(date)
+      if (await page.locator('.search-input').count()) await expect(page.locator('.search-input')).toHaveValue(date)
       await assertNoDocumentOverflow(page)
       expect(new URL(page.url()).pathname).toBe(routeBeforeResize)
       expect((await (await request.get(`/api/posts/${path}`)).json() as { metadata?: { id?: string } }).metadata?.id).toBe(seeded.documentId)
