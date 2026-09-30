@@ -253,13 +253,12 @@ export function useVaultLayout(options: UseVaultLayoutOptions = {}) {
     //
     // The left side panel is the file tree, tag panel, or history panel.
     //
-    // The right-rail panel sits on the right of the editor when expanded —
-    // VaultView keeps the rail available in edit, read, History, Diff,
-    // and Recovery views. The TOC tab gates on headings itself; the
-    // Links tab does not. Side panel and rail coexist — the user routinely
-    // reads with the file tree open on the left, and the side+rail
-    // combined width (~580px) leaves plenty of room for the editor
-    // area.
+    // For Note workspaces, VaultView keeps the right rail available in edit,
+    // read, History, Diff, and Recovery views. Diary does not own a contextual
+    // right panel, and its capability removes this track. The TOC tab gates on
+    // headings itself; the Links tab does not. Side panel and rail coexist —
+    // the user routinely reads with the file tree open on the left, and the
+    // side+rail combined width (~580px) leaves plenty of room for the editor.
     //
     // The right rail is one track regardless of which tab is active.
     // Trailing space on `left` and leading space on `right`/`toc`

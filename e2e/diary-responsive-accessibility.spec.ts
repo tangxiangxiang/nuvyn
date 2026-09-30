@@ -3,6 +3,8 @@ import {
   appendEditorText,
   clearDraftDatabase,
   gotoVaultReady,
+  openRecoveryDialog,
+  seedRecoveryDraft,
 } from './helpers/edit-program'
 import { CALENDAR_TEST_DATE, CALENDAR_TEST_TIME_ZONE, calendarDay } from './helpers/calendar-clock'
 
@@ -36,6 +38,12 @@ const DOCUMENT_VIEWPORTS: Viewport[] = [
 
 function localCivilDate(): string {
   return CALENDAR_TEST_DATE
+}
+
+function nextCivilDate(value: string): string {
+  const date = new Date(`${value}T12:00:00Z`)
+  date.setUTCDate(date.getUTCDate() + 1)
+  return date.toISOString().slice(0, 10)
 }
 
 function diaryPath(date: string): string {
@@ -309,10 +317,27 @@ async function assertNativeRead(page: Page, date: string, expectedFilter = date)
   await expect(page.locator(`[role="tab"][data-tab-id="${path}"]`)).toHaveAttribute('aria-selected', 'true')
   await expect(page.locator('.reading-pane')).toHaveCount(1)
   await expect(page.locator('.reading-pane')).toBeVisible()
-  if ((page.viewportSize()?.width ?? 1280) > 600) await ensureExplorerVisible(page)
-  if (await page.locator('.search-input').count()) await expect(page.locator('.search-input')).toHaveValue(expectedFilter)
+  const width = page.viewportSize()?.width ?? 1280
+  if (width > 600) {
+    await ensureExplorerVisible(page)
+    const search = page.locator('.file-tree .search-input')
+    await expect(search).toBeVisible()
+    await expect(search).toHaveValue(expectedFilter)
+  } else {
+    const leftPanelToggle = page.getByTestId('left-panel-toggle')
+    await expect(leftPanelToggle).toHaveAttribute('aria-pressed', 'false')
+    await expect(page.locator('.file-tree')).toHaveCount(0)
+    await expect(page.locator('.search-input')).toHaveCount(0)
+  }
   await expect(page.getByTestId('diary-calendar')).toBeAttached()
   await expect(page.getByTestId('diary-calendar')).toBeHidden()
+}
+
+async function ensureNativeReadMode(page: Page): Promise<void> {
+  const toggle = page.getByTestId('view-toggle')
+  await expect(toggle).toBeVisible()
+  if (/read|阅读/i.test(await toggle.getAttribute('aria-label') ?? '')) await toggle.click()
+  await expect(page.locator('.reading-pane')).toBeVisible()
 }
 
 async function captureDiagnostics(page: Page): Promise<{
@@ -885,6 +910,112 @@ test('Diary has no contextual rail and preserves the Note rail selection', async
     await deletePost(request, note)
     await deletePost(request, diaryPath(date))
   }
+})
+
+test('mobile direct Diary route and reload keep FileTree as a full-width overlay', async ({ page, request }) => {
+  const dates = [localCivilDate(), nextCivilDate(localCivilDate())]
+  const paths = dates.map(diaryPath)
+  const state = await captureDiagnostics(page)
+
+  try {
+    for (const date of dates) await seedDiary(request, date, `# Mobile direct Diary ${date} ${RUN_ID}\n`)
+    await page.setViewportSize({ width: 375, height: 812 })
+    await page.evaluate(() => localStorage.setItem('nuvyn.vault.activeScope', 'diary'))
+    await page.goto(`/vault/${paths[0]}`)
+
+    await ensureNativeReadMode(page)
+    await expect(page.locator('.vault')).toHaveClass(/diary-native-document-mode/)
+    await assertNativeRead(page, dates[0])
+    await expect(page.locator('.right-rail-slot, .splitter-toc, .right-rail-toggle')).toHaveCount(0)
+    const directMetrics = await documentMetrics(page)
+    expect(directMetrics.editorAreaLeft).toBeLessThanOrEqual(1)
+    expect(directMetrics.editorAreaRight).toBeGreaterThanOrEqual(374)
+    await assertNoDocumentOverflow(page)
+
+    await page.reload()
+    await ensureNativeReadMode(page)
+    await expect(page.locator('.vault')).toHaveClass(/diary-native-document-mode/)
+    await assertNativeRead(page, dates[0])
+    await expect(page.locator('.right-rail-slot, .splitter-toc, .right-rail-toggle')).toHaveCount(0)
+    const reloadedMetrics = await documentMetrics(page)
+    expect(reloadedMetrics.editorAreaLeft).toBeLessThanOrEqual(1)
+    expect(reloadedMetrics.editorAreaRight).toBeGreaterThanOrEqual(374)
+    await assertNoDocumentOverflow(page)
+
+    const leftPanelToggle = page.getByTestId('left-panel-toggle')
+    await leftPanelToggle.click()
+    await expect(leftPanelToggle).toHaveAttribute('aria-pressed', 'true')
+    const fileTree = page.locator('.file-tree')
+    await expect(fileTree).toBeVisible()
+    const overlayMetrics = await fileTree.evaluate((element) => ({
+      position: getComputedStyle(element).position,
+      left: element.getBoundingClientRect().left,
+    }))
+    expect(overlayMetrics.position).toBe('absolute')
+    expect(overlayMetrics.left).toBeLessThanOrEqual(1)
+    const openMetrics = await documentMetrics(page)
+    expect(openMetrics.editorAreaLeft).toBeLessThanOrEqual(1)
+    expect(openMetrics.editorAreaRight).toBeGreaterThanOrEqual(374)
+    await assertNoDocumentOverflow(page)
+
+    await fileTree.locator(`[data-tree-key="file:${paths[1]}"] .row-line`).click()
+    await expect(page).toHaveURL(new RegExp(`/vault/${paths[1].replace('/', '\\/')}(?:[?#]|$)`))
+    await expect(page.locator('.vault')).toHaveClass(/diary-native-document-mode/)
+    await assertNativeRead(page, dates[1])
+    await expect(page.locator('.right-rail-slot, .splitter-toc, .right-rail-toggle')).toHaveCount(0)
+    const selectedMetrics = await documentMetrics(page)
+    expect(selectedMetrics.editorAreaLeft).toBeLessThanOrEqual(1)
+    expect(selectedMetrics.editorAreaRight).toBeGreaterThanOrEqual(374)
+    await assertNoDocumentOverflow(page)
+  } finally {
+    for (const path of paths) await deletePost(request, path)
+  }
+
+  expect(state.pageErrors).toEqual([])
+  expect(state.consoleErrors).toEqual([])
+})
+
+test('mobile Recovery surface does not inherit ordinary Diary document layout', async ({ page, request }) => {
+  const date = localCivilDate()
+  const diary = diaryPath(date)
+  const note = `inbox/diary-recovery-layout-${RUN_ID}`
+  const marker = `RECOVERY_LAYOUT_${RUN_ID}`
+  const state = await captureDiagnostics(page)
+
+  try {
+    await seedDiary(request, date, `# Diary under Recovery ${RUN_ID}\n`)
+    await seedNote(request, note)
+    const noteResponse = await request.get(`/api/posts/${note}`)
+    expect(noteResponse.status()).toBe(200)
+    const noteDetail = await noteResponse.json() as { metadata?: { id?: string } }
+    expect(noteDetail.metadata?.id).toEqual(expect.any(String))
+    const identityResponse = await request.get('/api/vault/identity')
+    expect(identityResponse.status()).toBe(200)
+    const identity = await identityResponse.json() as { vaultId: string }
+    await seedRecoveryDraft(page, {
+      vaultId: identity.vaultId,
+      documentId: noteDetail.metadata!.id!,
+      documentPath: note,
+      content: marker,
+    })
+
+    await page.setViewportSize({ width: 375, height: 812 })
+    await page.evaluate(() => localStorage.setItem('nuvyn.vault.activeScope', 'diary'))
+    await page.goto(`/vault/${diary}`)
+    await expect(page.locator(`[role="tab"][data-tab-id="${diary}"]`)).toHaveAttribute('aria-selected', 'true')
+    const recoveryDialog = await openRecoveryDialog(page)
+    await recoveryDialog.getByRole('button', { name: 'Open Recovered Content' }).click()
+
+    await expect(page.locator('.draft-recovery-pane')).toBeVisible()
+    await expect(page.locator('.vault')).not.toHaveClass(/diary-native-document-mode/)
+    await expect(page.locator('.right-rail-slot, .splitter-toc, .right-rail-toggle')).toHaveCount(0)
+  } finally {
+    await deletePost(request, note)
+    await deletePost(request, diary)
+  }
+
+  expect(state.pageErrors).toEqual([])
+  expect(state.consoleErrors).toEqual([])
 })
 
 test('native READ and EDIT remain usable across panel states, breakpoints, and resize', async ({ page, request }) => {

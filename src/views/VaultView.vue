@@ -1801,16 +1801,23 @@ const specialWorkspaceSurfaceActive = computed(() => Boolean(
 const isManagedDiaryDocumentActive = computed(() => (
   isDiaryScope.value && classifyDiaryPath(activePath.value ?? '') === 'managed'
 ))
+// This is the authority for ordinary Diary document behavior. Presentation
+// provenance can be absent after direct routes, reloads, and route hydration,
+// so mobile layout and Diary Back must follow the active stable workspace
+// document while excluding read-only/special workspace surfaces.
+const isOrdinaryManagedDiaryDocumentActive = computed(() => (
+  isDiaryScope.value
+  && classifyDiaryPath(activePath.value ?? '') === 'managed'
+  && activeWorkspaceTabId.value === activePath.value
+  && activeTab.value?.path === activePath.value
+  && !specialWorkspaceSurfaceActive.value
+))
 // Diary Back follows the active managed document itself, not the transient
 // presentation mode that Calendar-originated navigation records. This keeps
 // direct routes, reloads, and route-led hydration eligible while special
 // read-only workspace surfaces retain ownership of their backing document.
 const canBackToDiaryHome = computed(() => (
-  isDiaryScope.value
-  && isManagedDiaryDocumentActive.value
-  && activeWorkspaceTabId.value === activePath.value
-  && activeTab.value?.path === activePath.value
-  && !specialWorkspaceSurfaceActive.value
+  isOrdinaryManagedDiaryDocumentActive.value
 ))
 // Keep an inactive Diary tab from trapping the user in a hidden document when
 // they return to Diary with a Note selected. That state safely returns Home;
@@ -1951,8 +1958,10 @@ watch(
 )
 
 // Reuse the existing left-panel state for temporary mobile Diary navigation.
-watch([isDiaryDocumentMode, isMobileDiaryViewport], ([diary, mobile]) => {
-  if (diary && mobile) leftSidebarCollapsed.value = true
+// This follows the active document identity so direct routes and reloads use
+// the same collapsed FileTree overlay as Calendar-originated navigation.
+watch([isOrdinaryManagedDiaryDocumentActive, isMobileDiaryViewport], ([diaryDocument, mobile]) => {
+  if (diaryDocument && mobile) leftSidebarCollapsed.value = true
 }, { immediate: true })
 
 // NavBar lives above RouterView, while SettingsModal remains owned by this
@@ -2690,7 +2699,7 @@ watch(isReadMode, async (reading) => {
   <div
     ref="vaultRef"
     class="vault"
-    :class="{ 'is-read': isReadMode, 'right-rail-open': rightRailVisible, 'side-panel-open': sidePanelOpen, 'diary-calendar-mode': isDiaryCalendarVisible, 'diary-native-document-mode': isDiaryDocumentMode }"
+    :class="{ 'is-read': isReadMode, 'right-rail-open': rightRailVisible, 'side-panel-open': sidePanelOpen, 'diary-calendar-mode': isDiaryCalendarVisible, 'diary-native-document-mode': isOrdinaryManagedDiaryDocumentActive }"
     tabindex="0"
     :style="vaultStyle"
     @keydown="onVaultKeydown"

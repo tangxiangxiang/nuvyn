@@ -328,15 +328,23 @@ describe('VaultView editor tab wiring', () => {
     const diaryShortcut = source.match(/const diaryBackChord = createDiaryShortcutChord\([\s\S]*?\n\}\)/)?.[0]
     const diaryBackCommand = source.match(/function backToDiaryHome\([\s\S]*?\n\}/)?.[0]
     const diaryBackEligibility = source.match(/const canBackToDiaryHome = computed\(\(\) => \([\s\S]*?\n\)\)/)?.[0]
+    const ordinaryDiaryDocument = source.match(/const isOrdinaryManagedDiaryDocumentActive = computed\(\(\) => \([\s\S]*?\n\)\)/)?.[0]
+    const specialWorkspaceSurface = source.match(/const specialWorkspaceSurfaceActive = computed\(\(\) => Boolean\([\s\S]*?\n\)\)/)?.[0]
 
     expect(diaryShortcut).toBeDefined()
+    expect(ordinaryDiaryDocument).toBeDefined()
+    expect(specialWorkspaceSurface).toBeDefined()
     expect(diaryShortcut).toContain('goBack: backToDiaryHome')
     expect(diaryShortcut).toContain('isDiaryDocument: () => canBackToDiaryHome.value')
-    expect(diaryBackEligibility).toContain('isDiaryScope.value')
-    expect(diaryBackEligibility).toContain('isManagedDiaryDocumentActive.value')
-    expect(diaryBackEligibility).toContain('activeWorkspaceTabId.value === activePath.value')
-    expect(diaryBackEligibility).toContain('activeTab.value?.path === activePath.value')
-    expect(diaryBackEligibility).toContain('!specialWorkspaceSurfaceActive.value')
+    expect(diaryBackEligibility).toContain('isOrdinaryManagedDiaryDocumentActive.value')
+    expect(ordinaryDiaryDocument).toContain('isDiaryScope.value')
+    expect(ordinaryDiaryDocument).toContain("classifyDiaryPath(activePath.value ?? '') === 'managed'")
+    expect(ordinaryDiaryDocument).toContain('activeWorkspaceTabId.value === activePath.value')
+    expect(ordinaryDiaryDocument).toContain('activeTab.value?.path === activePath.value')
+    expect(ordinaryDiaryDocument).toContain('!specialWorkspaceSurfaceActive.value')
+    expect(specialWorkspaceSurface).toContain('activeHistoryComparison.value')
+    expect(specialWorkspaceSurface).toContain('activeWorkingTreeDiff.value')
+    expect(specialWorkspaceSurface).toContain('activeDraftRecovery.value')
     expect(diaryBackEligibility).not.toContain('isDiaryDocumentMode')
     expect(source).toContain('registeredDiaryBackCommand = () => { void backToDiaryHome() }')
     expect(diaryBackCommand).toContain('if (!canBackToDiaryHome.value) return')
@@ -789,7 +797,8 @@ describe('VaultView D3.2 Diary surface wiring', () => {
     // Mobile navigation reuses the shared left-panel toggle over a full-width document.
     expect(source).toContain("'side-panel-open': sidePanelOpen")
     expect(styles).toContain('.vault.diary-native-document-mode > .file-tree')
-    expect(source).toContain('watch([isDiaryDocumentMode, isMobileDiaryViewport]')
+    expect(source).toContain('watch([isOrdinaryManagedDiaryDocumentActive, isMobileDiaryViewport]')
+    expect(source).toContain("'diary-native-document-mode': isOrdinaryManagedDiaryDocumentActive")
     expect(source).toContain('closeMobileDiaryNavigation()')
     expect(source).toContain('workspaceRightPanelAvailable.value && !rightRailCollapsed.value')
     expect(styles).toContain('grid-template-columns: minmax(0, 1fr) !important')
