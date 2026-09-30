@@ -733,8 +733,9 @@ describe('VaultView D3.2 Diary surface wiring', () => {
 
   it('persists FileTree query ownership so a user-cleared query is not re-seeded', () => {
     const source = readFileSync(fileURLToPath(new URL('../VaultView.vue', import.meta.url)), 'utf8')
+    const ownership = readFileSync(fileURLToPath(new URL('../../composables/diary/diaryFilterScopeExit.ts', import.meta.url)), 'utf8')
 
-    expect(source).toContain("type DiaryFilterOwnership = 'none' | 'calendar' | 'user'")
+    expect(ownership).toContain("export type DiaryFilterOwnership = 'none' | 'calendar' | 'user'")
     expect(source).toContain('BROWSER_STORAGE_KEYS.diaryFilterOwnership')
     expect(source).toContain("diaryFilterOwnership.value = 'user'")
     expect(source).toContain("diaryFilterOwnership.value === 'user'")
@@ -744,11 +745,14 @@ describe('VaultView D3.2 Diary surface wiring', () => {
 
   it('distinguishes fresh access bootstrap from a reconciled lock boundary', () => {
     const source = readFileSync(fileURLToPath(new URL('../VaultView.vue', import.meta.url)), 'utf8')
+    const cleanup = readFileSync(fileURLToPath(new URL('../../composables/diary/diaryFilterScopeExit.ts', import.meta.url)), 'utf8')
 
-    expect(source).toContain('if (!diaryAccess.statusResolved.value) return')
-    expect(source).not.toContain("diaryAccess.state.value !== 'UNLOCKED'")
-    expect(source).toContain('diaryFilterOwnership.value === \'calendar\'')
-    expect(source).toContain('diaryFilterOwnership.value = \'none\'')
+    expect(source).toContain('watchDiaryFilterScopeExit({')
+    expect(source).toContain('statusResolved: diaryAccess.statusResolved')
+    expect(cleanup).toContain('[isDiaryScope, statusResolved]')
+    expect(cleanup).toContain('if (inDiaryScope || !accessResolved) return')
+    expect(cleanup).toContain("diaryFilterOwnership.value === 'calendar'")
+    expect(cleanup).toContain("diaryFilterOwnership.value = 'none'")
   })
 
   it('keeps the Calendar mounted while presentation state controls visibility', () => {

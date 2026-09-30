@@ -94,6 +94,17 @@ function diagnostics(page: Page): { pageErrors: string[]; consoleErrors: string[
   return { pageErrors, consoleErrors }
 }
 
+async function reloadWithoutDiaryFixtureBootstrap(page: Page): Promise<void> {
+  // The Diary fixture normally unlocks after reload so most tests can keep
+  // their original scope. This path exercises the real locked fresh-process
+  // fallback instead of that test convenience.
+  const navigation = page.waitForNavigation({ waitUntil: 'domcontentloaded' })
+  await Promise.all([
+    navigation,
+    page.evaluate(() => window.location.reload()).catch(() => null),
+  ])
+}
+
 async function selectScope(page: Page, scope: 'note' | 'diary'): Promise<void> {
   const chip = page.locator('.scope-chip').filter({ hasText: scope })
   if (await chip.getAttribute('aria-pressed') !== 'true') await chip.click()
@@ -490,6 +501,54 @@ test('clean refresh restores one managed Diary document and Note tabs from the d
     await expect(page.locator('[role="tab"][data-tab-id]')).toHaveCount(2)
   } finally {
     for (const path of [...paths, note]) await deletePost(request, path)
+  }
+  expect(state.pageErrors).toEqual([])
+  expect(state.consoleErrors).toEqual([])
+})
+
+test('locked refresh clears the Calendar-owned Diary date from the Note FileTree', async ({ page, request }) => {
+  const date = localCivilDate()
+  const path = diaryPath(date)
+  const state = diagnostics(page)
+  try {
+    await seedDiary(request, date, `# Locked refresh filter ${RUN_ID}\n`)
+    await openDiaryHome(page)
+    await clickDiaryDate(page, date)
+    await assertNativeDiary(page, date, date)
+    await expect(page.locator('.scope-chip').filter({ hasText: 'diary' })).toHaveAttribute('aria-pressed', 'true')
+
+    await reloadWithoutDiaryFixtureBootstrap(page)
+
+    await expect(page.locator('.diary-access-dialog')).toBeVisible({ timeout: 15_000 })
+    await expect(page.locator('.scope-chip').filter({ hasText: 'note' })).toHaveAttribute('aria-pressed', 'true')
+    await expect(page.locator('.file-tree .search-input')).toHaveValue('')
+  } finally {
+    await deletePost(request, path)
+  }
+  expect(state.pageErrors).toEqual([])
+  expect(state.consoleErrors).toEqual([])
+})
+
+test('locked refresh preserves a user-owned Diary FileTree filter', async ({ page, request }) => {
+  const date = localCivilDate()
+  const path = diaryPath(date)
+  const userQuery = `abc-${RUN_ID}`
+  const state = diagnostics(page)
+  try {
+    await seedDiary(request, date, `# User filter after locked refresh ${RUN_ID}\n`)
+    await openDiaryHome(page)
+    await clickDiaryDate(page, date)
+    await assertNativeDiary(page, date, date)
+    await page.locator('.file-tree .search-input').fill(userQuery)
+    await expect(page.locator('.file-tree .search-input')).toHaveValue(userQuery)
+
+    await reloadWithoutDiaryFixtureBootstrap(page)
+
+    await expect(page.locator('.diary-access-dialog')).toBeVisible({ timeout: 15_000 })
+    await expect(page.locator('.scope-chip').filter({ hasText: 'note' })).toHaveAttribute('aria-pressed', 'true')
+    await expect(page.locator('.file-tree .search-input')).toHaveValue(userQuery)
+  } finally {
+    await deletePost(request, path)
   }
   expect(state.pageErrors).toEqual([])
   expect(state.consoleErrors).toEqual([])

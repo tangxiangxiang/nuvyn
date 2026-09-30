@@ -66,6 +66,7 @@ import { useDocumentLifecycle } from '../composables/vault/useDocumentLifecycle'
 import type { DocumentLifecycle } from '../composables/vault/useDocumentLifecycle'
 import { applyMetadataToPostSummary } from './metadataPostSummary'
 import { useDiaryDateCommand, type DiaryDateCommandResult } from '../composables/diary/useDiaryDateCommand'
+import { watchDiaryFilterScopeExit, type DiaryFilterOwnership } from '../composables/diary/diaryFilterScopeExit'
 import { useDiaryMoodCommand } from '../composables/diary/useDiaryMoodCommand'
 import { useDiaryMoodIconPreferences } from '../composables/diary/useDiaryMoodIconPreferences'
 import { useDiaryWorkspacePresentation } from '../composables/diary/useDiaryWorkspacePresentation'
@@ -1971,8 +1972,6 @@ watch([isOrdinaryManagedDiaryDocumentActive, isMobileDiaryViewport], ([diaryDocu
 watch(() => appShell?.settingsRequestTick.value, (tick, previous) => {
   if (tick !== undefined && tick !== previous) settingsOpen.value = true
 })
-type DiaryFilterOwnership = 'none' | 'calendar' | 'user'
-
 // Persist both the Calendar seed and who owns the current query. A plain
 // empty seed cannot distinguish a fresh empty query from one the user
 // deliberately cleared, so the ownership state must survive refresh too.
@@ -2037,31 +2036,17 @@ function rememberPendingMoodFirstPresentation(date: DiaryDate, intent: number | 
 // Keep the ordinary FileTree search input useful in the Diary context. Seed
 // it only when entering/leaving the Diary scope; it is user-owned afterwards
 // and must not change when a file or another Diary tab is clicked.
+watchDiaryFilterScopeExit({
+  isDiaryScope,
+  statusResolved: diaryAccess.statusResolved,
+  filesFilter,
+  diaryFilterSeed,
+  diaryFilterOwnership,
+  clearPendingMoodFirstPresentation,
+})
+
 watch(isDiaryScope, (inDiaryScope) => {
-  if (!inDiaryScope) {
-    // A fresh browser process cannot restore the process-local Diary
-    // capability from persisted scope state. App.vue therefore normalizes a
-    // persisted Diary scope to note while it resolves access. Only that
-    // unresolved bootstrap is exempt from the normal scope-exit cleanup;
-    // once status has been reconciled, LOCKED also represents a real
-    // lock/expiry/logout boundary and must clear Calendar-owned state.
-    if (!diaryAccess.statusResolved.value) return
-    clearPendingMoodFirstPresentation()
-    // A Calendar-seeded date is presentation context and should not hide the
-    // ordinary scope's tree. Once the user edits the query, it is their
-    // ordinary FileTree state and must survive the scope transition.
-    if (
-      diaryFilterOwnership.value === 'calendar'
-      && filesFilter.value === diaryFilterSeed.value
-    ) {
-      filesFilter.value = ''
-    }
-    diaryFilterSeed.value = ''
-    if (diaryFilterOwnership.value === 'calendar') {
-      diaryFilterOwnership.value = 'none'
-    }
-    return
-  }
+  if (!inDiaryScope) return
   // User-owned state includes an intentionally empty query. It must not be
   // re-seeded from the active Diary document during refresh or re-entry.
   if (diaryFilterOwnership.value === 'user') return

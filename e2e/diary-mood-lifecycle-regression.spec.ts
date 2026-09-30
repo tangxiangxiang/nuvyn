@@ -637,7 +637,9 @@ test('unknown Mood survives native save, refresh, close, and reopen', async ({ p
     await expect(page.getByTestId('diary-reader-dialog')).toHaveCount(0)
     await expect(page.locator(`[role="tab"][data-tab-id="${path}"]`)).toHaveAttribute('aria-selected', 'true')
     await ensureExplorerVisible(page)
-    await expect(page.locator('.search-input')).toHaveValue(date)
+    // Fresh-process access bootstrap temporarily falls back to Note; the
+    // Calendar-owned date is cleared before the fixture reopens Diary.
+    await expect(page.locator('.search-input')).toHaveValue('')
     await expect(page.getByTestId('diary-calendar')).toBeAttached()
     await expect(page.getByTestId('diary-calendar')).toBeHidden()
     await expect(page.locator('.editor-pane, .reading-pane')).toHaveCount(1)
@@ -927,14 +929,16 @@ test('route navigation preserves Diary identity with one managed document and a 
     // Route navigation switches the single managed Diary slot while keeping
     // the ordinary workspace tabs underneath it.
     await page.goto(`/vault/${secondPath}`)
-    await assertNativeReader(page, secondDate, firstDate)
+    // A direct route reload crosses the fresh-process scope fallback, so the
+    // previous Calendar seed is not restored into the new presentation.
+    await assertNativeReader(page, secondDate, '')
     await expect(firstTab).toHaveCount(0)
     await expect(secondTab).toHaveCount(1)
     await expect(page.locator('.tabs')).toBeHidden()
     await expect(page.getByTestId('diary-calendar')).toBeHidden()
 
     await page.goto(`/vault/${firstPath}`)
-    await assertNativeReader(page, firstDate, firstDate)
+    await assertNativeReader(page, firstDate, '')
     await expect(firstTab).toHaveCount(1)
     await expect(secondTab).toHaveCount(0)
     await expect(page.locator('.tabs')).toBeHidden()
@@ -999,7 +1003,7 @@ test('scope switching and route navigation preserve the user FileTree query', as
     await clickDiaryDate(page, firstDate)
     await assertNativeReader(page, firstDate)
     await page.goto(`/vault/${secondPath}`)
-    await assertNativeReader(page, secondDate, firstDate)
+    await assertNativeReader(page, secondDate, '')
     await expect(page.locator(`[role="tab"][data-tab-id="${firstPath}"]`)).toHaveCount(0)
     await expect(page.locator(`[role="tab"][data-tab-id="${secondPath}"]`)).toHaveCount(1)
     await page.goto(`/vault/${notePath}`)
@@ -1349,7 +1353,7 @@ test('dirty Diary body survives a rejected single-document route switch without 
   expect(state.pageErrors).toEqual([])
   expect(state.consoleErrors).toEqual([])
 })
-test('refresh preserves Calendar-seed provenance so Diary scope exit clears it', async ({ page, request }) => {
+test('refresh clears Calendar-seeded context before it can leak into Note', async ({ page, request }) => {
   const date = await findUnusedDiaryDate(request)
   const path = diaryPath(date)
   const notePath = `inbox/d74-round3-seed-refresh-${RUN_ID}`
@@ -1375,17 +1379,14 @@ test('refresh preserves Calendar-seed provenance so Diary scope exit clears it',
     const search = page.locator('.file-tree .search-input')
     await expect(search).toHaveValue(date)
 
-    // Refresh the page while the Calendar-seeded query is still in place.
-    // `filesFilter` survives via useStorage; the seed must survive too so the
-    // scope-exit check can still recognise it as a system seed.
+    // Refresh starts a fresh Diary access bootstrap. The persisted scope
+    // normalizes to Note while access resolves, so its Calendar-owned query
+    // must be cleared before the fixture finishes reopening Diary.
     await page.reload()
-    await assertNativeReader(page, date)
-    await expect(search).toHaveValue(date)
+    await assertNativeReader(page, date, '')
+    await expect(search).toHaveValue('')
 
-    // Leaving Diary scope after refresh must still classify the persisted
-    // query as a Calendar seed (not a user query) and clear it. Otherwise the
-    // ordinary Note tree inherits a Diary presentation filter — that is the
-    // Round 3 refresh-provenance P2 the independent review found.
+    // The Note tree remains unfiltered after leaving Diary.
     await selectScope(page, 'note')
     await ensureExplorerVisible(page)
     await expect(search).toHaveValue('')
