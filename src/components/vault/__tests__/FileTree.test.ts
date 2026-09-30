@@ -164,7 +164,7 @@ describe('FileTree', () => {
     wrapper.unmount()
   })
 
-  it('focuses an already active file without reopening it', async () => {
+  it('emits select for an already active path while keeping treeitem focus', async () => {
     const wrapper = mount(FileTree, {
       props: { tree: TREE, currentPath: null },
       attachTo: document.body,
@@ -177,7 +177,7 @@ describe('FileTree', () => {
 
     expect(document.activeElement).toBe(row.element)
     expect(row.attributes('tabindex')).toBe('0')
-    expect(wrapper.emitted('select')).toBeUndefined()
+    expect(wrapper.emitted('select')).toEqual([['inbox/draft']])
     wrapper.unmount()
   })
 

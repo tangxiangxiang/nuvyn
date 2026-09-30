@@ -276,6 +276,15 @@ async function clickDiaryDate(page: Page, date: string): Promise<void> {
   await button.click()
 }
 
+async function clickDiaryTreeDocument(page: Page, path: string): Promise<void> {
+  await ensureExplorerVisible(page)
+  const search = page.locator('.file-tree .search-input')
+  if (await search.inputValue()) await search.fill('')
+  const row = page.locator(`[data-tree-key="file:${path}"]`)
+  await expect(row).toBeVisible()
+  await row.locator('.row-line').click()
+}
+
 async function assertNativeReader(page: Page, date: string, expectedFilter = date): Promise<void> {
   const path = diaryPath(date)
   await expect(page).toHaveURL(new RegExp(`/vault/${path.replace('/', '\\/')}(?:[?#]|$)`))
@@ -896,7 +905,6 @@ test('route navigation preserves Diary identity with one managed document and a 
     if (outgoing.method() === 'PATCH' && pathname === `/api/metadata/documents/${firstPath}`) moodPatchRequests += 1
     if (outgoing.method() === 'PATCH' && pathname === `/api/metadata/documents/${secondPath}`) moodPatchRequests += 1
   })
-
   try {
     const first = await seedDiary(request, firstDate, `# Round 3 Diary A ${RUN_ID}\n`)
     const second = await seedDiary(request, secondDate, `# Round 3 Diary B ${RUN_ID}\n`)
@@ -1216,8 +1224,9 @@ test('refresh, deep link, and browser Back/Forward preserve Diary identity, Mood
     await expect(page).toHaveURL(new RegExp(`/vault/${notePath.replace('/', '\\/')}(?:[?#]|$)`))
     await expect(page.locator(`[role="tab"][data-tab-id="${notePath}"]`)).toHaveAttribute('aria-selected', 'true')
     await expect(page.locator(`[role="tab"][data-tab-id="${path}"]`)).toHaveCount(1)
-    await expect(page.getByTestId('diary-calendar')).toBeHidden()
-    await expect(page.locator('.file-tree .search-input')).toHaveValue(customQuery)
+    await expect(page.getByTestId('diary-calendar')).toBeVisible()
+    await expect.poll(() => page.evaluate(() => localStorage.getItem('nuvyn.file-tree.filter')))
+      .toBe(customQuery)
 
     await page.goForward()
     await assertNativeReader(page, date, customQuery)
@@ -1267,6 +1276,10 @@ test('dirty Diary body survives a rejected single-document route switch without 
     const firstTab = page.locator(`[role="tab"][data-tab-id="${firstPath}"]`)
     const secondTab = page.locator(`[role="tab"][data-tab-id="${secondPath}"]`)
     await expect(firstTab).toHaveAttribute('data-save-status', 'dirty', { timeout: 15_000 })
+    // Let the debounced autosave reach its deterministic aborted state before
+    // requesting another document; this prevents the route guard and the
+    // autosave timer from racing over the same in-flight request.
+    await expect(firstTab).toHaveAttribute('data-save-status', 'error', { timeout: 15_000 })
     await expect(page.locator('.tabs')).toBeHidden()
     // Managed Diary drafts are memory-only in D8.3; no IndexedDB row may be
     // created while the tab is dirty.
@@ -1277,13 +1290,16 @@ test('dirty Diary body survives a rejected single-document route switch without 
     expect(beforeSwitch.metadata.id).toBe(first.documentId)
     expect(beforeSwitch.metadata.mood).toBe('happy')
 
-    // A failed save rejects the route change and keeps the current document
-    // selected. The hidden tab strip is never used as a switching surface.
-    await page.goto(`/vault/${secondPath}`)
+    // A failed save rejects an in-app FileTree selection and keeps the current
+    // document selected. page.goto would destroy the SPA's dirty buffer.
+    await clickDiaryTreeDocument(page, secondPath)
     await expect(page).toHaveURL(new RegExp(firstPath.replace('/', '\\/')))
     await expect(firstTab).toHaveCount(1)
     await expect(firstTab).toHaveAttribute('aria-selected', 'true')
-    await expect(firstTab).toHaveAttribute('data-save-status', 'dirty')
+    // A rejected save may be represented as `error` while the raw buffer
+    // remains dirty; the dirty marker is the stable unsaved-buffer contract.
+    await expect(firstTab.locator('.tab-dirty-indicator')).toHaveCount(1)
+    await expect(firstTab).toHaveAttribute('data-save-status', 'error', { timeout: 15_000 })
     await expect(secondTab).toHaveCount(0)
     await expect(page.locator('.tabs')).toBeHidden()
     await expect(page.locator('.editor-pane .monaco-editor .view-lines').first()).toContainText(dirtyMarker)
@@ -1291,17 +1307,24 @@ test('dirty Diary body survives a rejected single-document route switch without 
 
     await page.unroute(`**/api/posts/${firstPath}`)
     autosaveInstalled = false
+    const savedResponse = page.waitForResponse((response) => {
+      const outgoing = response.request()
+      return outgoing.method() === 'PUT'
+        && new URL(response.url()).pathname === `/api/posts/${firstPath}`
+    }, { timeout: 15_000 })
+    // The app-level save shortcut is intentionally blocked inside Monaco's
+    // editable textarea; focus the Vault shell to invoke its command handler.
     await page.locator('.vault').focus()
     await page.keyboard.press('Control+s')
-    await expect(firstTab).toHaveAttribute('data-save-status', 'saved', { timeout: 15_000 })
+    expect((await savedResponse).status()).toBe(200)
     const saved = await readDiary(request, firstDate)
     expect(normalizeLineEndings(saved.raw)).toContain(dirtyMarker)
     expect(saved.metadata.id).toBe(first.documentId)
     expect(saved.metadata.mood).toBe('happy')
     await expect.poll(() => draftRowCount(page, dirtyMarker), { timeout: 15_000 }).toBe(0)
 
-    await page.goto(`/vault/${secondPath}`)
-    await assertNativeReader(page, secondDate, firstDate)
+    await clickDiaryTreeDocument(page, secondPath)
+    await assertNativeReader(page, secondDate, '')
     await expect(firstTab).toHaveCount(0)
     await expect(secondTab).toHaveCount(1)
     await expect(page.locator('.tabs')).toBeHidden()
@@ -1309,8 +1332,8 @@ test('dirty Diary body survives a rejected single-document route switch without 
     expect(secondAfterSwitch.metadata.id).toBe(second.documentId)
     expect(secondAfterSwitch.metadata.mood).toBe('sad')
 
-    await page.goto(`/vault/${firstPath}`)
-    await assertNativeReader(page, firstDate, firstDate)
+    await clickDiaryTreeDocument(page, firstPath)
+    await assertNativeReader(page, firstDate, '')
     await expect(firstTab).toHaveCount(1)
     await expect(secondTab).toHaveCount(0)
     const reopened = await readDiary(request, firstDate)

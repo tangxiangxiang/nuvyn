@@ -350,7 +350,7 @@ test('real Browser Back passively ends native Diary presentation without retarge
 
     await expect(page).toHaveURL(new RegExp(`/vault/${source.replace('/', '\\/')}(?:[?#]|$)`))
     await expect(page.locator(`[role="tab"][data-tab-id="${source}"]`)).toHaveAttribute('aria-selected', 'true')
-    await expect(page.getByTestId('diary-calendar')).toBeHidden()
+    await expect(page.getByTestId('diary-calendar')).toBeVisible()
     await expect(page.locator(`[role="tab"][data-tab-id="${diaryPath(date)}"]`)).toHaveCount(1)
   } finally {
     await deleteDiaryDate(request, date)

@@ -549,7 +549,10 @@ function filePaths(n: TreeNode): string[] {
 
 // --- row event handlers ---
 async function onSelect(p: string) {
-  if (p !== props.currentPath) emit('select', p)
+  // A row click is an explicit selection intent even when this path is also
+  // the workspace's currentPath. A Recovery/Diff surface can share that path
+  // while the formal document is inactive; the workspace owns reuse/no-op.
+  emit('select', p)
 }
 async function onToggle(p: string) { toggle(p) }
 

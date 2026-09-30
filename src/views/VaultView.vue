@@ -1772,6 +1772,15 @@ const specialWorkspaceSurfaceActive = computed(() => Boolean(
 const isManagedDiaryDocumentActive = computed(() => (
   isDiaryScope.value && classifyDiaryPath(activePath.value ?? '') === 'managed'
 ))
+// Diary Back follows the active managed document itself, not the transient
+// presentation mode that Calendar-originated navigation records. This keeps
+// direct routes, reloads, and route-led hydration eligible while special
+// read-only workspace surfaces retain ownership of their backing document.
+const canBackToDiaryHome = computed(() => (
+  isDiaryScope.value
+  && isManagedDiaryDocumentActive.value
+  && !specialWorkspaceSurfaceActive.value
+))
 // Keep an inactive Diary tab from trapping the user in a hidden document when
 // they return to Diary with a Note selected. That state safely returns Home;
 // an active managed path continues to own the native document surface.
@@ -1823,11 +1832,7 @@ function onReadingPaneRendered(path: string | null): void {
 }
 
 function backToDiaryHome(): Promise<void> | void {
-  if (
-    !isDiaryScope.value
-    || !isDiaryDocumentMode.value
-    || classifyDiaryPath(activePath.value ?? '') !== 'managed'
-  ) return
+  if (!canBackToDiaryHome.value) return
   const activeId = activeWorkspaceTabId.value
   if (activeId) return closeWorkspaceTab(activeId)
 }
@@ -1843,15 +1848,13 @@ onBeforeUnmount(() => {
 })
 
 const diaryBackChord = createDiaryShortcutChord({
-  isDiaryDocument: () => isDiaryScope.value
-    && isDiaryDocumentMode.value
-    && classifyDiaryPath(activePath.value ?? '') === 'managed',
+  isDiaryDocument: () => canBackToDiaryHome.value,
   isTextEntryContext: isDiaryTextEntryContext,
   isBlocked: isDiaryShortcutBlocked,
   goBack: backToDiaryHome,
 })
 
-watch([isDiaryScope, isDiaryDocumentMode, activeWorkspaceTabId], () => {
+watch([canBackToDiaryHome, activeWorkspaceTabId], () => {
   diaryBackChord.reset()
 }, { flush: 'sync' })
 

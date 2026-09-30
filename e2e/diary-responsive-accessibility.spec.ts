@@ -172,6 +172,30 @@ test('active Diary re-selection returns to Calendar Home on desktop and mobile',
   }
 })
 
+test('active Diary re-selection after a direct route reload returns to Calendar Home', async ({ page, request }) => {
+  const date = localCivilDate()
+  const path = diaryPath(date)
+
+  try {
+    await seedDiary(request, date, `# Direct route Diary re-select ${Date.now()}\n`)
+    await openDiaryHome(page)
+    await page.goto(`/vault/${path}`)
+    await assertNativeRead(page, date)
+    await page.reload()
+    await assertNativeRead(page, date)
+
+    const diaryTab = page.locator(`[role="tab"][data-tab-id="${path}"]`)
+    await page.locator('.scope-chip').filter({ hasText: 'diary' }).click()
+
+    await expect(diaryTab).toHaveCount(0)
+    await expect(page.getByTestId('diary-calendar')).toBeVisible()
+    await expect(page.getByTestId('diary-workspace-home')).toBeVisible()
+    await expect(page).toHaveURL(/\/vault(?:[?#]|$)/)
+  } finally {
+    await deletePost(request, path)
+  }
+})
+
 async function ensureExplorerVisible(page: Page): Promise<void> {
   const fileTree = page.locator('.file-tree')
   if (!(await fileTree.isVisible())) {

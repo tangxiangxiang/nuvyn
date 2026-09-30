@@ -327,10 +327,16 @@ describe('VaultView editor tab wiring', () => {
     const source = readFileSync(fileURLToPath(new URL('../VaultView.vue', import.meta.url)), 'utf8')
     const diaryShortcut = source.match(/const diaryBackChord = createDiaryShortcutChord\([\s\S]*?\n\}\)/)?.[0]
     const diaryBackCommand = source.match(/function backToDiaryHome\([\s\S]*?\n\}/)?.[0]
+    const diaryBackEligibility = source.match(/const canBackToDiaryHome = computed\(\(\) => \([\s\S]*?\n\)\)/)?.[0]
 
     expect(diaryShortcut).toBeDefined()
     expect(diaryShortcut).toContain('goBack: backToDiaryHome')
+    expect(diaryShortcut).toContain('isDiaryDocument: () => canBackToDiaryHome.value')
+    expect(diaryBackEligibility).toContain('isDiaryScope.value')
+    expect(diaryBackEligibility).toContain('isManagedDiaryDocumentActive.value')
+    expect(diaryBackEligibility).toContain('!specialWorkspaceSurfaceActive.value')
     expect(source).toContain('registeredDiaryBackCommand = () => { void backToDiaryHome() }')
+    expect(diaryBackCommand).toContain('if (!canBackToDiaryHome.value) return')
     expect(diaryBackCommand).toContain('return closeWorkspaceTab(activeId)')
     expect(source).toContain('@close="closeWorkspaceTab"')
     expect(source).not.toContain('window.history.back()')

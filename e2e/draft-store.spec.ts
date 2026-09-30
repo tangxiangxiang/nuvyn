@@ -3060,7 +3060,9 @@ test('E2E-9: document and recovery viewers coexist without cross-saving', async 
   await page.unroute('**/api/posts/**')
 
   // … then the formal document ALONGSIDE it: two workspace tab kinds
-  // coexist in one stable tab strip.
+  // coexist in one stable tab strip. Recovery and the formal document share
+  // currentPath here, so this click must still emit a fresh FileTree select
+  // intent to activate the ordinary document surface.
   await openTreeDocument(page, `Coexist Closure ${suffix}`, path)
   await expect(page.locator('.editor-pane .monaco-editor')).toBeVisible()
   const tabs = page.locator('.tabs .tab')
