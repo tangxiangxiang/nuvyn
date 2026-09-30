@@ -25,7 +25,12 @@ import { useI18n } from '../composables/useI18n'
 import { DiaryAccessContextKey } from '../composables/diary/diaryAccessContext'
 import { AppShellContextKey } from '../composables/appShellContext'
 import AccountMenu from './vault/AccountMenu.vue'
-import type { ChromeStyle, WorkspaceKind } from '../lib/workspace'
+import {
+  isWorkspaceNavigationAvailable,
+  workspaceMobileNavigationQuery,
+  type ChromeStyle,
+  type WorkspaceKind,
+} from '../lib/workspace'
 
 const props = withDefaults(defineProps<{
   workspaceKind?: WorkspaceKind
@@ -56,6 +61,19 @@ const { theme, toggle } = useTheme()
 const { t } = useI18n()
 const route = useRoute()
 const router = useRouter()
+const workspaceMobileMediaQuery = typeof window !== 'undefined' && typeof window.matchMedia === 'function'
+  ? window.matchMedia(workspaceMobileNavigationQuery)
+  : null
+const isMobileWorkspaceViewport = ref(workspaceMobileMediaQuery?.matches ?? false)
+
+function onWorkspaceViewportChange(event: MediaQueryListEvent): void {
+  isMobileWorkspaceViewport.value = event.matches
+}
+
+const workspaceNavigationViewport = computed(() => isMobileWorkspaceViewport.value ? 'mobile' : 'desktop')
+const showBoardNavigation = computed(() => (
+  isWorkspaceNavigationAvailable('board', workspaceNavigationViewport.value)
+))
 
 const effectiveWorkspaceKind = computed<WorkspaceKind>(() => {
   if (props.workspaceKind !== null && props.workspaceKind !== undefined) return props.workspaceKind
@@ -89,11 +107,16 @@ const themeTitle = computed<string>(() => {
   return t('nav.theme', { current, next })
 })
 
-const scopeChips = computed(() => [
-  { scope: 'note', label: 'note', icon: Notes },
-  { scope: 'diary', label: 'diary', icon: props.diaryUnlocked ? Calendar : Lock },
-  { scope: 'ledger', label: 'ledger', icon: Wallet },
-] as const)
+const scopeChips = computed(() => {
+  const chips = [
+    { scope: 'note', label: 'note', icon: Notes },
+    { scope: 'diary', label: 'diary', icon: props.diaryUnlocked ? Calendar : Lock },
+    { scope: 'ledger', label: 'ledger', icon: Wallet },
+  ] as const
+  return chips.filter((chip) => (
+    isWorkspaceNavigationAvailable(chip.scope, workspaceNavigationViewport.value)
+  ))
+})
 
 function scopeLabel(scope: ScopeKey, label: string): string {
   return isScopeActive(scope)
@@ -113,6 +136,10 @@ const isReadMode = computed(() => viewModeApi?.mode.value === 'read')
    FileTree can read the active scope and the chips here can write it.
    Counts are pushed in by VaultView whenever the tree changes. */
 const { activeScope, selectScope } = useScopeFilter()
+const navigationSelectedScope = ref<ScopeKey | null>(null)
+watch(activeScope, () => {
+  navigationSelectedScope.value = null
+}, { flush: 'sync' })
 const diaryAccess = inject(DiaryAccessContextKey, null)
 const appShell = inject(AppShellContextKey, null)
 
@@ -128,10 +155,28 @@ function isVaultLedgerDocument(): boolean {
     && route.path.startsWith('/vault/ledger/')
 }
 
+function activeVaultDocumentScope(): ScopeKey | null {
+  if (!isVault.value || route?.name !== 'vault-doc') return null
+  const pathMatch = route.params.pathMatch as string[] | string | undefined
+  const path = Array.isArray(pathMatch) ? pathMatch.join('/') : pathMatch ?? ''
+  if (!path) return null
+  // A Diary URL does not prove an unlocked Diary scope. During lock recovery
+  // the same document route remains while App normalizes the scope to Note.
+  if (path === 'diary' || path.startsWith('diary/')) return null
+  if (path === 'ledger' || path.startsWith('ledger/')) return 'ledger'
+  return 'note'
+}
+
 function isScopeActive(scope: ScopeKey): boolean {
   if (isBoard.value) return false
   if (isLedger.value) return scope === 'ledger'
   if (scope === 'ledger' && isVaultLedgerDocument()) return true
+  // When Calendar Home is the visible surface, the selected Vault scope owns
+  // navigation state. A retained document URL must not mask a scope change.
+  if (appShell?.diaryCalendarVisible.value === true) return activeScope.value === scope
+  if (navigationSelectedScope.value) return navigationSelectedScope.value === scope
+  const documentScope = activeVaultDocumentScope()
+  if (documentScope) return scope === documentScope
   return activeScope.value === scope
 }
 
@@ -162,19 +207,27 @@ function onScopeClick(scope: ScopeKey): void {
     // top-level Ledger chip opens the canonical Ledger workspace elsewhere.
     if (isVaultLedgerDocument()) {
       selectScope('ledger')
+      navigationSelectedScope.value = 'ledger'
       return
     }
-    if (!isLedger.value) void router.push({ name: 'ledger' })
+    if (!isLedger.value) {
+      navigationSelectedScope.value = 'ledger'
+      void router.push({ name: 'ledger' })
+    }
     return
   }
   if (isLedger.value) {
     if (scope === 'diary' && diaryAccess) {
       void diaryAccess.requestScopeChange(scope).then(() => {
-        if (activeScope.value === scope) void router.push({ name: 'vault' })
+        if (activeScope.value === scope) {
+          navigationSelectedScope.value = scope
+          void router.push({ name: 'vault' })
+        }
       })
       return
     }
     selectScope(scope)
+    navigationSelectedScope.value = scope
     void router.push({ name: 'vault' })
     return
   }
@@ -187,16 +240,19 @@ function onScopeClick(scope: ScopeKey): void {
     // The Vault owns whether this is an ordinary Diary document eligible for
     // Back. Calendar Home and special surfaces intentionally turn this into
     // a no-op; the navbar never duplicates document-close policy.
+    navigationSelectedScope.value = scope
     appShell?.diaryBackCommand?.value?.()
     return
   }
   if (scope === 'diary' && diaryAccess) {
     void diaryAccess.requestScopeChange(scope).then(() => {
+      if (activeScope.value === scope) navigationSelectedScope.value = scope
       if (isBoard.value && activeScope.value === scope) void router.push({ name: 'vault' })
     })
     return
   }
   selectScope(scope)
+  navigationSelectedScope.value = scope
   if (isBoard.value) void router.push({ name: 'vault' })
 }
 
@@ -254,15 +310,20 @@ function onEscape(event: KeyboardEvent) {
   if (event.key === 'Escape') stopBrandConstellation()
 }
 
-watch(() => route?.fullPath, stopBrandConstellation)
+watch(() => route?.fullPath, () => {
+  navigationSelectedScope.value = null
+  stopBrandConstellation()
+})
 
 onMounted(() => {
+  workspaceMobileMediaQuery?.addEventListener('change', onWorkspaceViewportChange)
   window.addEventListener('blur', onWindowBlur)
   window.addEventListener('keydown', onEscape)
   document.addEventListener('visibilitychange', onVisibilityChange)
 })
 
 onBeforeUnmount(() => {
+  workspaceMobileMediaQuery?.removeEventListener('change', onWorkspaceViewportChange)
   stopBrandConstellation()
   window.removeEventListener('blur', onWindowBlur)
   window.removeEventListener('keydown', onEscape)
@@ -314,6 +375,7 @@ onBeforeUnmount(() => {
           </NButton>
         </div>
         <NButton
+          v-if="showBoardNavigation"
           class="nav-workspace-link workspace-board-link"
           :class="{ active: isBoard }"
           attr-type="button"

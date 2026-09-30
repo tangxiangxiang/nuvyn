@@ -1140,22 +1140,20 @@ main.container.auth-page-shell {
   }
 }
 
-/* The shared workspace navbar keeps the full set of navigation actions on
-   desktop, but its fixed-size controls cannot all coexist with text labels
-   at phone widths. Preserve each action and the Board route while switching
-   the low-priority labels to icon-only affordances. The right rail is already
-   hidden by the mobile native-document layout, so its navbar toggle has no
-   useful target in this range. */
+/* Workspace navigation entries are filtered by the shared mobile
+   availability capability. Keep the remaining controls compact at phone
+   widths; this only changes presentation and never limits workspace routes. */
 @media (max-width: 600px) {
   .navbar.is-workspace .navbar-inner {
+    box-sizing: border-box;
+    width: 100%;
     gap: 8px;
     padding-left: 6px;
     padding-right: 4px;
   }
 
   .navbar.is-workspace .brand-wordmark,
-  .navbar.is-workspace .scope-chip-label,
-  .navbar.is-workspace .workspace-board-link-label {
+  .navbar.is-workspace .scope-chip-label {
     display: none;
   }
 
@@ -1172,18 +1170,6 @@ main.container.auth-page-shell {
   .navbar.is-workspace .nav-workspace-link {
     padding-left: 5px;
     padding-right: 5px;
-  }
-
-  .navbar.is-workspace .workspace-board-link {
-    display: inline-flex;
-    width: 28px;
-    min-width: 28px;
-    padding-left: 0;
-    padding-right: 0;
-  }
-
-  .navbar.is-workspace .workspace-board-link-icon {
-    display: inline-flex;
   }
 
   .navbar.is-workspace .nav-actions {

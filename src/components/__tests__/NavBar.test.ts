@@ -12,6 +12,36 @@ import { __resetVaultLayoutState } from '../../composables/vault/useVaultLayout'
 import { AppShellContextKey } from '../../composables/appShellContext'
 import { Calendar, Lock } from '@vicons/tabler'
 
+function installWorkspaceMobileMediaQuery(initialMatches: boolean) {
+  const originalDescriptor = Object.getOwnPropertyDescriptor(window, 'matchMedia')
+  const listeners = new Set<(event: MediaQueryListEvent) => void>()
+  const query = {
+    matches: initialMatches,
+    media: '(max-width: 600px)',
+    addEventListener: vi.fn((_type: string, listener: (event: MediaQueryListEvent) => void) => {
+      listeners.add(listener)
+    }),
+    removeEventListener: vi.fn((_type: string, listener: (event: MediaQueryListEvent) => void) => {
+      listeners.delete(listener)
+    }),
+  } as unknown as MediaQueryList
+  Object.defineProperty(window, 'matchMedia', {
+    configurable: true,
+    value: vi.fn(() => query),
+  })
+
+  return {
+    resize(matches: boolean) {
+      Object.defineProperty(query, 'matches', { configurable: true, value: matches })
+      for (const listener of listeners) listener({ matches } as MediaQueryListEvent)
+    },
+    restore() {
+      if (originalDescriptor) Object.defineProperty(window, 'matchMedia', originalDescriptor)
+      else Reflect.deleteProperty(window, 'matchMedia')
+    },
+  }
+}
+
 function makeViewModeApi(initial: VaultViewMode = 'edit') {
   const mode = ref<VaultViewMode>(initial)
   return {
@@ -597,5 +627,40 @@ describe('NavBar — brand constellation', () => {
     wrapper.unmount()
     vi.advanceTimersByTime(3000)
     expect(document.body.classList.contains('brand-constellation-active')).toBe(false)
+  })
+})
+
+describe('NavBar — workspace mobile availability', () => {
+  beforeEach(() => {
+    useI18n().setLocale('en')
+    useScopeFilter().activeScope.value = 'note'
+  })
+  afterEach(() => useI18n().setLocale('zh'))
+
+  it('removes Note and Board from mobile navigation and restores them on resize', async () => {
+    const media = installWorkspaceMobileMediaQuery(true)
+    const { wrapper } = mountNavBar()
+
+    expect(wrapper.findAll('.scope-chip-label').map((label) => label.text())).toEqual(['diary', 'ledger'])
+    expect(wrapper.find('.workspace-board-link').exists()).toBe(false)
+    expect(wrapper.findAll('.scope-chip[aria-pressed="true"]')).toHaveLength(0)
+
+    media.resize(false)
+    await nextTick()
+    expect(wrapper.findAll('.scope-chip-label').map((label) => label.text())).toEqual([
+      'note',
+      'diary',
+      'ledger',
+    ])
+    expect(wrapper.find('.workspace-board-link').exists()).toBe(true)
+    expect(wrapper.find('.scope-chip[aria-pressed="true"] .scope-chip-label').text()).toBe('note')
+
+    media.resize(true)
+    await nextTick()
+    expect(wrapper.findAll('.scope-chip-label').map((label) => label.text())).toEqual(['diary', 'ledger'])
+    expect(wrapper.find('.workspace-board-link').exists()).toBe(false)
+
+    wrapper.unmount()
+    media.restore()
   })
 })

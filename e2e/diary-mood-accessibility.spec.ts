@@ -88,7 +88,9 @@ async function selectScope(page: Page, scope: 'note' | 'diary'): Promise<void> {
 
 async function openDiaryHome(page: Page): Promise<void> {
   await page.goto('/vault')
-  await expect(page.locator('.file-tree')).toBeVisible()
+  if ((page.viewportSize()?.width ?? 1280) > 600) {
+    await expect(page.locator('.file-tree')).toBeVisible()
+  }
   await selectScope(page, 'diary')
   await expect(page.getByTestId('diary-calendar-surface')).toBeVisible({ timeout: 15_000 })
   await expect(page.getByTestId('diary-calendar')).toBeVisible()

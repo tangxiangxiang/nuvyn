@@ -284,6 +284,7 @@ async function bootstrapDiaryPage(
   const diaryChip = page.locator('.scope-chip').filter({ hasText: 'diary' })
   const noteChip = page.locator('.scope-chip').filter({ hasText: 'note' })
   await expect(diaryChip).toBeVisible({ timeout: 15_000 })
+  const noteNavigationAvailable = await noteChip.count() > 0
   await diagnostics.record('SCOPE_VISIBLE')
 
   const password = page.locator('#diary-access-password')
@@ -319,10 +320,22 @@ async function bootstrapDiaryPage(
   // Diary scope must not be mistaken for a live capability. Force the real
   // scope transition to invoke App.vue's normal access dialog.
   if (await diaryChip.getAttribute('aria-pressed') === 'true' && !keepDiaryScope) {
-    await diagnostics.record('SCOPE_ACTIVATION_START', 'note')
-    await activateScopeChip(page, noteChip)
-    await expect(noteChip).toHaveAttribute('aria-pressed', 'true')
-    await diagnostics.record('SCOPE_ACTIVATION_FINISH', 'note')
+    if (noteNavigationAvailable) {
+      await diagnostics.record('SCOPE_ACTIVATION_START', 'note')
+      await activateScopeChip(page, noteChip)
+      await expect(noteChip).toHaveAttribute('aria-pressed', 'true')
+      await diagnostics.record('SCOPE_ACTIVATION_FINISH', 'note')
+    } else {
+      // Mobile intentionally omits Note from the workspace navigation. On a
+      // fresh page, let App reconcile any stale Diary selection through its
+      // normal access boundary instead of trying to focus a non-rendered item.
+      await diagnostics.record('SCOPE_ACTIVATION_START', 'mobile-note-nav-unavailable')
+      await expect.poll(async () => (
+        await password.isVisible().catch(() => false)
+          || await diaryChip.getAttribute('aria-pressed') !== 'true'
+      ), { timeout: 15_000 }).toBe(true)
+      await diagnostics.record('SCOPE_ACTIVATION_FINISH', 'mobile-note-nav-unavailable')
+    }
   }
   if (await diaryChip.getAttribute('aria-pressed') !== 'true') {
     await diagnostics.record('SCOPE_ACTIVATION_START', 'diary')
@@ -342,7 +355,7 @@ async function bootstrapDiaryPage(
 
   await expect(diaryChip).toHaveAttribute('aria-pressed', 'true', { timeout: 15_000 })
   await diagnostics.record('ACCESS_READY')
-  if (!keepDiaryScope) {
+  if (!keepDiaryScope && noteNavigationAvailable) {
     await diagnostics.record('SCOPE_ACTIVATION_START', 'restore-note')
     await activateScopeChip(page, noteChip)
     await expect(noteChip).toHaveAttribute('aria-pressed', 'true')
