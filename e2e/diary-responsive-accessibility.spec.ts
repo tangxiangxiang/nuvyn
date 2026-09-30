@@ -180,11 +180,17 @@ test('active Diary re-selection after a direct route reload returns to Calendar 
     await seedDiary(request, date, `# Direct route Diary re-select ${Date.now()}\n`)
     await openDiaryHome(page)
     await page.goto(`/vault/${path}`)
-    await assertNativeRead(page, date)
-    await page.reload()
-    await assertNativeRead(page, date)
-
     const diaryTab = page.locator(`[role="tab"][data-tab-id="${path}"]`)
+    await expect(diaryTab).toHaveAttribute('aria-selected', 'true')
+    await page.reload()
+    await expect(diaryTab).toHaveAttribute('aria-selected', 'true')
+
+    await goBackFromDiaryDocument(page)
+    await expect(page.getByTestId('diary-calendar')).toBeVisible()
+    await expect(page).toHaveURL(/\/vault(?:[?#]|$)/)
+
+    await page.goto(`/vault/${path}`)
+    await expect(diaryTab).toHaveAttribute('aria-selected', 'true')
     await page.locator('.scope-chip').filter({ hasText: 'diary' }).click()
 
     await expect(diaryTab).toHaveCount(0)
@@ -193,6 +199,70 @@ test('active Diary re-selection after a direct route reload returns to Calendar 
     await expect(page).toHaveURL(/\/vault(?:[?#]|$)/)
   } finally {
     await deletePost(request, path)
+  }
+})
+
+test('Diary Back remains available after consecutive FileTree Diary switches', async ({ page, request }) => {
+  const dates = [
+    '2026-08-16',
+    '2026-08-17',
+    '2026-08-18',
+    '2026-08-19',
+    '2026-08-20',
+  ]
+  const paths = dates.map(diaryPath)
+
+  try {
+    for (const date of dates) {
+      await seedDiary(request, date, `# Sequential Diary Back ${date} ${RUN_ID}\n`)
+    }
+
+    await openDiaryHome(page)
+    await activateDiaryDate(page, dates[0])
+    await assertNativeRead(page, dates[0])
+    await page.keyboard.press('g')
+    await page.keyboard.press('b')
+    await expect(page.getByTestId('diary-calendar')).toBeVisible()
+    await expect(page).toHaveURL(/\/vault(?:[?#]|$)/)
+
+    for (let targetIndex = 1; targetIndex < dates.length; targetIndex += 1) {
+      const sourceDate = dates[targetIndex - 1]!
+      const date = dates[targetIndex]!
+      const path = diaryPath(date)
+      await activateDiaryDate(page, sourceDate)
+      await assertNativeRead(page, sourceDate)
+      await ensureExplorerVisible(page)
+
+      const filter = page.locator('.file-tree .search-input').first()
+      await expect(filter).toBeVisible()
+      await filter.fill('')
+      const row = page.locator(`[data-tree-key="file:${path}"]`)
+      await expect(row).toBeVisible()
+      await row.locator('.row-line').click()
+
+      await assertNativeRead(page, date, '')
+      await expect.poll(() => page.evaluate(() => (
+        (document.activeElement as HTMLElement | null)?.dataset.treeKey ?? null
+      ))).toBe(`file:${path}`)
+      await expect(page.locator('[role="tab"][data-tab-id^="diary/"]')).toHaveCount(1)
+
+      // The Diary fixture pins Date.now. Move the mocked wall clock forward
+      // by one millisecond so this keyboard chord is a distinct browser event
+      // from the nested FileTree row activation.
+      const browserNow = await page.evaluate(() => Date.now())
+      await page.clock.setSystemTime(new Date(browserNow + 1))
+      await page.keyboard.press('g')
+      await page.keyboard.press('b')
+
+      await expect(page.locator(`[role="tab"][data-tab-id="${path}"]`)).toHaveCount(0)
+      await expect(page.locator('[role="tab"][data-tab-id^="diary/"]')).toHaveCount(0)
+      await expect(page.getByTestId('diary-calendar')).toBeVisible()
+      await expect(page.getByTestId('diary-workspace-shell'))
+        .toHaveAttribute('data-presentation-mode', 'home')
+      await expect(page).toHaveURL(/\/vault(?:[?#]|$)/)
+    }
+  } finally {
+    for (const path of paths) await deletePost(request, path)
   }
 })
 
@@ -229,7 +299,7 @@ async function openNoteDocument(page: Page, path: string): Promise<void> {
   await expect(page.locator(`[role="tab"][data-tab-id="${path}"]`)).toHaveAttribute('aria-selected', 'true')
 }
 
-async function assertNativeRead(page: Page, date: string): Promise<void> {
+async function assertNativeRead(page: Page, date: string, expectedFilter = date): Promise<void> {
   const path = diaryPath(date)
   await expect(page).toHaveURL(new RegExp(`/vault/${path.replace('/', '\\/')}(?:[?#]|$)`))
   await expect(page.getByTestId('diary-reader-dialog')).toHaveCount(0)
@@ -237,7 +307,7 @@ async function assertNativeRead(page: Page, date: string): Promise<void> {
   await expect(page.locator('.reading-pane')).toHaveCount(1)
   await expect(page.locator('.reading-pane')).toBeVisible()
   await ensureExplorerVisible(page)
-  await expect(page.locator('.search-input')).toHaveValue(date)
+  await expect(page.locator('.search-input')).toHaveValue(expectedFilter)
   await expect(page.getByTestId('diary-calendar')).toBeAttached()
   await expect(page.getByTestId('diary-calendar')).toBeHidden()
 }

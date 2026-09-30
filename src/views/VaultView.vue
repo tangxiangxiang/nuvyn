@@ -1399,11 +1399,29 @@ const { ensureDiaryDate, openDiaryDate } = useDiaryDateCommand({
 
 async function openFileTreeDocument(path: string): Promise<void> {
   if (isDiaryScope.value && classifyDiaryPath(path) === 'managed') {
+    const activeDocument = activeTab.value
+    if (
+      activePath.value === path
+      && activeWorkspaceTabId.value === path
+      && activeDocument?.path === path
+      && !activeDocument.loading
+      && !activeDocument.loadError
+      && !specialWorkspaceSurfaceActive.value
+    ) {
+      // Re-selecting the already active Diary is a workspace no-op. Avoid
+      // starting an exact-path probe that briefly locks the document against
+      // G+B while the FileTree click's async date command is still resolving.
+      return
+    }
     const date = diaryDateFromPath(path)
     if (!date) return
+    // A new FileTree selection replaces the current ordinary Diary document.
+    // Retire its presentation before creating the new date intent so the
+    // activePath reconciliation for the replacement cannot invalidate it.
+    diaryWorkspacePresentation.reset()
     const intent = diaryWorkspacePresentation.beginDateIntent()
     const result = await openDiaryDate(date)
-    await presentDiaryDateResult(result, intent)
+    await presentDiaryDateResult(result, intent, { focusVault: false })
     return
   }
   await openPost(path)
@@ -1779,6 +1797,8 @@ const isManagedDiaryDocumentActive = computed(() => (
 const canBackToDiaryHome = computed(() => (
   isDiaryScope.value
   && isManagedDiaryDocumentActive.value
+  && activeWorkspaceTabId.value === activePath.value
+  && activeTab.value?.path === activePath.value
   && !specialWorkspaceSurfaceActive.value
 ))
 // Keep an inactive Diary tab from trapping the user in a hidden document when
@@ -2234,6 +2254,7 @@ async function onDiaryDateSelected(date: DiaryDate): Promise<void> {
 async function presentDiaryDateResult(
   result: DiaryDateCommandResult,
   intent: number,
+  options: { focusVault?: boolean } = {},
 ): Promise<void> {
   if (
     !diaryWorkspacePresentation.isDateIntentCurrent(intent)
@@ -2249,7 +2270,7 @@ async function presentDiaryDateResult(
   diaryWorkspacePresentation.requestDocument(result.date, result.path)
   viewModeApi?.set('read')
   await nextTick()
-  if (diaryWorkspacePresentation.isDateIntentCurrent(intent)) {
+  if (options.focusVault !== false && diaryWorkspacePresentation.isDateIntentCurrent(intent)) {
     vaultRef.value?.focus()
   }
 }
