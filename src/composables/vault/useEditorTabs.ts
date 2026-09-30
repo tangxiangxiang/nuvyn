@@ -80,6 +80,9 @@ export function useEditorTabs(opts: {
     refresh,
     applyPostSummary,
     openPost: openWorkspacePost,
+    loadPostDetached,
+    attachLoadedPost,
+    replaceTabsWithLoadedPost,
     restoreOneTab: restoreWorkspaceTab,
     closeTab: closeTabState,
     confirmCloseMany: confirmCloseManyState,
@@ -145,7 +148,19 @@ export function useEditorTabs(opts: {
     draftVaultId: () => vaultId.value,
   })
 
+  // The single managed Diary policy owns navigation authority. A newer
+  // explicit workspace action invalidates every older async Diary open.
+  let navigationIntentGeneration = 0
+  function beginNavigationIntent(): number {
+    navigationIntentGeneration += 1
+    return navigationIntentGeneration
+  }
+  function isCurrentNavigationIntent(intent: number): boolean {
+    return intent === navigationIntentGeneration
+  }
+
   async function closeTab(path: string): Promise<boolean> {
+    if (path === activePath.value) beginNavigationIntent()
     const release = opts.mutationLock?.acquire(toMutationPaths([path])) ?? null
     if (opts.mutationLock && !release) return false
     try {
@@ -164,6 +179,7 @@ export function useEditorTabs(opts: {
   }
 
   async function confirmCloseMany(paths: string[]): Promise<boolean> {
+    if (activePath.value && paths.includes(activePath.value)) beginNavigationIntent()
     const release = opts.mutationLock?.acquire(toMutationPaths(paths)) ?? null
     if (opts.mutationLock && !release) return false
     try {
@@ -185,8 +201,14 @@ export function useEditorTabs(opts: {
   }
 
   function closeManyConfirmedWithDrafts(paths: string[]): void {
+    if (activePath.value && paths.includes(activePath.value)) beginNavigationIntent()
     void discardDocumentDrafts(paths)
     closeManyConfirmed(paths)
+  }
+
+  function selectWorkspaceTab(path: string): void {
+    if (tabs.value.some((tab) => tab.path === path)) beginNavigationIntent()
+    selectTab(path)
   }
 
   async function runTabExternalRenameTransaction(
@@ -236,7 +258,7 @@ export function useEditorTabs(opts: {
     activePath,
     doSaveNow,
     closeTab,
-    selectTab,
+    selectTab: selectWorkspaceTab,
     selectFilesPanel: () => opts.selectPanel('files'),
     toggleViewMode: opts.toggleViewMode,
     workspaceShortcuts: opts.workspaceShortcuts,
@@ -256,7 +278,9 @@ export function useEditorTabs(opts: {
     requestedPath: string,
     previousActivePath: string | null,
     previousDiaryPath: string | null,
+    intent: number,
   ): void {
+    if (!isCurrentNavigationIntent(intent)) return
     if (routePath.value !== requestedPath && activePath.value !== requestedPath) return
     const fallback = [previousActivePath, previousDiaryPath].find((path) => (
       path !== null && tabs.value.some((tab) => tab.path === path)
@@ -273,10 +297,14 @@ export function useEditorTabs(opts: {
       && !requiresCloseConfirmation(tab!)
   }
 
-  async function flushManagedDiaryTabs(paths: readonly string[]): Promise<boolean> {
+  async function flushManagedDiaryTabs(
+    paths: readonly string[],
+    canContinue: () => boolean = () => true,
+  ): Promise<boolean> {
     for (const path of paths) {
       if (!tabs.value.some((tab) => tab.path === path)) continue
       await doSaveNow(path)
+      if (!canContinue()) return false
       if (!diaryTabCanBeClosed(path)) return false
     }
     return true
@@ -285,103 +313,150 @@ export function useEditorTabs(opts: {
   async function openManagedDiaryPost(
     path: string,
     openOptions: { refresh?: boolean },
+    intent: number,
   ): Promise<void> {
+    if (!isCurrentNavigationIntent(intent)) return
     if (needsDiaryAccess(path)) {
       const granted = opts.authorizeDocumentPath ? await opts.authorizeDocumentPath(path) : false
+      if (!isCurrentNavigationIntent(intent)) return
       if (!granted) {
         opts.onDiaryAccessCancelled?.(path)
         return
       }
     }
+    if (!isCurrentNavigationIntent(intent)) return
 
     const previousActivePath = activePath.value
     const previousDiaryPath = tabs.value.find((tab) => (
       classifyDiaryPath(tab.path) === 'managed'
     ))?.path ?? null
     const initialTarget = tabs.value.find((tab) => tab.path === path)
-    const targetWasOpen = Boolean(initialTarget)
     const sessionGeneration = captureDiarySessionGeneration()
     const oldDiaryPaths = tabs.value
       .filter((tab) => classifyDiaryPath(tab.path) === 'managed' && tab.path !== path)
       .map((tab) => tab.path)
-
-    if (!(await flushManagedDiaryTabs(oldDiaryPaths))) {
-      toast.info(t('diary.switch_not_saved'))
-      restorePathAfterRejectedDiaryOpen(path, previousActivePath, previousDiaryPath)
-      return
-    }
-
-    try {
-      // Keep the previous Diary as the visible, active document while the
-      // target loads. Activation and old-tab cleanup happen only after the
-      // target and a second save-safety check have both succeeded.
-      await openWorkspacePost(path, { ...openOptions, activate: false })
-    } catch {
-      // openPost can report a tree refresh failure after the target itself
-      // loaded. The live tab below is the authority for this switch.
-    }
-
-    const target = tabs.value.find((tab) => tab.path === path)
-    const accessStillValid = isDiarySessionGenerationCurrent(sessionGeneration)
+    const oldDiaryOwners = new Map(oldDiaryPaths.map((oldPath) => [
+      oldPath,
+      tabs.value.find((tab) => tab.path === oldPath),
+    ]))
+    const accessStillValid = () => isDiarySessionGenerationCurrent(sessionGeneration)
       && (!opts.isDiaryAccessReady || opts.isDiaryAccessReady())
-    const targetLoaded = Boolean(target && !target.loading && !target.loadError)
-    if (!targetLoaded || !accessStillValid) {
-      if (target && !targetWasOpen && !target.loading && !requiresCloseConfirmation(target)) {
-        closeManyConfirmedWithDrafts([path])
-      }
-      restorePathAfterRejectedDiaryOpen(path, previousActivePath, previousDiaryPath)
-      if (target?.loadError && accessStillValid) {
-        toast.error(t('diary.open_failed', { error: target.loadError }))
-      }
+    const requestStillOwnsCapturedTabs = () => (
+      isCurrentNavigationIntent(intent)
+      && (initialTarget
+        ? tabs.value.find((tab) => tab.path === path) === initialTarget
+        : !tabs.value.some((tab) => tab.path === path))
+      && tabs.value
+        .filter((tab) => classifyDiaryPath(tab.path) === 'managed' && tab.path !== path)
+        .every((tab) => oldDiaryOwners.get(tab.path) === tab)
+      && tabs.value.filter((tab) => (
+        classifyDiaryPath(tab.path) === 'managed' && tab.path !== path
+      )).length === oldDiaryOwners.size
+      && [...oldDiaryOwners].every(([oldPath, owner]) => (
+        owner && tabs.value.find((tab) => tab.path === oldPath) === owner
+      ))
+    )
+
+    if (!(await flushManagedDiaryTabs(oldDiaryPaths, requestStillOwnsCapturedTabs))) {
+      if (!requestStillOwnsCapturedTabs()) return
+      toast.info(t('diary.switch_not_saved'))
+      restorePathAfterRejectedDiaryOpen(path, previousActivePath, previousDiaryPath, intent)
       return
     }
+    if (!requestStillOwnsCapturedTabs() || !accessStillValid()) return
+
+    let loadedTarget = tabs.value.find((tab) => tab.path === path) ?? null
+    let detachedPost: Awaited<ReturnType<typeof loadPostDetached>> | null = null
+    if (!loadedTarget || loadedTarget.loading || loadedTarget.loadError) {
+      try {
+        // Detached loading does not add a placeholder to tabs or grant the
+        // request authority over activePath/route while the network is slow.
+        detachedPost = await loadPostDetached(path)
+      } catch (error) {
+        if (!requestStillOwnsCapturedTabs()) return
+        if (!accessStillValid()) return
+        restorePathAfterRejectedDiaryOpen(path, previousActivePath, previousDiaryPath, intent)
+        toast.error(t('diary.open_failed', { error: (error as Error).message }))
+        return
+      }
+    }
+    if (!requestStillOwnsCapturedTabs() || !accessStillValid()) return
 
     const liveOldDiaryPaths = tabs.value
       .filter((tab) => classifyDiaryPath(tab.path) === 'managed' && tab.path !== path)
       .map((tab) => tab.path)
-    if (!(await flushManagedDiaryTabs(liveOldDiaryPaths))) {
-      if (!targetWasOpen && tabs.value.some((tab) => tab.path === path)) {
-        closeManyConfirmedWithDrafts([path])
-      }
+    if (!(await flushManagedDiaryTabs(liveOldDiaryPaths, requestStillOwnsCapturedTabs))) {
+      if (!requestStillOwnsCapturedTabs()) return
       toast.info(t('diary.switch_not_saved'))
-      restorePathAfterRejectedDiaryOpen(path, previousActivePath, previousDiaryPath)
+      restorePathAfterRejectedDiaryOpen(path, previousActivePath, previousDiaryPath, intent)
+      return
+    }
+    if (!requestStillOwnsCapturedTabs() || !accessStillValid()) return
+
+    // A session teardown can synchronously clear protected tabs while a save
+    // was flushing. Never activate stale content or replace surviving tabs
+    // based on a pre-await snapshot.
+    if (!requestStillOwnsCapturedTabs() || !accessStillValid()) return
+    loadedTarget = tabs.value.find((tab) => tab.path === path) ?? null
+    const opened = oldDiaryPaths.length > 0
+      ? replaceTabsWithLoadedPost(oldDiaryPaths, path, detachedPost)
+      : detachedPost
+        ? attachLoadedPost(path, detachedPost)
+        : loadedTarget && !loadedTarget.loading && !loadedTarget.loadError
+          ? (selectTab(path), true)
+          : false
+    if (!opened) {
+      if (isCurrentNavigationIntent(intent)) {
+        toast.info(t('diary.switch_not_saved'))
+        restorePathAfterRejectedDiaryOpen(path, previousActivePath, previousDiaryPath, intent)
+      }
       return
     }
 
-    // A session teardown can synchronously clear the target while a save was
-    // flushing. Never activate stale protected content or close surviving
-    // documents based on a pre-await snapshot.
-    if (!isDiarySessionGenerationCurrent(sessionGeneration)
-      || (opts.isDiaryAccessReady && !opts.isDiaryAccessReady())
-      || !tabs.value.some((tab) => tab.path === path && !tab.loading && !tab.loadError)) {
-      restorePathAfterRejectedDiaryOpen(path, previousActivePath, previousDiaryPath)
-      return
+    if (openOptions.refresh !== false) {
+      try {
+        await refresh()
+      } catch (error) {
+        console.warn(`[useEditorTabs] Opened ${path}, but Vault refresh failed`, error)
+      }
     }
-
-    selectTab(path)
-    const previousDiaryPaths = tabs.value
-      .filter((tab) => classifyDiaryPath(tab.path) === 'managed' && tab.path !== path)
-      .map((tab) => tab.path)
-    if (previousDiaryPaths.length > 0) closeManyConfirmedWithDrafts(previousDiaryPaths)
   }
 
   async function openAuthorizedPost(
     path: string,
     openOptions: { refresh?: boolean } = {},
+    existingIntent?: number,
   ): Promise<void> {
+    const intent = existingIntent ?? beginNavigationIntent()
     if (opts.singleManagedDiaryDocument && classifyDiaryPath(path) === 'managed') {
-      const opening = managedDiaryOpenQueue.then(() => openManagedDiaryPost(path, openOptions))
+      const opening = managedDiaryOpenQueue.then(() => openManagedDiaryPost(path, openOptions, intent))
       managedDiaryOpenQueue = opening.catch(() => {})
       return opening
     }
     if (needsDiaryAccess(path)) {
       const granted = opts.authorizeDocumentPath ? await opts.authorizeDocumentPath(path) : false
+      if (!isCurrentNavigationIntent(intent)) return
       if (!granted) {
         opts.onDiaryAccessCancelled?.(path)
         return
       }
     }
+    if (!isCurrentNavigationIntent(intent)) return
     await openWorkspacePost(path, openOptions)
+  }
+
+  function removeOpenWorkspaceDocuments(paths: readonly string[]): void {
+    if (activePath.value && paths.includes(activePath.value)) beginNavigationIntent()
+    removeOpenDocuments(paths)
+  }
+
+  function renameOpenWorkspaceDocuments(
+    mappings: ReadonlyArray<{ from: string; to: string }>,
+  ): void {
+    if (activePath.value && mappings.some(({ from }) => from === activePath.value)) {
+      beginNavigationIntent()
+    }
+    renameOpenDocuments(mappings)
   }
 
   async function restoreAuthorizedTab(path: string): Promise<boolean> {
@@ -442,6 +517,7 @@ export function useEditorTabs(opts: {
       .filter((tab) => classifyDiaryPath(tab.path) === 'managed')
       .map((tab) => tab.path)
     if (!paths.length) return
+    beginNavigationIntent()
     clearSensitiveState(paths)
     closeManyConfirmed(paths)
   }
@@ -455,6 +531,7 @@ export function useEditorTabs(opts: {
       toast.error(t('common.name_invalid'))
       return
     }
+    const intent = beginNavigationIntent()
     const newPath = parent ? `${parent}/${filename}` : filename
     try {
       let created: PostSummary
@@ -469,7 +546,8 @@ export function useEditorTabs(opts: {
           console.warn(`[useEditorTabs] Created ${created.path}, but Vault refresh failed`, error)
         }
       }
-      await openAuthorizedPost(created.path, { refresh: false })
+      if (!isCurrentNavigationIntent(intent)) return
+      await openAuthorizedPost(created.path, { refresh: false }, intent)
       toast.success(t('common.created', { path: created.path }))
     } catch (e) {
       toast.error(t('common.create_failed', { error: (e as Error).message }))
@@ -482,7 +560,7 @@ export function useEditorTabs(opts: {
     activePath,
     closeTab,
     runTabRenameTransaction: runTabExternalRenameTransaction,
-    renameOpenDocument: (from, to) => renameOpenDocuments([{ from, to }]),
+    renameOpenDocument: (from, to) => renameOpenWorkspaceDocuments([{ from, to }]),
     // External deletion is not an explicit user discard. Edit-09.5 decides
     // orphan/migration behavior; this stage must preserve its draft.
     removeOpenDocument: (path) => closeManyConfirmed([path]),
@@ -495,7 +573,15 @@ export function useEditorTabs(opts: {
     prepareWorkspaceRename: opts.prepareWorkspaceRename,
   })
 
-  const { routePath } = useRouteSync({ activePath, openPost: openAuthorizedPost })
+  const { routePath } = useRouteSync({
+    activePath,
+    openPost: openAuthorizedPost,
+    // Non-empty route changes are handed to openAuthorizedPost, which captures
+    // their intent. Only /vault Home lacks an openPost call of its own.
+    onRouteIntent: (path) => {
+      if (path === null) beginNavigationIntent()
+    },
+  })
   let disposed = false
   let stopFileChangeSubscription: (() => void) | null = null
 
@@ -519,6 +605,7 @@ export function useEditorTabs(opts: {
   // URL changes; we don't want it to also fire on mount or we'd
   // double-open.
   onMounted(async () => {
+    const initialNavigationIntent = beginNavigationIntent()
     const initialRoutePath = routePath.value
     window.addEventListener('beforeunload', handleBeforeUnload)
     window.addEventListener('online', handleOnline)
@@ -572,7 +659,10 @@ export function useEditorTabs(opts: {
         if (disposed) return
         if (!ok) missing.push(p)
       }
-      if (!initialRoutePath && tabs.value.length > 0 && !deferredDiaryActivePath) {
+      if (!initialRoutePath
+        && isCurrentNavigationIntent(initialNavigationIntent)
+        && tabs.value.length > 0
+        && !deferredDiaryActivePath) {
         // Prefer the saved active if it survived restore; otherwise
         // fall back to the first restored tab (left-to-right reading
         // order matches the persisted order).
@@ -589,8 +679,8 @@ export function useEditorTabs(opts: {
       }
     }
 
-    if (initialRoutePath) {
-      await openAuthorizedPost(initialRoutePath)
+    if (initialRoutePath && isCurrentNavigationIntent(initialNavigationIntent)) {
+      await openAuthorizedPost(initialRoutePath, {}, initialNavigationIntent)
       if (disposed) return
     }
     // Subscribe to the file-change bus so AI tool writes/deletes/
@@ -635,10 +725,10 @@ export function useEditorTabs(opts: {
     clearManagedDiaryWorkspace,
     resumeDeferredDiaryTabs,
     reorderOpenDocuments,
-    renameOpenDocuments,
-    removeOpenDocuments,
+    renameOpenDocuments: renameOpenWorkspaceDocuments,
+    removeOpenDocuments: removeOpenWorkspaceDocuments,
     applyLifecycleReferenceWrites,
-    selectTab,
+    selectTab: selectWorkspaceTab,
     onEditorChange,
     applyRecoveredDraft,
     doSaveNow,

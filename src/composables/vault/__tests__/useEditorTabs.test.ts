@@ -49,7 +49,7 @@ import EditorTabs from '../../../components/vault/EditorTabs.vue'
 import { deriveDocumentSavePresentation } from '../editor-tabs/savePresentation'
 import { createVaultFileChanges, type VaultFileChanges } from '../context/fileChanges'
 import { useI18n } from '../../useI18n'
-import type { PostSummary, TreeNode } from '../../../lib/api'
+import type { PostDetail, PostSummary, TreeNode } from '../../../lib/api'
 import {
   getMarkdownModel,
   registerMarkdownModel,
@@ -85,6 +85,7 @@ interface Harness {
   onCommandPaletteNew: (t: string) => Promise<void>
   refresh: () => Promise<void>
   resumeDeferredDiaryTabs: () => Promise<void>
+  clearManagedDiaryWorkspace: () => void
   applyPostSummary: (post: PostSummary) => void
   renameOpenDocuments: (mappings: ReadonlyArray<{ from: string; to: string }>) => void
   removeOpenDocuments: (paths: readonly string[]) => void
@@ -259,6 +260,17 @@ function postSummary(path: string, overrides: Partial<PostSummary> = {}): PostSu
   }
 }
 
+function postDetail(path: string, raw = path): PostDetail {
+  return {
+    path,
+    raw,
+    content: raw,
+    frontmatter: {},
+    size: raw.length,
+    mtime: 1,
+  }
+}
+
 function treeFor(...posts: PostSummary[]): TreeNode[] {
   return [{
     kind: 'folder',
@@ -392,6 +404,25 @@ describe('useEditorTabs', () => {
     h.unmount()
   })
 
+  it('reactivates an already-open managed Diary after an ordinary Note was active', async () => {
+    const diary = 'diary/2026-09-15'
+    const note = 'inbox/example'
+    vi.stubGlobal('fetch', stubFetch({
+      'GET /api/tree': () => [],
+      'GET /api/posts': () => [],
+      [`GET /api/posts/${diary}`]: () => postDetail(diary, 'diary'),
+      [`GET /api/posts/${note}`]: () => postDetail(note, 'note'),
+    }))
+    const h = await setup({ singleManagedDiaryDocument: true })
+    await h.openPost(diary)
+    await h.openPost(note)
+    await h.openPost(diary)
+
+    expect(h.activePath.value).toBe(diary)
+    expect(h.tabs.value.map((tab) => tab.path)).toEqual([diary, note])
+    h.unmount()
+  })
+
   it('flushes edits made to the current Diary while the target date is loading', async () => {
     const first = 'diary/2026-09-15'
     const second = 'diary/2026-09-16'
@@ -419,6 +450,7 @@ describe('useEditorTabs', () => {
     const opening = h.openPost(second)
     await targetRequested.promise
     expect(h.activePath.value).toBe(first)
+    expect(h.tabs.value.map((tab) => tab.path)).toEqual([first])
     h.onEditorChange(first, 'edited during target load')
     targetPost.resolve({
       path: second,
@@ -433,6 +465,305 @@ describe('useEditorTabs', () => {
     expect(saved).toEqual(['saved before target load', 'edited during target load'])
     expect(h.tabs.value.map((tab) => tab.path)).toEqual([second])
     expect(h.tabs.value[0].raw).toBe('second')
+    h.unmount()
+  })
+
+  it('does not let a stale Diary load steal the active Note or route', async () => {
+    const first = 'diary/2026-09-15'
+    const second = 'diary/2026-09-16'
+    const note = 'inbox/example'
+    const targetRequested = deferred<void>()
+    const targetPost = deferred<PostDetail>()
+    vi.stubGlobal('fetch', stubFetch({
+      'GET /api/tree': () => [],
+      'GET /api/posts': () => [],
+      [`GET /api/posts/${first}`]: () => postDetail(first, 'first'),
+      [`GET /api/posts/${second}`]: () => {
+        targetRequested.resolve()
+        return targetPost.promise
+      },
+      [`GET /api/posts/${note}`]: () => postDetail(note, 'note'),
+    }))
+    const { harness: h, router } = await mountWithRouter(
+      { singleManagedDiaryDocument: true },
+      `/vault/${first}`,
+    )
+    const openingDiary = h.openPost(second)
+    await targetRequested.promise
+
+    expect(h.activePath.value).toBe(first)
+    expect(h.tabs.value.map((tab) => tab.path)).toEqual([first])
+    await h.openPost(note)
+    targetPost.resolve(postDetail(second, 'second'))
+    await openingDiary
+
+    expect(h.activePath.value).toBe(note)
+    expect(router.currentRoute.value.path).toBe(`/vault/${note}`)
+    expect(h.tabs.value.map((tab) => tab.path)).toEqual([first, note])
+    expect(h.tabs.value.filter((tab) => tab.path.startsWith('diary/'))).toHaveLength(1)
+    h.unmount()
+  })
+
+  it('does not invalidate a pending authorized route when initial Diary cleanup has no open tabs', async () => {
+    const path = 'diary/2026-09-15'
+    let accessReady = false
+    const authorizationStarted = deferred<void>()
+    const authorization = deferred<boolean>()
+    vi.stubGlobal('fetch', stubFetch({
+      'GET /api/tree': () => [],
+      'GET /api/posts': () => [],
+      [`GET /api/posts/${path}`]: () => postDetail(path, 'diary'),
+    }))
+    const h = await setup({
+      singleManagedDiaryDocument: true,
+      isDiaryAccessReady: () => accessReady,
+      authorizeDocumentPath: () => {
+        authorizationStarted.resolve()
+        return authorization.promise
+      },
+    })
+    const opening = h.openPost(path)
+    await authorizationStarted.promise
+    h.clearManagedDiaryWorkspace()
+    accessReady = true
+    authorization.resolve(true)
+    await opening
+
+    expect(h.activePath.value).toBe(path)
+    expect(h.tabs.value.map((tab) => tab.path)).toEqual([path])
+    h.unmount()
+  })
+
+  it('does not reactivate a pending Diary after closing the current Diary to Home', async () => {
+    const first = 'diary/2026-09-15'
+    const second = 'diary/2026-09-16'
+    const targetRequested = deferred<void>()
+    const targetPost = deferred<PostDetail>()
+    vi.stubGlobal('fetch', stubFetch({
+      'GET /api/tree': () => [],
+      'GET /api/posts': () => [],
+      [`GET /api/posts/${first}`]: () => postDetail(first, 'first'),
+      [`GET /api/posts/${second}`]: () => {
+        targetRequested.resolve()
+        return targetPost.promise
+      },
+    }))
+    const { harness: h, router } = await mountWithRouter(
+      { singleManagedDiaryDocument: true },
+      `/vault/${first}`,
+    )
+    const openingDiary = h.openPost(second)
+    await targetRequested.promise
+
+    expect(await h.closeTab(first)).toBe(true)
+    await flushPromises()
+    expect(h.activePath.value).toBeNull()
+    expect(router.currentRoute.value.path).toBe('/vault')
+    targetPost.resolve(postDetail(second, 'second'))
+    await openingDiary
+    await flushPromises()
+
+    expect(h.activePath.value).toBeNull()
+    expect(h.tabs.value).toEqual([])
+    expect(router.currentRoute.value.path).toBe('/vault')
+    h.unmount()
+  })
+
+  it('invalidates a pending Diary when another existing Workspace tab is selected', async () => {
+    const diary = 'diary/2026-09-15'
+    const target = 'diary/2026-09-16'
+    const note = 'inbox/example'
+    const targetRequested = deferred<void>()
+    const targetPost = deferred<PostDetail>()
+    vi.stubGlobal('fetch', stubFetch({
+      'GET /api/tree': () => [],
+      'GET /api/posts': () => [],
+      [`GET /api/posts/${diary}`]: () => postDetail(diary, 'diary'),
+      [`GET /api/posts/${target}`]: () => {
+        targetRequested.resolve()
+        return targetPost.promise
+      },
+      [`GET /api/posts/${note}`]: () => postDetail(note, 'note'),
+    }))
+    const h = await setup({ singleManagedDiaryDocument: true })
+    await h.openPost(note)
+    await h.openPost(diary)
+    const openingDiary = h.openPost(target)
+    await targetRequested.promise
+
+    h.selectTab(note)
+    targetPost.resolve(postDetail(target, 'target'))
+    await openingDiary
+
+    expect(h.activePath.value).toBe(note)
+    expect(h.tabs.value.map((tab) => tab.path)).toEqual([note, diary])
+    h.unmount()
+  })
+
+  it('keeps only the latest Diary navigation when an earlier load is pending', async () => {
+    const first = 'diary/2026-09-15'
+    const second = 'diary/2026-09-16'
+    const third = 'diary/2026-09-17'
+    const targetRequested = deferred<void>()
+    const targetPost = deferred<PostDetail>()
+    const reads: string[] = []
+    vi.stubGlobal('fetch', stubFetch({
+      'GET /api/tree': () => [],
+      'GET /api/posts': () => [],
+      [`GET /api/posts/${first}`]: () => postDetail(first, 'first'),
+      [`GET /api/posts/${second}`]: () => {
+        reads.push(second)
+        targetRequested.resolve()
+        return targetPost.promise
+      },
+      [`GET /api/posts/${third}`]: () => {
+        reads.push(third)
+        return postDetail(third, 'third')
+      },
+    }))
+    const h = await setup({ singleManagedDiaryDocument: true })
+    await h.openPost(first)
+    const openingB = h.openPost(second)
+    await targetRequested.promise
+    const openingC = h.openPost(third)
+    targetPost.resolve(postDetail(second, 'second'))
+    await Promise.all([openingB, openingC])
+
+    expect(reads).toEqual([second, third])
+    expect(h.activePath.value).toBe(third)
+    expect(h.tabs.value.map((tab) => tab.path)).toEqual([third])
+    h.unmount()
+  })
+
+  it('does not restore the previous Diary route after a stale target load fails', async () => {
+    const first = 'diary/2026-09-15'
+    const second = 'diary/2026-09-16'
+    const note = 'inbox/example'
+    const targetRequested = deferred<void>()
+    const targetPost = deferred<PostDetail>()
+    vi.stubGlobal('fetch', stubFetch({
+      'GET /api/tree': () => [],
+      'GET /api/posts': () => [],
+      [`GET /api/posts/${first}`]: () => postDetail(first, 'first'),
+      [`GET /api/posts/${second}`]: () => {
+        targetRequested.resolve()
+        return targetPost.promise
+      },
+      [`GET /api/posts/${note}`]: () => postDetail(note, 'note'),
+    }))
+    const { harness: h, router } = await mountWithRouter(
+      { singleManagedDiaryDocument: true },
+      `/vault/${first}`,
+    )
+    await router.push(`/vault/${second}`)
+    await targetRequested.promise
+    await router.push(`/vault/${note}`)
+    await flushPromises()
+    targetPost.reject(new Error('target unavailable'))
+    await flushPromises()
+
+    expect(h.activePath.value).toBe(note)
+    expect(router.currentRoute.value.path).toBe(`/vault/${note}`)
+    expect(h.tabs.value.map((tab) => tab.path)).toEqual([first, note])
+    expect(toastCalls).not.toContainEqual({
+      type: 'error',
+      message: '无法打开日记：target unavailable',
+    })
+    h.unmount()
+  })
+
+  it('replaces a managed Diary in its existing slot at TAB_HARD_LIMIT', async () => {
+    const notes = Array.from({ length: 8 }, (_, index) => `inbox/note-${index + 1}`)
+    const first = 'diary/2026-09-15'
+    const second = 'diary/2026-09-16'
+    vi.stubGlobal('fetch', stubFetch({
+      'GET /api/tree': () => [],
+      'GET /api/posts': () => [],
+      ...Object.fromEntries(notes.map((path) => [
+        `GET /api/posts/${path}`,
+        () => postDetail(path),
+      ])),
+      [`GET /api/posts/${first}`]: () => postDetail(first, 'first'),
+      [`GET /api/posts/${second}`]: () => postDetail(second, 'second'),
+    }))
+    const h = await setup({ singleManagedDiaryDocument: true })
+    for (const path of notes) await h.openPost(path)
+    await h.openPost(first)
+
+    let diaryModelDisposed = false
+    const noteModel = { isDisposed: () => false, dispose: vi.fn() }
+    registerMarkdownModel(first, {
+      isDisposed: () => diaryModelDisposed,
+      dispose: () => { diaryModelDisposed = true },
+    })
+    registerMarkdownModel(notes[0], noteModel)
+
+    expect(h.tabs.value).toHaveLength(9)
+    await h.openPost(second)
+
+    expect(h.tabs.value).toHaveLength(9)
+    expect(h.tabs.value.map((tab) => tab.path)).toEqual([...notes, second])
+    expect(h.activePath.value).toBe(second)
+    expect(toastCalls.some((call) => call.message.includes('标签页已达上限'))).toBe(false)
+    expect(diaryModelDisposed).toBe(true)
+    expect(getMarkdownModel(first)).toBeUndefined()
+    expect(getMarkdownModel(notes[0])).toBe(noteModel)
+    expect(noteModel.dispose).not.toHaveBeenCalled()
+    expect(JSON.parse(localStorage.getItem(PERSIST_KEY)!).paths).toEqual([...notes, second])
+    expect(JSON.parse(localStorage.getItem(PERSIST_KEY)!).active).toBe(second)
+    h.unmount()
+  })
+
+  it('keeps the ordinary Note hard limit unchanged', async () => {
+    const notes = Array.from({ length: 10 }, (_, index) => `inbox/note-${index + 1}`)
+    vi.stubGlobal('fetch', stubFetch({
+      'GET /api/tree': () => [],
+      'GET /api/posts': () => [],
+      ...Object.fromEntries(notes.map((path) => [
+        `GET /api/posts/${path}`,
+        () => postDetail(path),
+      ])),
+    }))
+    const h = await setup()
+    for (const path of notes.slice(0, 9)) await h.openPost(path)
+    await h.openPost(notes[9])
+
+    expect(h.tabs.value).toHaveLength(9)
+    expect(h.tabs.value.map((tab) => tab.path)).toEqual(notes.slice(0, 9))
+    expect(h.activePath.value).toBe(notes[8])
+    expect(toastCalls).toContainEqual({
+      type: 'error',
+      message: '标签页已达上限（9），请先关闭一些',
+    })
+    h.unmount()
+  })
+
+  it('preserves all Note tabs and the current Diary when replacement fails at the hard limit', async () => {
+    const notes = Array.from({ length: 8 }, (_, index) => `inbox/note-${index + 1}`)
+    const first = 'diary/2026-09-15'
+    const second = 'diary/2026-09-16'
+    vi.stubGlobal('fetch', stubFetch({
+      'GET /api/tree': () => [],
+      'GET /api/posts': () => [],
+      ...Object.fromEntries(notes.map((path) => [
+        `GET /api/posts/${path}`,
+        () => postDetail(path),
+      ])),
+      [`GET /api/posts/${first}`]: () => postDetail(first, 'first'),
+      [`GET /api/posts/${second}`]: () => { throw new Error('target unavailable') },
+    }))
+    const h = await setup({ singleManagedDiaryDocument: true })
+    for (const path of notes) await h.openPost(path)
+    await h.openPost(first)
+    await h.openPost(second)
+
+    expect(h.tabs.value).toHaveLength(9)
+    expect(h.tabs.value.map((tab) => tab.path)).toEqual([...notes, first])
+    expect(h.activePath.value).toBe(first)
+    expect(toastCalls).toContainEqual({
+      type: 'error',
+      message: '无法打开日记：target unavailable',
+    })
     h.unmount()
   })
 

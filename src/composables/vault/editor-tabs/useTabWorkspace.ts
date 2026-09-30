@@ -1,6 +1,6 @@
 import { computed, ref, toRaw } from 'vue'
 import { useRouter } from 'vue-router'
-import { getPost, getTree, listPosts, type PostSummary, type TreeNode } from '../../../lib/api'
+import { getPost, getTree, listPosts, type PostDetail, type PostSummary, type TreeNode } from '../../../lib/api'
 import { disposeMarkdownModel, renameMarkdownModel } from '../../../components/vault/monacoModelRegistry'
 import type { Tab } from '../../../components/vault/tabs'
 import { makeEmptyTab, pathToUrl, TAB_HARD_LIMIT, TAB_SOFT_LIMIT } from './tabState'
@@ -76,6 +76,117 @@ export function useTabWorkspace(options: {
 
   function setPersist(persist: () => void): void {
     persistRef = persist
+  }
+
+  function applyPostDetail(tab: Tab, post: PostDetail): void {
+    tab.raw = post.raw
+    tab.originalRaw = post.raw
+    tab.documentId = post.metadata?.id ?? null
+    tab.title = post.metadata?.title || (post.frontmatter.title as string) || post.path
+    tab.serverMtime = post.mtime
+    tab.loading = false
+    tab.loadError = null
+  }
+
+  function makeLoadedTab(path: string, post: PostDetail): Tab {
+    const tab = makeEmptyTab(path)
+    applyPostDetail(tab, post)
+    return tab
+  }
+
+  /** Load document data without granting it a visible or persisted tab slot. */
+  function loadPostDetached(path: string): Promise<PostDetail> {
+    return getPost(path)
+  }
+
+  /** Attach a previously loaded document, respecting the normal workspace cap. */
+  function attachLoadedPost(path: string, post: PostDetail): boolean {
+    const existing = tabs.value.find((tab) => tab.path === path)
+    if (existing) {
+      if ((existing.loading || existing.loadError) && requiresCloseConfirmation(existing)) {
+        return false
+      }
+      if (existing.loading || existing.loadError) {
+        const index = tabs.value.findIndex((tab) => tab.path === path)
+        tabs.value.splice(index, 1, makeLoadedTab(path, post))
+        disposeMarkdownModel(path)
+        flushPersist()
+      }
+      activePath.value = path
+      navigateTo(path)
+      return true
+    }
+    if (tabs.value.length >= TAB_HARD_LIMIT) {
+      options.toastError(t('editor.tab_limit', { count: TAB_HARD_LIMIT }))
+      return false
+    }
+    if (tabs.value.length >= TAB_SOFT_LIMIT) options.toastInfo(t('editor.many_tabs'))
+    tabs.value.push(makeLoadedTab(path, post))
+    activePath.value = path
+    navigateTo(path)
+    flushPersist()
+    return true
+  }
+
+  /**
+   * Atomically replace existing document slots with a loaded document. The
+   * first live source slot is retained; an already-loaded target tab is
+   * reused so its local state and Monaco model survive.
+   */
+  function replaceTabsWithLoadedPost(
+    replacedPaths: readonly string[],
+    path: string,
+    post: PostDetail | null,
+  ): boolean {
+    const sourcePath = replacedPaths.find((candidate) => (
+      candidate !== path && tabs.value.some((tab) => tab.path === candidate)
+    ))
+    if (!sourcePath) return false
+
+    const target = tabs.value.find((tab) => tab.path === path) ?? null
+    if (target && (target.loading || target.loadError) && requiresCloseConfirmation(target)) {
+      return false
+    }
+    const replacement = target && !target.loading && !target.loadError
+      ? target
+      : post
+        ? makeLoadedTab(path, post)
+        : null
+    if (!replacement) return false
+
+    // Remove a pre-existing target first, then resolve the source index again
+    // by path. This preserves the source's tab slot even when the target was
+    // located before it in the array.
+    if (target && replacement === target) {
+      const targetIndex = tabs.value.findIndex((tab) => tab.path === path)
+      if (targetIndex !== -1) tabs.value.splice(targetIndex, 1)
+    } else if (target) {
+      tabs.value.splice(tabs.value.findIndex((tab) => tab.path === path), 1)
+      disposeMarkdownModel(path)
+    }
+
+    const sourceIndex = tabs.value.findIndex((tab) => tab.path === sourcePath)
+    if (sourceIndex === -1) return false
+    tabs.value.splice(sourceIndex, 1, replacement)
+
+    const removedPaths = [...new Set(replacedPaths)]
+      .filter((candidate) => candidate !== sourcePath && candidate !== path)
+      .map((candidate) => ({
+        path: candidate,
+        index: tabs.value.findIndex((tab) => tab.path === candidate),
+      }))
+      .filter(({ index }) => index !== -1)
+      .sort((a, b) => b.index - a.index)
+    for (const removed of removedPaths) {
+      tabs.value.splice(removed.index, 1)
+      disposeMarkdownModel(removed.path)
+    }
+    disposeMarkdownModel(sourcePath)
+
+    activePath.value = path
+    navigateTo(path)
+    flushPersist()
+    return true
   }
 
   async function refresh() {
@@ -159,7 +270,7 @@ export function useTabWorkspace(options: {
       navigateTo(path)
     }
     try {
-      const post = await getPost(path)
+      const post = await loadPostDetached(path)
       // Race guard: the user may have closed this tab while getPost
       // was in flight. If so, drop the populated data — the watcher
       // debounce will not have caught this yet, so we also persist
@@ -172,13 +283,7 @@ export function useTabWorkspace(options: {
         return
       }
       // Must go through the proxy so dependent computeds recompute.
-      live.raw = post.raw
-      live.originalRaw = post.raw
-      live.documentId = post.metadata?.id ?? null
-      live.title = post.metadata?.title || (post.frontmatter.title as string) || path
-      live.serverMtime = post.mtime
-      live.loading = false
-      live.loadError = null
+      applyPostDetail(live, post)
     } catch (error) {
       const live = liveTabFor(plainTab)
       if (!live) {
@@ -371,6 +476,9 @@ export function useTabWorkspace(options: {
     refresh,
     applyPostSummary,
     openPost,
+    loadPostDetached,
+    attachLoadedPost,
+    replaceTabsWithLoadedPost,
     restoreOneTab,
     closeTab,
     closeMany,
