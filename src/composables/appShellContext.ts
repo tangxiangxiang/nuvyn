@@ -20,6 +20,8 @@ export interface AppShellContext {
   readonly diaryCalendarVisible: Ref<boolean>
   /** Vault-owned semantic action used by the global workspace navigation. */
   readonly diaryBackCommand?: Ref<(() => void | Promise<void>) | null>
+  /** Switch Note/Diary presentation while preserving each scope's document context. */
+  readonly vaultScopeChangeCommand?: Ref<((scope: 'note' | 'diary') => Promise<boolean>) | null>
 }
 
 export const AppShellContextKey: InjectionKey<AppShellContext> = Symbol('nuvyn.app-shell')

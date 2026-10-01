@@ -244,6 +244,16 @@ function onScopeClick(scope: ScopeKey): void {
     appShell?.diaryBackCommand?.value?.()
     return
   }
+  if (scope === 'note' && isVault.value && activeScope.value === 'diary') {
+    const changeScope = appShell?.vaultScopeChangeCommand?.value
+    if (!changeScope) return
+    void changeScope('note').then((completed) => {
+      if (completed && activeScope.value === 'note') {
+        navigationSelectedScope.value = 'note'
+      }
+    }).catch(() => {})
+    return
+  }
   if (scope === 'diary' && diaryAccess) {
     void diaryAccess.requestScopeChange(scope).then(() => {
       if (activeScope.value === scope) navigationSelectedScope.value = scope

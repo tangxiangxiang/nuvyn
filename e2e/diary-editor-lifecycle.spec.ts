@@ -285,6 +285,106 @@ test('Native Editor dirty lifecycle preserves identity and reveals Calendar afte
   expect(state.consoleErrors).toEqual([])
 })
 
+test('switching to Note saves and hides the Diary edit, then restores it on re-entry', async ({ page, request }) => {
+  const date = localCivilDate()
+  const path = diaryPath(date)
+  const note = `inbox/d66-scope-save-${RUN_ID}`
+  const baseRaw = `# Scope save ${RUN_ID}`
+  const marker = `SCOPE_SAVE_${RUN_ID}`
+  const rawWithEdit = `${baseRaw}\n${marker}`
+  const autosave = { seen: false, statuses: [] as number[] }
+  let releaseSave: () => void = () => {}
+  let browserAutosaveInstalled = false
+
+  try {
+    await seedDiary(request, date, baseRaw)
+    await seedOrdinaryNote(request, note)
+    await page.goto(`/vault/${note}`)
+    await expect(page.locator(`[role="tab"][data-tab-id="${note}"]`)).toHaveAttribute('aria-selected', 'true')
+
+    const diaryScope = page.locator('.scope-chip').filter({ hasText: 'diary' })
+    await diaryScope.click()
+    await expect(page.getByTestId('diary-calendar')).toBeVisible()
+    await clickDiaryDate(page, date)
+    await assertNativeReader(page, date)
+    await enterEditor(page)
+
+    const gate = new Promise<void>((resolve) => { releaseSave = resolve })
+    await interceptAutosaveHeld(page, path, autosave, gate)
+    browserAutosaveInstalled = true
+    await appendEditorText(page, marker)
+    await expect(page.locator(`[data-tab-id="${path}"][data-save-status="dirty"]`)).toHaveAttribute('data-save-status', 'dirty')
+
+    const noteScope = page.locator('.scope-chip').filter({ hasText: 'note' })
+    await noteScope.click()
+    await expect.poll(() => autosave.seen, { timeout: 15_000 }).toBe(true)
+    await expect(diaryScope).toHaveAttribute('aria-pressed', 'true')
+    await expect(noteScope).toHaveAttribute('aria-pressed', 'false')
+    await expect(page.locator(`[role="tab"][data-tab-id="${path}"]`)).toHaveCount(1)
+    await expect(page).toHaveURL(new RegExp(`/vault/${path.replace('/', '\\/')}(?:[?#]|$)`))
+
+    releaseSave()
+    await expect.poll(() => autosave.statuses.length, { timeout: 15_000 }).toBe(1)
+    expect(autosave.statuses[0]).toBe(200)
+    await expect(noteScope).toHaveAttribute('aria-pressed', 'true')
+    await expect(page.locator(`[role="tab"][data-tab-id="${path}"]`)).toHaveCount(0)
+    await expect(page.locator(`[role="tab"][data-tab-id="${note}"]`)).toHaveAttribute('aria-selected', 'true')
+    await expect(page).toHaveURL(new RegExp(`/vault/${note.replace('/', '\\/')}(?:[?#]|$)`))
+    const saved = await (await request.get(`/api/posts/${path}`)).json()
+    expect(normalizeLineEndings(saved.raw)).toBe(rawWithEdit)
+
+    await diaryScope.click()
+    await expect(diaryScope).toHaveAttribute('aria-pressed', 'true')
+    await expect(noteScope).toHaveAttribute('aria-pressed', 'false')
+    await expect(page.locator(`[role="tab"][data-tab-id="${path}"]`)).toHaveAttribute('aria-selected', 'true')
+    await expect(page).toHaveURL(new RegExp(`/vault/${path.replace('/', '\\/')}(?:[?#]|$)`))
+    await noteScope.click()
+    await expect(page.locator(`[role="tab"][data-tab-id="${note}"]`)).toHaveAttribute('aria-selected', 'true')
+  } finally {
+    releaseSave()
+    if (browserAutosaveInstalled) await page.unroute(`**/api/posts/${path}`)
+    await deleteDiaryDate(request, date)
+    await deletePost(request, note)
+  }
+})
+
+test('a Diary save failure cancels the Note scope transition without closing the document', async ({ page, request }) => {
+  const date = localCivilDate()
+  const path = diaryPath(date)
+  const baseRaw = `# Scope failure ${RUN_ID}`
+  const marker = `SCOPE_FAILURE_${RUN_ID}`
+  let browserAutosaveInstalled = false
+
+  try {
+    await seedDiary(request, date, baseRaw)
+    await openDiaryHome(page)
+    await clickDiaryDate(page, date)
+    await assertNativeReader(page, date)
+    await enterEditor(page)
+
+    await interceptAutosaveAborted(page, path)
+    browserAutosaveInstalled = true
+    await appendEditorText(page, marker)
+    await expect(page.locator(`[data-tab-id="${path}"][data-save-status="dirty"]`)).toHaveAttribute('data-save-status', 'dirty')
+
+    const noteScope = page.locator('.scope-chip').filter({ hasText: 'note' })
+    const diaryScope = page.locator('.scope-chip').filter({ hasText: 'diary' })
+    await noteScope.click()
+
+    await expect(diaryScope).toHaveAttribute('aria-pressed', 'true')
+    await expect(noteScope).toHaveAttribute('aria-pressed', 'false')
+    await expect(page.locator(`[role="tab"][data-tab-id="${path}"]`)).toHaveCount(1)
+    await expect(page.locator(`[role="tab"][data-tab-id="${path}"]`)).toHaveAttribute('aria-selected', 'true')
+    await expect(page.locator('.editor-pane .monaco-editor .view-lines').first()).toContainText(marker)
+    await expect(page).toHaveURL(new RegExp(`/vault/${path.replace('/', '\\/')}(?:[?#]|$)`))
+    const saved = await (await request.get(`/api/posts/${path}`)).json()
+    expect(saved.raw).toBe(baseRaw)
+  } finally {
+    if (browserAutosaveInstalled) await page.unroute(`**/api/posts/${path}`)
+    await deleteDiaryDate(request, date)
+  }
+})
+
 test.skip('D8.2: managed Diary History Comparison waits for an adapter-aware owner', async ({ page, request }) => {
   const date = localCivilDate()
   const path = diaryPath(date)

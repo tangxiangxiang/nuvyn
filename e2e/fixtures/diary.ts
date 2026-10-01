@@ -595,11 +595,15 @@ export const test = authTest.extend<{}, {
       const response = await originalGoto(url, options)
       await diagnostics.record('NAVIGATION_SETTLED', 'goto')
       if (accessStatus) await accessStatus
-      await bootstrapDiaryPage(
-        page,
-        keepDiaryScope || targetPath.startsWith('/vault/diary/'),
-        diagnostics,
-      )
+      if (targetPath.startsWith('/vault/ledger/')) {
+        await diagnostics.record('FINISH', 'non-Diary Ledger route')
+      } else {
+        await bootstrapDiaryPage(
+          page,
+          keepDiaryScope || targetPath.startsWith('/vault/diary/'),
+          diagnostics,
+        )
+      }
       return response
     }
     page.reload = async (options) => {

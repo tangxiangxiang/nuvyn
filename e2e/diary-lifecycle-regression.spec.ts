@@ -229,11 +229,12 @@ test('Diary documents replace ActivityBar with FileTree and preserve Note Tags a
       ))).toBe(panel)
 
       await selectScope(page, 'diary')
-      if (panel === 'tags') {
+      const diaryTab = page.locator(`[role="tab"][data-tab-id="${diary}"]`)
+      if (await diaryTab.count()) {
+        await assertNativeDiary(page, date)
+      } else {
         await expect(page.getByTestId('diary-calendar')).toBeVisible()
         await clickDiaryDate(page, date)
-      } else {
-        await expect(page.getByTestId('diary-calendar')).toBeHidden()
       }
 
       await assertNativeDiary(page, date)
@@ -303,7 +304,7 @@ test('Diary fixed FileTree and left-panel toggle do not mutate a null Note panel
   }
 })
 
-test('scope exit and re-entry preserve the document lifecycle without reopening Diary presentation', async ({ page, request }) => {
+test('scope switching hides but retains the managed Diary document and restores it on re-entry', async ({ page, request }) => {
   const date = localCivilDate()
   const path = diaryPath(date)
   const state = diagnostics(page)
@@ -312,27 +313,50 @@ test('scope exit and re-entry preserve the document lifecycle without reopening 
     await openDiaryHome(page)
     await clickDiaryDate(page, date)
     await assertNativeDiary(page, date)
-    const routeBefore = new URL(page.url()).pathname
-
     await selectScope(page, 'note')
     await expect(page.getByTestId('diary-calendar')).toHaveCount(0)
-    await expect(page.locator(`[role="tab"][data-tab-id="${path}"]`)).toHaveCount(1)
-    expect(new URL(page.url()).pathname).toBe(routeBefore)
+    await expect(page.locator(`[role="tab"][data-tab-id="${path}"]`)).toHaveCount(0)
+    await expect(page).toHaveURL(/\/vault(?:[?#]|$)/)
 
     await selectScope(page, 'diary')
-    await expect(page.getByTestId('diary-calendar')).toBeHidden()
+    await assertNativeDiary(page, date)
     await expect(page.locator(`[role="tab"][data-tab-id="${path}"]`)).toHaveCount(1)
-    await expect(page.locator('.tabs')).toBeHidden()
 
     for (let cycle = 0; cycle < 3; cycle += 1) {
       await selectScope(page, 'note')
       await expect(page.getByTestId('diary-calendar')).toHaveCount(0)
-      await expect(page.locator(`[role="tab"][data-tab-id="${path}"]`)).toHaveCount(1)
+      await expect(page.locator(`[role="tab"][data-tab-id="${path}"]`)).toHaveCount(0)
       await selectScope(page, 'diary')
       await assertNativeDiary(page, date)
+      await expect(page.locator(`[role="tab"][data-tab-id="${path}"]`)).toHaveCount(1)
     }
   } finally {
     await deletePost(request, path)
+  }
+  expect(state.pageErrors).toEqual([])
+  expect(state.consoleErrors).toEqual([])
+})
+
+test('switching away from Calendar Home and back does not activate an old Note tab', async ({ page, request }) => {
+  const note = `inbox/d65-calendar-home-${RUN_ID}`
+  const state = diagnostics(page)
+  try {
+    await seedNote(request, note, `# Calendar boundary ${RUN_ID}\n`)
+    await page.goto('/vault')
+    await openNote(page, note)
+    await selectScope(page, 'diary')
+    await assertDiaryHome(page)
+    await expect(page).toHaveURL(/\/vault(?:[?#]|$)/)
+
+    await selectScope(page, 'note')
+    await expect(page.locator(`[role="tab"][data-tab-id="${note}"]`)).toHaveAttribute('aria-selected', 'true')
+    await expect(page).toHaveURL(new RegExp(`/vault/${note.replace('/', '\\/')}(?:[?#]|$)`))
+    await selectScope(page, 'diary')
+    await assertDiaryHome(page)
+    await expect(page.locator(`[role="tab"][data-tab-id="${note}"]`)).toHaveCount(0)
+    await expect(page).toHaveURL(/\/vault(?:[?#]|$)/)
+  } finally {
+    await deletePost(request, note)
   }
   expect(state.pageErrors).toEqual([])
   expect(state.consoleErrors).toEqual([])
@@ -356,29 +380,36 @@ test('route navigation replaces the managed Diary document and preserves Note ta
     await openNote(page, note)
     await page.locator('.file-tree .search-input').fill(filterValue)
     await selectScope(page, 'diary')
-    await assertDiaryHome(page)
+    await assertNativeDiary(page, dates[0], filterValue)
 
     await page.goto(`/vault/${paths[1]}`)
     await assertNativeDiary(page, dates[1], filterValue)
     await expect(page.locator(`[role="tab"][data-tab-id="${paths[0]}"]`)).toHaveCount(0)
     await expect(page.locator(`[role="tab"][data-tab-id="${paths[1]}"]`)).toHaveCount(1)
-    await expect(page.locator(`[role="tab"][data-tab-id="${note}"]`)).toHaveCount(1)
+    await expect(page.locator(`[role="tab"][data-tab-id="${note}"]`)).toHaveCount(0)
     await expect(page.locator('.tabs')).toBeHidden()
 
     await page.goto(`/vault/${paths[0]}`)
     await assertNativeDiary(page, dates[0], filterValue)
     await expect(page.locator(`[role="tab"][data-tab-id="${paths[1]}"]`)).toHaveCount(0)
     await expect(page.locator(`[role="tab"][data-tab-id="${paths[0]}"]`)).toHaveCount(1)
-    await expect(page.locator(`[role="tab"][data-tab-id="${note}"]`)).toHaveCount(1)
+    await expect(page.locator(`[role="tab"][data-tab-id="${note}"]`)).toHaveCount(0)
 
     await selectScope(page, 'note')
+    await expect(page.locator(`[role="tab"][data-tab-id="${paths[0]}"]`)).toHaveCount(0)
+    await expect(page.locator(`[role="tab"][data-tab-id="${note}"]`)).toHaveAttribute('aria-selected', 'true')
+    await expect(page).toHaveURL(new RegExp(`/vault/${note.replace('/', '\\/')}(?:[?#]|$)`))
     await selectTab(page, note)
     await expect(page.locator('.file-tree .search-input')).toHaveValue(filterValue)
     await selectScope(page, 'diary')
-    await assertDiaryHome(page)
+    await assertNativeDiary(page, dates[0], filterValue)
     await expect(page.locator(`[role="tab"][data-tab-id="${paths[0]}"]`)).toHaveCount(1)
-    await expect(page.locator(`[role="tab"][data-tab-id="${note}"]`)).toHaveCount(1)
+    await expect(page.locator(`[role="tab"][data-tab-id="${note}"]`)).toHaveCount(0)
     await expect(page.locator('.tabs')).toBeHidden()
+    await selectScope(page, 'note')
+    await expect(page.locator(`[role="tab"][data-tab-id="${note}"]`)).toHaveAttribute('aria-selected', 'true')
+    await expect(page.locator(`[role="tab"][data-tab-id^="diary/"]`)).toHaveCount(0)
+    await expect(page).toHaveURL(new RegExp(`/vault/${note.replace('/', '\\/')}(?:[?#]|$)`))
   } finally {
     for (const path of [...paths, note]) await deletePost(request, path)
   }
@@ -399,34 +430,29 @@ test('Cmd/Ctrl+W close and reopen use existing fallback and stable document iden
     await assertNativeDiary(page, date)
     await openNote(page, note)
     await selectScope(page, 'diary')
-    await assertDiaryHome(page)
-    await clickDiaryDate(page, date)
     await assertNativeDiary(page, date)
 
     await selectScope(page, 'note')
-    await closeCurrentWorkspaceDocument(page)
     await expect(page.locator(`[role="tab"][data-tab-id="${path}"]`)).toHaveCount(0)
     await expect(page.locator(`[role="tab"][data-tab-id="${note}"]`)).toHaveAttribute('aria-selected', 'true')
     await expect(page).toHaveURL(new RegExp(`/vault/${note.replace('/', '\\/')}(?:[?#]|$)`))
 
+    await closeCurrentWorkspaceDocument(page)
+    await expect(page.locator(`[role="tab"][data-tab-id="${note}"]`)).toHaveCount(0)
+    await expect(page).toHaveURL(/\/vault(?:[?#]|$)/)
+
     await selectScope(page, 'diary')
-    await assertDiaryHome(page)
-    await clickDiaryDate(page, date)
     await assertNativeDiary(page, date)
     await expect(page.locator(`[role="tab"][data-tab-id="${path}"]`)).toHaveCount(1)
     const reopened = await request.get(`/api/posts/${path}`)
     expect((await reopened.json()).metadata.id).toBe(documentId)
 
     await selectScope(page, 'note')
-    await page.locator(`[role="tab"][data-tab-id="${note}"] .tab-close`).click()
-    await expect(page.locator(`[role="tab"][data-tab-id="${note}"]`)).toHaveCount(0)
-    await expect(page.locator(`[role="tab"][data-tab-id="${path}"]`)).toHaveAttribute('aria-selected', 'true')
-    await closeCurrentWorkspaceDocument(page)
     await expect(page.locator(`[role="tab"][data-tab-id="${path}"]`)).toHaveCount(0)
     await expect(page).toHaveURL(/\/vault(?:[?#]|$)/)
 
     await selectScope(page, 'diary')
-    await assertDiaryHome(page)
+    await assertNativeDiary(page, date)
   } finally {
     await deletePost(request, path)
     await deletePost(request, note)
@@ -435,7 +461,7 @@ test('Cmd/Ctrl+W close and reopen use existing fallback and stable document iden
   expect(state.consoleErrors).toEqual([])
 })
 
-test('closing a non-active tab preserves Diary DOCUMENT and the user filter', async ({ page, request }) => {
+test('scope exit restores the Note tab and preserves the user filter', async ({ page, request }) => {
   const date = localCivilDate()
   const path = diaryPath(date)
   const note = `inbox/d65-non-active-${RUN_ID}`
@@ -449,18 +475,18 @@ test('closing a non-active tab preserves Diary DOCUMENT and the user filter', as
 
     await openNote(page, note)
     await selectScope(page, 'diary')
-    await assertDiaryHome(page)
-    await clickDiaryDate(page, date)
     await assertNativeDiary(page, date)
     const filterValue = `d65-filter-${RUN_ID}`
     await page.locator('.file-tree .search-input').fill(filterValue)
     await selectScope(page, 'note')
 
-    // The note tab is non-active while the Diary document remains active.
-    await page.locator(`[role="tab"][data-tab-id="${note}"] .tab-close`).click()
-    await expect(page.locator(`[role="tab"][data-tab-id="${note}"]`)).toHaveCount(0)
+    await expect(page.locator(`[role="tab"][data-tab-id="${path}"]`)).toHaveCount(0)
+    await expect(page.locator(`[role="tab"][data-tab-id="${note}"]`)).toHaveAttribute('aria-selected', 'true')
+    await expect(page).toHaveURL(new RegExp(`/vault/${note.replace('/', '\\/')}(?:[?#]|$)`))
     await selectScope(page, 'diary')
     await assertNativeDiary(page, date)
+    await selectScope(page, 'note')
+    await ensureExplorerVisible(page)
     await expect(page.locator('.search-input')).toHaveValue(filterValue)
   } finally {
     await deletePost(request, path)
@@ -485,20 +511,25 @@ test('clean refresh restores one managed Diary document and Note tabs from the d
     await assertNativeDiary(page, dates[0])
     await openNote(page, note)
     await selectScope(page, 'diary')
-    await assertDiaryHome(page)
+    await assertNativeDiary(page, dates[0])
     await page.goto(`/vault/${paths[1]}`)
     await assertNativeDiary(page, dates[1])
 
     await page.reload()
     await expect(page.locator('.vault')).toBeVisible({ timeout: 15_000 })
-    await expect.poll(async () => page.locator('[role="tab"][data-tab-id]').count(), { timeout: 15_000 }).toBe(2)
+    await expect.poll(async () => page.locator('[role="tab"][data-tab-id]').count(), { timeout: 15_000 }).toBe(1)
     await expect(page.locator(`[role="tab"][data-tab-id="${paths[0]}"]`)).toHaveCount(0)
     await expect(page.locator(`[role="tab"][data-tab-id="${paths[1]}"]`)).toHaveCount(1)
-    await expect(page.locator(`[role="tab"][data-tab-id="${note}"]`)).toHaveCount(1)
+    await expect(page.locator(`[role="tab"][data-tab-id="${note}"]`)).toHaveCount(0)
     await expect(page.locator(`[role="tab"][data-tab-id="${paths[1]}"]`)).toHaveAttribute('aria-selected', 'true')
     await assertNativeDiary(page, dates[1])
     await expect(page.locator('.tabs')).toBeHidden()
-    await expect(page.locator('[role="tab"][data-tab-id]')).toHaveCount(2)
+    await expect(page.locator('[role="tab"][data-tab-id]')).toHaveCount(1)
+
+    await selectScope(page, 'note')
+    await expect(page.locator(`[role="tab"][data-tab-id="${paths[1]}"]`)).toHaveCount(0)
+    await expect(page.locator(`[role="tab"][data-tab-id="${note}"]`)).toHaveAttribute('aria-selected', 'true')
+    await expect(page).toHaveURL(new RegExp(`/vault/${note.replace('/', '\\/')}(?:[?#]|$)`))
   } finally {
     for (const path of [...paths, note]) await deletePost(request, path)
   }
@@ -576,7 +607,7 @@ test('direct Diary deep link opens the native Vault lifecycle without Calendar p
   expect(state.consoleErrors).toEqual([])
 })
 
-test('real Browser Back and Forward reconcile route lifecycle without reopening Diary presentation', async ({ page, request }) => {
+test('real Browser Back and Forward keep Diary route and presentation aligned with its remembered document', async ({ page, request }) => {
   const date = localCivilDate()
   const path = diaryPath(date)
   const first = `inbox/d65-back-first-${RUN_ID}`
@@ -679,9 +710,10 @@ test('real Browser Back and Forward reconcile route lifecycle without reopening 
     const historyBefore = await page.evaluate(() => history.length)
     await page.goBack()
     await recordNavigationHistory('after-goBack-wrapper')
-    await expect(page).toHaveURL(new RegExp(`/vault/${first.replace('/', '\\/')}(?:[?#]|$)`))
-    await expect(page.locator(`[role="tab"][data-tab-id="${first}"]`)).toHaveAttribute('aria-selected', 'true')
-    await expect(page.getByTestId('diary-calendar')).toBeVisible()
+    await expect(page).toHaveURL(new RegExp(`/vault/${path.replace('/', '\\/')}(?:[?#]|$)`))
+    await expect(page.locator(`[role="tab"][data-tab-id="${path}"]`)).toHaveAttribute('aria-selected', 'true')
+    await expect(page.getByTestId('diary-calendar')).toBeHidden()
+    await expect(page.locator(`[role="tab"][data-tab-id="${first}"]`)).toHaveCount(0)
     await expect(page.locator('.tabs')).toBeHidden()
 
     await recordNavigationHistory('before-goForward')

@@ -334,7 +334,7 @@ test('existing today/past enter native READ while unsupported future files and m
   expect(state.consoleErrors.filter((message) => !message.includes('404'))).toEqual([])
 })
 
-test('real Browser Back passively ends native Diary presentation without retargeting', async ({ page, request }) => {
+test('real Browser Back restores the scope-owned Diary document without exposing Note tabs', async ({ page, request }) => {
   const date = localCivilDate()
   const source = 'inbox/d6-native-back-source'
   const intermediate = 'inbox/d6-native-back-intermediate'
@@ -353,9 +353,10 @@ test('real Browser Back passively ends native Diary presentation without retarge
 
     await page.goBack()
 
-    await expect(page).toHaveURL(new RegExp(`/vault/${source.replace('/', '\\/')}(?:[?#]|$)`))
-    await expect(page.locator(`[role="tab"][data-tab-id="${source}"]`)).toHaveAttribute('aria-selected', 'true')
-    await expect(page.getByTestId('diary-calendar')).toBeVisible()
+    await expect(page).toHaveURL(new RegExp(`/vault/${diaryPath(date).replace('/', '\\/')}(?:[?#]|$)`))
+    await expect(page.locator(`[role="tab"][data-tab-id="${diaryPath(date)}"]`)).toHaveAttribute('aria-selected', 'true')
+    await expect(page.locator(`[role="tab"][data-tab-id="${source}"]`)).toHaveCount(0)
+    await expect(page.getByTestId('diary-calendar')).toBeHidden()
     await expect(page.locator(`[role="tab"][data-tab-id="${diaryPath(date)}"]`)).toHaveCount(1)
   } finally {
     await deleteDiaryDate(request, date)

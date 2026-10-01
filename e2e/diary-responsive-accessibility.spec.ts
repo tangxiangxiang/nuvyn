@@ -700,7 +700,7 @@ test('mobile Calendar-to-native keyboard journey preserves focus, shortcuts, and
   expect(state.consoleErrors).toEqual([])
 })
 
-test('Native DOCUMENT Cmd/Ctrl+W closes through the existing focus and dirty policy', async ({ page, request }) => {
+test('Note scope hides the Diary document and Cmd/Ctrl+W keeps its normal Note behavior', async ({ page, request }) => {
   const date = localCivilDate()
   const diary = diaryPath(date)
   const note = `inbox/d66-close-focus-${RUN_ID}`
@@ -720,24 +720,20 @@ test('Native DOCUMENT Cmd/Ctrl+W closes through the existing focus and dirty pol
 
     const diaryTab = page.locator(`[role="tab"][data-tab-id="${diary}"]`)
     const fallbackTab = page.locator(`[role="tab"][data-tab-id="${note}"]`)
-    // Leave Diary scope before the close assertion so the fallback workspace
-    // tab remains a visible native Vault focus target. The Diary tab itself
-    // remains the active document and is closed with the generic shortcut.
+    // Leaving Diary safely saves and hides the managed document, restoring
+    // the previously open Note while retaining Diary's own context.
     await selectScope(page, 'note')
     await expect(page.getByTestId('diary-calendar')).toHaveCount(0)
-    await closeCurrentWorkspaceDocument(page)
-
     await expect(diaryTab).toHaveCount(0)
     await expect(fallbackTab).toHaveAttribute('aria-selected', 'true')
     await expect(page).toHaveURL(new RegExp(`/vault/${note.replace('/', '\\/')}(?:[?#]|$)`))
-    await expect(fallbackTab).toBeFocused()
+    await closeCurrentWorkspaceDocument(page)
+
+    await expect(fallbackTab).toHaveCount(0)
+    await expect(page).toHaveURL(/\/vault(?:[?#]|$)/)
     await expect(page.locator('.n-dialog[role="dialog"]')).toHaveCount(0)
 
     await selectScope(page, 'diary')
-    await expect(page.getByTestId('diary-calendar')).toBeVisible()
-    await expect(calendarDay(page.getByTestId('diary-calendar'), date)).not.toHaveClass(/is-selected/)
-    await expect(calendarDay(page.getByTestId('diary-calendar'), date)).toHaveAttribute('aria-pressed', 'false')
-    await activateDiaryDate(page, date)
     await assertNativeRead(page, date)
     await page.locator('.vault').focus()
     await page.keyboard.press('ControlOrMeta+e')
@@ -755,8 +751,8 @@ test('Native DOCUMENT Cmd/Ctrl+W closes through the existing focus and dirty pol
     await confirmation.getByRole('button', { name: 'Cancel', exact: true }).click()
     await expect(confirmation).not.toBeVisible()
     await expect(diaryTab).toHaveAttribute('data-save-status', 'dirty')
-    await expect(calendarDay(page.getByTestId('diary-calendar'), date)).toHaveClass(/is-selected/)
-    await expect(calendarDay(page.getByTestId('diary-calendar'), date)).toHaveAttribute('aria-pressed', 'true')
+    await expect(calendarDay(page.getByTestId('diary-calendar'), date)).not.toHaveClass(/is-selected/)
+    await expect(calendarDay(page.getByTestId('diary-calendar'), date)).toHaveAttribute('aria-pressed', 'false')
     // Let the intentionally retained dirty edit settle before fixture
     // cleanup deletes the server document. Otherwise the delayed autosave
     // can race the cleanup DELETE and report a misleading 404 in the page.

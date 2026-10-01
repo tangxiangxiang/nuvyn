@@ -115,8 +115,8 @@ test('Diary date navigation keeps one document, preserves FileTree search, and r
     await expect(page.locator('.tabs')).toBeHidden()
     await expect(page.locator(`[role="tab"][data-tab-id="${first}"]`)).toHaveCount(0)
     await expect(page.locator(`[role="tab"][data-tab-id="${second}"]`)).toHaveCount(1)
-    await expect(page.locator(`[role="tab"][data-tab-id="${noteA}"]`)).toHaveCount(1)
-    await expect(page.locator(`[role="tab"][data-tab-id="${noteB}"]`)).toHaveCount(1)
+    await expect(page.locator(`[role="tab"][data-tab-id="${noteA}"]`)).toHaveCount(0)
+    await expect(page.locator(`[role="tab"][data-tab-id="${noteB}"]`)).toHaveCount(0)
 
     const diaryCyclePrevented = await page.locator('.vault').evaluate((element) => {
       const event = new KeyboardEvent('keydown', {
@@ -150,11 +150,11 @@ test('Diary date navigation keeps one document, preserves FileTree search, and r
     await expect(page.locator(`[role="tab"][data-tab-id="${noteB}"]`)).toHaveCount(1)
 
     await selectScope(page, 'diary')
-    await expect(page.getByTestId('diary-calendar')).toBeVisible()
+    await expect(page.getByTestId('diary-calendar')).toBeHidden()
     await expect(page.locator('.tabs')).toBeHidden()
     await expect(page.locator(`[role="tab"][data-tab-id="${second}"]`)).toHaveCount(1)
-    await expect(page.locator(`[role="tab"][data-tab-id="${noteA}"]`)).toHaveCount(1)
-    await expect(page.locator(`[role="tab"][data-tab-id="${noteB}"]`)).toHaveCount(1)
+    await expect(page.locator(`[role="tab"][data-tab-id="${noteA}"]`)).toHaveCount(0)
+    await expect(page.locator(`[role="tab"][data-tab-id="${noteB}"]`)).toHaveCount(0)
 
     await selectScope(page, 'note')
     await expect(page.locator('.file-tree .search-input')).toHaveValue(filter)

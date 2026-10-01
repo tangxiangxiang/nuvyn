@@ -1006,6 +1006,7 @@ test('scope switching and route navigation preserve the user FileTree query', as
     await assertNativeReader(page, secondDate, '')
     await expect(page.locator(`[role="tab"][data-tab-id="${firstPath}"]`)).toHaveCount(0)
     await expect(page.locator(`[role="tab"][data-tab-id="${secondPath}"]`)).toHaveCount(1)
+    await selectScope(page, 'note')
     await page.goto(`/vault/${notePath}`)
     await expect(page.locator(`[role="tab"][data-tab-id="${notePath}"]`)).toHaveAttribute('aria-selected', 'true')
 
@@ -1018,7 +1019,7 @@ test('scope switching and route navigation preserve the user FileTree query', as
     // Route navigation is not a Calendar date selection, so the user query
     // remains untouched while the single Diary slot changes documents.
     await selectScope(page, 'diary')
-    await expect(page.getByTestId('diary-calendar')).toBeVisible()
+    await assertNativeReader(page, secondDate, customQuery)
     await page.goto(`/vault/${firstPath}`)
     await assertNativeReader(page, firstDate, customQuery)
     await expect(search).toHaveValue(customQuery)
@@ -1163,7 +1164,7 @@ test('a user-owned empty query survives refresh without re-seeding Diary context
   expect(state.consoleErrors).toEqual([])
 })
 
-test('refresh, deep link, and browser Back/Forward preserve Diary identity, Mood, and query', async ({ page, request }) => {
+test('refresh, deep link, and browser Back/Forward preserve Diary scope ownership, identity, Mood, and query', async ({ page, request }) => {
   const date = await findUnusedDiaryDate(request)
   const path = diaryPath(date)
   const notePath = `inbox/d74-round3-history-${RUN_ID}`
@@ -1217,7 +1218,8 @@ test('refresh, deep link, and browser Back/Forward preserve Diary identity, Mood
     expect(deepLinked.metadata.mood).toBe('happy')
 
     // Build a real generic history sequence and traverse it. The existing
-    // route/tab owner selects the already-open Diary without duplicating it.
+    // scope owner restores Diary rather than presenting a Note route as active.
+    await selectScope(page, 'note')
     await page.goto(`/vault/${notePath}`)
     await expect(page.locator(`[role="tab"][data-tab-id="${notePath}"]`)).toHaveAttribute('aria-selected', 'true')
     await page.goto(`/vault/${path}`)
@@ -1225,10 +1227,11 @@ test('refresh, deep link, and browser Back/Forward preserve Diary identity, Mood
     await expect(page.locator(`[role="tab"][data-tab-id="${path}"]`)).toHaveCount(1)
 
     await page.goBack()
-    await expect(page).toHaveURL(new RegExp(`/vault/${notePath.replace('/', '\\/')}(?:[?#]|$)`))
-    await expect(page.locator(`[role="tab"][data-tab-id="${notePath}"]`)).toHaveAttribute('aria-selected', 'true')
+    await expect(page).toHaveURL(new RegExp(`/vault/${path.replace('/', '\\/')}(?:[?#]|$)`))
+    await expect(page.locator(`[role="tab"][data-tab-id="${path}"]`)).toHaveAttribute('aria-selected', 'true')
+    await expect(page.locator(`[role="tab"][data-tab-id="${notePath}"]`)).toHaveCount(0)
     await expect(page.locator(`[role="tab"][data-tab-id="${path}"]`)).toHaveCount(1)
-    await expect(page.getByTestId('diary-calendar')).toBeVisible()
+    await expect(page.getByTestId('diary-calendar')).toBeHidden()
     await expect.poll(() => page.evaluate(() => localStorage.getItem('nuvyn.file-tree.filter')))
       .toBe(customQuery)
 

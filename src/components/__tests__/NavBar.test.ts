@@ -387,6 +387,50 @@ describe('NavBar — scope chips', () => {
     wrapper.unmount()
   })
 
+  it('waits for the Vault to restore Note scope before selecting the Note chip', async () => {
+    const router = createRouter({
+      history: createMemoryHistory(),
+      routes: [
+        { path: '/vault', name: 'vault', component: { template: '<div />' } },
+        { path: '/vault/:pathMatch(.*)*', name: 'vault-doc', component: { template: '<div />' } },
+      ],
+    })
+    await router.push('/vault/diary/2026-09-30')
+    await router.isReady()
+    const scope = useScopeFilter()
+    scope.activeScope.value = 'diary'
+    let resolveExit: (completed: boolean) => void = () => {}
+    const vaultScopeChangeCommand = vi.fn(() => new Promise<boolean>((resolve) => {
+      resolveExit = resolve
+    }))
+    const wrapper = mount(NavBar, {
+      props: { isVault: true, diaryUnlocked: true },
+      global: {
+        plugins: [router],
+        provide: {
+          [VaultViewModeKey as symbol]: makeViewModeApi(),
+          [AppShellContextKey as symbol]: {
+            settingsRequestTick: ref(0),
+            diaryCalendarVisible: ref(false),
+            diaryBackCommand: ref(null),
+            vaultScopeChangeCommand: ref(vaultScopeChangeCommand),
+          },
+        },
+      },
+    })
+
+    await wrapper.findAll('.scope-chip')[0].trigger('click')
+
+    expect(vaultScopeChangeCommand).toHaveBeenCalledWith('note')
+    expect(vaultScopeChangeCommand).toHaveBeenCalledOnce()
+    expect(scope.activeScope.value).toBe('diary')
+    resolveExit(false)
+    await flushPromises()
+    expect(scope.activeScope.value).toBe('diary')
+
+    wrapper.unmount()
+  })
+
   it('uses the ledger scope chip as the canonical Ledger entry', async () => {
     const api = makeViewModeApi()
     const router = createRouter({

@@ -363,7 +363,7 @@ test('Diary Calendar navigation exposes keyboard-only focus indicators', async (
   expect(consoleErrors).toEqual([])
 })
 
-test('Diary scope returns to Calendar Home when a Note is active and retains both documents', async ({ page, request }) => {
+test('Diary scope restores its hidden managed document after Note navigation', async ({ page, request }) => {
   const date = localCivilDate()
   const diary = diaryPath(date)
   const note = 'inbox/d6-hidden-shortcut-note'
@@ -387,10 +387,11 @@ test('Diary scope returns to Calendar Home when a Note is active and retains bot
     await expect(page).toHaveURL(new RegExp(`/vault/${note.replace('/', '\\/')}(?:[?#]|$)`))
 
     await page.locator('.scope-chip').filter({ hasText: 'diary' }).click()
-    await expect(page.getByTestId('diary-calendar')).toBeVisible()
+    await expect(page.getByTestId('diary-calendar')).toBeHidden()
     await expect(page.locator('.tabs')).toBeHidden()
-    await expect(page.locator(`[role="tab"][data-tab-id="${diary}"]`)).toHaveCount(1)
-    await expect(page.locator(`[role="tab"][data-tab-id="${note}"]`)).toHaveCount(1)
+    await expect(page.locator(`[role="tab"][data-tab-id="${diary}"]`)).toHaveAttribute('aria-selected', 'true')
+    await expect(page.locator(`[role="tab"][data-tab-id="${note}"]`)).toHaveCount(0)
+    await expect(page).toHaveURL(new RegExp(`/vault/${diary.replace('/', '\\/')}(?:[?#]|$)`))
   } finally {
     await deleteDiaryDate(request, date)
     const removed = await request.delete(`/api/posts/${note}`)

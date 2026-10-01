@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { ref, inject, shallowRef, watch, computed, defineAsyncComponent, onBeforeUnmount, onMounted, nextTick } from 'vue'
 import { useMediaQuery, useStorage } from '@vueuse/core'
-import { useRoute } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
 import { useShortcutDisplay } from '../composables/useShortcutDisplay'
 import { useVaultLayout } from '../composables/vault/useVaultLayout'
 import { useSplitterDrag } from '../composables/vault/useSplitterDrag'
@@ -12,6 +12,7 @@ import { useConfirm } from '../composables/useConfirm'
 import { useI18n } from '../composables/useI18n'
 import { useAuth, type WorkspaceAuthTransitionAdapter } from '../composables/useAuth'
 import { useEditorTabs } from '../composables/vault/useEditorTabs'
+import { pathToUrl } from '../composables/vault/editor-tabs/tabState'
 import { watchLinkNavigationHandoff } from '../composables/vault/useLinkNavigationHandoff'
 import { clearLinkNavigation, linkNavigationIntent } from '../composables/useLinkNavigation'
 import { createDraftStore } from '../composables/vault/draft-recovery/draftStore'
@@ -178,6 +179,7 @@ const readingPaneReady = ref(false)
 const settingsOpen = ref(false)
 const appShell = inject(AppShellContextKey, null)
 const route = useRoute()
+const router = useRouter()
 // The layout composable owns the grid tracks. VaultView only supplies the
 // current presentation visibility, so Calendar Home can remove the activity
 // and side-panel columns without a Diary-specific CSS offset.
@@ -261,6 +263,20 @@ const auth = useAuth()
 const diaryAccess = useDiaryAccessSession()
 const diaryAccessContext = inject(DiaryAccessContextKey, null)
 const { activeScope, selectScope } = useScopeFilter()
+const noteActivePath = ref<string | null>(null)
+const diaryActivePath = ref<string | null>(null)
+let applyingScopeTransition = false
+
+function scopeForWorkspacePath(path: string): 'note' | 'diary' | 'ledger' {
+  if (scopeRootsFor('diary').some((root) => path === root || path.startsWith(`${root}/`))) return 'diary'
+  if (scopeRootsFor('ledger').some((root) => path === root || path.startsWith(`${root}/`))) return 'ledger'
+  return 'note'
+}
+
+function rememberScopePath(scope: 'note' | 'diary', path: string | null): void {
+  const owner = scope === 'note' ? noteActivePath : diaryActivePath
+  owner.value = path && scopeForWorkspacePath(path) === scope ? path : null
+}
 
 const searchablePosts = computed(() => {
   const roots = scopeRootsFor(activeScope.value)
@@ -403,6 +419,20 @@ const {
   isDiaryAccessReady: () => diaryAccess.isUnlocked.value,
   singleManagedDiaryDocument: true,
 })
+
+watch([activeScope, activePath], ([scope, path]) => {
+  if (applyingScopeTransition) return
+  // Legacy Ledger documents can still be opened inside Vault. Their route is
+  // the scope owner on Note routes, just like the Ledger navigation chip.
+  if (scope === 'note' && path && scopeForWorkspacePath(path) === 'ledger') {
+    selectScope('ledger')
+    return
+  }
+  if (scope !== 'note' && scope !== 'diary') return
+  if (path === null || scopeForWorkspacePath(path) === scope) {
+    rememberScopePath(scope, path)
+  }
+}, { flush: 'sync' })
 
 watch(searchablePosts, (next) => {
   documentSearchSource.replace(next)
@@ -1303,17 +1333,23 @@ const workspaceTabs = computed<WorkspaceTab[]>(() => {
   return reconcileWorkspaceTabOrder(workspaceTabOrder.value, natural.map((tab) => tab.id))
     .map((id) => byId.get(id))
     .filter((tab): tab is WorkspaceTab => Boolean(tab))
+    .filter((tab) => scopeForWorkspacePath(tab.documentPath ?? tab.id) === activeScope.value)
 })
 const activeSavePresentation = computed(() => (
   activeHistoryComparison.value || activeWorkingTreeDiff.value || activeDraftRecovery.value
     ? deriveDocumentSavePresentation(null)
     : deriveDocumentSavePresentation(activeTab.value)
 ))
-const activeWorkspaceTabId = computed(() => (
+const resolvedActiveWorkspaceTabId = computed(() => (
   activeDraftRecovery.value?.tabId
   ?? activeHistoryComparison.value?.tabId
   ?? activeWorkingTreeDiff.value?.tabId
   ?? activePath.value
+))
+const activeWorkspaceTabId = computed(() => (
+  workspaceTabs.value.some((tab) => tab.id === resolvedActiveWorkspaceTabId.value)
+    ? resolvedActiveWorkspaceTabId.value
+    : null
 ))
 // Bind the AI capture delegate now that every workspace authority exists.
 // This one call is the AI context's sole send-time authority — the active
@@ -1341,10 +1377,16 @@ async function reorderWorkspaceTabs(request: WorkspaceTabReorderRequest): Promis
   workspaceTabOrder.value = nextOrder
 
   const byId = new Map(workspaceTabs.value.map((tab) => [tab.id, tab]))
-  const documentPaths = nextOrder
+  const scopedDocumentPaths = nextOrder
     .map((id) => byId.get(id))
     .filter((tab): tab is WorkspaceTab => tab?.kind === 'document')
     .map((tab) => tab.documentPath ?? tab.id)
+  let nextScopedDocument = 0
+  const documentPaths = tabs.value.map((tab) => (
+    scopeForWorkspacePath(tab.path) === activeScope.value
+      ? scopedDocumentPaths[nextScopedDocument++] ?? tab.path
+      : tab.path
+  ))
   reorderOpenDocuments(documentPaths)
 
   if (request.input === 'keyboard' || !activeWorkspaceTabId.value) {
@@ -1476,7 +1518,7 @@ async function selectWorkspaceTab(id: string, focusViewer = true): Promise<void>
   }
 }
 
-async function closeWorkspaceTab(id: string): Promise<void> {
+async function closeWorkspaceTab(id: string): Promise<boolean> {
   const result = await closeWorkspaceTabState(id, {
     workspaceTabs: workspaceTabs.value,
     activeId: activeWorkspaceTabId.value,
@@ -1488,23 +1530,28 @@ async function closeWorkspaceTab(id: string): Promise<void> {
     closeRecovery: recoveryTabs.close,
     refreshDocumentComparison: historyComparisons.refreshDocumentComparison,
   })
-  if (!result.closed) return
+  if (!result.closed) return false
   if (!result.activeWillClose) {
     await nextTick()
     const activeId = activeWorkspaceTabId.value
     if (activeId) editorTabsRef.value?.focusTab(activeId)
     else vaultRef.value?.focus()
-    return
+    return true
   }
   if (!result.fallbackId) {
+    if (activePath.value && scopeForWorkspacePath(activePath.value) !== activeScope.value) {
+      activePath.value = null
+      await router.replace('/vault')
+    }
     await nextTick()
     vaultRef.value?.focus()
-    return
+    return true
   }
 
   await selectWorkspaceTab(result.fallbackId, false)
   await nextTick()
   editorTabsRef.value?.focusTab(result.fallbackId)
+  return true
 }
 
 async function closeManyWorkspaceTabs(ids: string[]): Promise<void> {
@@ -1529,6 +1576,10 @@ async function closeManyWorkspaceTabs(ids: string[]): Promise<void> {
     return
   }
   if (!result.fallbackId) {
+    if (activePath.value && scopeForWorkspacePath(activePath.value) !== activeScope.value) {
+      activePath.value = null
+      await router.replace('/vault')
+    }
     await nextTick()
     vaultRef.value?.focus()
     return
@@ -1870,19 +1921,129 @@ function onReadingPaneRendered(path: string | null): void {
   readingPaneReady.value = true
 }
 
-function backToDiaryHome(): Promise<void> | void {
+async function backToDiaryHome(): Promise<void> {
   if (!canBackToDiaryHome.value) return
   const activeId = activeWorkspaceTabId.value
-  if (activeId) return closeWorkspaceTab(activeId)
+  if (activeId && !(await closeWorkspaceTab(activeId))) return
+  rememberScopePath('diary', null)
+  if (activePath.value !== null || route.path !== '/vault') {
+    activePath.value = null
+    await router.replace('/vault')
+  }
+}
+
+function pathIsOpenInScope(path: string | null, scope: 'note' | 'diary'): path is string {
+  return Boolean(
+    path
+    && scopeForWorkspacePath(path) === scope
+    && tabs.value.some((tab) => tab.path === path && !tab.loadError),
+  )
+}
+
+function resolveScopeDocumentPath(scope: 'note' | 'diary'): string | null {
+  const remembered = scope === 'note' ? noteActivePath.value : diaryActivePath.value
+  if (pathIsOpenInScope(remembered, scope)) return remembered
+
+  const byId = new Map(naturalWorkspaceTabs.value.map((tab) => [tab.id, tab]))
+  const orderedIds = reconcileWorkspaceTabOrder(
+    workspaceTabOrder.value,
+    naturalWorkspaceTabIds.value,
+  )
+  return orderedIds
+    .map((id) => byId.get(id))
+    .find((tab) => tab?.kind === 'document'
+      && tab.documentPath
+      && scopeForWorkspacePath(tab.documentPath) === scope
+      && pathIsOpenInScope(tab.documentPath, scope))
+    ?.documentPath ?? null
+}
+
+let scopeTransition: Promise<boolean> | null = null
+async function changeVaultScope(scope: 'note' | 'diary'): Promise<boolean> {
+  if (scopeTransition) return scopeTransition
+  if (activeScope.value === scope) return true
+  if (scope === 'diary' && !diaryAccess.isUnlocked.value) return false
+
+  const transition = (async () => {
+    const previousScope = activeScope.value
+    if (previousScope !== 'note' && previousScope !== 'diary') return false
+
+    const outgoingPath = activePath.value
+    rememberScopePath(previousScope, outgoingPath)
+
+    if (previousScope === 'diary' && outgoingPath && scopeForWorkspacePath(outgoingPath) === 'diary') {
+      const tab = tabs.value.find((candidate) => candidate.path === outgoingPath)
+      if (!tab || tab.loading || tab.loadError) return false
+
+      try {
+        await doSaveNow(outgoingPath)
+      } catch {
+        return false
+      }
+
+      const savedTab = tabs.value.find((candidate) => candidate.path === outgoingPath)
+      if (
+        activeScope.value !== 'diary'
+        || activePath.value !== outgoingPath
+        || !savedTab
+        || savedTab.loading
+        || savedTab.loadError
+        || savedTab.raw !== savedTab.originalRaw
+        || savedTab.revision !== savedTab.savedRevision
+        || savedTab.savingRevision !== null
+        || savedTab.externalRaw != null
+        || ['error', 'offline', 'external', 'saving'].includes(savedTab.saveStatus)
+      ) return false
+    }
+
+    if (scope === 'diary') await resumeDeferredDiaryTabs()
+
+    const targetPath = resolveScopeDocumentPath(scope)
+    recoveryTabs.deactivate()
+    historyComparisons.deactivate()
+    workingTreeDiffs.deactivate()
+
+    applyingScopeTransition = true
+    try {
+      selectScope(scope)
+      rememberScopePath(scope, targetPath)
+      if (targetPath) {
+        selectEditorTab(targetPath)
+        await router.replace(pathToUrl(targetPath))
+      } else {
+        activePath.value = null
+        await router.replace('/vault')
+      }
+    } finally {
+      applyingScopeTransition = false
+    }
+
+    return activeScope.value === scope
+      && (targetPath ? activePath.value === targetPath && route.path === pathToUrl(targetPath)
+        : activePath.value === null && route.path === '/vault')
+  })()
+
+  scopeTransition = transition
+  try {
+    return await transition
+  } finally {
+    if (scopeTransition === transition) scopeTransition = null
+  }
 }
 
 const registeredDiaryBackCommand = () => { void backToDiaryHome() }
 if (appShell?.diaryBackCommand) {
   appShell.diaryBackCommand.value = registeredDiaryBackCommand
 }
+if (appShell?.vaultScopeChangeCommand) {
+  appShell.vaultScopeChangeCommand.value = changeVaultScope
+}
 onBeforeUnmount(() => {
   if (appShell?.diaryBackCommand?.value === registeredDiaryBackCommand) {
     appShell.diaryBackCommand.value = null
+  }
+  if (appShell?.vaultScopeChangeCommand?.value === changeVaultScope) {
+    appShell.vaultScopeChangeCommand.value = null
   }
 })
 

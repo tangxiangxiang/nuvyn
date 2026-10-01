@@ -40,6 +40,7 @@ const settingsRequestTick = ref(0)
 const ledgerSettingsOpen = ref(false)
 const diaryCalendarVisible = ref(false)
 const diaryBackCommand = ref<(() => void | Promise<void>) | null>(null)
+const vaultScopeChangeCommand = ref<((scope: 'note' | 'diary') => Promise<boolean>) | null>(null)
 const globalSearchHost = ref<{ show: () => void } | null>(null)
 const boardRecoveryStore = createIndexedDbBoardCheckpointStore()
 
@@ -56,6 +57,7 @@ provide(AppShellContextKey, {
   settingsRequestTick,
   diaryCalendarVisible,
   diaryBackCommand,
+  vaultScopeChangeCommand,
   openGlobalSearch: onOpenSearch,
 })
 
@@ -163,7 +165,15 @@ async function requestDiaryAccess(): Promise<boolean> {
 async function requestScopeChange(scope: ScopeKey): Promise<void> {
   if (scope === activeScope.value) return
   if (scope === 'diary') {
-    if (await requestDiaryAccess()) selectScope('diary')
+    if (!(await requestDiaryAccess())) return
+  }
+  const scopeTransition = vaultScopeChangeCommand.value
+  if (
+    (scope === 'note' || scope === 'diary')
+    && route.path.startsWith('/vault')
+    && scopeTransition
+  ) {
+    await scopeTransition(scope)
     return
   }
   selectScope(scope)
