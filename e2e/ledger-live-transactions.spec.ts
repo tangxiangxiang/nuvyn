@@ -29,6 +29,17 @@ type AccountLayoutMetrics = {
   documentScrollHeight: number
 }
 
+type AccountRowPresentation = {
+  flexDirection: string
+  alignItems: string
+  minHeight: string
+  nameFlexGrow: string
+  amountFlexShrink: string
+  amountWhiteSpace: string
+  amountInsideRow: boolean
+  nameBeforeAmount: boolean
+}
+
 async function readAccountLayoutMetrics(page: import('@playwright/test').Page): Promise<AccountLayoutMetrics> {
   return await page.evaluate(() => {
     function box(element: Element): Box {
@@ -67,6 +78,30 @@ async function readAccountLayoutMetrics(page: import('@playwright/test').Page): 
       documentScrollHeight: Math.max(document.documentElement.scrollHeight, document.body.scrollHeight),
     }
   })
+}
+
+async function readAccountRowPresentation(page: import('@playwright/test').Page): Promise<AccountRowPresentation[]> {
+  return await page.locator('.ledger-account-list .ledger-account-row').evaluateAll((rows) => rows.map((row) => {
+    const name = row.querySelector<HTMLElement>('.ledger-account-name')
+    const amount = row.querySelector<HTMLElement>('.ledger-account-balance')
+    if (!name || !amount) throw new Error('Account row contents are missing')
+
+    const rowRect = row.getBoundingClientRect()
+    const nameRect = name.getBoundingClientRect()
+    const amountRect = amount.getBoundingClientRect()
+    const rowStyle = getComputedStyle(row)
+
+    return {
+      flexDirection: rowStyle.flexDirection,
+      alignItems: rowStyle.alignItems,
+      minHeight: rowStyle.minHeight,
+      nameFlexGrow: getComputedStyle(name).flexGrow,
+      amountFlexShrink: getComputedStyle(amount).flexShrink,
+      amountWhiteSpace: getComputedStyle(amount).whiteSpace,
+      amountInsideRow: amountRect.left >= rowRect.left && amountRect.right <= rowRect.right,
+      nameBeforeAmount: nameRect.right <= amountRect.left,
+    }
+  }))
 }
 
 function assertDesktopContainment(metrics: AccountLayoutMetrics, viewport: Viewport): void {
@@ -250,6 +285,13 @@ test('Accounts cards and lists use the desktop workspace height without mobile r
     await expect(page.getByTestId('ledger-archived-account-list').or(page.getByTestId('ledger-archived-account-empty'))).toBeVisible()
     const metrics = await readAccountLayoutMetrics(page)
     assertDesktopContainment(metrics, viewport)
+    const rowPresentations = await readAccountRowPresentation(page)
+    expect(rowPresentations.length).toBeGreaterThan(0)
+    for (const row of rowPresentations) {
+      expect(row.flexDirection).toBe('row')
+      expect(row.minHeight).toBe('64px')
+      expect(row.nameFlexGrow).toBe('0')
+    }
     desktopMetrics.push(metrics)
   }
 
@@ -267,6 +309,14 @@ test('Accounts cards and lists use the desktop workspace height without mobile r
   await expect(page.getByTestId('ledger-active-account-list').or(page.getByTestId('ledger-active-account-empty'))).toBeVisible()
   await expect(page.getByTestId('ledger-archived-account-list').or(page.getByTestId('ledger-archived-account-empty'))).toBeVisible()
   const mobileMetrics = await readAccountLayoutMetrics(page)
+  const mobileAccountFilterOpacities = await page.locator('.ledger-account-type-filter').evaluateAll((filters) => filters.map((filter) => getComputedStyle(filter).opacity))
+  expect(mobileAccountFilterOpacities.length).toBeGreaterThan(0)
+  expect(mobileAccountFilterOpacities.every((opacity) => opacity === '1')).toBe(true)
+  expect(mobileMetrics.lists.length).toBeGreaterThan(0)
+  for (const list of mobileMetrics.lists) {
+    expect(list.overflowY).toBe('visible')
+    expect(list.scrollHeight).toBeLessThanOrEqual(list.clientHeight + 1)
+  }
   expect(mobileMetrics.cards[0]).toBeTruthy()
   expect(mobileMetrics.cards[1]).toBeTruthy()
   if (mobileMetrics.cards[0] && mobileMetrics.cards[1]) {
@@ -274,6 +324,18 @@ test('Accounts cards and lists use the desktop workspace height without mobile r
     expect(mobileMetrics.cards[1].top).toBeGreaterThanOrEqual(mobileMetrics.cards[0].bottom - 1)
   }
   await expect(page.locator('.ledger-account-list .ledger-account-row').first()).toBeVisible()
+  const mobileRows = await readAccountRowPresentation(page)
+  expect(mobileRows.length).toBeGreaterThan(0)
+  for (const row of mobileRows) {
+    expect(row.flexDirection).toBe('row')
+    expect(row.alignItems).toBe('center')
+    expect(row.minHeight).toBe('0px')
+    expect(row.nameFlexGrow).toBe('1')
+    expect(row.amountFlexShrink).toBe('0')
+    expect(row.amountWhiteSpace).toBe('nowrap')
+    expect(row.amountInsideRow).toBe(true)
+    expect(row.nameBeforeAmount).toBe(true)
+  }
 })
 
 test('transaction statistics exclusion keeps the row visible and is reversible from the context menu', async ({ page, request }) => {

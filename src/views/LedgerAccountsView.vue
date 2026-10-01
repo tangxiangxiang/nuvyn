@@ -331,7 +331,13 @@ function onAccountSaved(): void {
   .ledger-accounts-page { padding: 28px 16px 48px; }
   .ledger-page-header { align-items: stretch; flex-direction: column; }
   .ledger-page-actions > * { flex: 1 1 150px; }
-  .ledger-account-row { align-items: flex-start; flex-direction: column; }
+  .ledger-account-section { height: auto; }
+  .ledger-account-section :deep(.n-card__content) { height: auto; overflow: visible; }
+  .ledger-account-list { height: auto; flex: 0 0 auto; overflow-y: visible; overscroll-behavior: auto; }
+  .ledger-account-type-filter { opacity: 1; }
+  .ledger-account-row { align-items: center; flex-direction: row; gap: 12px; min-height: 0; padding: 10px; }
+  .ledger-account-name { flex: 1 1 0; }
+  .ledger-account-balance { white-space: nowrap; }
   .ledger-account-section :deep(.n-card__content) { padding: 16px 13px; }
   .ledger-account-sections { grid-template-columns: 1fr; }
   .ledger-account-create-modal-card { width: calc(100vw - 24px); max-height: 92vh; }
