@@ -334,7 +334,6 @@ function onAccountSaved(): void {
   .ledger-account-section { height: auto; }
   .ledger-account-section :deep(.n-card__content) { height: auto; overflow: visible; }
   .ledger-account-list { height: auto; flex: 0 0 auto; overflow-y: visible; overscroll-behavior: auto; }
-  .ledger-account-type-filter { opacity: 1; }
   .ledger-account-row { align-items: center; flex-direction: row; gap: 12px; min-height: 0; padding: 10px; }
   .ledger-account-name { flex: 1 1 0; }
   .ledger-account-balance { white-space: nowrap; }

@@ -309,9 +309,6 @@ test('Accounts cards and lists use the desktop workspace height without mobile r
   await expect(page.getByTestId('ledger-active-account-list').or(page.getByTestId('ledger-active-account-empty'))).toBeVisible()
   await expect(page.getByTestId('ledger-archived-account-list').or(page.getByTestId('ledger-archived-account-empty'))).toBeVisible()
   const mobileMetrics = await readAccountLayoutMetrics(page)
-  const mobileAccountFilterOpacities = await page.locator('.ledger-account-type-filter').evaluateAll((filters) => filters.map((filter) => getComputedStyle(filter).opacity))
-  expect(mobileAccountFilterOpacities.length).toBeGreaterThan(0)
-  expect(mobileAccountFilterOpacities.every((opacity) => opacity === '1')).toBe(true)
   expect(mobileMetrics.lists.length).toBeGreaterThan(0)
   for (const list of mobileMetrics.lists) {
     expect(list.overflowY).toBe('visible')
