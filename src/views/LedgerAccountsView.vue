@@ -159,7 +159,7 @@ function onAccountSaved(): void {
           <div class="ledger-section-heading">
             <div>
               <h2 id="ledger-archived-accounts-title">已归档账户 <span class="ledger-count"><NNumberAnimation :from="0" :to="sortedArchivedAccounts.length" :duration="2000" /></span></h2>
-              <p>历史记录仍然保留；恢复后可以再次用于记账。</p>
+              <p>历史记录保留，恢复后可继续记账。</p>
             </div>
             <NSelect v-model:value="archivedAccountTypeFilter" class="ledger-account-type-filter" size="small" :options="accountTypeOptions" :consistent-menu-width="false" aria-label="已归档账户类型" />
           </div>
