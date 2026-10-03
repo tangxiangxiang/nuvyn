@@ -393,6 +393,10 @@ test('native Edit keeps the same tab and unsaved raw across presentation toggles
       { width: 320, height: 700 },
     ]) {
       await page.setViewportSize(viewport)
+      // matchMedia changes reach Vue after the browser viewport changes.
+      // Measure only once the navigation has adopted this breakpoint.
+      await expect(page.locator('.workspace-navigation .scope-chip')).toHaveCount(viewport.width <= 600 ? 2 : 3)
+      await expect(page.locator('.workspace-board-link')).toHaveCount(viewport.width <= 600 ? 0 : 1)
       await expect(page.locator('.reading-pane')).toBeVisible()
       const overflow = await page.evaluate(() => ({
         viewport: window.innerWidth,

@@ -1114,16 +1114,30 @@ test('native READ and EDIT remain usable across panel states, breakpoints, and r
       { width: 768, height: 1024 },
       { width: 1280, height: 800 },
     ]
+    let leftPanelOpen = true
     for (const viewport of sequence) {
       await page.setViewportSize(viewport)
+      await expect(page.locator('.workspace-navigation .scope-chip')).toHaveCount(viewport.width <= 600 ? 2 : 3)
+      await expect(page.locator('.workspace-board-link')).toHaveCount(viewport.width <= 600 ? 0 : 1)
+      // Entering a mobile Diary viewport collapses the panel; resizing back
+      // to desktop preserves that choice instead of automatically reopening it.
+      if (viewport.width <= 600) leftPanelOpen = false
+      await expect(leftPanelToggle).toHaveAttribute('aria-pressed', String(leftPanelOpen))
       await expect(tab).toHaveCount(1)
       await expect(tab).toHaveAttribute('aria-selected', 'true')
       await expect(page.locator('.reading-pane')).toBeVisible()
-      if (await page.locator('.search-input').count()) await expect(page.locator('.search-input')).toHaveValue(date)
+      if (leftPanelOpen) {
+        await expect(page.locator('.file-tree')).toBeVisible()
+        await expect(page.locator('.search-input')).toHaveValue(date)
+      } else {
+        await expect(page.locator('.file-tree, .search-input')).toHaveCount(0)
+      }
       await assertNoDocumentOverflow(page)
       expect(new URL(page.url()).pathname).toBe(routeBeforeResize)
       expect((await (await request.get(`/api/posts/${path}`)).json() as { metadata?: { id?: string } }).metadata?.id).toBe(seeded.documentId)
     }
+    await ensureExplorerVisible(page)
+    await expect(page.locator('.search-input')).toHaveValue(date)
   } finally {
     await deletePost(request, path)
   }
