@@ -371,6 +371,125 @@ describe('Ledger live dashboard', () => {
     expect(wrapper.get('[data-testid="ledger-period-today"]').text()).not.toContain('-¥38.00')
   })
 
+  it('labels the day summary from its own date while a local read is pending and after returning to today', async () => {
+    const wrapper = mount(LedgerView)
+    wrappers.push(wrapper)
+    await flushPromises()
+
+    const periodCard = wrapper.get('[data-testid="ledger-period-today"]')
+    const picker = datePickerFor(wrapper, 'ledger-period-date')
+    expect(periodCard.get('h3').text()).toBe('今天')
+
+    const pending = deferred<LedgerOverviewDto>()
+    api.getLedgerOverview.mockReturnValueOnce(pending.promise)
+    picker.vm.$emit('update:modelValue', '2026-09-04')
+    await nextTick()
+
+    expect(periodCard.get('h3').text()).toBe('当天')
+    expect(picker.props('label')).toBe('当天日期')
+    expect(periodCard.find('[data-testid="ledger-period-loading-today"]').exists()).toBe(true)
+    expect(useLedgerStore().overview.value?.context.anchorDate).toBe('2026-09-05')
+    expect(wrapper.get('[data-testid="ledger-period-month"] h3').text()).toBe('本月')
+
+    pending.resolve(overviewFor('2026-09-04'))
+    await flushPromises()
+    expect(periodCard.get('h3').text()).toBe('当天')
+
+    picker.vm.$emit('update:modelValue', '2026-09-05')
+    await flushPromises()
+    expect(periodCard.get('h3').text()).toBe('今天')
+    expect(picker.props('label')).toBe('今天日期')
+  })
+
+  it('labels a local today selection as today even when the main overview remains historical', async () => {
+    const wrapper = mount(LedgerView)
+    wrappers.push(wrapper)
+    await flushPromises()
+
+    const store = useLedgerStore()
+    store.setOverviewRequestContext({ scope: 'month', anchorDate: '2026-08-20' })
+    await store.refreshOverview()
+    await flushPromises()
+
+    const periodCard = wrapper.get('[data-testid="ledger-period-today"]')
+    expect(periodCard.get('h3').text()).toBe('当天')
+    expect(wrapper.get('[data-testid="ledger-period-year"] h3').text()).toBe('今年')
+
+    datePickerFor(wrapper, 'ledger-period-date').vm.$emit('update:modelValue', '2026-09-05')
+    await flushPromises()
+    expect(periodCard.get('h3').text()).toBe('今天')
+    expect(store.overview.value?.context.anchorDate).toBe('2026-08-20')
+    expect(wrapper.get('.ledger-cashflow-section h2').text()).toBe('所在月概览')
+  })
+
+  it.each([
+    { period: 'week', currentLabel: '本周', otherLabel: '所在周', otherDate: '2026-08-24', currentDate: '2026-08-31' },
+    { period: 'month', currentLabel: '本月', otherLabel: '所在月', otherDate: '2026-08-01', currentDate: '2026-09-01' },
+    { period: 'year', currentLabel: '今年', otherLabel: '所在年', otherDate: '2025-01-01', currentDate: '2026-01-01' },
+  ] as const)('labels the $period summary by its own calendar period independently of the main overview', async ({
+    period, currentLabel, otherLabel, otherDate, currentDate,
+  }) => {
+    const wrapper = mount(LedgerView)
+    wrappers.push(wrapper)
+    await flushPromises()
+
+    const card = wrapper.get(`[data-testid="ledger-period-${period}"]`)
+    const picker = datePickerFor(wrapper, `ledger-period-picker-${period}`)
+    expect(card.get('h3').text()).toBe(currentLabel)
+
+    picker.vm.$emit('update:modelValue', otherDate)
+    await nextTick()
+    expect(card.get('h3').text()).toBe(otherLabel)
+    expect(picker.props('label')).toBe(`${otherLabel}日期`)
+    await flushPromises()
+
+    // A different date can still belong to this week, month, or year.
+    picker.vm.$emit('update:modelValue', currentDate)
+    await flushPromises()
+    expect(card.get('h3').text()).toBe(currentLabel)
+    const store = useLedgerStore()
+    expect(store.overview.value?.context.anchorDate).toBe('2026-09-05')
+    expect(wrapper.get('[data-testid="ledger-period-today"] h3').text()).toBe('今天')
+
+    store.setOverviewRequestContext({ scope: 'month', anchorDate: '2025-08-20' })
+    await store.refreshOverview()
+    await flushPromises()
+    expect(wrapper.get(`[data-testid="ledger-period-${period}"] h3`).text()).toBe(otherLabel)
+
+    datePickerFor(wrapper, `ledger-period-picker-${period}`).vm.$emit('update:modelValue', currentDate)
+    await flushPromises()
+    expect(wrapper.get(`[data-testid="ledger-period-${period}"] h3`).text()).toBe(currentLabel)
+    expect(store.overview.value?.context.anchorDate).toBe('2025-08-20')
+    expect(wrapper.get('.ledger-cashflow-section h2').text()).toBe('所在月概览')
+  })
+
+  it('compares complete ISO weeks across calendar-year boundaries', async () => {
+    api.getLedgerOverview.mockImplementation((input: { scope: LedgerOverviewDto['context']['scope']; anchorDate?: string }) => Promise.resolve({
+      ...overview(),
+      context: {
+        scope: input.scope,
+        anchorDate: input.anchorDate ?? '2026-01-02',
+        todayDate: '2026-01-02',
+        isToday: input.anchorDate === undefined || input.anchorDate === '2026-01-02',
+      },
+    }))
+    const wrapper = mount(LedgerView)
+    wrappers.push(wrapper)
+    await flushPromises()
+
+    const card = wrapper.get('[data-testid="ledger-period-week"]')
+    const picker = datePickerFor(wrapper, 'ledger-period-picker-week')
+    for (const [date, label] of [
+      ['2025-12-29', '本周'],
+      ['2025-12-28', '所在周'],
+      ['2024-12-30', '所在周'],
+    ]) {
+      picker.vm.$emit('update:modelValue', date)
+      await flushPromises()
+      expect(card.get('h3').text()).toBe(label)
+    }
+  })
+
   it('does not present stale period amounts while a local request is pending or fails', async () => {
     const wrapper = mount(LedgerView)
     wrappers.push(wrapper)
@@ -388,6 +507,7 @@ describe('Ledger live dashboard', () => {
     pending.reject(new LedgerApiError('period unavailable', 500, 'ledger-internal-error'))
     await flushPromises()
 
+    expect(periodCard.get('h3').text()).toBe('当天')
     expect(periodCard.text()).not.toContain('-¥38.00')
     expect(periodCard.get('[data-testid="ledger-period-error-today"]').text()).toContain('该期间数据暂时无法加载')
     expect(periodCard.get('[data-testid="ledger-period-error-today"]').text()).toContain('重试')

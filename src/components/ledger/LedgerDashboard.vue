@@ -219,11 +219,18 @@ function showScrollbarWhileScrolling(event: Event): void {
   }, 700))
 }
 
+function isCurrentPeriod(period: LedgerPeriodName): boolean {
+  const anchorDate = periodDateInputs.value[period]
+  const todayDate = dateMax.value
+  if (!anchorDate || !todayDate) return true
+  return formatLedgerPeriodPickerLabel(period, anchorDate) === formatLedgerPeriodPickerLabel(period, todayDate)
+}
+
 const periodLabels = computed<Record<LedgerPeriodName, string>>(() => ({
-  today: historicalMode.value ? '当日' : '今天',
-  week: historicalMode.value ? '所在周' : '本周',
-  month: historicalMode.value ? '所在月' : '本月',
-  year: historicalMode.value ? '所在年' : '今年',
+  today: isCurrentPeriod('today') ? '今天' : '当天',
+  week: isCurrentPeriod('week') ? '本周' : '所在周',
+  month: isCurrentPeriod('month') ? '本月' : '所在月',
+  year: isCurrentPeriod('year') ? '今年' : '所在年',
 }))
 const periodPickerTypes: Record<LedgerPeriodName, 'date' | 'week' | 'month' | 'year'> = {
   today: 'date',
@@ -1972,10 +1979,12 @@ function animatedMoneyParts(minor: number, currency: string, key: MetricKey): { 
     border-left: 0;
   }
   .ledger-dashboard-account-list-viewport { max-height: 360px; }
-  .ledger-period-heading { flex-direction: column; }
+  .ledger-period-heading-copy {
+    flex: 1;
+    align-self: center;
+  }
   .ledger-period-toolbar {
-    width: 100%;
-    justify-content: flex-start;
+    flex: 0 0 auto;
   }
 }
 
@@ -2037,11 +2046,6 @@ function animatedMoneyParts(minor: number, currency: string, key: MetricKey): { 
   }
   .ledger-period-card:first-child :deep(.n-card__content) { padding-top: 0; }
   .ledger-period-card:last-child :deep(.n-card__content) { padding-bottom: 0; }
-  .ledger-period-toolbar :deep(.ledger-period-scope) {
-    flex: 1 1 96px;
-    min-width: 0;
-    width: auto;
-  }
   .ledger-recent-row {
     grid-template-columns: 30px minmax(0, 1fr) auto;
     gap: 8px;

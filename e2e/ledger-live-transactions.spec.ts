@@ -262,6 +262,35 @@ test('real Ledger onboarding and expense survive dashboard refresh', async ({ pa
     expect(metrics.overflowY).toBe('visible')
     expect(metrics.scrollHeight).toBeLessThanOrEqual(metrics.clientHeight)
   }
+
+  for (const width of [320, 375, 390, 430, 440, 441, 600, 760, 761, 1280]) {
+    await page.setViewportSize({ width, height: 844 })
+    await page.locator('.ledger-period-scope').hover()
+    await expect(page.locator('.ledger-period-scope')).toHaveCSS('opacity', '1')
+    const alignment = await page.locator('.ledger-period-toolbar').evaluate((toolbar) => {
+      const heading = toolbar.closest<HTMLElement>('.ledger-period-heading')
+      const title = heading?.querySelector<HTMLElement>('h2')
+      const selection = toolbar.querySelector<HTMLElement>('.ledger-period-scope .n-base-selection')
+      if (!heading || !title || !selection) throw new Error('收支期间标题或选择器不存在')
+
+      const titleRect = title.getBoundingClientRect()
+      const selectionRect = selection.getBoundingClientRect()
+
+      return {
+        headingRight: heading.getBoundingClientRect().right,
+        toolbarRight: toolbar.getBoundingClientRect().right,
+        selectionRight: selectionRect.right,
+        titleBeforeSelection: titleRect.right <= selectionRect.left,
+        sameRow: titleRect.top < selectionRect.bottom && selectionRect.top < titleRect.bottom,
+      }
+    })
+    expect(Math.abs(alignment.toolbarRight - alignment.selectionRight), `${width}px selector right edge`)
+      .toBeLessThanOrEqual(1)
+    expect(Math.abs(alignment.headingRight - alignment.selectionRight), `${width}px selector aligned to heading right`)
+      .toBeLessThanOrEqual(1)
+    expect(alignment.titleBeforeSelection, `${width}px title and selector do not overlap`).toBe(true)
+    expect(alignment.sameRow, `${width}px title and selector share one row`).toBe(true)
+  }
 })
 
 // This file owns the fresh Ledger onboarding case first. Tests below may call
