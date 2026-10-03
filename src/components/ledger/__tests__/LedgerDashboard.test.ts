@@ -27,8 +27,13 @@ const api = vi.hoisted(() => ({
   getLedgerTrend: vi.fn(),
   listLedgerTransactions: vi.fn(),
 }))
+const analysisExport = vi.hoisted(() => ({
+  loadLedgerAnalysisExport: vi.fn(),
+  downloadLedgerAnalysisExport: vi.fn(),
+}))
 
 vi.mock('../../../features/ledger/api', () => api)
+vi.mock('../../../features/ledger/ledgerAnalysisExport', () => analysisExport)
 
 // jsdom has no canvas, so the chart's DOM-owning entry point is stubbed. The
 // chart's own suite covers what it renders.
@@ -265,6 +270,229 @@ describe('Ledger live dashboard', () => {
 
   afterEach(() => {
     for (const wrapper of wrappers.splice(0)) wrapper.unmount()
+  })
+
+  describe('Ledger analysis export shortcut', () => {
+    const exportData = { version: 1, exportedAt: '2026-10-01T00:00:00.000Z', currency: 'CNY', timezone: 'Asia/Shanghai', accounts: [], transactions: [] }
+
+    beforeEach(() => {
+      vi.stubGlobal('matchMedia', vi.fn((media: string) => ({
+        matches: media === '(hover: hover) and (pointer: fine)', media,
+        addEventListener: vi.fn(), removeEventListener: vi.fn(), addListener: vi.fn(), removeListener: vi.fn(),
+      })))
+      analysisExport.loadLedgerAnalysisExport.mockReset().mockResolvedValue(exportData)
+      analysisExport.downloadLedgerAnalysisExport.mockReset()
+    })
+
+    afterEach(() => {
+      for (const wrapper of wrappers.splice(0)) wrapper.unmount()
+      vi.unstubAllGlobals()
+      vi.restoreAllMocks()
+    })
+
+    async function mountExportTarget() {
+      const wrapper = mount(LedgerView)
+      wrappers.push(wrapper)
+      await flushPromises()
+      const eyebrow = wrapper.get('.ledger-eyebrow')
+      expect(eyebrow.element.textContent).toBe('Ledger')
+      expect(eyebrow.findAll('span')).toHaveLength(1)
+      const target = eyebrow.get('span')
+      expect(target.text()).toBe('Ledger')
+      expect(target.attributes()).not.toHaveProperty('tabindex')
+      expect(target.attributes()).not.toHaveProperty('title')
+      expect(target.attributes()).not.toHaveProperty('role')
+      expect(target.attributes()).not.toHaveProperty('aria-label')
+      return { wrapper, target, eyebrow }
+    }
+
+    function pressExportKey(init: KeyboardEventInit = {}): KeyboardEvent {
+      const event = new KeyboardEvent('keydown', { key: 'e', bubbles: true, cancelable: true, ...init })
+      window.dispatchEvent(event)
+      return event
+    }
+
+    it('requires hover and stops responding immediately on mouseleave', async () => {
+      const { target } = await mountExportTarget()
+      pressExportKey()
+      expect(analysisExport.loadLedgerAnalysisExport).not.toHaveBeenCalled()
+      await target.trigger('mouseenter')
+      expect(analysisExport.loadLedgerAnalysisExport).not.toHaveBeenCalled()
+      pressExportKey()
+      await flushPromises()
+      expect(analysisExport.loadLedgerAnalysisExport).toHaveBeenCalledOnce()
+      expect(analysisExport.downloadLedgerAnalysisExport).toHaveBeenCalledWith(exportData)
+      await target.trigger('mouseleave')
+      pressExportKey()
+      expect(analysisExport.loadLedgerAnalysisExport).toHaveBeenCalledOnce()
+      await target.trigger('mouseenter')
+      pressExportKey()
+      await flushPromises()
+      expect(analysisExport.loadLedgerAnalysisExport).toHaveBeenCalledTimes(2)
+    })
+
+    it.each([
+      { key: 'e' }, { key: 'E' }, { key: 'E', shiftKey: true },
+    ])('accepts E or e, including Shift + E (%j)', async (init) => {
+      const { target } = await mountExportTarget()
+      await target.trigger('mouseenter')
+      pressExportKey(init)
+      await flushPromises()
+      expect(analysisExport.loadLedgerAnalysisExport).toHaveBeenCalledOnce()
+    })
+
+    it.each([
+      { ctrlKey: true }, { metaKey: true }, { altKey: true }, { key: 'x' }, { isComposing: true },
+    ])('ignores modifier shortcuts, other keys and composition without consuming the event (%j)', async (init) => {
+      const { target } = await mountExportTarget()
+      await target.trigger('mouseenter')
+      const event = pressExportKey(init)
+      expect(analysisExport.loadLedgerAnalysisExport).not.toHaveBeenCalled()
+      expect(event.defaultPrevented).toBe(false)
+    })
+
+    it('ignores key repeats while allowing later distinct presses after completion', async () => {
+      const { target } = await mountExportTarget()
+      await target.trigger('mouseenter')
+      pressExportKey()
+      await flushPromises()
+      pressExportKey({ repeat: true })
+      expect(analysisExport.loadLedgerAnalysisExport).toHaveBeenCalledOnce()
+      pressExportKey()
+      await flushPromises()
+      expect(analysisExport.loadLedgerAnalysisExport).toHaveBeenCalledTimes(2)
+    })
+
+    it('does not start an overlapping export while the previous request is running', async () => {
+      const pending = deferred<typeof exportData>()
+      analysisExport.loadLedgerAnalysisExport.mockReturnValueOnce(pending.promise)
+      const { target } = await mountExportTarget()
+      await target.trigger('mouseenter')
+      pressExportKey()
+      pressExportKey()
+      await target.trigger('mouseleave')
+      await target.trigger('mouseenter')
+      pressExportKey()
+      expect(analysisExport.loadLedgerAnalysisExport).toHaveBeenCalledOnce()
+      pending.resolve(exportData)
+      await flushPromises()
+      expect(analysisExport.downloadLedgerAnalysisExport).toHaveBeenCalledOnce()
+      pressExportKey()
+      await flushPromises()
+      expect(analysisExport.loadLedgerAnalysisExport).toHaveBeenCalledTimes(2)
+    })
+
+    it.each(['read', 'download'])('catches %s failures without UI changes and releases the running state', async (stage) => {
+      const error = new Error('network failed')
+      if (stage === 'read') analysisExport.loadLedgerAnalysisExport.mockRejectedValueOnce(error)
+      else analysisExport.downloadLedgerAnalysisExport.mockImplementationOnce(() => { throw error })
+      const log = vi.spyOn(console, 'error').mockImplementation(() => {})
+      const { wrapper, target } = await mountExportTarget()
+      await target.trigger('mouseenter')
+      pressExportKey()
+      await flushPromises()
+      expect(log).toHaveBeenCalledWith('Ledger analysis export failed', error)
+      expect(wrapper.text()).not.toContain('network failed')
+      pressExportKey()
+      await flushPromises()
+      expect(analysisExport.loadLedgerAnalysisExport).toHaveBeenCalledTimes(2)
+      expect(analysisExport.downloadLedgerAnalysisExport).toHaveBeenLastCalledWith(exportData)
+    })
+
+    it.each(['input', 'textarea', 'select'])('does not export when e is typed into a focused %s', async (tag) => {
+      const { target } = await mountExportTarget()
+      await target.trigger('mouseenter')
+      const input = document.createElement(tag)
+      document.body.appendChild(input)
+      try {
+        input.focus()
+        expect(document.activeElement).toBe(input)
+        input.dispatchEvent(new KeyboardEvent('keydown', { key: 'e', bubbles: true }))
+        expect(analysisExport.loadLedgerAnalysisExport).not.toHaveBeenCalled()
+      } finally {
+        input.remove()
+      }
+    })
+
+    it.each(['true', '', 'plaintext-only'])('blocks nested contenteditable targets (%s)', async (value) => {
+      const { target } = await mountExportTarget()
+      await target.trigger('mouseenter')
+      const editor = document.createElement('div')
+      editor.setAttribute('contenteditable', value)
+      const text = document.createElement('span')
+      editor.appendChild(text)
+      document.body.appendChild(editor)
+      try {
+        text.dispatchEvent(new KeyboardEvent('keydown', { key: 'e', bubbles: true }))
+        expect(analysisExport.loadLedgerAnalysisExport).not.toHaveBeenCalled()
+      } finally {
+        editor.remove()
+      }
+    })
+
+    it('respects native isContentEditable and shadow-root editable event paths', async () => {
+      const { target } = await mountExportTarget()
+      await target.trigger('mouseenter')
+      const editor = document.createElement('div')
+      Object.defineProperty(editor, 'isContentEditable', { value: true })
+      const host = document.createElement('div')
+      const shadow = host.attachShadow({ mode: 'open' })
+      shadow.appendChild(editor)
+      document.body.appendChild(host)
+      try {
+        editor.dispatchEvent(new KeyboardEvent('keydown', { key: 'e', bubbles: true, composed: true }))
+        expect(analysisExport.loadLedgerAnalysisExport).not.toHaveBeenCalled()
+      } finally {
+        host.remove()
+      }
+    })
+
+    it('registers only once per hover and removes the keyboard listener on unmount', async () => {
+      const { wrapper, target } = await mountExportTarget()
+      const add = vi.spyOn(window, 'addEventListener')
+      const remove = vi.spyOn(window, 'removeEventListener')
+      await target.trigger('mouseenter')
+      await target.trigger('mouseenter')
+      const keydownCalls = add.mock.calls.filter(([name]) => name === 'keydown')
+      expect(keydownCalls).toHaveLength(1)
+      wrapper.unmount()
+      wrappers.splice(wrappers.indexOf(wrapper), 1)
+      expect(remove).toHaveBeenCalledWith('keydown', keydownCalls[0]![1])
+      pressExportKey()
+      expect(analysisExport.loadLedgerAnalysisExport).not.toHaveBeenCalled()
+    })
+
+    it('does not download a pending export after the component is unmounted', async () => {
+      const pending = deferred<typeof exportData>()
+      analysisExport.loadLedgerAnalysisExport.mockReturnValueOnce(pending.promise)
+      const { wrapper, target } = await mountExportTarget()
+      await target.trigger('mouseenter')
+      pressExportKey()
+      wrapper.unmount()
+      wrappers.splice(wrappers.indexOf(wrapper), 1)
+      pending.resolve(exportData)
+      await flushPromises()
+      expect(analysisExport.downloadLedgerAnalysisExport).not.toHaveBeenCalled()
+    })
+
+    it.each([false, undefined])('does not register without hover and fine-pointer capability (%s)', async (matches) => {
+      vi.stubGlobal('matchMedia', matches === undefined ? undefined : vi.fn(() => ({ matches })))
+      const { target } = await mountExportTarget()
+      const add = vi.spyOn(window, 'addEventListener')
+      await target.trigger('mouseenter')
+      pressExportKey()
+      expect(add.mock.calls.filter(([name]) => name === 'keydown')).toHaveLength(0)
+      expect(analysisExport.loadLedgerAnalysisExport).not.toHaveBeenCalled()
+    })
+
+    it('does not activate from whitespace outside the text or touch events', async () => {
+      const { target, eyebrow } = await mountExportTarget()
+      await eyebrow.trigger('mouseenter')
+      await target.trigger('touchstart')
+      await target.trigger('pointerdown', { pointerType: 'touch' })
+      pressExportKey()
+      expect(analysisExport.loadLedgerAnalysisExport).not.toHaveBeenCalled()
+    })
   })
 
   it('renders live data and recent real transactions without mock data', async () => {

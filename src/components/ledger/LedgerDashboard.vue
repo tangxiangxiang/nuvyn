@@ -2,6 +2,7 @@
 import { computed, onBeforeUnmount, reactive, ref, watch } from 'vue'
 import { NAlert, NButton, NCard, NEmpty, NFlex, NIcon, NList, NListItem, NNumberAnimation, NSelect, NSpin, NStatistic, type SelectOption } from 'naive-ui'
 import { CreditCard, Scale, Wallet } from '@vicons/tabler'
+import { isNuvynShortcutBlocked } from '../../lib/keyboard'
 import type {
   LedgerOverviewDto,
   LedgerOverviewScope,
@@ -16,6 +17,7 @@ import { formatLedgerDate, formatLedgerDateTime, formatLedgerPeriodPickerLabel, 
 import { ledgerSelectNodeProps } from '../../features/ledger/naiveControls'
 import { calendarDateFromNaivePickerTimestamp } from '../../features/ledger/naiveTemporal'
 import { useLedgerStore } from '../../features/ledger/ledgerStore'
+import { downloadLedgerAnalysisExport, loadLedgerAnalysisExport } from '../../features/ledger/ledgerAnalysisExport'
 import LedgerCashflowTrend from './LedgerCashflowTrend.vue'
 import LedgerDatePicker from './LedgerDatePicker.vue'
 import LedgerAnimatedMoney from './LedgerAnimatedMoney.vue'
@@ -33,6 +35,56 @@ const emit = defineEmits<{
   inspectTransaction: [transaction: LedgerTransactionDto]
 }>()
 const store = useLedgerStore()
+let ledgerEyebrowHovered = false
+let ledgerAnalysisExportRunning = false
+let ledgerAnalysisExportDisposed = false
+
+function supportsLedgerAnalysisHover(): boolean {
+  return typeof window.matchMedia === 'function'
+    && window.matchMedia('(hover: hover) and (pointer: fine)').matches
+}
+
+function leaveLedgerEyebrow(): void {
+  ledgerEyebrowHovered = false
+  window.removeEventListener('keydown', onLedgerAnalysisKeydown)
+}
+
+async function runLedgerAnalysisExport(): Promise<void> {
+  ledgerAnalysisExportRunning = true
+  try {
+    const data = await loadLedgerAnalysisExport()
+    if (!ledgerAnalysisExportDisposed) downloadLedgerAnalysisExport(data)
+  } catch (error) {
+    console.error('Ledger analysis export failed', error)
+  } finally {
+    ledgerAnalysisExportRunning = false
+  }
+}
+
+function isLedgerAnalysisEditableEvent(event: KeyboardEvent): boolean {
+  return isNuvynShortcutBlocked(event)
+    || event.composedPath().some((target) => target instanceof HTMLElement && target.isContentEditable)
+}
+
+function onLedgerAnalysisKeydown(event: KeyboardEvent): void {
+  if (!ledgerEyebrowHovered || ledgerAnalysisExportDisposed || ledgerAnalysisExportRunning
+    || !supportsLedgerAnalysisHover() || event.key.toLowerCase() !== 'e'
+    || event.repeat || event.isComposing || event.defaultPrevented
+    || event.ctrlKey || event.metaKey || event.altKey || isLedgerAnalysisEditableEvent(event)) return
+  void runLedgerAnalysisExport()
+}
+
+function enterLedgerEyebrow(): void {
+  if (ledgerAnalysisExportDisposed || ledgerEyebrowHovered || !supportsLedgerAnalysisHover()) return
+  ledgerEyebrowHovered = true
+  window.addEventListener('keydown', onLedgerAnalysisKeydown)
+}
+
+onBeforeUnmount(() => {
+  ledgerAnalysisExportDisposed = true
+  leaveLedgerEyebrow()
+})
+
 const overview = computed(() => store.overview.value)
 const selectedScope = ref<LedgerOverviewScope>('month')
 const categoryScope = ref<LedgerOverviewScope>('month')
@@ -595,7 +647,7 @@ function animatedMoneyParts(minor: number, currency: string, key: MetricKey): { 
   <section class="ledger-dashboard" data-testid="ledger-dashboard" :aria-busy="refreshing ? 'true' : undefined">
     <header class="ledger-dashboard-header">
       <div>
-        <p class="ledger-eyebrow">Ledger</p>
+        <p class="ledger-eyebrow"><span @mouseenter="enterLedgerEyebrow" @mouseleave="leaveLedgerEyebrow">Ledger</span></p>
         <h1>财务概览</h1>
         <p v-if="store.settings.value">{{ store.settings.value.baseCurrency }} · {{ store.settings.value.timezone }}</p>
       </div>
