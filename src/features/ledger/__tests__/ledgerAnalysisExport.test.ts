@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { LedgerAccountDto, LedgerCategoryDto, LedgerSettingsDto, LedgerTransactionDto } from '../../../../shared/ledgerProtocol'
-import { downloadLedgerAnalysisExport, loadLedgerAnalysisExport } from '../ledgerAnalysisExport'
+import { createLedgerAnalysisExportCommand, downloadLedgerAnalysisExport, loadLedgerAnalysisExport } from '../ledgerAnalysisExport'
 
 const api = vi.hoisted(() => ({
   getLedgerSettings: vi.fn(),
@@ -214,17 +214,90 @@ describe('Ledger analysis data export', () => {
   })
 })
 
+describe('Ledger module export command', () => {
+  function observeDownloads() {
+    const createObjectURL = vi.fn(() => 'blob:ledger-command')
+    vi.stubGlobal('URL', { createObjectURL, revokeObjectURL: vi.fn() })
+    const click = vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => {})
+    return { createObjectURL, click }
+  }
+
+  it('does not read data outside its current module lifetime', async () => {
+    const { createObjectURL, click } = observeDownloads()
+    await createLedgerAnalysisExportCommand(() => false)()
+    expect(api.getLedgerSettings).not.toHaveBeenCalled()
+    expect(api.listLedgerTransactions).not.toHaveBeenCalled()
+    expect(createObjectURL).not.toHaveBeenCalled()
+    expect(click).not.toHaveBeenCalled()
+  })
+
+  it('runs the unchanged full-data export, prevents overlap, then allows a later export', async () => {
+    const { click } = observeDownloads()
+    let resolve!: (value: LedgerSettingsDto) => void
+    api.getLedgerSettings.mockReturnValueOnce(new Promise((done) => { resolve = done }))
+    const command = createLedgerAnalysisExportCommand(() => true)
+    const pending = command()
+    await command()
+    expect(api.getLedgerSettings).toHaveBeenCalledOnce()
+    resolve(settings)
+    await pending
+    expect(click).toHaveBeenCalledOnce()
+    await command()
+    expect(api.getLedgerSettings).toHaveBeenCalledTimes(2)
+    expect(click).toHaveBeenCalledTimes(2)
+    expect(api.listLedgerAccounts).toHaveBeenLastCalledWith(true)
+    expect(api.listLedgerTransactions).toHaveBeenLastCalledWith({ limit: 200, includeDeleted: true })
+  })
+
+  it('creates no Blob after module disposal while a body page is pending', async () => {
+    const { createObjectURL, click } = observeDownloads()
+    const blob = vi.fn()
+    vi.stubGlobal('Blob', blob)
+    let resolve!: (value: unknown) => void
+    api.listLedgerTransactions.mockReturnValueOnce(new Promise((done) => { resolve = done }))
+    let current = true
+    const command = createLedgerAnalysisExportCommand(() => current)
+    const pending = command()
+    await vi.waitFor(() => expect(api.listLedgerTransactions).toHaveBeenCalledOnce())
+    current = false
+    resolve({ transactions, page: { nextCursor: null, total: transactions.length } })
+    await pending
+    expect(blob).not.toHaveBeenCalled()
+    expect(createObjectURL).not.toHaveBeenCalled()
+    expect(click).not.toHaveBeenCalled()
+    await command()
+    expect(api.getLedgerSettings).toHaveBeenCalledOnce()
+  })
+
+  it.each(['read', 'download'])('catches %s failures generically and releases the running guard', async (stage) => {
+    const { click } = observeDownloads()
+    const error = Object.assign(new Error('private data context'), { transactions })
+    if (stage === 'read') api.listLedgerTransactions.mockRejectedValueOnce(error)
+    else click.mockImplementationOnce(() => { throw error })
+    const log = vi.spyOn(console, 'error').mockImplementation(() => {})
+    const command = createLedgerAnalysisExportCommand(() => true)
+    await command()
+    expect(log).toHaveBeenCalledExactlyOnceWith('Ledger analysis export failed')
+    expect(document.querySelector('a[download]')).toBeNull()
+    await command()
+    expect(api.listLedgerTransactions).toHaveBeenCalledTimes(2)
+    expect(click).toHaveBeenCalledTimes(stage === 'read' ? 1 : 2)
+  })
+})
+
 describe('Ledger analysis JSON download', () => {
   it.each([
-    ['Asia/Shanghai', '2026-10-02'],
-    ['Pacific/Honolulu', '2026-10-01'],
-  ])('uses the Ledger date in %s, readable UTF-8 JSON, and cleans up the download', async (timezone, date) => {
-    const data = { ...await loadLedgerAnalysisExport(), exportedAt: '2026-10-01T16:30:00.000Z', timezone }
+    ['Asia/Shanghai', '2026-10-02_00-30-09'],
+    ['Pacific/Honolulu', '2026-10-01_06-30-09'],
+    ['Asia/Kolkata', '2026-10-01_22-00-09'],
+  ])('uses the full Ledger-local timestamp in %s, readable UTF-8 JSON, and cleans up the download', async (timezone, timestamp) => {
+    const data = { ...await loadLedgerAnalysisExport(), exportedAt: '2026-10-01T16:30:09.000Z', timezone }
     const createObjectURL = vi.fn((_blob: Blob) => 'blob:ledger-analysis')
     const revokeObjectURL = vi.fn()
     vi.stubGlobal('URL', { createObjectURL, revokeObjectURL })
     const click = vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(function (this: HTMLAnchorElement) {
-      expect(this.download).toBe(`nuvyn-ledger-${date}.json`)
+      expect(this.download).toBe(`nuvyn-ledger-${timestamp}.json`)
+      expect(this.download).not.toMatch(/[<>:"/\\|?*]/)
       expect(this.href).toBe('blob:ledger-analysis')
       expect(this.isConnected).toBe(true)
       expect(this.hidden).toBe(true)
@@ -246,6 +319,20 @@ describe('Ledger analysis JSON download', () => {
     expect(json).not.toMatch(/^\uFEFF/)
     expect(revokeObjectURL).toHaveBeenCalledWith('blob:ledger-analysis')
     expect(document.querySelector('a[download]')).toBeNull()
+  })
+
+  it('distinguishes repeated exports on the same date down to the second', async () => {
+    const data = await loadLedgerAnalysisExport()
+    vi.stubGlobal('URL', { createObjectURL: vi.fn(() => 'blob:ledger-analysis'), revokeObjectURL: vi.fn() })
+    const filenames: string[] = []
+    vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(function (this: HTMLAnchorElement) {
+      filenames.push(this.download)
+    })
+
+    downloadLedgerAnalysisExport({ ...data, exportedAt: '2026-10-01T16:30:09.000Z' })
+    downloadLedgerAnalysisExport({ ...data, exportedAt: '2026-10-01T16:30:10.000Z' })
+
+    expect(filenames).toEqual(['nuvyn-ledger-2026-10-02_00-30-09.json', 'nuvyn-ledger-2026-10-02_00-30-10.json'])
   })
 
   it('removes the anchor and revokes the URL even if the browser download throws', async () => {

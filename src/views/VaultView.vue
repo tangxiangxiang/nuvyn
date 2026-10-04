@@ -91,6 +91,12 @@ import type { DiaryMoodId as MoodId } from '../../shared/diaryMood'
 import { handleDiaryHomeKeydown } from './diaryHomeKeyboard'
 import { createDiaryShortcutChord, isDiaryShortcutBlocked, isDiaryTextEntryContext } from './diaryShortcutChord'
 import FileTree from '../components/vault/FileTree.vue'
+import { projectFileTree } from '../components/vault/fileTreeProjection'
+import {
+  downloadDiaryAnalysisExport,
+  loadDiaryAnalysisExport,
+  managedDiaryPathsInProjection,
+} from '../features/diary/diaryAnalysisExport'
 import DiaryWorkspace from '../components/diary/DiaryWorkspace.vue'
 import DiaryCalendarSurface from '../components/diary/DiaryCalendarSurface.vue'
 import TagPanel from '../components/vault/TagPanel.vue'
@@ -134,6 +140,7 @@ import StatusBar from '../components/vault/StatusBar.vue'
 import { requireVaultId } from '../lib/vault-identity'
 import {
   buildTagIndex,
+  parseTagQuery,
   resolveTagBrowseSelection,
   toggleTagBrowseSelection,
 } from '../lib/tags'
@@ -2258,6 +2265,66 @@ watch(isDiaryCalendarVisible, (visible, wasVisible) => {
 
 const diaryMoodBusy = ref(false)
 const diaryMoodPreferences = useDiaryMoodIconPreferences()
+const filteredDiaryAnalysisPaths = computed(() => managedDiaryPathsInProjection(projectFileTree({
+  tree: tree.value,
+  posts: posts.value,
+  scope: activeScope.value,
+  query: parseTagQuery(filesFilter.value),
+  exactPathFilter: diaryExactPathFilter.value,
+})))
+let diaryAnalysisExportRunning = false
+let diaryAnalysisExportDisposed = false
+
+async function exportDiaryAnalysis(): Promise<void> {
+  if (diaryAnalysisExportRunning || diaryAnalysisExportDisposed
+    || activeScope.value !== 'diary' || !diaryAccess.isUnlocked.value) return
+  const sessionGeneration = captureDiarySessionGeneration()
+  let scopeCurrent = true
+  const isCurrent = () => scopeCurrent && !diaryAnalysisExportDisposed
+    && diaryAccess.isUnlocked.value
+    && isDiarySessionGenerationCurrent(sessionGeneration)
+  // Freeze the final projection and its display query before the first await.
+  // Exact-path provenance stays in the existing presentation owner.
+  const paths = [...filteredDiaryAnalysisPaths.value]
+  if (!paths.length) return
+  const moods = new Map(posts.value.map((post) => [post.path, post.mood ?? null]))
+  const snapshot = { filter: filesFilter.value, documents: paths.map((path) => ({ path, mood: moods.get(path) ?? null })) }
+  diaryAnalysisExportRunning = true
+  // Scope exit cancels this invocation permanently, even if Diary is entered
+  // again before a pending read resolves. This does not lock the session.
+  const stopScopeWatch = watch(activeScope, () => { scopeCurrent = false }, { flush: 'sync' })
+  try {
+    // Direct document routes need not have mounted Calendar Home (which
+    // normally loads these names). Reuse its preference owner, not raw SVGs.
+    await diaryMoodPreferences.load().catch(() => undefined)
+    if (!isCurrent()) return
+    const data = await loadDiaryAnalysisExport(snapshot, {
+      isCurrent,
+      liveRawForPath: (path) => {
+        const tab = tabs.value.find((candidate) => candidate.path === path)
+        return tab && !tab.loading && !tab.loadError ? tab.raw : undefined
+      },
+      customIconNames: { ...diaryMoodPreferences.customIconNames.value },
+      locale: locale.value,
+    })
+    if (data && isCurrent()) downloadDiaryAnalysisExport(data, isCurrent)
+  } catch {
+    if (isCurrent()) console.error('Diary analysis export failed')
+  } finally {
+    stopScopeWatch()
+    diaryAnalysisExportRunning = false
+  }
+}
+
+if (appShell?.diaryAnalysisExportCommand) {
+  appShell.diaryAnalysisExportCommand.value = exportDiaryAnalysis
+}
+onBeforeUnmount(() => {
+  diaryAnalysisExportDisposed = true
+  if (appShell?.diaryAnalysisExportCommand?.value === exportDiaryAnalysis) {
+    appShell.diaryAnalysisExportCommand.value = null
+  }
+})
 const diaryMoodCommand = useDiaryMoodCommand({
   mutationLock: historyMutationLock,
   onBusy: () => toast.info(t('mood.busy')),

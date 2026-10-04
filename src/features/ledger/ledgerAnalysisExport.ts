@@ -1,3 +1,4 @@
+import { Temporal } from '@js-temporal/polyfill'
 import type {
   LedgerAccountDto,
   LedgerAdjustmentTransactionDto,
@@ -7,7 +8,6 @@ import type {
   LedgerTransferTransactionDto,
 } from '../../../shared/ledgerProtocol'
 import { getLedgerSettings, listLedgerAccounts, listLedgerCategories, listLedgerTransactions } from './api'
-import { openingDateInputFromInstant } from './time'
 
 export type LedgerAnalysisAccountDto = Pick<LedgerAccountDto,
   | 'id' | 'name' | 'nature' | 'type'
@@ -118,15 +118,34 @@ export async function loadLedgerAnalysisExport(): Promise<LedgerAnalysisExportDt
   }
 }
 
+/** Module-owned lifetime guard; no gesture, route or UI ownership here. */
+export function createLedgerAnalysisExportCommand(isCurrent: () => boolean): () => Promise<void> {
+  let running = false
+  return async () => {
+    if (running || !isCurrent()) return
+    running = true
+    try {
+      const data = await loadLedgerAnalysisExport()
+      if (isCurrent()) downloadLedgerAnalysisExport(data)
+    } catch {
+      console.error('Ledger analysis export failed')
+    } finally {
+      running = false
+    }
+  }
+}
+
 export function downloadLedgerAnalysisExport(data: LedgerAnalysisExportDto): void {
-  const date = openingDateInputFromInstant(Date.parse(data.exportedAt), data.timezone)
+  const exportedAt = Temporal.Instant.from(data.exportedAt).toZonedDateTimeISO(data.timezone)
+  const date = exportedAt.toPlainDate().toString()
+  const time = [exportedAt.hour, exportedAt.minute, exportedAt.second].map((value) => String(value).padStart(2, '0')).join('-')
   const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' })
   const objectUrl = URL.createObjectURL(blob)
   let anchor: HTMLAnchorElement | undefined
   try {
     anchor = document.createElement('a')
     anchor.href = objectUrl
-    anchor.download = `nuvyn-ledger-${date}.json`
+    anchor.download = `nuvyn-ledger-${date}_${time}.json`
     anchor.hidden = true
     document.body.appendChild(anchor)
     anchor.click()

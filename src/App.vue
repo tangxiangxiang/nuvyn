@@ -25,6 +25,7 @@ import { documentSearchSource } from './lib/documentSearchSource'
 import { clearSearchReveal } from './composables/useSearchReveal'
 import { clearLinkNavigation } from './composables/useLinkNavigation'
 import { workspaceKindForPath, type ChromeStyle, type WorkspaceKind } from './lib/workspace'
+import { createLedgerAnalysisExportCommand } from './features/ledger/ledgerAnalysisExport'
 import { createIndexedDbBoardCheckpointStore } from './features/board/checkpointStore'
 import { NUVYN_BROWSER_STORAGE_KEYS, readStorageKey, writeStorageKey } from './technicalNamespace'
 
@@ -40,6 +41,8 @@ const settingsRequestTick = ref(0)
 const ledgerSettingsOpen = ref(false)
 const diaryCalendarVisible = ref(false)
 const diaryBackCommand = ref<(() => void | Promise<void>) | null>(null)
+const diaryAnalysisExportCommand = ref<(() => Promise<void>) | null>(null)
+const ledgerAnalysisExportCommand = ref<(() => Promise<void>) | null>(null)
 const vaultScopeChangeCommand = ref<((scope: 'note' | 'diary') => Promise<boolean>) | null>(null)
 const globalSearchHost = ref<{ show: () => void } | null>(null)
 const boardRecoveryStore = createIndexedDbBoardCheckpointStore()
@@ -57,6 +60,8 @@ provide(AppShellContextKey, {
   settingsRequestTick,
   diaryCalendarVisible,
   diaryBackCommand,
+  diaryAnalysisExportCommand,
+  ledgerAnalysisExportCommand,
   vaultScopeChangeCommand,
   openGlobalSearch: onOpenSearch,
 })
@@ -79,6 +84,21 @@ const isVaultRoute = computed(() => (
   && vaultIdentity.state.value === 'ready'
 ))
 const isLedgerRoute = computed(() => workspaceKind.value === 'ledger')
+// Ledger's sibling routes have no shared view owner. Keep one module command
+// across them, and invalidate it when leaving Ledger or changing auth owner.
+watch([isLedgerRoute, () => auth.state.value, () => auth.user.value?.username ?? null], ([isLedger, authState], _previous, onCleanup) => {
+  if (!isLedger || authState !== 'authenticated') {
+    ledgerAnalysisExportCommand.value = null
+    return
+  }
+  let current = true
+  const command = createLedgerAnalysisExportCommand(() => current)
+  ledgerAnalysisExportCommand.value = command
+  onCleanup(() => {
+    current = false
+    if (ledgerAnalysisExportCommand.value === command) ledgerAnalysisExportCommand.value = null
+  })
+}, { immediate: true, flush: 'sync' })
 const isWorkspaceChrome = computed(() => (
   auth.state.value === 'authenticated'
   && workspaceKind.value !== null

@@ -20,6 +20,10 @@ export interface AppShellContext {
   readonly diaryCalendarVisible: Ref<boolean>
   /** Vault-owned semantic action used by the global workspace navigation. */
   readonly diaryBackCommand?: Ref<(() => void | Promise<void>) | null>
+  /** Hidden chrome gesture; data/filter/session ownership stays in VaultView. */
+  readonly diaryAnalysisExportCommand?: Ref<(() => Promise<void>) | null>
+  /** Ledger module lifecycle owns availability; the export feature owns data. */
+  readonly ledgerAnalysisExportCommand?: Ref<(() => Promise<void>) | null>
   /** Switch Note/Diary presentation while preserving each scope's document context. */
   readonly vaultScopeChangeCommand?: Ref<((scope: 'note' | 'diary') => Promise<boolean>) | null>
 }

@@ -25,6 +25,8 @@ import { useI18n } from '../composables/useI18n'
 import { DiaryAccessContextKey } from '../composables/diary/diaryAccessContext'
 import { AppShellContextKey } from '../composables/appShellContext'
 import AccountMenu from './vault/AccountMenu.vue'
+import { isNuvynShortcutBlocked } from '../lib/keyboard'
+import { isDiaryShortcutBlocked, isDiaryTextEntryContext } from '../views/diaryShortcutChord'
 import {
   isWorkspaceNavigationAvailable,
   workspaceMobileNavigationQuery,
@@ -142,6 +144,60 @@ watch(activeScope, () => {
 }, { flush: 'sync' })
 const diaryAccess = inject(DiaryAccessContextKey, null)
 const appShell = inject(AppShellContextKey, null)
+
+let analysisExportHoveredScope: 'diary' | 'ledger' | null = null
+let analysisExportRunning = false
+let analysisExportDisposed = false
+
+function supportsAnalysisHover(): boolean {
+  return typeof window.matchMedia === 'function'
+    && window.matchMedia('(hover: hover) and (pointer: fine)').matches
+}
+
+function leaveAnalysisScopeChip(): void {
+  analysisExportHoveredScope = null
+  window.removeEventListener('keydown', onAnalysisExportKeydown)
+}
+
+function enterScopeChip(scope: ScopeKey): void {
+  if ((scope !== 'diary' && scope !== 'ledger') || analysisExportDisposed || !supportsAnalysisHover()) return
+  if (analysisExportHoveredScope === scope) return
+  leaveAnalysisScopeChip()
+  analysisExportHoveredScope = scope
+  window.addEventListener('keydown', onAnalysisExportKeydown)
+}
+
+async function runAnalysisExport(scope: 'diary' | 'ledger', command: () => Promise<void>): Promise<void> {
+  analysisExportRunning = true
+  try {
+    await command()
+  } catch {
+    // Never log an exception which might carry decrypted document context.
+    console.error(`${scope === 'diary' ? 'Diary' : 'Ledger'} analysis export failed`)
+  } finally {
+    analysisExportRunning = false
+  }
+}
+
+function onAnalysisExportKeydown(event: KeyboardEvent): void {
+  const scope = analysisExportHoveredScope
+  if (!scope || analysisExportDisposed || analysisExportRunning
+    || !isScopeActive(scope) || props.logoutBusy || !supportsAnalysisHover()
+    || event.key.toLowerCase() !== 'e' || event.repeat || event.isComposing || event.defaultPrevented
+    || event.ctrlKey || event.metaKey || event.altKey || isNuvynShortcutBlocked(event)
+    || isDiaryTextEntryContext(event) || isDiaryShortcutBlocked(event)
+    || event.composedPath().some((target) => target instanceof HTMLElement && target.isContentEditable)) return
+  if (scope === 'diary' && (!isVault.value || isLedger.value || !props.diaryUnlocked)) return
+  if (scope === 'ledger' && !isLedger.value) return
+  const command = scope === 'diary'
+    ? appShell?.diaryAnalysisExportCommand?.value
+    : appShell?.ledgerAnalysisExportCommand?.value
+  if (command) void runAnalysisExport(scope, command)
+}
+
+watch(showScopeChips, (visible) => {
+  if (!visible) leaveAnalysisScopeChip()
+}, { flush: 'sync' })
 
 function requestGlobalSearch(): void {
   if (appShell?.openGlobalSearch) appShell.openGlobalSearch()
@@ -312,9 +368,15 @@ function stopBrandConstellation() {
   setBrandCursorHidden(false)
 }
 
-function onWindowBlur() { stopBrandConstellation() }
+function onWindowBlur() {
+  stopBrandConstellation()
+  leaveAnalysisScopeChip()
+}
 function onVisibilityChange() {
-  if (document.hidden) stopBrandConstellation()
+  if (document.hidden) {
+    stopBrandConstellation()
+    leaveAnalysisScopeChip()
+  }
 }
 function onEscape(event: KeyboardEvent) {
   if (event.key === 'Escape') stopBrandConstellation()
@@ -333,6 +395,8 @@ onMounted(() => {
 })
 
 onBeforeUnmount(() => {
+  analysisExportDisposed = true
+  leaveAnalysisScopeChip()
   workspaceMobileMediaQuery?.removeEventListener('change', onWorkspaceViewportChange)
   stopBrandConstellation()
   window.removeEventListener('blur', onWindowBlur)
@@ -379,6 +443,8 @@ onBeforeUnmount(() => {
             :aria-label="scopeLabel(chip.scope, chip.label)"
             :title="scopeLabel(chip.scope, chip.label)"
             @click="onScopeClick(chip.scope)"
+            @mouseenter="enterScopeChip(chip.scope)"
+            @mouseleave="leaveAnalysisScopeChip"
           >
             <NIcon class="scope-chip-icon" aria-hidden="true"><component :is="chip.icon" /></NIcon>
             <span class="scope-chip-label">{{ chip.label }}</span>

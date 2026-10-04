@@ -3,6 +3,10 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { mount } from '@vue/test-utils'
 import { defineComponent, ref } from 'vue'
 import FileTree from '../FileTree.vue'
+import { projectFileTree } from '../fileTreeProjection'
+import { parseTagQuery } from '../../../lib/tags'
+import { managedDiaryPathsInProjection } from '../../../features/diary/diaryAnalysisExport'
+import { classifyDiaryPath } from '../../../../shared/diaryProtocol'
 import type { PostSummary, TreeNode } from '../../../lib/api'
 import { installDialogMocks } from '../../../__test-helpers__/dialogs'
 import { useI18n } from '../../../composables/useI18n'
@@ -261,6 +265,23 @@ describe('FileTree', () => {
 })
 
 describe('Files filter', () => {
+  it.each(['', '2026-08', '2026-08-25', '#work', '-#work', '#work 2026-08', '#work -#rest'])('renders the same managed paths the export consumes for %s', async (filter) => {
+    useScopeFilter().activeScope.value = 'diary'
+    const posts: PostSummary[] = ['2026-08-24', '2026-08-25', '2026-08-26'].map((date, index) => ({
+      path: `diary/${date}`, title: 'Diary', tags: index === 1 ? ['rest'] : ['work'], created: '', updated: '', size: 0, mtime: 0,
+    }))
+    const wrapper = mount(FileTree, { props: { tree: DIARY_TREE, posts, currentPath: null, filter } })
+    const managedRows = () => wrapper.findAll('[data-tree-key]').map((row) => row.attributes('data-tree-path'))
+      .filter((path) => classifyDiaryPath(path) === 'managed')
+    const expected = (exactPathFilter: string | null) => managedDiaryPathsInProjection(projectFileTree({
+      tree: DIARY_TREE, posts, scope: 'diary', query: parseTagQuery(filter), exactPathFilter,
+    }))
+    expect(managedRows()).toEqual(expected(null))
+    await wrapper.setProps({ exactPathFilter: 'diary/2026-08-25' })
+    expect(managedRows()).toEqual(expected('diary/2026-08-25'))
+    wrapper.unmount()
+  })
+
   function mountTree() {
     return mount(FileTree, { props: { tree: TREE, posts: POSTS, currentPath: null } })
   }

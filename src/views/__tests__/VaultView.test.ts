@@ -23,6 +23,28 @@ function keyboardEvent(
 }
 
 describe('VaultView editor tab wiring', () => {
+  it('owns the hidden Diary export command, final tree projection and session fence', () => {
+    const source = readFileSync(fileURLToPath(new URL('../VaultView.vue', import.meta.url)), 'utf8')
+    const handler = source.match(/async function exportDiaryAnalysis[\s\S]*?\n}/)?.[0]
+    expect(handler).toBeDefined()
+    expect(source).toContain('managedDiaryPathsInProjection(projectFileTree({')
+    expect(source).toContain('query: parseTagQuery(filesFilter.value)')
+    expect(source).toContain('exactPathFilter: diaryExactPathFilter.value')
+    expect(source).toContain('appShell.diaryAnalysisExportCommand.value = exportDiaryAnalysis')
+    expect(source).toContain('appShell.diaryAnalysisExportCommand.value = null')
+    expect(handler).toContain('!diaryAccess.isUnlocked.value')
+    expect(handler).toContain('captureDiarySessionGeneration()')
+    expect(handler).toContain('isDiarySessionGenerationCurrent(sessionGeneration)')
+    expect(handler).toContain("activeScope.value !== 'diary'")
+    expect(handler).toContain("watch(activeScope, () => { scopeCurrent = false }, { flush: 'sync' })")
+    expect(handler).toContain('stopScopeWatch()')
+    expect(handler).toContain('const paths = [...filteredDiaryAnalysisPaths.value]')
+    expect(handler!.indexOf('const paths =')).toBeLessThan(handler!.indexOf('await loadDiaryAnalysisExport'))
+    expect(handler).toContain('tab && !tab.loading && !tab.loadError ? tab.raw : undefined')
+    expect(handler).toContain('if (data && isCurrent()) downloadDiaryAnalysisExport(data, isCurrent)')
+    expect(handler).not.toMatch(/doSaveNow|requestAccess|selectScope|router\.|localStorage|sessionStorage|toast\.|console\.error\([^)]*,/)
+  })
+
   it('settles PDF images before preparing the export snapshot', () => {
     const source = readFileSync(fileURLToPath(new URL('../VaultView.vue', import.meta.url)), 'utf8')
     const exportHandler = source.match(/async function exportPdfDocument[\s\S]*?\n}/)?.[0]
@@ -122,7 +144,7 @@ describe('VaultView editor tab wiring', () => {
     const selectionHandler = source.match(/function selectTag\(tag: string\): void \{[\s\S]*?\n\}/)?.[0]
     const browsingWatcher = source.match(/watch\(tagBrowsingIndex, \(index\) => \{[\s\S]*?\n\}\)/)?.[0]
 
-    expect(source).toContain("import {\n  buildTagIndex,\n  resolveTagBrowseSelection,\n  toggleTagBrowseSelection,\n} from '../lib/tags'")
+    expect(source).toContain("import {\n  buildTagIndex,\n  parseTagQuery,\n  resolveTagBrowseSelection,\n  toggleTagBrowseSelection,\n} from '../lib/tags'")
     expect(source).toContain('const tagBrowsingIndex = computed(() => buildTagIndex(posts.value))')
     expect(selectionHandler).toContain('toggleTagBrowseSelection(selectedTag.value, tag)')
     expect(selectionHandler).toContain('tagSelectionEpoch.value += 1')

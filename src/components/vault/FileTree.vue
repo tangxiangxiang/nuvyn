@@ -3,7 +3,8 @@ import { ref, computed, watch, nextTick } from 'vue'
 import { NButton, NIcon, NInput, type InputInst } from 'naive-ui'
 import { Search } from '@vicons/tabler'
 import type { TreeNode, PostSummary } from '../../lib/api'
-import { matchesTagQuery, parseTagQuery, type TagQuery } from '../../lib/tags'
+import { parseTagQuery, type TagQuery } from '../../lib/tags'
+import { projectFileTree } from './fileTreeProjection'
 import TreeRow from './TreeRow.vue'
 import { useConfirm } from '../../composables/useConfirm'
 import { usePrompt } from '../../composables/usePrompt'
@@ -13,7 +14,6 @@ import { createPost, createFolder as createFolderApi, patchPost, deletePost, ren
 import { suggestSlug } from '../../lib/ai-api'
 import { isSlugSegment, toLocalSlug } from '../../lib/slug'
 import { useScopeFilter } from '../../composables/vault/useScopeFilter'
-import { scopeRootsFor } from '../../../shared/scopeProtocol'
 import { useArchiveNote } from '../../composables/vault/useArchiveNote'
 import { getFallbackVaultFileChanges } from '../../composables/vault/context/fileChanges'
 import { useOptionalVaultContext } from '../../composables/vault/context/useVaultContext'
@@ -94,60 +94,15 @@ async function suggestEnglishSlug(input: string, kind: 'file' | 'folder'): Promi
   }
 }
 
-// The server returns a single implicit root folder ("content", path "") whose
-// children are the user's top-level folders. We don't surface that synthetic
-// root in the UI — only its children are rendered.
-const topLevel = computed<TreeNode[]>(() => {
-  const root = props.tree[0]
-  if (!root || root.kind !== 'folder') return []
-  let children = root.children
-  if (activeScope.value) {
-    const roots = scopeRootsFor(activeScope.value)
-    children = children.filter((c) => roots.includes(c.path))
-  }
-  // Diary's protected root is a namespace boundary, not a useful navigation
-  // level. Project its children directly into the presentation tree while
-  // preserving each node's canonical `diary/...` path and identity.
-  if (activeScope.value === 'diary') {
-    const diaryRoot = children.find((node): node is Extract<TreeNode, { kind: 'folder' }> => (
-      node.kind === 'folder' && node.path === 'diary'
-    ))
-    children = diaryRoot?.children ?? []
-  }
-  // The exact-path constraint is a generic presentation projection. It has
-  // higher priority than the user's text/tag query but never mutates that
-  // query, so leaving the detail context restores the search verbatim.
-  if (props.exactPathFilter) {
-    children = children
-      .map((child) => filterByExactPath(child, props.exactPathFilter!))
-      .filter((node): node is TreeNode => node !== null)
-  }
-  // Rebuild the subtree so non-matching files are hidden while matching
-  // ancestors remain visible. A matching folder keeps its complete
-  // subtree. The filter runs through the shared `matchesTagQuery`
-  // predicate, which means an empty query (no text tokens, no
-  // includes, no excludes) matches every file and the tree is
-  // returned unchanged.
-  if (
-    parsedQuery.value.textTokens.length > 0 ||
-    parsedQuery.value.includeAll.length > 0 ||
-    parsedQuery.value.exclude.length > 0 ||
-    parsedQuery.value.includeAny.length > 0
-  ) {
-    children = children
-      .map((c) => filterByQuery(c))
-      .filter((n): n is TreeNode => n !== null)
-  }
-  return children
-})
-
-function filterByExactPath(node: TreeNode, exactPath: string): TreeNode | null {
-  if (node.kind === 'file') return node.path === exactPath ? node : null
-  const children = node.children
-    .map((child) => filterByExactPath(child, exactPath))
-    .filter((child): child is TreeNode => child !== null)
-  return children.length > 0 ? { ...node, children } : null
-}
+// Keep scope, exact-path, and query semantics in one data projection. Neither
+// export scope nor matching rows are inferred from rendered DOM/expansion.
+const topLevel = computed(() => projectFileTree({
+  tree: props.tree,
+  posts: props.posts,
+  scope: activeScope.value,
+  query: parsedQuery.value,
+  exactPathFilter: props.exactPathFilter,
+}))
 // Only ambiguous display titles pay the cost of an always-visible path hint.
 // Count across the complete tree, not the filtered result, so a search/filter
 // cannot make an otherwise ambiguous title suddenly look unique.
@@ -181,35 +136,6 @@ const exactPathFilterActive = computed(() => props.exactPathFilter !== null)
 //       full tree while they finish typing — no silent "filter
 //       for literal #" branch that would empty the result list.
 const parsedQuery = computed<TagQuery>(() => parseTagQuery(contentText.value))
-// Lookup so `filterByQuery` can resolve a tree node's path to its
-// `PostSummary` (and therefore to its tags) without a linear scan.
-const postsByPath = computed<Map<string, PostSummary>>(
-  () => new Map(props.posts.map((p) => [p.path, p])),
-)
-
-function filterByQuery(node: TreeNode): TreeNode | null {
-  const query = parsedQuery.value
-  if (node.kind === 'file') {
-    const post = postsByPath.value.get(node.path)
-    const doc = post
-      ? { path: node.path, title: node.title, tags: post.tags, summary: post.summary }
-      // Files we have no `PostSummary` for (e.g. just-created empty
-      // notes still being snapshotted by the server) carry an empty
-      // tag set so an `#xxx` query correctly excludes them. The
-      // text channel still has path/title to match against.
-      : { path: node.path, title: node.title, tags: [] as string[] }
-    return matchesTagQuery(doc, query) ? node : null
-  }
-  // Folder: keep its complete subtree if any descendant file
-  // matches. Mirrors the legacy "folder match keeps subtree"
-  // behavior, just driven by the tag-aware predicate instead of
-  // raw token substring.
-  const kids = node.children
-    .map((c) => filterByQuery(c))
-    .filter((n): n is TreeNode => n !== null)
-  if (kids.length === 0) return null
-  return { ...node, children: kids }
-}
 
 // Per-file match annotation, derived by re-walking the already-filtered
 // tree. Each text token is assigned to its first matching field in
