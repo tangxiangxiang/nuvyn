@@ -71,6 +71,15 @@ const visibleTags = computed<TagRecord[]>(() => {
 // up. Normalize once into a key and compare keys.
 const selectedTagKey = computed(() => normalizeTag(props.selectedTag))
 
+const duplicateTitles = computed(() => {
+  const counts = new Map<string, number>()
+  for (const post of props.posts) {
+    const title = post.title.trim().toLocaleLowerCase()
+    counts.set(title, (counts.get(title) ?? 0) + 1)
+  }
+  return new Set([...counts].filter(([, count]) => count > 1).map(([title]) => title))
+})
+
 const filteredPosts = computed(() => {
   if (!props.selectedTag) return []
   // Use the normalized form as the index key — this is what
@@ -134,11 +143,12 @@ function onFilterKeydown(event: KeyboardEvent) {
       </header>
       <ul v-if="filteredPosts.length" class="results-list">
         <li v-for="post in filteredPosts" :key="post.path">
-          <NButton attr-type="button" text :bordered="false" class="result-entry document-row" :class="{ active: post.path === path }" @click="emit('open', post.path)">
+          <NButton attr-type="button" text :bordered="false" class="result-entry document-row" :class="{ active: post.path === path }" :title="`${post.title}\n${post.path}`" @click="emit('open', post.path)">
             <span class="result-chevron-spacer" aria-hidden="true" />
             <NIcon class="result-icon" aria-hidden="true"><FileText /></NIcon>
-            <span class="result-label">
+            <span class="result-label" :class="{ 'has-path-hint': duplicateTitles.has(post.title.trim().toLocaleLowerCase()) }">
               <span class="result-title">{{ post.title }}</span>
+              <span v-if="duplicateTitles.has(post.title.trim().toLocaleLowerCase())" class="result-path-hint">{{ post.path }}</span>
             </span>
           </NButton>
         </li>

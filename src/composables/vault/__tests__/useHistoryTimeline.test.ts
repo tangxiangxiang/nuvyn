@@ -39,7 +39,19 @@ describe('buildHistoryDayGroups', () => {
 
     expect(groups.map((group) => group.key)).toEqual(['2026-08-01', '2026-07-31'])
     expect(groups[0]!.commits.map((commit) => commit.id)).toEqual(['newest', 'older-same-day'])
-    expect(groups[0]!.label).toContain('Saturday')
+    expect(groups[0]!.label).toBe('2026-08-01 Sat')
+  })
+
+  it.each([
+    ['zh-CN', '2026-08-08 周六'],
+    ['en-US', '2026-08-08 Sat'],
+  ])('uses a compact local date label for %s', (locale, expected) => {
+    const groups = buildHistoryDayGroups([
+      record('compact-date', new Date(2026, 7, 8, 0, 15), 'Update', ['inbox/a.md']),
+    ], [], locale)
+
+    expect(groups[0]!.key).toBe('2026-08-08')
+    expect(groups[0]!.label).toBe(expected)
   })
 
   it('renders one multi-file commit once with normalized Markdown children', () => {

@@ -29,7 +29,7 @@ function onKeydown(event: KeyboardEvent): void {
     role="treeitem"
     aria-level="3"
     :aria-selected="selected ? 'true' : 'false'"
-    :title="file.path"
+    :title="`${file.title}\n${file.path}`"
     @click="emit('select')"
     @keydown="onKeydown"
   >

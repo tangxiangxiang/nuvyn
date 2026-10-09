@@ -70,6 +70,17 @@ describe('Tags filter', () => {
     expect(wrapper.emitted('open')?.[0]).toEqual([POSTS[0].path])
   })
 
+  it('shows path hints only for duplicate titles and exposes full names on hover', () => {
+    const posts = [...POSTS, { ...POSTS[0]!, path: 'archive/markdown-copy', tags: ['other'] }]
+    const wrapper = mountPanel({ posts, selectedTag: 'reference', path: POSTS[0]!.path })
+    const rows = wrapper.findAll('.result-entry')
+    expect(rows[0]!.classes()).toContain('active')
+    expect(rows[0]!.attributes('title')).toBe(`${POSTS[0]!.title}\n${POSTS[0]!.path}`)
+    expect(rows[0]!.get('.result-path-hint').text()).toBe(POSTS[0]!.path)
+    expect(rows[1]!.find('.result-path-hint').exists()).toBe(false)
+    expect(rows[2]!.find('.result-path-hint').exists()).toBe(false)
+  })
+
   it('keeps management navigation out of the tag browsing panel', async () => {
     const wrapper = mountPanel({ selectedTag: 'reference' })
     await wrapper.get('.tag-filter-input').setValue('ref')

@@ -1425,8 +1425,10 @@ main.container.auth-page-shell {
   border: 0;
   border-radius: 4px;
   background: transparent;
-  color: var(--vs-text-2);
+  color: var(--vs-text-3);
   font: inherit;
+  font-size: 0.66rem;
+  font-weight: 400;
   cursor: pointer;
 }
 .history-changes-actions button:hover:not(:disabled) { background: var(--vs-hover-bg); color: var(--vs-text-1); }
@@ -1498,10 +1500,10 @@ main.container.auth-page-shell {
 .history-change-copy strong { color: var(--vs-text-1); font-size: inherit; font-weight: 450; }
 .history-change-status {
   flex: 0 0 auto;
-  padding: 2px 6px;
+  padding: 1px 5px;
   border: 1px solid transparent;
   border-radius: 999px;
-  font-size: 0.62rem;
+  font-size: 0.6rem;
   font-weight: 500;
   line-height: 1.2;
 }
@@ -1539,7 +1541,7 @@ main.container.auth-page-shell {
   box-sizing: border-box;
   width: 100%;
   max-width: 100%;
-  min-height: 46px;
+  min-height: 36px;
   resize: vertical;
   padding: 7px 8px;
   border: 1px solid color-mix(in srgb, var(--vs-border) 88%, transparent);
@@ -1551,7 +1553,41 @@ main.container.auth-page-shell {
   line-height: 1.4;
   transition: border-color 120ms ease, box-shadow 120ms ease;
 }
-.history-version-composer .history-version-message-input { padding-right: 76px; }
+.history-composer-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+  gap: 4px 8px;
+  min-width: 0;
+}
+.history-composer-button-group {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  align-items: stretch;
+  width: 100%;
+  min-width: 0;
+  max-width: 100%;
+}
+.history-composer-button-group > .n-button {
+  flex: 1 1 0;
+  min-width: 0;
+  height: auto;
+}
+.history-composer-button-group > .n-button .n-button__content {
+  white-space: normal;
+  gap: 3px;
+}
+.history-composer-button-group > .history-generate-message {
+  border-right-width: 0;
+  border-top-right-radius: 0;
+  border-bottom-right-radius: 0;
+}
+.history-composer-button-group > .history-create-version {
+  border-top-left-radius: 0;
+  border-bottom-left-radius: 0;
+}
+.history-composer-actions .history-create-version { width: auto; padding: 0 8px; }
 .history-version-composer textarea::placeholder { color: var(--vs-text-3); opacity: 0.75; }
 .history-version-composer textarea:focus {
   border-color: color-mix(in srgb, var(--vs-accent) 72%, var(--vs-border));
@@ -1559,25 +1595,25 @@ main.container.auth-page-shell {
   box-shadow: 0 0 0 2px color-mix(in srgb, var(--vs-accent) 14%, transparent);
 }
 .history-generate-message {
-  position: absolute;
-  top: 5px;
-  right: 5px;
+  box-sizing: border-box;
   display: inline-flex;
   align-items: center;
   gap: 3px;
-  min-height: 24px;
-  max-width: calc(100% - 10px);
-  padding: 0 5px;
-  border: 0;
-  border-radius: 4px;
-  background: color-mix(in srgb, var(--vs-bg-2) 72%, transparent);
+  min-height: 30px;
+  max-width: 100%;
+  padding: 0 8px;
+  border: 1px solid color-mix(in srgb, var(--vs-border) 86%, transparent);
+  border-radius: 5px;
+  background: transparent;
   color: var(--vs-text-2);
   font: inherit;
-  font-size: 0.66rem;
+  font-size: 0.74rem;
   cursor: pointer;
 }
-.history-generate-message-icon { display: inline-flex; flex: 0 0 14px; }
-.history-generate-message-icon :where(svg) { display: block; width: 14px; height: 14px; }
+.history-generate-message-icon,
+.history-create-version-icon { display: inline-flex; flex: 0 0 14px; }
+.history-generate-message-icon :where(svg),
+.history-create-version-icon :where(svg) { display: block; width: 14px; height: 14px; }
 .history-generate-message:hover:not(:disabled) { background: var(--vs-hover-bg); color: var(--vs-accent); }
 .history-generate-message:focus-visible { outline: 1px solid color-mix(in srgb, var(--vs-accent) 72%, transparent); outline-offset: 1px; }
 .history-generate-message:disabled { cursor: default; opacity: 0.5; }
@@ -1598,7 +1634,7 @@ main.container.auth-page-shell {
 .history-create-version:hover:not(:disabled) { filter: brightness(1.08); }
 .history-create-version:disabled {
   border-color: color-mix(in srgb, var(--vs-border) 86%, transparent);
-  background: color-mix(in srgb, var(--vs-text-3) 12%, var(--vs-bg-2));
+  background: color-mix(in srgb, var(--vs-text-3) 5%, var(--vs-bg-1));
   color: var(--vs-text-3);
   cursor: default;
   opacity: 1;
@@ -1824,6 +1860,88 @@ main.container.auth-page-shell {
   font-size: 0.84rem;
   font-weight: 450;
   line-height: 1.35;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+/* Sidebar history uses the same quiet document typography as FileTree. */
+.history-panel .history-change-open .n-button__content {
+  gap: 8px;
+}
+.history-panel .history-change-copy strong {
+  min-width: 0;
+  flex: 1 1 0;
+}
+.history-panel .history-change-copy strong,
+.history-panel .history-file-title,
+.history-panel .history-commit-row .history-row-title {
+  font-weight: 400;
+}
+.history-panel .history-change-row.active .history-change-copy strong,
+.history-panel .history-file-row.active .history-file-title {
+  font-weight: 600;
+}
+.vault .history-panel :is(.history-file-row, .history-commit-row, .history-timeline-group-header):not(.n-button--disabled):hover {
+  background-color: var(--vs-hover-bg);
+  color: var(--vs-text-1);
+}
+.vault .history-panel .history-file-row.active,
+.vault .history-panel .history-file-row.active:not(.n-button--disabled):hover {
+  background-color: var(--vs-active-bg);
+  color: var(--vs-text-1);
+}
+.history-panel .history-timeline-group-title {
+  font-size: 0.78rem;
+  font-weight: 500;
+}
+.history-panel .history-commit-row .history-row-title {
+  font-size: 0.76rem;
+  color: var(--vs-text-1);
+  font-variant-numeric: tabular-nums;
+}
+.history-panel .history-timeline-group-header,
+.history-panel .history-commit-row {
+  padding-right: 12px;
+}
+.history-panel .history-timeline-group-header .n-button__content,
+.history-panel .history-commit-row .n-button__content {
+  display: grid;
+  grid-template-columns: 14px minmax(0, 1fr) max-content;
+  flex: 1 1 auto;
+  gap: 6px;
+}
+.history-panel .history-file-row {
+  padding-right: 12px;
+}
+.history-panel .history-timeline-group-title,
+.history-panel .history-commit-row .history-row-title {
+  flex: 1 1 0;
+}
+.history-panel .history-commit-row .history-row-meta {
+  display: flex;
+  justify-content: flex-end;
+  align-items: baseline;
+  gap: 4px;
+  flex: 0 1 auto;
+  margin-left: auto;
+  text-align: right;
+}
+.history-panel .history-row-file-count {
+  flex-shrink: 0;
+}
+.history-panel .history-row-file-count,
+.history-panel .history-timeline-count {
+  text-align: right;
+  font-weight: 400;
+  line-height: 1.3;
+  font-variant-numeric: tabular-nums;
+}
+.history-panel .history-timeline-count {
+  flex: 0 0 auto;
+  font-size: 0.66rem;
+  margin-left: auto;
+  text-align: right;
+  min-width: 0;
+  overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -3207,6 +3325,10 @@ body:has(.ledger-detail-sheet-card) .n-modal-mask {
   flex-wrap: nowrap;
   min-width: 0;
 }
+.vault .file-tree header .search {
+  flex-wrap: nowrap;
+  min-width: 0;
+}
 .vault .file-tree header .search-input,
 .vault .tag-panel .tag-filter-input {
   /* `flex: 1 1 120px` keeps the input filling the row when there
@@ -3230,14 +3352,13 @@ body:has(.ledger-detail-sheet-card) .n-modal-mask {
   box-sizing: border-box;
 }
 .vault .file-tree header .search-input-control {
-  flex: 1 1 120px;
+  flex: 1 1 0;
   min-width: 0;
 }
 /* TagPanel search input prefers a 0px flex-basis so the input can
    shrink all the way down on narrow sidebars (≈150px) without
    squeezing out the clear-x button or the visible/total count.
-   FileTree keeps the 120px basis so the chips still have a useful
-   minimum to coexist with. */
+   FileTree's input control uses the same shrinking behavior. */
 .vault .tag-panel .tag-filter-input {
   flex: 1 1 0;
 }
@@ -3308,9 +3429,8 @@ body:has(.ledger-detail-sheet-card) .n-modal-mask {
 .vault .file-tree .tree {
   list-style: none; padding: 0; margin: 0;
   overflow-x: auto; overflow-y: auto; flex: 1;
-  /* Keep long paths horizontally scrollable without leaving a visible
-     scrollbar in the compact tree. Firefox uses the transparent thumb;
-     WebKit gets an axis-specific zero-height scrollbar below. */
+  /* Labels truncate within the sidebar. Keep the root as the sole scroll
+     owner, with no visible horizontal scrollbar. */
   scrollbar-color: transparent transparent;
 }
 .vault .file-tree .tree::-webkit-scrollbar {
@@ -3349,18 +3469,15 @@ body:has(.ledger-detail-sheet-card) .n-modal-mask {
    don't overlap). */
 .vault .file-tree .row-line {
   display: flex; flex-wrap: nowrap; align-items: center; gap: 5px;
-  flex: 1 1 auto;
+  flex: 1 1 100%;
+  min-width: 0;
+  max-width: 100%;
   position: relative;
   min-height: 30px;
   box-sizing: border-box;
   padding: 3px 8px 3px calc(6px + var(--depth, 0) * 10px);
-  /* No `min-width: 0` here — that would let `.row-line` shrink to 0,
-     which combined with `flex: 1` (basis 0%) lets it sit on the same
-     flex line as `.tree-children` (basis 100%) without wrapping.
-     With the default `min-width: auto`, `.row-line`'s hypothetical
-     main size is its content width, the sum with `.tree-children`
-     overflows the line, and flex-wrap pushes `.tree-children` down
-     to a second line — exactly what we want. */
+  /* A full-width basis keeps children on their own line while allowing
+     the text region to shrink and show an ellipsis. */
 }
 /* Files render two stacked lines (title + slug). The default
    `align-items: center` on .row-line would put the icon at the
@@ -3457,6 +3574,7 @@ body:has(.ledger-detail-sheet-card) .n-modal-mask {
 }
 .vault .file-tree .row-name {
   display: block;
+  width: 100%;
   max-width: 100%;
   overflow: hidden;
   text-decoration: none; color: inherit;
@@ -3468,6 +3586,11 @@ body:has(.ledger-detail-sheet-card) .n-modal-mask {
   padding: 0;
   font: inherit;
   cursor: inherit;
+}
+.vault .file-tree .row-name .n-button__content {
+  display: block;
+  min-width: 0;
+  width: 100%;
 }
 .vault .file-tree .row-title,
 .vault .file-tree .row-name-text,
@@ -3946,6 +4069,7 @@ body:has(.ledger-detail-sheet-card) .n-modal-mask {
 .vault .tag-panel .result-entry.active { background: var(--vs-active-bg); }
 .vault .tag-panel .result-entry .n-button__content {
   display: flex;
+  gap: 5px;
   align-items: center;
   justify-content: flex-start;
   width: 100%;
@@ -3977,18 +4101,31 @@ body:has(.ledger-detail-sheet-card) .n-modal-mask {
   max-height: 18px;
   overflow: hidden;
 }
-/* Title weight mirrors a file-tree document row (font-weight: 450),
-   so the two sidebars' document items read at the same visual weight. */
+/* Match normal and current document weights to the file tree. */
 .vault .tag-panel .result-title {
   display: block;
   min-width: 0;
   font-size: 0.84rem;
-  font-weight: 450;
+  font-weight: 400;
   color: var(--vs-text-1);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
   max-width: 100%;
+}
+.vault .tag-panel .result-entry.active .result-title {
+  font-weight: 600;
+}
+.vault .tag-panel .result-label.has-path-hint {
+  max-height: none;
+}
+.vault .tag-panel .result-path-hint {
+  display: block;
+  color: var(--vs-text-3);
+  font: 0.66rem/1.1 var(--mono);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 /* Tags navigation and selected-tag details are separate scroll regions. */
 .vault .tag-panel {

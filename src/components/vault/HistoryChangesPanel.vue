@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, ref, watch } from 'vue'
-import { NButton, NCheckbox, NIcon, NInput } from 'naive-ui'
-import { Stars } from '@vicons/tabler'
+import { NButton, NButtonGroup, NCheckbox, NIcon, NInput } from 'naive-ui'
+import { GitCommit, Stars } from '@vicons/tabler'
 import type { PostSummary } from '../../lib/api'
 import type { StatusEntry } from '../../lib/history-api'
 import { suggestCommitMessage } from '../../lib/ai-api'
@@ -47,6 +47,13 @@ let generationController: AbortController | null = null
 const allSelected = computed(() => (
   props.entries.length > 0 && props.entries.every((entry) => props.selectedPaths.has(entry.path))
 ))
+const selectedCount = computed(() => props.entries.filter((entry) => props.selectedPaths.has(entry.path)).length)
+const commitHint = computed(() => {
+  if (props.busy || props.mutationLocked || generatingMessage.value) return ''
+  if (selectedCount.value === 0) return t('history.select_documents_hint')
+  if (!props.message.trim()) return t('history.enter_message_hint')
+  return ''
+})
 
 function displayName(path: string): string {
   const name = path.split('/').pop() ?? path
@@ -151,7 +158,7 @@ onBeforeUnmount(cancelGeneration)
         <h2 id="history-changes-title">{{ t('history.changes') }}</h2>
         <span>{{ entries.length }}</span>
         <span class="history-changes-actions">
-          <NButton attr-type="button" :bordered="false" :disabled="busy || mutationLocked || entries.length === 0" @click="toggleAll">
+          <NButton attr-type="button" text :bordered="false" :disabled="busy || mutationLocked || entries.length === 0" @click="toggleAll">
             {{ t(allSelected ? 'history.clear_selection' : 'history.select_all') }}
           </NButton>
         </span>
@@ -182,7 +189,7 @@ onBeforeUnmount(cancelGeneration)
             class="history-change-open"
             :class="{ active: activeDiffPath === entry.path }"
             :aria-current="activeDiffPath === entry.path ? 'true' : undefined"
-            :title="entry.path"
+            :title="`${displayTitle(entry.path)}\n${entry.path}`"
             @click="emit('open-diff', entry)"
           >
             <span class="history-change-copy">
@@ -206,33 +213,43 @@ onBeforeUnmount(cancelGeneration)
           @update:value="onMessage"
           @keydown="onMessageKeydown"
         />
-        <NButton
-          attr-type="button"
-          size="small"
-          :bordered="false"
-          class="history-generate-message"
-          :disabled="busy || mutationLocked || generatingMessage || selectedPaths.size === 0"
-          :aria-label="t(generatingMessage ? 'history.generating_message' : 'history.generate_message')"
-          :title="t(generatingMessage ? 'history.generating_message' : 'history.generate_message')"
-          @click="generateMessage"
-        >
-          <NIcon class="history-generate-message-icon" aria-hidden="true">
-            <Stars />
-          </NIcon>
-          <span>{{ t(generatingMessage ? 'history.generating_message' : 'history.generate_message') }}</span>
-        </NButton>
       </div>
+      <div class="history-composer-actions">
+        <NButtonGroup class="history-composer-button-group" size="small" :aria-label="t('history.version_message')">
+          <NButton
+            attr-type="button"
+            size="small"
+            :bordered="false"
+            class="history-generate-message"
+            :disabled="busy || mutationLocked || generatingMessage || selectedPaths.size === 0"
+            :aria-label="t(generatingMessage ? 'history.generating_message' : 'history.generate_message')"
+            :title="t(generatingMessage ? 'history.generating_message' : 'history.generate_message')"
+            @click="generateMessage"
+          >
+            <NIcon class="history-generate-message-icon" aria-hidden="true">
+              <Stars />
+            </NIcon>
+            <span>{{ t(generatingMessage ? 'history.generating_message' : 'history.generate_message') }}</span>
+          </NButton>
+          <NButton
+            attr-type="button"
+            size="small"
+            :bordered="false"
+            class="history-create-version history-create-action"
+            :title="commitHint || undefined"
+            :disabled="!canCommit || generatingMessage"
+            :aria-describedby="commitHint ? 'history-commit-hint' : undefined"
+            @click="submit"
+          >
+            <NIcon class="history-create-version-icon" aria-hidden="true">
+              <GitCommit />
+            </NIcon>
+            <span>{{ busy ? t('history.creating_version') : t('history.create_version') }}</span>
+          </NButton>
+        </NButtonGroup>
+      </div>
+      <span v-if="commitHint" id="history-commit-hint" class="sr-only">{{ commitHint }}</span>
       <div v-if="error" class="history-commit-error" role="alert">{{ error }}</div>
-      <NButton
-        attr-type="button"
-        size="small"
-        :bordered="false"
-        class="history-create-version"
-        :disabled="!canCommit || generatingMessage"
-        @click="submit"
-      >
-        {{ busy ? t('history.creating_version') : t('history.create_version') }}
-      </NButton>
       <span v-if="busy" class="sr-only" role="status">{{ t('history.creating_version') }}</span>
       <div v-if="indexRepairPending" class="history-commit-error" role="status">
         <span>{{ t(indexRepairConflict ? 'history.index_repair_conflict' : 'history.commit_index_refresh_failed') }}</span>

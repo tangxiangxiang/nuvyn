@@ -65,6 +65,68 @@ test.describe('View mode toggle', () => {
     expect(overflow).toEqual({ x: 'visible', y: 'visible' })
   })
 
+  test('truncates long folder and document names within the sidebar', async ({ page, request }) => {
+    const folder = `inbox/e2e-long-folder-${Date.now()}-${'nested-folder-'.repeat(6)}end`
+    const title = '很长的文档标题用于验证侧栏省略号'.repeat(6)
+    const createdFolder = await request.post('/api/folders', { data: { path: folder } })
+    expect(createdFolder.ok(), await createdFolder.text()).toBe(true)
+    try {
+      expect((await request.post('/api/posts', { data: { path: `${folder}/long-note`, title } })).ok()).toBe(true)
+      await page.reload()
+      const inbox = page.locator('[data-tree-key="folder:inbox"]')
+      if (await inbox.getAttribute('aria-expanded') !== 'true') await inbox.locator(':scope > .row-line .chevron').click()
+      const folderRow = page.locator(`[data-tree-key="folder:${folder}"]`)
+      await expect(folderRow).toBeVisible()
+      await folderRow.locator(':scope > .row-line .chevron').click()
+      const fileRow = page.locator(`[data-tree-key="file:${folder}/long-note"]`)
+      await expect(fileRow).toBeVisible()
+      await expect(fileRow.locator('.row-label')).toHaveAttribute('title', `${title}\n${folder}/long-note`)
+      for (const label of [folderRow.locator(':scope > .row-line .row-name-text'), fileRow.locator('.row-title')]) {
+        const metrics = await label.evaluate(element => ({
+          clipped: element.scrollWidth > element.clientWidth,
+          overflow: getComputedStyle(element).textOverflow,
+          right: element.getBoundingClientRect().right,
+          sidebarRight: element.closest('.file-tree')!.getBoundingClientRect().right,
+        }))
+        expect(metrics.clipped).toBe(true)
+        expect(metrics.overflow).toBe('ellipsis')
+        expect(metrics.right).toBeLessThanOrEqual(metrics.sidebarRight)
+      }
+      const layout = await folderRow.evaluate(element => ({
+        rowBottom: element.querySelector(':scope > .row-line')!.getBoundingClientRect().bottom,
+        childrenTop: element.querySelector(':scope > .tree-children')!.getBoundingClientRect().top,
+      }))
+      expect(layout.childrenTop).toBeGreaterThanOrEqual(layout.rowBottom)
+    } finally {
+      await request.delete(`/api/folders/${folder}?recursive=true`)
+    }
+  })
+
+  test('keeps the file filter on one row at the minimum sidebar width', async ({ page }) => {
+    const splitter = page.locator('.splitter:not(.splitter-toc)')
+    const bounds = await splitter.boundingBox()
+    expect(bounds).not.toBeNull()
+    await splitter.dispatchEvent('pointerdown', { clientX: bounds!.x + bounds!.width / 2 })
+    await page.mouse.move(0, bounds!.y + 80)
+    await page.mouse.up()
+    const input = page.locator('.file-tree .search-input')
+    await input.fill('Shortcut')
+    await expect(page.locator('.file-tree .row-path-hint')).toHaveCount(0)
+    await expect(page.locator(`[data-tree-key="file:${TEST_DOC_PATH}"] .row-name`)).toBeHidden()
+    const metrics = await page.locator('.file-tree .search').evaluate(element => {
+      const row = element.getBoundingClientRect()
+      const children = [...element.children].map(child => child.getBoundingClientRect())
+      return {
+        width: element.closest('.file-tree')!.getBoundingClientRect().width,
+        withinRow: children.every(child => child.top >= row.top && child.bottom <= row.bottom && child.right <= row.right),
+      }
+    })
+    expect(metrics.width).toBe(150)
+    expect(metrics.withinRow).toBe(true)
+    await page.locator('.file-tree .search-clear-x').click()
+    await expect(input).toHaveValue('')
+  })
+
   test('toggles the left side panel from the top-right NavBar', async ({ page }) => {
     const toggle = page.getByTestId('left-panel-toggle')
     await expect(toggle).toHaveAttribute('aria-pressed', 'true')

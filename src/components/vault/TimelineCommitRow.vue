@@ -41,14 +41,15 @@ function onKeydown(event: KeyboardEvent): void {
     aria-level="2"
     :aria-expanded="expanded"
     :aria-label="toggleLabel"
+    :title="`${commit.message}\n${commit.shortId}`"
     @click="emit('toggle')"
     @keydown="onKeydown"
     @contextmenu.prevent="emit('contextmenu', $event)"
   >
     <NIcon class="history-disclosure" :class="{ expanded }" aria-hidden="true"><ChevronRight /></NIcon>
-    <span class="history-row-title" :title="`${commit.message} · ${commit.shortId}`">{{ commit.message }}</span>
+    <span class="history-row-title">{{ timeLabel }}</span>
     <span class="history-row-meta">
-      {{ timeLabel }} · {{ fileCountLabel }}
+      <span class="history-row-file-count">{{ fileCountLabel }}</span>
     </span>
   </NButton>
 </template>

@@ -14,6 +14,39 @@ beforeEach(() => useI18n().setLocale('en'))
 afterEach(() => vi.restoreAllMocks())
 
 describe('HistoryChangesPanel', () => {
+  it('keeps actions together and exposes disabled reasons without visible hints', async () => {
+    const wrapper = mount(HistoryChangesPanel, {
+      props: {
+        entries,
+        selectedPaths: new Set(['missing.md']),
+        message: '',
+        busy: false,
+        canCommit: false,
+        error: null,
+      },
+    })
+    expect(wrapper.find('.history-selected-count').exists()).toBe(false)
+    expect(wrapper.find('.history-commit-hint').exists()).toBe(false)
+    expect(wrapper.get('.history-create-action').attributes('title')).toContain('Select files')
+    expect(wrapper.get('#history-commit-hint').classes()).toContain('sr-only')
+    expect(wrapper.get('.history-create-version').attributes('aria-describedby')).toBe('history-commit-hint')
+    expect(wrapper.find('.history-version-message-field .history-generate-message').exists()).toBe(false)
+    expect(wrapper.find('.history-composer-actions .history-generate-message').exists()).toBe(true)
+    expect(wrapper.find('.history-composer-actions .history-create-version').exists()).toBe(true)
+    expect(wrapper.get('.history-create-version-icon').attributes('aria-hidden')).toBe('true')
+
+    await wrapper.setProps({ selectedPaths: new Set(['inbox/modified.md', 'inbox/new.md']) })
+    expect(wrapper.get('.history-create-action').attributes('title')).toContain('Enter a version message')
+    await wrapper.setProps({ message: '   ' })
+    expect(wrapper.find('#history-commit-hint').exists()).toBe(true)
+    await wrapper.setProps({ message: 'Update documents', canCommit: true })
+    expect(wrapper.find('#history-commit-hint').exists()).toBe(false)
+    expect(wrapper.get('.history-create-version').attributes('disabled')).toBeUndefined()
+    await wrapper.setProps({ busy: true })
+    expect(wrapper.find('#history-commit-hint').exists()).toBe(false)
+    wrapper.unmount()
+  })
+
   it('renders understandable statuses and accessible selection controls', async () => {
     const wrapper = mount(HistoryChangesPanel, {
       props: {
@@ -81,8 +114,8 @@ describe('HistoryChangesPanel', () => {
       'no-title',
     ])
     expect(wrapper.findAll('.history-change-open').map((item) => item.attributes('title'))).toEqual([
-      'inbox/english-object.md',
-      'inbox/no-title.md',
+      'English Object\ninbox/english-object.md',
+      'no-title\ninbox/no-title.md',
     ])
     expect(wrapper.findAll('.history-change-copy span')).toHaveLength(0)
   })
@@ -238,7 +271,7 @@ describe('HistoryChangesPanel', () => {
       },
     })
     expect(wrapper.get('.history-changes').attributes('aria-busy')).toBe('true')
-    expect(wrapper.get('[role="status"]').text()).toBe('正在创建版本…')
+    expect(wrapper.get('.sr-only[role="status"]').text()).toBe('正在创建版本…')
     expect(wrapper.get('[role="alert"]').text()).toBe('提交失败')
     expect(wrapper.get('.history-create-version').text()).toBe('正在创建版本…')
     expect(wrapper.findAll('[role="checkbox"][aria-disabled="true"]')).toHaveLength(3)

@@ -150,7 +150,7 @@ describe('HistoryPanel commit-first timeline', () => {
     await wrapper.vm.$nextTick()
     await expandFirstDate(wrapper)
     expect(wrapper.findAll('.history-commit-row')).toHaveLength(1)
-    expect(wrapper.get('.history-commit-row').text()).toContain('Repository head')
+    expect(wrapper.get('.history-commit-row').attributes('aria-label')).toContain('Repository head')
   })
 
   it('opens a file-history commit through the existing revision selection contract', async () => {
@@ -238,7 +238,10 @@ describe('HistoryPanel commit-first timeline', () => {
     expect(wrapper.get('.history-commit-row').text()).not.toContain('abcdef1')
     expect(wrapper.get('.history-commit-row').text()).toContain('2 files')
     expect(wrapper.find('.history-commit-sha').exists()).toBe(false)
-    expect(wrapper.get('.history-row-title').attributes('title')).toBe('Improve History timeline · abcdef1')
+    expect(wrapper.get('.history-commit-row').attributes('aria-label')).toContain('Improve History timeline')
+    expect(wrapper.get('.history-commit-row').attributes('aria-label')).toContain('abcdef1')
+    expect(wrapper.get('.history-row-title').text()).toMatch(/^\d{1,2}:\d{2}(?: [AP]M)?$/)
+    expect(wrapper.get('.history-commit-row').text()).not.toContain('Improve History timeline')
     await expandFirstCommit(wrapper)
     expect(wrapper.findAll('.history-file-row')).toHaveLength(2)
     expect(wrapper.findAll('.history-file-row').map((row) => row.text())).toEqual([
@@ -320,7 +323,7 @@ describe('HistoryPanel commit-first timeline', () => {
         summary: 'Update two notes',
       }],
     ])
-    expect(files[1]!.attributes('title')).toBe('archive/deleted-note.md')
+    expect(files[1]!.attributes('title')).toBe('Deleted Note\narchive/deleted-note.md')
   })
 
   it('shows parent paths only when file titles are ambiguous', async () => {
@@ -351,13 +354,13 @@ describe('HistoryPanel commit-first timeline', () => {
     await history.refreshLog()
     await flushPromises()
     expect(wrapper.findAll('.history-timeline-group-header')[1]!.attributes('aria-expanded')).toBe('true')
-    const olderRow = wrapper.findAll('.history-commit-row').find((row) => row.text().includes('Older'))!
+    const olderRow = wrapper.findAll('.history-commit-row').find((row) => row.attributes('aria-label')?.includes('Older'))!
     expect(olderRow.attributes('aria-expanded')).toBe('true')
 
     vi.mocked(api.getLog).mockResolvedValue({ commits: [first] })
     await history.refreshLog()
     await flushPromises()
-    expect(wrapper.text()).not.toContain('Older')
+    expect(wrapper.findAll('.history-commit-row').some((row) => row.attributes('aria-label')?.includes('Older'))).toBe(false)
     expect(wrapper.findAll('.history-file-row')).toHaveLength(0)
   })
 
@@ -378,7 +381,7 @@ describe('HistoryPanel commit-first timeline', () => {
     await flushPromises()
 
     expect(wrapper.findAll('.history-timeline-group-header')[0]!.attributes('aria-expanded')).toBe('true')
-    expect(wrapper.findAll('.history-commit-row')[0]!.text()).toContain('Fresh')
+    expect(wrapper.findAll('.history-commit-row')[0]!.attributes('aria-label')).toContain('Fresh')
     expect(wrapper.findAll('.history-commit-row')[0]!.attributes('aria-expanded')).toBe('false')
   })
 
@@ -405,7 +408,7 @@ describe('HistoryPanel commit-first timeline', () => {
     await flushPromises()
     expect(api.dropCommit).toHaveBeenCalledWith('latest')
     expect(wrapper.findAll('.history-commit-row')).toHaveLength(1)
-    expect(wrapper.text()).toContain('Older')
+    expect(wrapper.get('.history-commit-row').attributes('aria-label')).toContain('Older')
   })
 
   it('does not expose Withdraw on the newest visible Markdown commit when HEAD only changed another file type', async () => {
@@ -518,7 +521,7 @@ describe('HistoryPanel commit-first timeline', () => {
     await flushPromises()
     await expandFirstDate(wrapper)
     expect(wrapper.get('.history-timeline-heading').text()).toContain('时间线')
-    expect(wrapper.get('.history-timeline-group-header').text()).toContain('1 个提交')
+    expect(wrapper.get('.history-timeline-count').text()).toBe('1 次提交')
     expect(wrapper.get('.history-commit-row').text()).toContain('1 个文件')
     expect(wrapper.get('.history-timeline-group-header').attributes('aria-label')).toContain('折叠')
   })

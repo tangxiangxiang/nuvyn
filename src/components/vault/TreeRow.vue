@@ -96,12 +96,9 @@ const canReceiveDrop = computed(() => classifyDiaryPath(dropTargetPath.value) ==
 const displayTitle = computed(() => props.node.kind === 'file' && props.node.title.trim()
   ? props.node.title.trim()
   : props.node.name)
-const showFilename = computed(() => props.node.kind === 'file' && displayTitle.value !== props.node.name)
 const isDuplicate = computed(() => props.node.kind === 'file' &&
   props.duplicateTitles?.has(displayTitle.value.toLocaleLowerCase()))
-const revealPath = computed(() => props.showPathHint && !isFolder.value && (
-  props.searchActive || isDuplicate.value || (isActive.value && !props.compact)
-))
+const revealPath = computed(() => props.showPathHint && !isFolder.value && isDuplicate.value)
 const visiblePath = computed(() => isDuplicate.value && !props.searchActive && !isActive.value
   ? (parentPath.value ? `${parentPath.value}/` : '/')
   : props.node.path)
@@ -356,7 +353,7 @@ function activateRow() {
            tooltip names which fields matched; when the file is in
            the tree for another reason (folder-name match, or no
            query active), the attribute is omitted entirely. -->
-      <div class="row-label">
+      <div class="row-label" :title="[displayTitle, node.path, matchTooltip].filter(Boolean).join('\n')">
         <span v-if="!isFolder" class="row-title">{{ displayTitle }}</span>
         <NButton
           attr-type="button"
@@ -364,7 +361,7 @@ function activateRow() {
           :bordered="false"
           :focusable="false"
           class="row-name"
-          :class="{ 'row-file-name': showFilename, 'row-file-name-hidden': !isFolder && !showFilename }"
+          :class="{ 'row-file-name-hidden': !isFolder }"
           :title="matchTooltip"
           :aria-label="!isFolder ? `${displayTitle}, ${node.path}` : displayTitle"
           @click.stop="activateRow"

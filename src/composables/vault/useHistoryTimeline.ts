@@ -60,12 +60,10 @@ export function fallbackDocumentTitle(path: string): string {
 }
 
 function dateLabel(timestamp: number, locale: string): string {
-  return new Intl.DateTimeFormat(locale, {
-    year: 'numeric',
-    month: 'long',
-    day: 'numeric',
-    weekday: 'long',
+  const weekday = new Intl.DateTimeFormat(locale, {
+    weekday: 'short',
   }).format(timestamp)
+  return `${localDateKey(timestamp)} ${weekday}`
 }
 
 /** Pure projection from the Git-native log into Date -> Commit -> Files. */

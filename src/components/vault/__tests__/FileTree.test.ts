@@ -576,7 +576,7 @@ describe('Diary FileTree presentation boundary', () => {
     wrapper.unmount()
   })
 
-  it('keeps Note roots and Note search path hints unchanged', async () => {
+  it('keeps unique Note search results on one line without path hints', async () => {
     useScopeFilter().activeScope.value = 'note'
     const wrapper = mount(FileTree, { props: { tree: TREE, currentPath: null } })
 
@@ -585,7 +585,38 @@ describe('Diary FileTree presentation boundary', () => {
     expect(wrapper.find('[data-tree-key="folder:archive"]').exists()).toBe(true)
 
     await wrapper.get('.search-input').setValue('backend')
-    expect(wrapper.find('[data-tree-key="file:inbox/backend/redis-note"] .row-path-hint').exists()).toBe(true)
+    const row = wrapper.get('[data-tree-key="file:inbox/backend/redis-note"]')
+    expect(row.find('.row-path-hint').exists()).toBe(false)
+    expect(row.get('.row-name').classes()).toContain('row-file-name-hidden')
+    await wrapper.setProps({ currentPath: 'inbox/backend/redis-note' })
+    expect(row.find('.row-path-hint').exists()).toBe(false)
+    wrapper.unmount()
+  })
+
+  it('shows directory hints for duplicate titles while keeping unique rows compact', async () => {
+    useScopeFilter().activeScope.value = 'note'
+    const tree: TreeNode[] = [
+      { kind: 'folder', name: 'inbox', path: 'inbox', children: [
+        { kind: 'file', name: 'draft', path: 'inbox/draft', title: 'Shared title', mtime: 0 },
+        { kind: 'file', name: 'unique', path: 'inbox/unique', title: 'Unique title', mtime: 0 },
+      ] },
+      { kind: 'folder', name: 'archive', path: 'archive', children: [
+        { kind: 'file', name: 'saved', path: 'archive/saved', title: 'Shared title', mtime: 0 },
+      ] },
+    ]
+    localStorage.setItem('nuvyn.vault.expandedPaths', JSON.stringify(['inbox', 'archive']))
+    const wrapper = mount(FileTree, {
+      props: { tree: [{ kind: 'folder', name: 'content', path: '', children: tree }], currentPath: null },
+    })
+    expect(wrapper.get('[data-tree-key="file:inbox/draft"] .row-path-hint').text()).toBe('inbox/')
+    expect(wrapper.get('[data-tree-key="file:archive/saved"] .row-path-hint').text()).toBe('archive/')
+    expect(wrapper.find('[data-tree-key="file:inbox/unique"] .row-path-hint').exists()).toBe(false)
+
+    await wrapper.get('.search-input').setValue('inbox/draft')
+    expect(wrapper.find('[data-tree-key="file:archive/saved"]').exists()).toBe(false)
+    expect(wrapper.get('[data-tree-key="file:inbox/draft"] .row-path-hint').text()).toBe('inbox/draft')
+    await wrapper.get('.search-input').setValue('')
+    expect(wrapper.get('[data-tree-key="file:inbox/draft"] .row-path-hint').text()).toBe('inbox/')
     wrapper.unmount()
   })
 

@@ -31,7 +31,7 @@ describe('TimelineFileRow', () => {
       role: 'treeitem',
       'aria-level': '3',
       'aria-selected': 'false',
-      title: 'inbox/getting-started.md',
+      title: 'Getting Started\ninbox/getting-started.md',
     })
     expect(wrapper.find('.history-file-icon svg').exists()).toBe(true)
     expect(wrapper.get('.history-file-title').text()).toBe('Getting Started')
