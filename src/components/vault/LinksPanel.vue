@@ -274,10 +274,8 @@ watchEffect(() => {
   gap: 6px;
 }
 .link-entry {
-  display: grid;
-  grid-template-columns: 14px minmax(0, 1fr);
-  align-items: start;
-  gap: 8px;
+  display: flex;
+  justify-content: flex-start;
   width: 100%;
   padding: 7px 8px;
   border-radius: 4px;
@@ -288,6 +286,14 @@ watchEffect(() => {
   cursor: pointer;
   font: inherit;
   font-size: 0.84rem;
+}
+.link-entry :deep(.n-button__content) {
+  display: grid;
+  flex: 1 1 auto;
+  grid-template-columns: 14px minmax(0, 1fr);
+  align-items: start;
+  gap: 8px;
+  width: 100%;
 }
 .link-entry:hover {
   background: color-mix(in srgb, var(--vs-hover-bg, var(--bg-soft)) 58%, transparent);

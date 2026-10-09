@@ -47,6 +47,7 @@ describe('LinksPanel', () => {
     expect(wrapper.text()).toContain('引用（1）')
     expect(wrapper.text()).toContain('#source-section')
     expect(wrapper.findAll('.link-path')).toHaveLength(2)
+    expect(wrapper.findAll('.link-title').map((title) => title.text())).toEqual(['英语-谓语', '英语-宾语'])
     expect(wrapper.findAll('.link-entry')[0].attributes('title')).toBe('archive/grammar/predicate')
     await wrapper.findAll('.link-entry')[0].trigger('click')
     await wrapper.findAll('.link-entry')[1].trigger('click')
