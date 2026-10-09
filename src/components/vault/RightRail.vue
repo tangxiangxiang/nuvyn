@@ -521,29 +521,11 @@ function onHistoryTabClick(): void {
   overflow: hidden;
 }
 
-/* Row uses the same vertical rhythm as a .link-entry (6px/12px
-   padding, 0.88rem font-size, 1.4 line-height) so the two halves
-   have matching row heights. The heading text fills the available
-   width and is truncated with ellipsis on overflow.
-
-   Hierarchy is conveyed by typography, not just indent:
-
-     - lvl-1/2 (sections): full text-1 color, 0.82rem, weight 500 —
-       these are the spine of the document and should read at a
-       glance when scanning.
-     - lvl-3+ (sub-items): muted color, 0.76rem, weight 400, deeper
-       indent + a 1px guide line at left:12px. The guide line
-       continues through every sub-item of a section so the user
-       reads each cluster as one group, not as a flat indented list.
-
-   Active state is communicated by text weight + a light row
-   background, modeled on Cursor / VS Code Outline rather than the
-   file-tree's accent-bar style — a TOC is a reading aid, not a
-   navigation tree. The .active rule below bumps color/weight on
-   the active link regardless of its level, so a focused sub-item
-   still pops out of its muted siblings. */
+/* Keep section labels quiet; indentation and guide lines convey hierarchy.
+   Hover and selection share the file tree's background tokens. */
 .toc-panel-link {
   display: block;
+  box-sizing: border-box;
   width: calc(100% - 28px);
   margin: 0 14px;
   /* min-width: 0 lets this flex item shrink below its intrinsic
@@ -553,7 +535,7 @@ function onHistoryTabClick(): void {
   font-size: 0.82rem;
   line-height: 1.35;
   color: var(--vs-text-1, var(--text));
-  font-weight: 500;
+  font-weight: 400;
   text-decoration: none;
   border-radius: 5px;
   transition: background 0.12s ease, color 0.12s ease;
@@ -576,16 +558,9 @@ function onHistoryTabClick(): void {
   background: var(--vs-hover-bg, var(--bg-soft));
 }
 
-.toc-panel-item.active .toc-panel-link {
-  color: var(--vs-text-1, var(--text));
-  font-weight: 600;
-  background: transparent;
-}
-
 .toc-panel-item.active {
-  background: var(--vs-hover-bg, var(--bg-soft));
+  background: var(--vs-active-bg, var(--bg-soft));
 }
-
 /* Sections (lvl-1/2): baseline indent only, no guide line. */
 .toc-panel-item.lvl-1 .toc-panel-link,
 .toc-panel-item.lvl-2 .toc-panel-link {
@@ -600,6 +575,8 @@ function onHistoryTabClick(): void {
 .toc-panel-item.lvl-4 .toc-panel-link,
 .toc-panel-item.lvl-5 .toc-panel-link,
 .toc-panel-item.lvl-6 .toc-panel-link {
+  padding-top: 3px;
+  padding-bottom: 3px;
   padding-left: 24px;
   font-size: 0.76rem;
   font-weight: 400;
@@ -617,6 +594,12 @@ function onHistoryTabClick(): void {
   bottom: 0;
   width: 1px;
   background: color-mix(in srgb, var(--border) 70%, transparent);
+}
+
+.toc-panel-item.active .toc-panel-link {
+  color: var(--vs-text-1, var(--text));
+  font-weight: 600;
+  background: transparent;
 }
 
 /* LinksPanel renders its own <aside class="links-panel">. We strip

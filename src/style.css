@@ -3410,7 +3410,7 @@ body:has(.ledger-detail-sheet-card) .n-modal-mask {
 /* Folder vs file weight:
    - top folder (depth 0): 650
    - nested folder (depth ≥ 1): 550
-   - file: 450 (lighter than folders, so the eye picks folders first)
+   - file: 400; current file: 600
    The previous rule weighted top-level files at 620, which made them
    read like folders. Splitting the rule by .folder keeps the row
    type visible at a glance. */
@@ -3421,7 +3421,10 @@ body:has(.ledger-detail-sheet-card) .n-modal-mask {
   font-weight: 550;
 }
 .vault .file-tree .tree-row:not(.folder) > .row-line .row-title {
-  font-weight: 450;
+  font-weight: 400;
+}
+.vault .file-tree .tree-row.active:not(.folder) > .row-line .row-title {
+  font-weight: 600;
 }
 .vault .file-tree .row-line > * { position: relative; z-index: 1; }
 .vault .file-tree .tree-row[draggable] { cursor: grab; }
