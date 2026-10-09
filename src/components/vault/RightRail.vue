@@ -161,10 +161,6 @@ function onHistoryTabClick(): void {
     </nav>
 
     <section v-show="activeTab === 'toc'" class="toc-panel" role="tabpanel" :aria-label="t('rail.toc')">
-      <header v-if="path" class="right-rail-path-header">
-        <span :title="path">{{ path }}</span>
-      </header>
-
       <div v-if="!hasHeadings" class="right-rail-empty-state">
         <p>{{ props.isReadMode ? t('rail.toc_empty') : t('rail.toc_empty_edit') }}</p>
         <NButton
@@ -195,9 +191,6 @@ function onHistoryTabClick(): void {
     </section>
 
     <section v-show="activeTab === 'links'" class="links-slot" role="tabpanel" :aria-label="t('rail.links_panel')">
-      <header v-if="path" class="right-rail-path-header">
-        <span :title="path">{{ path }}</span>
-      </header>
       <LinksPanel
         :path="path"
         :posts="posts"
@@ -205,9 +198,6 @@ function onHistoryTabClick(): void {
       />
     </section>
     <section v-show="activeTab === 'properties'" class="metadata-slot" role="tabpanel" :aria-label="t('metadata.title')">
-      <header v-if="path" class="right-rail-path-header">
-        <span :title="path">{{ path }}</span>
-      </header>
       <DocumentMetadataForm
         :path="path"
         :enabled="activeTab === 'properties'"
@@ -350,80 +340,72 @@ function onHistoryTabClick(): void {
   overflow-y: auto;
 }
 .metadata-slot :deep(.document-metadata-body) {
-  gap: 9px;
-  padding: 11px 12px 12px;
+  align-content: start;
+  gap: 18px;
+  padding: 18px;
 }
 
-/* Labels: uppercase letter-spaced micro labels (VS Code form section style).
-   text-transform is a no-op on CJK glyphs but harmless and keeps EN parity.
-
-   The field's CSS-grid gap is forced to 0 (with !important as a defensive
-   override of DocumentMetadataForm.vue's scoped `gap: 6px`). The label itself
-   uses line-height: 1 so the box collapses to the actual glyph height, and
-   the visual gap to the input is controlled by the input's own margin-top
-   instead of the label's margin-bottom — that way the spacing rule lives
-   next to the element it affects. */
+/* Keep these refinements local to the rail; metadata dialogs use their own layout. */
 .metadata-slot :deep(.document-metadata-field) {
-  gap: 0 !important;
+  min-width: 0;
+  gap: 7px;
 }
 .metadata-slot :deep(.document-metadata-field > span),
-/* The summary field's label sits inside .document-metadata-field-head (a flex
-   row that also hosts the AI-generate button), so the direct-child selector
-   above doesn't match it. Mirror the same rules for the head's span so the
-   three field labels stay visually identical. */
 .metadata-slot :deep(.document-metadata-field-head > span) {
-  font-size: 0.58rem;
+  font-size: 0.76rem;
   font-weight: 600;
-  line-height: 1;
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
-  color: var(--text-muted);
+  line-height: 1.5;
+  color: var(--text);
 }
-.metadata-slot :deep(.document-metadata-field > .document-metadata-input) {
-  margin-top: 2px;
+.metadata-slot :deep(.document-metadata-field-head) {
+  flex-wrap: wrap;
 }
 
-/* Inputs: invisible border by default — only show on hover/focus, like inline
-   editing. Cursor/VS Code settings UI uses this pattern to keep the form from
-   feeling like a stack of "form fields" and more like a labeled document. */
+.metadata-slot :deep(.document-metadata-input) {
+  box-sizing: border-box;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg-soft);
+  transition: border-color 0.12s ease, box-shadow 0.12s ease;
+}
+.metadata-slot :deep(.document-metadata-input:focus-within) {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 16%, transparent);
+}
+.metadata-slot :deep(.document-metadata-input .n-input__border),
+.metadata-slot :deep(.document-metadata-input .n-input__state-border) {
+  display: none;
+}
 .metadata-slot :deep(.document-metadata-field input),
 .metadata-slot :deep(.document-metadata-field textarea) {
   font-family: inherit;
-  padding: 4px 7px;
-  font-size: 0.8rem;
-  line-height: 1.35;
-  border: 1px solid transparent;
-  border-radius: 3px;
-  background: var(--bg-soft);
-  transition: border-color 0.12s ease, background 0.12s ease;
-}
-.metadata-slot :deep(.document-metadata-field input:hover:not(:disabled)),
-.metadata-slot :deep(.document-metadata-field textarea:hover:not(:disabled)) {
-  border-color: var(--border);
-}
-.metadata-slot :deep(.document-metadata-field input:focus),
-.metadata-slot :deep(.document-metadata-field textarea:focus) {
-  border-color: var(--accent);
-  background: var(--bg);
+  padding: 6px 0;
+  font-size: 0.82rem;
+  line-height: 1.5;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
 }
 .metadata-slot :deep(.document-metadata-field input) {
-  height: 26px;
-  min-height: 26px;
+  height: 34px;
+  min-height: 34px;
 }
 .metadata-slot :deep(.document-metadata-textarea-wrap textarea) {
-  padding-right: 8px;
-  padding-bottom: 20px;
+  padding-bottom: 26px;
 }
 .metadata-slot :deep(.document-metadata-field textarea) {
-  min-height: 60px;
+  min-height: 112px;
   resize: vertical;
 }
 
 /* Char counter — tabular numerals, sits inside the textarea's bottom-right. */
 .metadata-slot :deep(.document-metadata-field small) {
-  right: 6px;
-  bottom: 5px;
-  font-size: 0.58rem;
+  position: absolute;
+  right: 10px;
+  bottom: 8px;
+  pointer-events: none;
+  font-size: 0.68rem;
   color: var(--text-muted);
   font-variant-numeric: tabular-nums;
 }
@@ -431,10 +413,10 @@ function onHistoryTabClick(): void {
 /* AI generate — ghost button on the field-head row, label left, action right.
    No positioning needed; the head is a flex row with space-between. */
 .metadata-slot :deep(.metadata-generate-summary) {
-  min-height: 18px;
-  padding: 0 5px;
-  font-size: 0.58rem;
-  border-radius: 3px;
+  min-height: 24px;
+  padding: 0 6px;
+  font-size: 0.7rem;
+  border-radius: 4px;
   color: var(--text-muted);
   background: transparent;
 }
@@ -450,23 +432,19 @@ function onHistoryTabClick(): void {
   height: 11px;
 }
 
-/* Readonly section — vertical key-value list (VS Code info panel).
-   Label on the left in tiny uppercase, value on the right with tabular
-   numerals (mono where it's an ID or path). Hairline dividers separate
-   the rows; the section is capped by a top border so it reads as its
-   own block. */
+/* Secondary document facts share one quiet key-value section. */
 .metadata-slot :deep(.document-metadata-readonly) {
   display: grid;
   grid-template-columns: 1fr;
-  margin: 4px 0 0;
+  margin: 2px 0 0;
   border-top: 1px solid var(--border);
 }
 .metadata-slot :deep(.document-metadata-readonly > div) {
   display: grid;
-  grid-template-columns: minmax(72px, max-content) 1fr;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1.6fr);
   align-items: center;
   gap: 12px;
-  padding: 6px 12px;
+  padding: 10px 0;
   border-bottom: 1px solid var(--border);
 }
 .metadata-slot :deep(.document-metadata-readonly > div:last-child) {
@@ -474,20 +452,18 @@ function onHistoryTabClick(): void {
 }
 .metadata-slot :deep(.document-metadata-readonly > div:nth-child(odd)),
 .metadata-slot :deep(.document-metadata-readonly > div:nth-child(even)) {
-  padding-left: 12px;
-  padding-right: 12px;
+  padding-left: 0;
+  padding-right: 0;
   border-left: 0;
 }
 .metadata-slot :deep(.document-metadata-readonly span) {
-  font-size: 0.58rem;
-  font-weight: 600;
-  line-height: 1;
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
+  font-size: 0.72rem;
+  line-height: 1.5;
   color: var(--text-muted);
 }
 .metadata-slot :deep(.document-metadata-readonly output) {
-  font-size: 0.72rem;
+  text-align: right;
+  font-size: 0.76rem;
   color: var(--text);
   font-variant-numeric: tabular-nums;
   overflow: hidden;
@@ -496,25 +472,27 @@ function onHistoryTabClick(): void {
 }
 .metadata-slot :deep(.document-metadata-readonly output.is-mono) {
   font-family: var(--mono);
-  font-size: 0.68rem;
+  font-size: 0.72rem;
 }
 
-/* Action footer — ghost text buttons. Save uses accent text on hover tint. */
+/* Keep save prominent and the footer separate from the scrolling fields. */
 .metadata-slot :deep(.document-metadata-actions) {
   justify-content: flex-end;
-  padding: 7px 10px;
-  gap: 4px;
+  flex-shrink: 0;
+  flex-wrap: wrap;
+  padding: 12px 18px;
+  gap: 8px;
   background: transparent;
   border-top: 1px solid var(--border);
 }
 .metadata-slot :deep(.document-metadata-actions .btn) {
   flex: 0 0 auto;
-  min-height: 22px;
-  padding: 2px 9px;
-  font-size: 0.72rem;
+  min-height: 30px;
+  padding: 5px 12px;
+  font-size: 0.76rem;
   line-height: 1.3;
   border: 1px solid transparent;
-  border-radius: 3px;
+  border-radius: 5px;
   background: transparent;
   color: var(--text-muted);
 }
@@ -523,10 +501,12 @@ function onHistoryTabClick(): void {
   color: var(--text);
 }
 .metadata-slot :deep(.document-metadata-actions .btn-primary) {
-  color: var(--accent);
+  background: var(--accent);
+  color: var(--on-accent, #fff);
 }
 .metadata-slot :deep(.document-metadata-actions .btn-primary:hover:not(:disabled)) {
-  background: color-mix(in srgb, var(--accent) 14%, transparent);
+  background: color-mix(in srgb, var(--accent) 90%, var(--text));
+  color: var(--on-accent, #fff);
   border-color: transparent;
 }
 .toc-panel-list {

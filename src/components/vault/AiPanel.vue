@@ -60,7 +60,7 @@ const { t } = useI18n()
 const { confirm } = useConfirm()
 const composer = ref<InstanceType<typeof AiComposer> | null>(null)
 
-// The header path and quick-prompt scope follow the same capture the
+// The display context and quick-prompt scope follow the same capture the
 // send uses. Fall back to the route path for display only if the live
 // capture is unavailable; the send path still captures independently.
 const displayContext = computed(() => {
@@ -198,18 +198,16 @@ async function useQuickPrompt(text: string) {
 
 <template>
   <aside class="ai-panel" :aria-label="t('ai.assistant')">
-    <header class="ai-header">
-      <span
-        class="ai-header-path"
-        :title="displayPath || t('ai.assistant')"
-      >{{ displayPath || t('ai.assistant') }}</span>
+    <header
+      v-if="history.activeSession.value && history.messages.value.length > 0"
+      class="ai-header"
+    >
       <div class="ai-header-actions">
       <NButton
         class="ai-header-btn"
         attr-type="button"
         text
         :bordered="false"
-        v-if="history.activeSession.value && history.messages.value.length > 0"
         :title="t('ai.clear_context')"
         :aria-label="t('ai.clear_context')"
         :disabled="history.busy.value || history.isLoading.value"

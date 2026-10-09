@@ -151,8 +151,9 @@ describe('unified document sidebar', () => {
     expect(wrapper.get('[role="tab"][aria-selected="true"]').text()).toBe('属性')
   })
 
-  it('hides the metadata path header when no document is selected', async () => {
+  it('omits the path header with or without a selected document', async () => {
     const wrapper = mountPanel('properties')
+    expect(wrapper.find('.right-rail-path-header').exists()).toBe(false)
     await wrapper.setProps({ path: null })
     expect(wrapper.find('.right-rail-path-header').exists()).toBe(false)
   })

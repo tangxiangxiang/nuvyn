@@ -59,10 +59,6 @@ function onTreeKeydown(event: KeyboardEvent): void {
 
 <template>
   <section class="right-rail-history" :aria-label="t('rail.history')">
-    <header v-if="path" class="right-rail-path-header">
-      <span :title="path">{{ path }}</span>
-    </header>
-
     <div v-if="!path" class="right-rail-history-empty right-rail-empty-state">
       {{ t('rail.history_empty') }}
     </div>
@@ -126,6 +122,7 @@ function onTreeKeydown(event: KeyboardEvent): void {
 }
 .right-rail-history-scroll {
   min-height: 0;
+  padding-top: 8px;
   overflow-y: auto;
   scrollbar-width: thin;
 }

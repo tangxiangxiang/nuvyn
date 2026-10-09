@@ -268,7 +268,7 @@ describe('AiPanel live context capture and transport (Edit-10.3)', () => {
     await wrapper.find('textarea').setValue('hello')
     expect(wrapper.findComponent(AiComposer).props('canSend')).toBe(false)
     expect(wrapper.get('.ai-send').attributes('disabled')).toBeDefined()
-    expect(wrapper.get('.ai-header-path').text()).toBe('notes/a.md')
+    expect(wrapper.find('.ai-header-path').exists()).toBe(false)
     expect(loadThreadSpy).toHaveBeenCalledWith(null)
 
     wrapper.findComponent(AiComposer).vm.$emit('send')
@@ -396,10 +396,10 @@ describe('AiPanel live context capture and transport (Edit-10.3)', () => {
     ['history', () => historyCapture('notes/h.md'), 'notes/h.md'],
     ['diff', () => diffCapture('notes/d.md'), 'notes/d.md'],
     ['recovery', () => recoveryCapture('notes/r.md'), 'notes/r.md'],
-  ])('shows the %s path in the panel header instead of repeating it in the message area', (_label, makeCapture, path) => {
+  ])('preserves the %s context without a visible path header', (_label, makeCapture, path) => {
     const wrapper = mountPanel(makeCapture)
     expect(wrapper.findComponent(AiChatMessages).props('currentPath')).toBe(path)
-    expect(wrapper.get('.ai-header-path').text()).toBe(path)
+    expect(wrapper.find('.ai-header-path').exists()).toBe(false)
     expect(wrapper.find('.ai-context-block').exists()).toBe(false)
   })
 
@@ -410,13 +410,36 @@ describe('AiPanel live context capture and transport (Edit-10.3)', () => {
     expect(wrapper.text()).not.toContain('notes / a.md')
   })
 
+  it('shows the clear action only for a conversation and disables it while busy', async () => {
+    history.activeSession.value = null
+    history.messages.value = []
+    const wrapper = mountPanel(() => documentCapture())
+    expect(wrapper.find('.ai-header').exists()).toBe(false)
+
+    history.activeSession.value = { id: 1, title: 'Test', createdAt: 0, updatedAt: 0 }
+    history.messages.value = [{ id: 1, sessionId: 1, role: 'user', content: 'Hello', createdAt: 0 }]
+    await nextTick()
+    expect(wrapper.find('.ai-header-btn').exists()).toBe(true)
+    expect(wrapper.find('.ai-header-path').exists()).toBe(false)
+
+    history.busy.value = true
+    await nextTick()
+    expect(wrapper.get('.ai-header-btn').attributes('disabled')).toBeDefined()
+
+    history.activeSession.value = null
+    history.messages.value = []
+    history.busy.value = false
+    await nextTick()
+    expect(wrapper.find('.ai-header').exists()).toBe(false)
+  })
+
   it.each([
     ['unavailable', () => ({ status: 'unavailable', reason: 'loading' }) as AiLiveContextCapture],
     ['none', () => ({ status: 'none' }) as AiLiveContextCapture],
   ])('shows no path in the chat header for %s context', (_label, makeCapture) => {
     const wrapper = mountPanel(makeCapture)
     expect(wrapper.findComponent(AiChatMessages).props('currentPath')).toBeNull()
-    expect(wrapper.get('.ai-header-path').text()).toBe('AI assistant')
+    expect(wrapper.find('.ai-header-path').exists()).toBe(false)
   })
 
   it('offers note-scoped quick prompts whenever a ready context exists', () => {

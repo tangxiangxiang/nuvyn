@@ -71,26 +71,6 @@ body.vault-mode #app { height: 100%; }
   background: var(--vs-hover-bg, var(--bg-soft));
 }
 
-/* Shared document path header for the properties and history tabs. Keep
-   these two lightweight context strips identical in typography and rhythm. */
-.right-rail-path-header {
-  display: flex;
-  flex: 0 0 auto;
-  align-items: center;
-  box-sizing: border-box;
-  height: 32px;
-  padding: 0 18px;
-  border-bottom: 1px solid color-mix(in srgb, var(--vs-border) 60%, transparent);
-}
-.right-rail-path-header span {
-  display: block;
-  overflow: hidden;
-  color: var(--vs-text-3, var(--text-muted));
-  font: 0.7rem/1.2 var(--mono);
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
 /* Global focus-visible ring. The vault and the command palette both
    set `outline: none` on their containers / inputs (those inputs then
    draw their own custom focus state via border-color + box-shadow), so
@@ -5334,18 +5314,6 @@ body:has(.ledger-detail-sheet-card) .n-modal-mask {
   border-bottom: 1px solid color-mix(in srgb, var(--vs-border) 34%, transparent);
   user-select: none;
   flex: 0 0 auto;
-}
-
-.ai-panel .ai-header-path {
-  margin-right: auto;
-  min-width: 0;
-  max-width: calc(100% - 64px);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  color: var(--vs-text-3);
-  font-size: 0.76rem;
-  font-weight: 550;
 }
 
 .ai-panel .ai-header-actions {
