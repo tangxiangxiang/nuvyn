@@ -44,7 +44,7 @@ import { rewriteDocumentReferences } from '../renameReferences.js'
 import { validateDocumentMutation } from '../documentMutationPolicy.js'
 import { listPostsFlat, readFrontmatter } from '../tree.js'
 import { bad, ensureMetadata, exists, metadataDb, recordCommittedMetadata } from './shared.js'
-import { rejectManagedDiaryReferenceFootprint, requireDiaryBodyAccess, withDiaryBodyOperation } from '../diaryAccess/guard.js'
+import { requireDiaryBodyAccess, withDiaryBodyOperation } from '../diaryAccess/guard.js'
 import { DiaryBodyCryptoError } from '../diaryAccess/body.js'
 import { DiaryAccessServiceError, type DiaryBodyOperation } from '../diaryAccess/service.js'
 import { deleteManagedDiaryDocument, ManagedDiaryDeleteError } from '../diaryAccess/delete.js'
@@ -649,10 +649,8 @@ postRoutes.patch('/api/posts/*', async (c) => {
   // Rename/move changes tree membership: structure lock first, with
   // the backlink plan computed under it (see folders PATCH note).
   return withVaultStructureLock(async () => {
-  if (updateReferences) {
-    const referenceError = await rejectManagedDiaryReferenceFootprint(c)
-    if (referenceError) return referenceError
-  }
+  // The generic index excludes managed Diary bodies. Plan only ordinary
+  // backlinks; authorize and validate the actual rewrite targets below.
   const plannedReferencePaths = updateReferences
     ? (await getLinkIndex()).getBacklinks(srcPath).map((backlink) => backlink.source)
     : []

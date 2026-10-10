@@ -26,15 +26,15 @@ describe('useI18n', () => {
     setLocale('zh-CN')
     const { t, setLocale: _ } = useI18n()
     _('zh')
-    expect(t('quick_prompts.with_note.summarize.label')).toBe('总结当前笔记')
+    expect(t('quick_prompts.with_note.summarize.label')).toBe('提炼要点')
   })
 
   it('returns English strings for non-zh locales', () => {
     setLocale('en-US')
     const { t, setLocale: _ } = useI18n()
     _('en')
-    expect(t('quick_prompts.with_note.summarize.label')).toBe('Summarize current note')
-    expect(t('quick_prompts.with_note.summarize.text')).toContain('actionable')
+    expect(t('quick_prompts.with_note.summarize.label')).toBe('Key takeaways')
+    expect(t('quick_prompts.with_note.summarize.text')).toContain('do not invent facts')
   })
 
   it('returns the key itself when the key is missing from the table', () => {

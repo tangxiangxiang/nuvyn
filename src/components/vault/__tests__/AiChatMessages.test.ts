@@ -161,6 +161,7 @@ describe('AiChatMessages empty presentation', () => {
   it('emits the selected quick prompt without sending it', async () => {
     const wrapper = mountMessages()
 
+    expect(wrapper.get('.ai-quick-prompt').attributes('title')).toBe('总结当前笔记')
     await wrapper.get('.ai-quick-prompt').trigger('click')
 
     expect(wrapper.emitted('prompt')).toEqual([['总结当前笔记']])

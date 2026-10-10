@@ -103,7 +103,8 @@ describe('FileTree prompt rename', () => {
     await clickRenameMenuButton()
     await flushPromises()
 
-    expect(dialogStubs.confirm).toHaveBeenCalledWith(expect.stringContaining('2 篇文档'))
+    expect(dialogStubs.confirm).toHaveBeenCalledWith(expect.stringContaining('2 篇普通文档'))
+    expect(dialogStubs.confirm).toHaveBeenCalledWith(expect.stringContaining('加密日记内的引用不会更新'))
     expect(patchSpy).toHaveBeenCalledWith('inbox/draft', { name: 'final', updateReferences: true })
   })
 

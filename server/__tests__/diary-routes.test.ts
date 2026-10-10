@@ -560,7 +560,7 @@ describe('Diary REST mutation contract', () => {
     expect(getDocumentMetadata(db, destinationPath)).toBeNull()
   })
 
-  it('blocks a locked file rename before reading a managed Diary backlink body', async () => {
+  it('renames an ordinary file and rewrites ordinary backlinks without reading locked Diary bodies', async () => {
     const date = '2000-04-04'
     const targetPath = 'inbox/rename-target'
     expect((await call('POST', '/api/diary/dates', { date, timeZone: TIME_ZONE })).status).toBe(201)
@@ -571,20 +571,30 @@ describe('Diary REST mutation contract', () => {
       baseRaw: `# ${date}\n`,
     })).status).toBe(200)
 
+    const notePath = 'inbox/backlink'
+    expect((await call('POST', '/api/posts', { path: notePath, title: 'Backlink' })).status).toBe(201)
+    expect((await call('PUT', `/api/posts/${notePath}`, { raw: `# Backlink\n\n[[${targetPath}]]\n`, baseRaw: '# Backlink\n' })).status).toBe(200)
+    const physicalDiary = path.join(vault, 'diary', `${date}.md`)
+    const encryptedBefore = await fs.readFile(physicalDiary)
+    __resetLinkIndexForTesting()
+    const readSpy = vi.spyOn(fs, 'readFile')
     const rename = await callWithoutDiaryCapability('PATCH', `/api/posts/${targetPath}`, {
       name: 'rename-target-new',
       updateReferences: true,
     })
 
-    expect(rename.status).toBe(423)
-    expect(await rename.json()).toMatchObject({ code: 'diary-locked' })
-    await expect(fs.readFile(path.join(vault, 'inbox', 'rename-target.md'), 'utf8'))
+    const reads = readSpy.mock.calls.map(([file]) => String(file))
+    readSpy.mockRestore()
+    expect(reads).not.toContain(physicalDiary)
+    expect(rename.status).toBe(200)
+    await expect(fs.readFile(path.join(vault, 'inbox', 'rename-target-new.md'), 'utf8'))
       .resolves.toBe('# Target\n')
-    await expect(fs.readFile(path.join(vault, 'diary', `${date}.md`), 'utf8'))
-      .resolves.not.toContain(diaryBody)
+    await expect(fs.readFile(path.join(vault, 'inbox', 'backlink.md'), 'utf8'))
+      .resolves.toContain('[[inbox/rename-target-new]]')
+    expect(await fs.readFile(physicalDiary)).toEqual(encryptedBefore)
   })
 
-  it('blocks a locked folder rename before reading a managed Diary backlink body', async () => {
+  it('renames an ordinary folder and updates ordinary backlinks without reading locked Diary bodies', async () => {
     const date = '2000-04-05'
     const folderPath = 'inbox/rename-folder'
     const targetPath = `${folderPath}/child`
@@ -597,16 +607,25 @@ describe('Diary REST mutation contract', () => {
       baseRaw: `# ${date}\n`,
     })).status).toBe(200)
 
+    expect((await call('POST', '/api/posts', { path: 'inbox/backlink', title: 'Backlink' })).status).toBe(201)
+    expect((await call('PUT', '/api/posts/inbox/backlink', { raw: `# Backlink\n\n[[${targetPath}]]\n`, baseRaw: '# Backlink\n' })).status).toBe(200)
+    const physicalDiary = path.join(vault, 'diary', `${date}.md`)
+    const encryptedBefore = await fs.readFile(physicalDiary)
+    __resetLinkIndexForTesting()
+    const readSpy = vi.spyOn(fs, 'readFile')
     const rename = await callWithoutDiaryCapability('PATCH', `/api/folders/${folderPath}`, {
       newPath: 'inbox/renamed-folder',
       updateReferences: true,
     })
 
-    expect(rename.status).toBe(423)
-    expect(await rename.json()).toMatchObject({ code: 'diary-locked' })
-    await expect(fs.stat(path.join(vault, 'inbox', 'rename-folder', 'child.md'))).resolves.toBeTruthy()
-    await expect(fs.readFile(path.join(vault, 'diary', `${date}.md`), 'utf8'))
-      .resolves.not.toContain(diaryBody)
+    const reads = readSpy.mock.calls.map(([file]) => String(file))
+    readSpy.mockRestore()
+    expect(reads).not.toContain(physicalDiary)
+    expect(rename.status).toBe(200)
+    await expect(fs.stat(path.join(vault, 'inbox', 'renamed-folder', 'child.md'))).resolves.toBeTruthy()
+    await expect(fs.readFile(path.join(vault, 'inbox', 'backlink.md'), 'utf8'))
+      .resolves.toContain('[[inbox/renamed-folder/child]]')
+    expect(await fs.readFile(physicalDiary)).toEqual(encryptedBefore)
   })
 
   it('allows an ordinary Note move to archive when Diary is locked and updateReferences is omitted', async () => {
@@ -671,21 +690,22 @@ describe('Diary REST mutation contract', () => {
       .resolves.toBe('# Child\n')
   })
 
-  it('keeps authorized reference rewrites fail-closed when a managed Diary exists', async () => {
+  it('allows reference updates with an unlocked unrelated Diary and leaves its ciphertext untouched', async () => {
     const date = '2000-06-05'
     const sourcePath = 'inbox/source'
     expect((await call('POST', '/api/diary/dates', { date, timeZone: TIME_ZONE })).status).toBe(201)
     expect((await call('POST', '/api/posts', { path: sourcePath, title: 'Source' })).status).toBe(201)
+    const physicalDiary = path.join(vault, 'diary', `${date}.md`)
+    const encryptedBefore = await fs.readFile(physicalDiary)
 
     const rename = await call('PATCH', `/api/posts/${sourcePath}`, {
       name: 'renamed',
       updateReferences: true,
     })
 
-    expect(rename.status).toBe(422)
-    expect(await rename.json()).toMatchObject({ code: 'diary-encrypted-reference-unsupported' })
-    await expect(fs.readFile(path.join(vault, 'inbox', 'source.md'), 'utf8')).resolves.toBe('# Source\n')
-    await expect(fs.stat(path.join(vault, 'inbox', 'renamed.md'))).rejects.toThrow()
+    expect(rename.status).toBe(200)
+    await expect(fs.readFile(path.join(vault, 'inbox', 'renamed.md'), 'utf8')).resolves.toBe('# Source\n')
+    expect(await fs.readFile(physicalDiary)).toEqual(encryptedBefore)
   })
 
   it('fails closed for generic recovery even when a missing Diary path looks managed', async () => {

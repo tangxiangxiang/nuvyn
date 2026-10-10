@@ -44,4 +44,6 @@ The UI and server protect only the reserved root names. Filesystem confinement, 
 
 The file tree supports create, rename, move, recursive folder deletion, document properties, link-aware renames, and archive actions. Before a rename, Nuvyn can update incoming Wiki and Markdown references. Mutations are serialized against editor saves, History actions, and other lifecycle work; a conflicting operation is rejected instead of silently overwriting another writer.
 
+Reference updates cover ordinary documents only. An unrelated locked Diary does not block renaming a note or folder. References inside encrypted Diary bodies are not scanned or rewritten; those links may need manual adjustment after a rename. Managed Diary identities remain protected from rename and move.
+
 See [Document Lifecycle Architecture](../architecture/document-lifecycle.md) for the implementation guarantees.

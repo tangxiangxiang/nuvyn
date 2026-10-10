@@ -4,6 +4,8 @@
 
 Open Document Properties and click **+** beside Tags to add tags (comma-separated names are supported). Remove a tag with its close button, shown on hover or keyboard focus. Tags are stored in SQLite, not written into new Markdown Frontmatter.
 
+The tag field stays on one line. Tags that do not fit are grouped behind **+N**; click it to view or remove the remaining tags in a popover. The visible tag count adjusts to the panel width.
+
 Click **Generate with AI** on the Tags heading to suggest 3–5 tags using the configured AI provider and current document content, including unsaved editor changes. Suggestions merge with existing tags and are deduplicated. Review or edit them, then click **Save** to persist; generation alone does not save. If you change documents or edit tags while a request is pending, its stale result is discarded. Managed Diary bodies are excluded from this feature.
 
 Tag identity is case-insensitive and trims one leading `#`. For example, `Java`, `java`, and `#JAVA` match as the same tag. The first observed casing is used as the display form.

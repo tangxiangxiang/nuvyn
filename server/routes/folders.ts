@@ -70,7 +70,7 @@ import { listSubtreePaths } from '../tree.js'
 import { bad, ensureMetadata, exists, metadataDb, recordCommittedMetadata } from './shared.js'
 import { nextMetadataBatchUpdatedAt } from '../metadataVersion.js'
 import { validateFolderMutation } from '../documentMutationPolicy.js'
-import { rejectManagedDiaryReferenceFootprint, requireDiaryBodyAccess } from '../diaryAccess/guard.js'
+import { requireDiaryBodyAccess } from '../diaryAccess/guard.js'
 import { recoveryMarkerName } from '../technicalNamespace.js'
 
 const folderRoutes = new Hono()
@@ -272,14 +272,8 @@ folderRoutes.patch('/api/folders/*', async (c) => {
   // the whole transaction instead of slipping a new child in between
   // the enumeration and the lock acquisition.
   return withVaultMutation(CONTENT_DIR, () => withVaultStructureLock(async () => {
-  // A generic reference planner cannot inspect managed Diary bodies. When
-  // reference updates are requested, conservatively reject a vault that has
-  // any managed Diary file before LinkIndex planning (locked callers retain
-  // the normal 423 response).
-  if (updateReferences) {
-    const referenceError = await rejectManagedDiaryReferenceFootprint(c)
-    if (referenceError) return referenceError
-  }
+  // The index excludes managed Diary bodies; unrelated locked diaries must
+  // not block ordinary references. Validate the actual mutation footprint.
   const plannedOldPaths = await listSubtreePaths(CONTENT_DIR, srcPath)
   if (plannedOldPaths.some((value) => classifyDiaryPath(value) === 'managed')) {
     return bad(c, 'folder rename reference footprint contains an encrypted managed Diary body', 422, 'diary-encrypted-reference-unsupported')

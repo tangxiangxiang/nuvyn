@@ -342,8 +342,8 @@ function onHistoryTabClick(): void {
 .metadata-slot :deep(.document-metadata-body) {
   display: flex;
   flex-direction: column;
-  gap: 14px;
-  padding: 16px 18px 10px;
+  gap: 10px;
+  padding: 12px 14px 8px;
 }
 .metadata-slot :deep(.document-metadata-body > *) {
   flex-shrink: 0;
@@ -374,12 +374,12 @@ function onHistoryTabClick(): void {
 /* Keep these refinements local to the rail; metadata dialogs use their own layout. */
 .metadata-slot :deep(.document-metadata-field) {
   min-width: 0;
-  gap: 7px;
+  gap: 5px;
 }
 .metadata-slot :deep(.document-metadata-field > span),
 .metadata-slot :deep(.metadata-tags-label > span),
 .metadata-slot :deep(.document-metadata-field-head > span) {
-  font-size: 0.76rem;
+  font-size: 0.72rem;
   font-weight: 600;
   line-height: 1.5;
   color: var(--text);
@@ -391,7 +391,7 @@ function onHistoryTabClick(): void {
 .metadata-slot :deep(.document-metadata-input) {
   box-sizing: border-box;
   border: 1px solid var(--border);
-  border-radius: 6px;
+  border-radius: 5px;
   background: var(--bg-soft);
   transition: border-color 0.12s ease, box-shadow 0.12s ease;
 }
@@ -406,8 +406,8 @@ function onHistoryTabClick(): void {
 .metadata-slot :deep(.document-metadata-field input),
 .metadata-slot :deep(.document-metadata-field textarea) {
   font-family: inherit;
-  padding: 6px 0;
-  font-size: 0.82rem;
+  padding: 4px 0;
+  font-size: 0.78rem;
   line-height: 1.5;
   border: 0;
   border-radius: 0;
@@ -415,8 +415,8 @@ function onHistoryTabClick(): void {
   box-shadow: none;
 }
 .metadata-slot :deep(.document-metadata-field input) {
-  height: 34px;
-  min-height: 34px;
+  height: 28px;
+  min-height: 28px;
 }
 .metadata-slot :deep(.document-metadata-field textarea) {
   min-height: 0;
@@ -435,9 +435,10 @@ function onHistoryTabClick(): void {
    No positioning needed; the head is a flex row with space-between. */
 .metadata-slot :deep(.metadata-field-action),
 .metadata-slot :deep(.metadata-add-tag) {
-  min-height: 24px;
-  padding: 0 6px;
-  font-size: 0.7rem;
+  height: 22px;
+  min-height: 22px;
+  padding: 0 4px;
+  font-size: 0.66rem;
   border-radius: 4px;
   color: var(--text-muted);
   background: transparent;
@@ -455,6 +456,23 @@ function onHistoryTabClick(): void {
 }
 
 /* Secondary document facts share one quiet key-value section. */
+.metadata-slot :deep(.metadata-tag-box) {
+  min-height: 30px;
+  padding: 4px 8px;
+  border-radius: 5px;
+}
+.metadata-slot :deep(.metadata-tag-list) {
+  max-height: 22px;
+  gap: 4px;
+}
+.metadata-slot :deep(.metadata-tag) {
+  height: 22px;
+  font-size: 0.7rem;
+  padding: 0 7px;
+}
+.metadata-slot :deep(.metadata-tag-placeholder) {
+  font-size: 0.72rem;
+}
 .metadata-slot :deep(.document-metadata-readonly) {
   display: grid;
   grid-template-columns: 1fr;
@@ -465,8 +483,8 @@ function onHistoryTabClick(): void {
   display: grid;
   grid-template-columns: max-content minmax(0, 1fr);
   align-items: center;
-  gap: 12px;
-  padding: 10px 0;
+  gap: 10px;
+  padding: 8px 0;
   border-bottom: 1px solid var(--border);
 }
 .metadata-slot :deep(.document-metadata-readonly > div:last-child) {
@@ -479,13 +497,13 @@ function onHistoryTabClick(): void {
   border-left: 0;
 }
 .metadata-slot :deep(.document-metadata-readonly span) {
-  font-size: 0.72rem;
+  font-size: 0.68rem;
   line-height: 1.5;
   color: var(--text-muted);
 }
 .metadata-slot :deep(.document-metadata-readonly output) {
   text-align: right;
-  font-size: 0.76rem;
+  font-size: 0.72rem;
   color: var(--text);
   font-variant-numeric: tabular-nums;
   overflow: hidden;
@@ -494,7 +512,7 @@ function onHistoryTabClick(): void {
 }
 .metadata-slot :deep(.document-metadata-readonly output.is-mono) {
   font-family: var(--mono);
-  font-size: 0.72rem;
+  font-size: 0.68rem;
 }
 
 /* Keep save prominent and the footer separate from the scrolling fields. */
@@ -502,16 +520,17 @@ function onHistoryTabClick(): void {
   justify-content: flex-end;
   flex-shrink: 0;
   flex-wrap: wrap;
-  padding: 12px 18px;
+  padding: 8px 14px;
   gap: 8px;
   background: transparent;
   border-top: 1px solid var(--border);
 }
 .metadata-slot :deep(.document-metadata-actions .btn) {
   flex: 0 0 auto;
-  min-height: 30px;
-  padding: 5px 12px;
-  font-size: 0.76rem;
+  height: 28px;
+  min-height: 28px;
+  padding: 3px 10px;
+  font-size: 0.72rem;
   line-height: 1.3;
   border: 1px solid transparent;
   border-radius: 5px;

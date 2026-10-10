@@ -24,6 +24,14 @@ credentials. Restore the original file from backup, or configure the matching
 key through `NUVYN_MASTER_KEY` or `NUVYN_MASTER_KEY_FILE`. The runtime accepts
 only the canonical Nuvyn key sources.
 
+## Quick Prompts
+
+With a document open, the assistant offers **Key takeaways**, **Find related notes**, and **Improve this note**. Without a document, it offers **Vault overview**, **Find notes to organize**, and **Organization plan**. Hover to preview the full prompt; clicking fills the composer without sending. Review it before sending.
+
+Type `/` in the empty composer to call up these prompt templates, even after the conversation has started. Type part of a template name to filter, use Up/Down to select and Enter or Tab to insert, or click a template. Escape dismisses the menu. Inserting a template does not send a message.
+
+The prompts ask for concise, evidence-based answers, links to existing notes, and advice before file changes. They do not override server access controls or make protected Diary content available.
+
 ## Generate Document Properties
 
 Document Properties has **Generate with AI** actions for Title, Summary, and Tags. They use the configured provider and current document body, including unsaved editor content. Generated values are drafts: review them and click **Save** to persist. Title generation changes the display title only, not the filename or document path. Tag suggestions merge with existing tags and deduplicate matches.

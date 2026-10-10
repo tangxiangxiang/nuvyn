@@ -79,38 +79,6 @@ export function rejectManagedDiaryPrivateMetadata(c: any, documentPath?: string)
 }
 
 /**
- * Fail closed before a generic reference-rewrite planner asks LinkIndex to
- * scan body files. The directory enumeration is structural only; no Diary
- * body is opened. A locked caller receives the normal 423 gate first.
- */
-export async function rejectManagedDiaryReferenceFootprint(c: any): Promise<Response | null> {
-  let entries: import('node:fs').Dirent[]
-  try {
-    // Derive the directory through filePathFor so test vaults that replace
-    // the path adapter keep this structural preflight scoped to that vault.
-    const diaryRoot = path.dirname(filePathFor('diary/2000-01-01'))
-    entries = await fs.readdir(diaryRoot, { withFileTypes: true })
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return null
-    throw error
-  }
-  const paths = entries
-    .filter((entry) => entry.isFile() && entry.name.endsWith('.md'))
-    .map((entry) => `diary/${entry.name.slice(0, -3)}`)
-    .filter((value) => isManagedDiaryBodyPath(value))
-  for (const diaryPath of paths) {
-    const bodyAccess = requireDiaryBodyAccess(c, diaryPath)
-    if (bodyAccess) return bodyAccess
-  }
-  if (paths.length === 0) return null
-  c.header('Cache-Control', 'no-store')
-  return c.json({
-    error: 'Reference rewrite footprint contains a managed Diary encrypted body.',
-    code: 'diary-encrypted-reference-unsupported',
-  }, 422)
-}
-
-/**
  * Gate a vault-wide metadata migration, which scans raw Markdown and cannot
  * be checked one path at a time before the scan starts. An uninitialized
  * Diary access configuration is intentionally allowed; once configured, the

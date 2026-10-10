@@ -34,6 +34,7 @@ const { t } = useI18n()
           attr-type="button"
           :bordered="false"
           class="ai-quick-prompt"
+          :title="prompt.text"
           @click="emit('prompt', prompt.text)"
         >
           <NIcon class="ai-quick-icon" aria-hidden="true">
@@ -67,6 +68,7 @@ const { t } = useI18n()
         <AiMarkdown
           v-if="message.role === 'assistant' && message.content && message.id !== 0"
           :content="message.content"
+          :source-path="currentPath"
         />
         <div v-else-if="message.content" class="ai-text" :class="{ 'ai-streaming-text': message.role === 'assistant' && message.id === 0 }">
           {{ message.content }}

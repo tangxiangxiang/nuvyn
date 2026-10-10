@@ -1,16 +1,35 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import { renderAiMarkdown } from '../../lib/aiMarkdown'
+import { useOptionalVaultContext } from '../../composables/vault/context/useVaultContext'
+import { getLinkIndex } from '../../composables/vault/useLinkIndex'
+import { resolveWikiTarget } from '../../../shared/linkResolve'
 
 const props = defineProps<{
   content: string
+  sourcePath?: string | null
 }>()
 
-const html = computed(() => renderAiMarkdown(props.content))
+const vaultContext = useOptionalVaultContext()
+const linkIndex = getLinkIndex(vaultContext?.fileChanges)
+const html = computed(() => renderAiMarkdown(props.content, {
+  sourcePath: props.sourcePath ?? undefined,
+  resolver: (ref, _anchor, context) => ({
+    target: resolveWikiTarget(ref, context?.sourcePath ?? props.sourcePath ?? '', [...linkIndex.value.paths]),
+  }),
+}))
+
+function onLinkClick(event: MouseEvent) {
+  if (event.button !== 0 || !vaultContext) return
+  const anchor = (event.target as HTMLElement | null)?.closest<HTMLAnchorElement>('a.wiki-link')
+  if (!anchor?.dataset.target) return
+  event.preventDefault()
+  void vaultContext.editor.openLink(anchor.dataset.target, anchor.dataset.anchor)
+}
 </script>
 
 <template>
-  <div class="ai-markdown article" v-html="html" />
+  <div class="ai-markdown article" v-html="html" @click="onLinkClick" />
 </template>
 
 <style scoped>

@@ -236,6 +236,7 @@ async function useQuickPrompt(text: string) {
       :configured="history.configured.value"
       :can-send="threadScope !== null"
       :model-name="history.model?.value ?? ''"
+      :prompts="quickPrompts"
       @send="onSend"
       @stop="history.stop"
     />

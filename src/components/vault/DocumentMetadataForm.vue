@@ -62,6 +62,51 @@ const title = ref('')
 const summary = ref('')
 const tags = ref('')
 const displayedTags = computed(() => split(tags.value))
+const tagList = ref<HTMLElement | null>(null)
+const tagMeasurements = ref<HTMLElement | null>(null)
+const visibleTagCount = ref(Number.POSITIVE_INFINITY)
+const visibleTags = computed(() => displayedTags.value.slice(0, visibleTagCount.value))
+const overflowTags = computed(() => displayedTags.value.slice(visibleTagCount.value))
+const tagOverflowOpen = ref(false)
+
+function updateTagLayout(): void {
+  const list = tagList.value
+  const measurements = tagMeasurements.value
+  if (!list || !measurements) return
+  const width = list.getBoundingClientRect().width
+  // Unmounted/hidden panels have no geometry; measure again when revealed.
+  if (!width) return
+  const gap = Number.parseFloat(getComputedStyle(list).columnGap) || 0
+  const widths = Array.from(measurements.querySelectorAll<HTMLElement>('.metadata-tag'))
+    .map(element => element.getBoundingClientRect().width)
+  const total = widths.reduce((sum, value) => sum + value, 0) + Math.max(0, widths.length - 1) * gap
+  if (total <= width) {
+    visibleTagCount.value = widths.length
+    tagOverflowOpen.value = false
+    return
+  }
+  const moreWidth = measurements.querySelector<HTMLElement>('.metadata-tag-more')?.getBoundingClientRect().width ?? 36
+  let used = moreWidth
+  let count = 0
+  for (const tagWidth of widths) {
+    if (used + gap + tagWidth > width) break
+    used += gap + tagWidth
+    count++
+  }
+  visibleTagCount.value = count
+}
+
+watch([tagList, tagMeasurements], ([list, measurements], _previous, onCleanup) => {
+  if (!list || !measurements) return
+  updateTagLayout()
+  if (typeof ResizeObserver === 'undefined') return
+  const observer = new ResizeObserver(updateTagLayout)
+  observer.observe(list)
+  observer.observe(measurements)
+  onCleanup(() => observer.disconnect())
+}, { flush: 'post' })
+watch([displayedTags, locale], async () => { await nextTick(); updateTagLayout() }, { flush: 'post' })
+watch(() => props.path, () => { tagOverflowOpen.value = false })
 
 function tagHue(tag: string): number {
   const hues = [350, 25, 45, 145, 190, 225, 275]
@@ -887,11 +932,25 @@ onBeforeUnmount(cancelTitleGeneration)
             </NButton>
           </div>
           <div class="metadata-tag-box">
-            <div class="metadata-tag-list">
-              <NTag v-for="tag in displayedTags" :key="tag" class="metadata-tag" :style="{ '--tag-hue': tagHue(tag) }" size="small" round :bordered="false" :closable="!isReadonly && !!path" :disabled="loading || saving" :title="tag" @close="removeTag(tag)">
+            <div ref="tagList" class="metadata-tag-list">
+              <NTag v-for="tag in visibleTags" :key="tag" class="metadata-tag" :style="{ '--tag-hue': tagHue(tag) }" size="small" round :bordered="false" :closable="!isReadonly && !!path" :disabled="loading || saving" :title="tag" @close="removeTag(tag)">
                 <span class="metadata-tag-name">{{ tag }}</span>
               </NTag>
               <span v-if="!displayedTags.length" class="metadata-tag-placeholder">{{ t('metadata.no_tags') }}</span>
+              <NPopover v-if="overflowTags.length" v-model:show="tagOverflowOpen" trigger="click" placement="bottom-end">
+                <template #trigger>
+                  <NButton class="metadata-tag-more" attr-type="button" size="tiny" :bordered="false" :aria-label="t('metadata.more_tags', { count: overflowTags.length })" :title="t('metadata.more_tags', { count: overflowTags.length })">+{{ overflowTags.length }}</NButton>
+                </template>
+                <div class="metadata-tag-overflow">
+                  <NTag v-for="tag in overflowTags" :key="tag" class="metadata-tag" :style="{ '--tag-hue': tagHue(tag) }" size="small" round :bordered="false" :closable="!isReadonly && !!path" :disabled="loading || saving" :title="tag" @close="removeTag(tag)">
+                    <span class="metadata-tag-name">{{ tag }}</span>
+                  </NTag>
+                </div>
+              </NPopover>
+            </div>
+            <div ref="tagMeasurements" class="metadata-tag-measurements" aria-hidden="true" inert>
+              <NTag v-for="tag in displayedTags" :key="tag" class="metadata-tag" size="small" round :bordered="false"><span class="metadata-tag-measure-name">{{ tag }}</span></NTag>
+              <NButton class="metadata-tag-more" attr-type="button" size="tiny" :bordered="false" tabindex="-1">+{{ displayedTags.length }}</NButton>
             </div>
           </div>
         </div>
@@ -965,8 +1024,14 @@ onBeforeUnmount(cancelTitleGeneration)
 .metadata-copy-id:hover { color: var(--accent); }
 .metadata-add-tag:hover:not(:disabled) { background: var(--code-bg); color: var(--accent); }
 .metadata-add-tag:focus-visible { outline: 1px solid color-mix(in srgb, var(--accent) 72%, transparent); outline-offset: 1px; }
-.metadata-tag-box { display: flex; align-items: center; gap: 8px; min-height: 34px; padding: 6px 10px; box-sizing: border-box; border: 1px solid var(--border); border-radius: 6px; background: var(--bg-soft); }
-.metadata-tag-list { display: flex; flex-wrap: wrap; align-items: center; align-content: flex-start; flex: 1; min-width: 0; max-height: 26px; overflow-y: auto; overflow-x: hidden; gap: 6px; }
+.metadata-tag-box { position: relative; display: flex; align-items: center; gap: 8px; min-height: 34px; padding: 6px 10px; box-sizing: border-box; border: 1px solid var(--border); border-radius: 6px; background: var(--bg-soft); overflow: hidden; }
+.metadata-tag-list { display: flex; align-items: center; flex: 1; min-width: 0; overflow: hidden; gap: 6px; }
+.metadata-tag-list > .metadata-tag { flex-shrink: 0; }
+.metadata-tag-more { flex-shrink: 0; height: 22px; padding: 0 7px; font-size: 0.7rem; font-variant-numeric: tabular-nums; color: var(--text-muted); background: var(--code-bg); border-radius: 11px; }
+.metadata-tag-more:hover { color: var(--accent); }
+.metadata-tag-measurements { position: absolute; display: flex; gap: 6px; width: max-content; visibility: hidden; pointer-events: none; }
+.metadata-tag-overflow { display: flex; flex-wrap: wrap; gap: 6px; max-width: min(300px, 75vw); max-height: 220px; overflow-y: auto; padding: 2px; }
+.metadata-tag-overflow .metadata-tag :deep(.n-base-close) { width: var(--n-close-size); margin: var(--n-close-margin); opacity: 1; }
 .metadata-tag {
   --tag-color: hsl(var(--tag-hue) 65% 50%);
   --tag-text: color-mix(in srgb, var(--tag-color) 40%, var(--text));
@@ -977,7 +1042,8 @@ onBeforeUnmount(cancelTitleGeneration)
   color: var(--tag-text);
   font-size: 0.76rem;
 }
-.metadata-tag-name { display: block; max-width: min(180px, 100%); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.metadata-tag-name,
+.metadata-tag-measure-name { display: block; max-width: min(180px, 100%); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .metadata-tag :deep(.n-base-close svg) { width: 12px; height: 12px; opacity: 0.55; transition: opacity 0.12s ease; }
 .metadata-tag :deep(.n-base-close:hover svg),
 .metadata-tag :deep(.n-base-close:focus-visible svg) { opacity: 1; }
