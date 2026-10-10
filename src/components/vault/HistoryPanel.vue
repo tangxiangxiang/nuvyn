@@ -37,6 +37,8 @@ const props = withDefaults(defineProps<{
 })
 const emit = defineEmits<{
   'open-revision': [selection: HistoryRevisionSelection]
+  'compare-revision': [selection: HistoryRevisionSelection]
+  'restore-revision': [selection: HistoryRevisionSelection]
   'open-diff': [entry: StatusEntry]
   'show-all-history': []
 }>()
@@ -51,6 +53,7 @@ const commitMenuOpen = ref(false)
 const commitMenuX = ref(0)
 const commitMenuY = ref(0)
 const commitMenuCommit = ref<HistoryCommitItem | FileHistoryCommitItem | null>(null)
+const fileMenuSelection = ref<HistoryRevisionSelection | null>(null)
 let commitMenuOrigin: HTMLElement | null = null
 
 const logErrorLabel = computed(() => h.logError.value?.message || t('history.load_failed'))
@@ -108,6 +111,7 @@ function isLatestCommit(item: { id: string }): boolean {
 }
 
 function closeCommitMenu(restoreFocus = false): void {
+  fileMenuSelection.value = null
   commitMenuOpen.value = false
   commitMenuCommit.value = null
   document.removeEventListener('pointerdown', onCommitMenuOutside)
@@ -126,9 +130,10 @@ function onCommitMenuEscape(event: KeyboardEvent): void {
   closeCommitMenu(true)
 }
 
-async function showCommitMenu(item: HistoryCommitItem | FileHistoryCommitItem, origin: HTMLElement, x: number, y: number): Promise<void> {
+async function showCommitMenu(item: HistoryCommitItem | FileHistoryCommitItem, origin: HTMLElement, x: number, y: number, file?: HistoryFileItem): Promise<void> {
   closeCommitMenu()
-  if (!isLatestCommit(item) || !props.withdraw.canWithdraw.value || props.withdraw.busy.value) return
+  if (!file && (!isLatestCommit(item) || !props.withdraw.canWithdraw.value || props.withdraw.busy.value)) return
+  if (file && 'files' in item) fileMenuSelection.value = timeline.selectFile(file, item)
   commitMenuCommit.value = item
   commitMenuOrigin = origin
   commitMenuX.value = x
@@ -143,6 +148,23 @@ async function showCommitMenu(item: HistoryCommitItem | FileHistoryCommitItem, o
   menu.querySelector<HTMLElement>('[role="menuitem"]')?.focus()
   document.addEventListener('pointerdown', onCommitMenuOutside)
   document.addEventListener('keydown', onCommitMenuEscape)
+}
+
+function onFileMenu(event: MouseEvent | KeyboardEvent, file: HistoryFileItem, item: HistoryCommitItem): void {
+  const origin = event.currentTarget as HTMLElement
+  const rect = origin.getBoundingClientRect()
+  const x = event instanceof MouseEvent ? event.clientX : rect.left
+  const y = event instanceof MouseEvent ? event.clientY : rect.bottom
+  void showCommitMenu(item, origin, x, y, file)
+}
+
+function fileMenuAction(action: 'compare-revision' | 'restore-revision'): void {
+  const selection = fileMenuSelection.value
+  closeCommitMenu()
+  if (selection) {
+    if (action === 'compare-revision') emit('compare-revision', selection)
+    else emit('restore-revision', selection)
+  }
 }
 
 function onCommitContextMenu(event: MouseEvent, item: HistoryCommitItem): void {
@@ -313,6 +335,8 @@ onBeforeUnmount(closeCommitMenu)
                     :selected="isSelected(file, item)"
                     :show-parent="ambiguousTitles.has(file.title)"
                     @select="openFile(file, item)"
+                    @contextmenu="onFileMenu($event, file, item)"
+                    @menukey="onFileMenu($event, file, item)"
                   />
                 </div>
               </template>
@@ -326,10 +350,18 @@ onBeforeUnmount(closeCommitMenu)
           ref="commitMenu"
           class="history-context-menu"
           role="menu"
-          :aria-label="t(props.fileHistory?.target.value ? 'history.latest_version_actions' : 'history.latest_commit_actions')"
+          :aria-label="t(fileMenuSelection ? 'history.version_actions' : props.fileHistory?.target.value ? 'history.latest_version_actions' : 'history.latest_commit_actions')"
           :style="{ left: commitMenuX + 'px', top: commitMenuY + 'px' }"
         >
-          <NButton attr-type="button" :bordered="false" role="menuitem" class="danger" @click="withdrawCommit">
+          <template v-if="fileMenuSelection">
+            <NButton attr-type="button" :bordered="false" role="menuitem" @click="fileMenuAction('compare-revision')">
+              {{ t('history.compare_with_working_tree') }}
+            </NButton>
+            <NButton attr-type="button" :bordered="false" role="menuitem" @click="fileMenuAction('restore-revision')">
+              {{ t('history.restore_version_ellipsis') }}
+            </NButton>
+          </template>
+          <NButton v-else size="small" attr-type="button" :bordered="false" role="menuitem" class="danger" @click="withdrawCommit">
             {{ t('history.withdraw_latest') }}
           </NButton>
         </div>

@@ -9,9 +9,14 @@ defineProps<{
   showParent?: boolean
 }>()
 
-const emit = defineEmits<{ select: [] }>()
+const emit = defineEmits<{ select: []; contextmenu: [event: MouseEvent]; menukey: [event: KeyboardEvent] }>()
 
 function onKeydown(event: KeyboardEvent): void {
+  if (event.key === 'ContextMenu' || (event.key === 'F10' && event.shiftKey)) {
+    event.preventDefault()
+    emit('menukey', event)
+    return
+  }
   if (event.key !== 'Enter') return
   event.preventDefault()
   emit('select')
@@ -32,6 +37,7 @@ function onKeydown(event: KeyboardEvent): void {
     :title="`${file.title}\n${file.path}`"
     @click="emit('select')"
     @keydown="onKeydown"
+    @contextmenu.prevent="emit('contextmenu', $event)"
   >
     <span class="history-file-chevron-spacer" aria-hidden="true" />
     <NIcon class="history-file-icon" aria-hidden="true"><FileText /></NIcon>

@@ -1,7 +1,11 @@
 import { describe, expect, it } from 'vitest'
-import { formatHistoryDate, historyLocale } from '../history-date'
+import { formatCompactHistoryDate, formatHistoryDate, historyLocale } from '../history-date'
 
 describe('History date formatting', () => {
+  it('formats a zero-padded compact local date with a 24-hour clock', () => {
+    expect(formatCompactHistoryDate(new Date(2026, 7, 8, 20, 19).getTime())).toBe('2026-08-08 20:19')
+    expect(formatCompactHistoryDate(new Date(2026, 0, 2, 0, 5).getTime())).toBe('2026-01-02 00:05')
+  })
   it('uses the application locale instead of the browser default', () => {
     const timestamp = new Date(2026, 6, 15, 10, 31).getTime()
     expect(historyLocale('zh')).toBe('zh-CN')

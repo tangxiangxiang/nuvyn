@@ -1,11 +1,12 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue'
-import { NButton } from 'naive-ui'
+import { NButton, NIcon } from 'naive-ui'
+import { Dots } from '@vicons/tabler'
 import type { HistoryComparison } from '../../composables/vault/useHistoryComparisons'
 import { useI18n } from '../../composables/useI18n'
 import HistoryUnifiedDiff from './HistoryUnifiedDiff.vue'
 import HistoryUnchangedContent from './HistoryUnchangedContent.vue'
-import { formatHistoryDate } from '../../lib/history-date'
+import { formatCompactHistoryDate } from '../../lib/history-date'
 
 const props = defineProps<{
   comparison: HistoryComparison
@@ -20,13 +21,18 @@ const emit = defineEmits<{
   viewCommitChanges: [tabId: string]
 }>()
 
-const { locale, t } = useI18n()
+const { t } = useI18n()
 const headingRef = ref<HTMLElement | null>(null)
 const menuRef = ref<HTMLElement | null>(null)
 const menuButtonRef = ref<{ $el: HTMLButtonElement } | null>(null)
 const menuOpen = ref(false)
 
-const revisionTimeLabel = computed(() => formatHistoryDate(props.comparison.revisionTime, locale.value))
+const revisionTimeLabel = computed(() => formatCompactHistoryDate(props.comparison.revisionTime))
+const revisionTooltip = computed(() => [
+  t('history.revision_label', { sha: props.comparison.revisionId }),
+  props.comparison.summary,
+  revisionTimeLabel.value,
+].filter(Boolean).join('\n'))
 const beforeLabel = computed(() => (
   props.comparison.mode === 'commit-change'
     ? (props.comparison.parentRevisionId?.slice(0, 7) ?? '∅')
@@ -140,9 +146,6 @@ onBeforeUnmount(() => {
 <template>
   <section
     class="history-comparison-pane"
-    :class="{
-      'has-summary': Boolean(comparison.summary),
-    }"
     :aria-label="t('history.comparison_viewer')"
     :aria-busy="restoring || undefined"
   >
@@ -153,13 +156,13 @@ onBeforeUnmount(() => {
           <span
             class="history-revision-chip"
             :aria-label="beforeAccessibleLabel"
-            :title="beforeAccessibleLabel"
+            :title="comparison.mode === 'revision-to-worktree' ? revisionTooltip : beforeAccessibleLabel"
           >{{ beforeLabel }}</span>
           <span aria-hidden="true">→</span>
           <span
             class="history-revision-chip"
             :aria-label="afterAccessibleLabel"
-            :title="afterAccessibleLabel"
+            :title="comparison.mode === 'commit-change' ? revisionTooltip : afterAccessibleLabel"
           >{{ afterLabel }}</span>
         </span>
       </div>
@@ -178,9 +181,10 @@ onBeforeUnmount(() => {
           aria-haspopup="menu"
           :aria-expanded="menuOpen"
           :aria-label="t('history.more_actions')"
+          :title="t('history.more_actions')"
           @click="toggleMenu"
         >
-          ⋯
+          <NIcon class="history-pane-menu-icon" aria-hidden="true"><Dots /></NIcon>
         </NButton>
         <div
           v-if="menuOpen"
@@ -235,11 +239,6 @@ onBeforeUnmount(() => {
       </div>
     </header>
 
-    <div v-if="comparison.summary" class="history-diff-summary">
-      <span class="history-diff-summary-text">{{ comparison.summary }}</span>
-      <span class="history-diff-summary-date">· {{ revisionTimeLabel }}</span>
-    </div>
-
     <div v-if="comparison.status === 'loading'" class="history-diff-state" role="status">
       {{ t('history.loading_comparison') }}
     </div>
@@ -257,10 +256,6 @@ onBeforeUnmount(() => {
       v-else-if="comparison.diff && comparison.diff.ops.length === 0"
       class="history-unchanged-view"
     >
-      <div v-if="comparison.beforeRaw.length > 0" class="history-unchanged-notice" role="status">
-        <span class="history-unchanged-notice-icon" aria-hidden="true">✓</span>
-        <span>{{ t('history.comparison_identical') }}</span>
-      </div>
       <HistoryUnchangedContent
         v-if="comparison.beforeRaw.length > 0"
         :raw="comparison.beforeRaw"

@@ -184,8 +184,10 @@ describe('HistoryComparisonPane', () => {
         diff: { ops: [], stats: { added: 0, removed: 0, equal: 0 } },
       }),
     })
-    expect(wrapper.text()).toContain('Identical')
-    expect(wrapper.get('.history-unchanged-notice-icon').text()).toBe('✓')
+    expect(wrapper.get('.history-diff-stats .is-added').text()).toBe('+0')
+    expect(wrapper.get('.history-diff-stats .is-removed').text()).toBe('−0')
+    expect(wrapper.find('.history-diff-identical').exists()).toBe(false)
+    expect(wrapper.find('.history-unchanged-notice').exists()).toBe(false)
     expect(wrapper.find('.unchanged-content-stub').text()).toContain('# Same document')
   })
 
@@ -201,12 +203,19 @@ describe('HistoryComparisonPane', () => {
     expect(wrapper.find('.unchanged-content-stub').exists()).toBe(false)
   })
 
-  it('formats the revision date with the application locale', () => {
+  it.each(['zh', 'en'] as const)('uses a compact revision date in %s', (locale) => {
     const { setLocale } = useI18n()
-    setLocale('zh')
+    setLocale(locale)
     try {
       const wrapper = mountPane(comparison())
-      expect(wrapper.text()).toContain('2026年7月15日')
+      const revision = wrapper.findAll('.history-revision-chip')[1]!
+      expect(revision.attributes('title')).toContain('2026-07-15 10:31')
+      expect(revision.attributes('title')).toContain('Update cache section')
+      expect(wrapper.find('.history-diff-summary').exists()).toBe(false)
+      expect(wrapper.classes()).not.toContain('has-summary')
+      const worktree = mountPane(comparison({ mode: 'revision-to-worktree' }))
+      expect(worktree.findAll('.history-revision-chip')[0]!.attributes('title')).toContain('Update cache section')
+      expect(worktree.findAll('.history-revision-chip')[1]!.attributes('title')).not.toContain('Update cache section')
     } finally {
       setLocale('en')
     }

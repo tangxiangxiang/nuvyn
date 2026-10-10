@@ -215,6 +215,29 @@ describe('HistoryPanel commit-first timeline', () => {
     expect(refreshFile).toHaveBeenCalledTimes(1)
   })
 
+  it('offers per-file comparison and restore actions without changing commit actions', async () => {
+    vi.mocked(api.getLog).mockResolvedValue({ commits: [commit('revision-files', NOW, 'Files', ['inbox/a.md', 'inbox/b.md'])] })
+    const { wrapper } = mountPanel({ attachTo: document.body })
+    await flushPromises()
+    await expandFirstCommit(wrapper)
+    const file = wrapper.findAll('.history-file-row')[1]!
+    await file.trigger('contextmenu', { clientX: 20, clientY: 30 })
+    await flushPromises()
+    let menu = document.querySelector('.history-context-menu')!
+    expect(menu.textContent).toContain('Compare with Working Tree')
+    expect(menu.textContent).not.toContain('Withdraw')
+    ;(menu.querySelector('button') as HTMLButtonElement).click()
+    await flushPromises()
+    expect(wrapper.emitted('compare-revision')?.[0]?.[0]).toMatchObject({ documentPath: 'inbox/b', revisionId: 'revision-files' })
+    expect(wrapper.emitted('open-revision')).toBeUndefined()
+    await file.trigger('keydown', { key: 'F10', shiftKey: true })
+    await flushPromises()
+    menu = document.querySelector('.history-context-menu')!
+    ;(menu.querySelectorAll('button')[1] as HTMLButtonElement).click()
+    await flushPromises()
+    expect(wrapper.emitted('restore-revision')?.[0]?.[0]).toMatchObject({ documentPath: 'inbox/b', revisionId: 'revision-files' })
+  })
+
   it('renders one multi-file commit once and expands its file children without another log request', async () => {
     vi.mocked(api.getLog).mockResolvedValue({
       commits: [commit('abcdef123456', NOW, 'Improve History timeline', [

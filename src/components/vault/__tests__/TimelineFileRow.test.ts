@@ -21,6 +21,16 @@ function mountRow(props: Partial<{ selected: boolean; showParent: boolean }> = {
 }
 
 describe('TimelineFileRow', () => {
+  it('opens a context menu without selecting the file', async () => {
+    const wrapper = mountRow()
+    const row = wrapper.get('.history-file-row')
+    await row.trigger('contextmenu')
+    await row.trigger('keydown', { key: 'ContextMenu' })
+    await row.trigger('keydown', { key: 'F10', shiftKey: true })
+    expect(wrapper.emitted('contextmenu')).toHaveLength(1)
+    expect(wrapper.emitted('menukey')).toHaveLength(2)
+    expect(wrapper.emitted('select')).toBeUndefined()
+  })
   it('preserves the treeitem button contract and renders the file icon', () => {
     const wrapper = mountRow()
     const row = wrapper.get('.history-file-row')

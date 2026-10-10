@@ -1683,6 +1683,20 @@ async function openHistoryComparison(selection: HistoryRevisionSelection): Promi
   await request
 }
 
+async function onHistoryFileAction(selection: HistoryRevisionSelection, action: 'compare' | 'restore'): Promise<void> {
+  recoveryTabs.deactivate()
+  workingTreeDiffs.deactivate()
+  const source = await historyComparisons.openComparison(selection)
+  if (source.status !== 'ready' || source.revisionId !== selection.revisionId || source.mode !== 'commit-change') return
+  if (action === 'compare') {
+    await compareHistoryWithWorkingTree(source.tabId)
+  } else if (source.afterExists) {
+    restoreHistoricalVersion(source)
+  } else {
+    toast.info(t('history.version_deletes_file'))
+  }
+}
+
 async function compareHistoryWithWorkingTree(tabId: string): Promise<void> {
   const request = historyComparisons.compareWithWorkingTree(tabId)
   await nextTick()
@@ -2986,6 +3000,8 @@ watch(isReadMode, async (reading) => {
       :active-diff-path="activeWorkingTreeDiff?.documentPath ? `${activeWorkingTreeDiff.documentPath}.md` : null"
       @show-all-history="showAllHistory"
       @open-revision="openHistoryComparison"
+      @compare-revision="onHistoryFileAction($event, 'compare')"
+      @restore-revision="onHistoryFileAction($event, 'restore')"
       @open-diff="openWorkingTreeDiff"
     />
     <DraftRecoveryCenter
