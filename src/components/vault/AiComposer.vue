@@ -123,6 +123,7 @@ defineExpose({ focus })
         :value="modelValue"
         :placeholder="inputPlaceholder"
         :bordered="false"
+        :theme-overrides="{ color: 'transparent', colorFocus: 'transparent', borderRadius: '0', boxShadowFocus: 'none' }"
         :input-props="{
           class: 'ai-input',
           'aria-label': t('ai.input_placeholder'),
