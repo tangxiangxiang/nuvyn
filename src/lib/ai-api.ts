@@ -303,6 +303,30 @@ export async function suggestCommitMessage(input: {
   }))
 }
 
+export async function suggestTags(input: {
+  path: string
+  content?: string
+  language?: 'zh' | 'en'
+}, signal?: AbortSignal): Promise<{ tags: string[] }> {
+  return jsonOrThrow<{ tags: string[] }>(await authFetch('/api/ai/tags', {
+    method: 'POST',
+    ...jsonBody(input),
+    signal,
+  }))
+}
+
+export async function suggestTitle(input: {
+  path: string
+  content?: string
+  language?: 'zh' | 'en'
+}, signal?: AbortSignal): Promise<{ title: string }> {
+  return jsonOrThrow<{ title: string }>(await authFetch('/api/ai/title', {
+    method: 'POST',
+    ...jsonBody(input),
+    signal,
+  }))
+}
+
 export async function suggestSummary(input: {
   path: string
   content?: string

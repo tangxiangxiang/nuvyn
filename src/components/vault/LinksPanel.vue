@@ -14,7 +14,7 @@
 
 import { computed, ref, watch, watchEffect, onMounted, onBeforeUnmount } from 'vue'
 import { NButton, NIcon } from 'naive-ui'
-import { FileText } from '@vicons/tabler'
+import { ArrowLeft, ArrowRight, ArrowsLeftRight, FileText } from '@vicons/tabler'
 import { useDebounceFn } from '@vueuse/core'
 import type { PostSummary, BacklinkRecord } from '../../lib/api'
 import { getLinkIndex, fetchBacklinks } from '../../composables/vault/useLinkIndex'
@@ -63,9 +63,22 @@ function displayTitle(p: string): string {
   return titleByPath.value.get(p) ?? p.split('/').at(-1) ?? p
 }
 
-/** Drop the leading protected root (`inbox/`, `archive/`, etc.) so
- *  the panel rows read as "the meaningful tail", matching what
- *  TagPanel / FileTree do. */
+const duplicateTitles = computed(() => {
+  const seen = new Set<string>()
+  const duplicates = new Set<string>()
+  for (const title of titleByPath.value.values()) {
+    if (seen.has(title)) duplicates.add(title)
+    seen.add(title)
+  }
+  return duplicates
+})
+
+function linkTooltip(path: string, anchor?: string, alias?: string): string {
+  return [displayTitle(path), anchor ? `${path}#${anchor}` : path, alias]
+    .filter(Boolean).join('\n')
+}
+
+/** Compact directory labels disambiguate documents with the same title. */
 function directoryLabel(p: string): string {
   const parts = p.split('/')
   parts.pop()
@@ -89,10 +102,38 @@ const outgoing = computed(() => {
 const outgoingDisplay = computed(() => {
   return outgoing.value.map((l) => ({
     target: l.target,
-    label: l.alias ?? displayTitle(l.target),
+    label: displayTitle(l.target),
+    alias: l.alias,
     anchor: l.anchor,
     kind: l.kind,
   }))
+})
+
+const relationshipGroups = computed(() => {
+  const sources = new Set(backlinks.value.map((link) => link.source))
+  const targets = new Map<string, typeof outgoingDisplay.value>()
+  for (const link of outgoingDisplay.value) {
+    const links = targets.get(link.target) ?? []
+    links.push(link)
+    targets.set(link.target, links)
+  }
+  const mutual = [...targets.keys()].filter((path) => sources.has(path))
+  const row = (path: string, navigateToAnchor = false) => {
+    const links = targets.get(path) ?? []
+    return {
+      path,
+      label: displayTitle(path),
+      anchor: navigateToAnchor ? links[0]?.anchor : undefined,
+      tooltip: [...new Set(links.length
+        ? links.map((link) => linkTooltip(path, link.anchor, link.alias))
+        : [linkTooltip(path)])].join('\n'),
+    }
+  }
+  return [
+    { key: 'links.mutual', icon: ArrowsLeftRight, rows: mutual.map((path) => row(path)) },
+    { key: 'links.backlinks', icon: ArrowLeft, rows: [...sources].filter((path) => !targets.has(path)).map((path) => row(path)) },
+    { key: 'links.outgoing', icon: ArrowRight, rows: [...targets.keys()].filter((path) => !sources.has(path)).map((path) => row(path, true)) },
+  ].filter((group) => group.rows.length)
 })
 
 async function refetchBacklinks() {
@@ -189,49 +230,29 @@ watchEffect(() => {
            and the section headers (with their "0" count) are
            redundant — dropping them keeps the panel down to what
            the note actually has. -->
-      <section v-if="backlinks.length" class="section" :aria-label="t('links.backlinks')">
+      <section v-for="group in relationshipGroups" :key="group.key" class="section" :aria-label="t(group.key)">
         <header class="section-header">
-          <span class="section-title">{{ t('links.count', { label: t('links.backlinks'), count: backlinks.length }) }}</span>
+          <span class="section-title">
+            <NIcon class="section-icon" aria-hidden="true"><component :is="group.icon" /></NIcon>
+            {{ t(group.key) }}
+          </span>
+          <span class="section-count">{{ group.rows.length }}</span>
         </header>
         <ul class="link-list">
-          <li v-for="b in backlinks" :key="b.source">
+          <li v-for="link in group.rows" :key="link.path">
             <NButton
               class="link-entry"
+              :class="{ 'is-active': link.path === activePath }"
               attr-type="button"
               text
               :bordered="false"
-              :title="b.source"
-              @click="emit('navigate', b.source)"
+              :title="link.tooltip"
+              @click="link.anchor ? emit('navigate', link.path, link.anchor) : emit('navigate', link.path)"
             >
               <NIcon class="link-icon" aria-hidden="true"><FileText /></NIcon>
               <span class="link-copy">
-                <span class="link-title">{{ displayTitle(b.source) }}</span>
-                <span class="link-path">{{ directoryLabel(b.source) }}</span>
-              </span>
-            </NButton>
-          </li>
-        </ul>
-      </section>
-
-      <section v-if="outgoingDisplay.length" class="section" :aria-label="t('links.outgoing')">
-        <header class="section-header">
-          <span class="section-title">{{ t('links.count', { label: t('links.outgoing'), count: outgoingDisplay.length }) }}</span>
-        </header>
-        <ul class="link-list">
-          <li v-for="l in outgoingDisplay" :key="l.target + (l.anchor ?? '')">
-            <NButton
-              class="link-entry"
-              attr-type="button"
-              text
-              :bordered="false"
-              :title="l.anchor ? `${l.target}#${l.anchor}` : l.target"
-              @click="l.anchor ? emit('navigate', l.target, l.anchor) : emit('navigate', l.target)"
-            >
-              <NIcon class="link-icon" aria-hidden="true"><FileText /></NIcon>
-              <span class="link-copy">
-                <span class="link-title">{{ l.label }}</span>
-                <span v-if="l.anchor" class="link-anchor">#{{ l.anchor }}</span>
-                <span class="link-path">{{ directoryLabel(l.target) }}</span>
+                <span class="link-title">{{ link.label }}</span>
+                <span v-if="duplicateTitles.has(link.label)" class="link-path">{{ directoryLabel(link.path) }}</span>
               </span>
             </NButton>
           </li>
@@ -256,29 +277,34 @@ watchEffect(() => {
 .section {
   display: block;
 }
-.section + .section { margin-top: 18px; }
+.section + .section { margin-top: 8px; }
 .section-header {
   display: flex;
   align-items: center;
-  padding: 0 22px 5px;
+  justify-content: space-between;
+  padding: 4px 16px 6px;
   font-size: 0.7rem;
   color: var(--vs-text-2, var(--text-muted));
 }
-.section-title { font-weight: 600; }
+.section-title { display: inline-flex; align-items: center; gap: 6px; font-weight: 600; }
+.section-icon { font-size: 14px; }
+.section-count { font-weight: 400; font-variant-numeric: tabular-nums; }
 
 .link-list {
   list-style: none;
   margin: 0;
-  padding: 0 14px;
+  padding: 0;
   display: grid;
-  gap: 6px;
+  gap: 0;
 }
 .link-entry {
   display: flex;
   justify-content: flex-start;
   width: 100%;
-  padding: 7px 8px;
-  border-radius: 4px;
+  height: auto;
+  min-height: 30px;
+  padding: 5px 16px;
+  border-radius: 0;
   background: transparent;
   border: 0;
   color: var(--vs-text, var(--text));
@@ -290,38 +316,33 @@ watchEffect(() => {
 .link-entry :deep(.n-button__content) {
   display: grid;
   flex: 1 1 auto;
+  min-width: 0;
   grid-template-columns: 14px minmax(0, 1fr);
-  align-items: start;
+  align-items: center;
   gap: 8px;
   width: 100%;
 }
-.link-entry:hover {
-  background: color-mix(in srgb, var(--vs-hover-bg, var(--bg-soft)) 58%, transparent);
+.links-panel .link-entry:hover,
+.links-panel .link-entry:focus-visible {
+  background: var(--vs-hover-bg, var(--bg-soft));
   color: var(--vs-text-1, var(--text));
 }
-.link-entry:active {
-  background: color-mix(in srgb, var(--vs-accent, var(--accent)) 10%, transparent);
+.links-panel .link-entry.is-active {
+  background: var(--vs-selection-bg, var(--bg-soft));
+  color: var(--vs-text-1, var(--text));
 }
+.link-entry.is-active .link-title { font-weight: 600; }
 .link-icon {
   display: inline-flex;
-  margin-top: 2px;
   color: var(--vs-text-3, var(--text-muted));
 }
 .link-copy { min-width: 0; display: grid; gap: 1px; }
 .link-title {
-  font-weight: 500;
+  font-weight: 400;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
   max-width: 100%;
-}
-.link-anchor {
-  color: var(--vs-text-2, var(--text-muted));
-  font-size: 0.72rem;
-  margin-left: 5px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
 }
 .link-path {
   font-size: 0.7rem;

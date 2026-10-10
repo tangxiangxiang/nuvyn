@@ -1,7 +1,8 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue'
-import { NButton, NIcon, NInput, type InputInst } from 'naive-ui'
-import { Stars } from '@vicons/tabler'
+import { NButton, NButtonGroup, NIcon, NInput, NPopover, NTag, type InputInst } from 'naive-ui'
+import { ArrowBackUp, DeviceFloppy, Plus, Stars } from '@vicons/tabler'
+import { copyTextToClipboard } from './workspaceTabActions'
 import {
   getPost,
   updateDocumentMetadata,
@@ -9,13 +10,14 @@ import {
   type PostDetail,
   type UpdateDocumentMetadata,
 } from '../../lib/api'
-import { suggestSummary } from '../../lib/ai-api'
+import { suggestSummary, suggestTags, suggestTitle } from '../../lib/ai-api'
 import { useToast } from '../../composables/useToast'
 import { useI18n } from '../../composables/useI18n'
 import type { MetadataBase, MetadataContext, MetadataDraft, MetadataDraftKey } from './metadataDraftStore'
 import {
   normalizeTagDisplay,
   normalizeTagIdentity,
+  normalizeAndDedupeTags,
 } from '../../../shared/tagNormalization'
 import {
   getMetadataDraft,
@@ -59,12 +61,51 @@ const loadError = ref<string | null>(null)
 const title = ref('')
 const summary = ref('')
 const tags = ref('')
+const displayedTags = computed(() => split(tags.value))
+
+function tagHue(tag: string): number {
+  const hues = [350, 25, 45, 145, 190, 225, 275]
+  let hash = 0
+  for (const character of normalizeTagIdentity(tag)) hash = (hash * 31 + character.codePointAt(0)!) >>> 0
+  return hues[hash % hues.length]!
+}
+
+function removeTag(tag: string) {
+  if (loading.value || saving.value || isReadonly.value || !props.path) return
+  tags.value = join(displayedTags.value.filter((value) => value !== tag))
+}
+const tagEntryOpen = ref(false)
+const newTag = ref('')
+const tagEntryInput = ref<InputInst | null>(null)
+watch(() => props.path, () => { tagEntryOpen.value = false; newTag.value = '' })
+
+async function updateTagEntry(show: boolean) {
+  newTag.value = ''
+  tagEntryOpen.value = show
+  if (tagEntryOpen.value) {
+    await nextTick()
+    tagEntryInput.value?.focus()
+  }
+}
+
+function addTag() {
+  if (loading.value || saving.value || isReadonly.value || !props.path || !newTag.value.trim()) return
+  tags.value = join(split(`${tags.value},${newTag.value}`))
+  newTag.value = ''
+  tagEntryOpen.value = false
+}
 const metadata = ref<DocumentMetadata | null>(null)
 const loadedBase = ref<MetadataBase | null>(null)
 const loadedIdentity = ref<{ path: string; documentId: string | null } | null>(null)
 const draftRevision = ref(0)
 const uncertainSaveKey = ref<MetadataDraftKey | null>(null)
 const generatingSummary = ref(false)
+const generatingTags = ref(false)
+const generatingTitle = ref(false)
+let titleGenerationId = 0
+let titleGenerationController: AbortController | null = null
+let tagsGenerationId = 0
+let tagsGenerationController: AbortController | null = null
 const isReadonly = computed(() => props.readonly || props.context !== 'document')
 let summaryGenerationId = 0
 let summaryGenerationController: AbortController | null = null
@@ -82,11 +123,7 @@ type ActiveMetadataSave = {
 }
 const activeSaveByKey = new Map<MetadataDraftKey, ActiveMetadataSave>()
 
-const directory = computed(() => {
-  if (!props.path) return '—'
-  const index = props.path.lastIndexOf('/')
-  return index < 0 ? t('metadata.root') : props.path.slice(0, index)
-})
+const documentPath = computed(() => props.path ? `${props.path}.md` : '—')
 
 const dirty = computed(() => {
   const base = loadedBase.value
@@ -104,6 +141,19 @@ function formatDate(value?: number): string {
     year: 'numeric', month: '2-digit', day: '2-digit',
     hour: '2-digit', minute: '2-digit', second: '2-digit',
   }).format(value)
+}
+
+async function copyDocumentId() {
+  const id = metadata.value?.id
+  if (!id) return
+  if (await copyTextToClipboard(id)) toast.success(t('metadata.id_copied'))
+  else toast.error(t('vault.copy_failed'))
+}
+
+async function copyDocumentPath() {
+  if (!props.path) return
+  if (await copyTextToClipboard(documentPath.value)) toast.success(t('metadata.path_copied'))
+  else toast.error(t('vault.copy_failed'))
 }
 
 function normalizeTitle(value: string): string { return value.trim() }
@@ -438,6 +488,8 @@ const canSave = computed(() => {
     && !loading.value
     && !saving.value
     && !generatingSummary.value
+    && !generatingTags.value
+    && !generatingTitle.value
     && !isReadonly.value,
   )
 })
@@ -601,6 +653,99 @@ async function generateSummary(): Promise<void> {
   }
 }
 
+async function generateDocumentTags(): Promise<void> {
+  const identity = loadedIdentity.value
+  if (!props.path || !identity || !loadedBase.value || loading.value || saving.value
+    || generatingTags.value || isReadonly.value) return
+  const generation = ++tagsGenerationId
+  const pathSnapshot = props.path
+  const tagsSnapshot = tags.value
+  const contentSnapshot = props.summarySource
+  const controller = new AbortController()
+  tagsGenerationController = controller
+  generatingTags.value = true
+  try {
+    const request: { path: string; language: 'zh' | 'en'; content?: string } = {
+      path: pathSnapshot, language: locale.value,
+    }
+    if (contentSnapshot !== null) request.content = contentSnapshot
+    const result = await suggestTags(request, controller.signal)
+    if (controller.signal.aborted || generation !== tagsGenerationId
+      || props.path !== pathSnapshot || loadedIdentity.value?.documentId !== identity.documentId
+      || tags.value !== tagsSnapshot || props.summarySource !== contentSnapshot
+      || loading.value || saving.value || isReadonly.value) return
+    const suggestions = normalizeAndDedupeTags(result.tags)
+    if (!suggestions.length) throw new Error(t('metadata.ai_tags_empty'))
+    tags.value = normalizeAndDedupeTags([...displayedTags.value, ...suggestions.map(tag => tag.displayName)])
+      .map(tag => tag.displayName).join(', ')
+  } catch (cause) {
+    if (controller.signal.aborted || generation !== tagsGenerationId) return
+    toast.error(t('metadata.ai_tags_failed', { error: normalizeError(cause) }))
+  } finally {
+    if (generation === tagsGenerationId) {
+      generatingTags.value = false
+      tagsGenerationController = null
+    }
+  }
+}
+
+async function generateDocumentTitle(): Promise<void> {
+  const identity = loadedIdentity.value
+  if (!props.path || !identity || !loadedBase.value || loading.value || saving.value
+    || generatingTitle.value || isReadonly.value) return
+  const generation = ++titleGenerationId
+  const pathSnapshot = props.path
+  const titleSnapshot = title.value
+  const contentSnapshot = props.summarySource
+  const controller = new AbortController()
+  titleGenerationController = controller
+  generatingTitle.value = true
+  try {
+    const request: { path: string; language: 'zh' | 'en'; content?: string } = {
+      path: pathSnapshot, language: locale.value,
+    }
+    if (contentSnapshot !== null) request.content = contentSnapshot
+    const result = await suggestTitle(request, controller.signal)
+    if (controller.signal.aborted || generation !== titleGenerationId
+      || props.path !== pathSnapshot || loadedIdentity.value?.documentId !== identity.documentId
+      || title.value !== titleSnapshot || props.summarySource !== contentSnapshot
+      || loading.value || saving.value || isReadonly.value) return
+    const suggestion = result.title.trim()
+    if (!suggestion || suggestion.length > 200) throw new Error(t('metadata.ai_title_empty'))
+    title.value = suggestion
+  } catch (cause) {
+    if (controller.signal.aborted || generation !== titleGenerationId) return
+    toast.error(t('metadata.ai_title_failed', { error: normalizeError(cause) }))
+  } finally {
+    if (generation === titleGenerationId) {
+      generatingTitle.value = false
+      titleGenerationController = null
+    }
+  }
+}
+
+function cancelTitleGeneration(): void {
+  titleGenerationId++
+  titleGenerationController?.abort()
+  titleGenerationController = null
+  generatingTitle.value = false
+}
+
+function cancelTagsGeneration(): void {
+  tagsGenerationId++
+  tagsGenerationController?.abort()
+  tagsGenerationController = null
+  generatingTags.value = false
+}
+
+function onTagEntryKeydown(event: KeyboardEvent): void {
+  if (event.key !== 'Enter' && event.key !== 'Escape') return
+  event.preventDefault()
+  event.stopPropagation()
+  if (event.key === 'Enter') addTag()
+  else tagEntryOpen.value = false
+}
+
 function reset(): void {
   const identity = loadedIdentity.value
   const base = loadedBase.value
@@ -634,6 +779,8 @@ watch(
   () => [props.enabled, props.path] as const,
   ([enabled]) => {
     cancelSummaryGeneration()
+    cancelTagsGeneration()
+    cancelTitleGeneration()
     if (!enabled) return
     if (props.path && loadedIdentity.value?.path === props.path && !loadError.value) return
     void load()
@@ -641,15 +788,19 @@ watch(
   { immediate: true },
 )
 watch(() => [props.context, props.readonly] as const, () => {
+  cancelTagsGeneration()
+  cancelTitleGeneration()
   if (props.enabled) void load()
 })
 
 onBeforeUnmount(cancelSummaryGeneration)
+onBeforeUnmount(cancelTagsGeneration)
+onBeforeUnmount(cancelTitleGeneration)
 </script>
 
 <template>
   <form class="document-metadata-form" @submit.prevent="save" @keydown="onKeydown">
-    <div v-if="path" class="document-metadata-body" :aria-busy="loading || generatingSummary">
+    <div v-if="path" class="document-metadata-body" :aria-busy="loading || generatingSummary || generatingTags || generatingTitle">
       <div v-if="loading" class="document-metadata-status" role="status">{{ t('metadata.loading') }}</div>
       <div v-else-if="loadError" class="document-metadata-error" role="alert">
         <span>{{ t('metadata.load_failed', { error: loadError }) }}</span>
@@ -659,8 +810,14 @@ onBeforeUnmount(cancelSummaryGeneration)
         <p v-if="isReadonly" class="document-metadata-readonly-hint">
           {{ t(`metadata.readonly_${context}`) }}
         </p>
-        <label class="document-metadata-field">
-          <span>{{ t('metadata.field_title') }}</span>
+        <div class="document-metadata-field">
+          <div class="document-metadata-field-head">
+            <span>{{ t('metadata.field_title') }}</span>
+            <NButton v-if="!isReadonly" class="metadata-generate-title metadata-field-action" attr-type="button" :bordered="false" :disabled="loading || saving || generatingTitle || !path" :aria-label="t('metadata.ai_generate_title')" :title="t('metadata.ai_generate_title')" @click="generateDocumentTitle">
+              <NIcon class="metadata-generate-summary-icon" aria-hidden="true"><Stars /></NIcon>
+              <span>{{ t(generatingTitle ? 'metadata.ai_generating_summary' : 'metadata.ai_generate_title') }}</span>
+            </NButton>
+          </div>
           <NInput
             ref="titleInput"
             v-model:value="title"
@@ -670,17 +827,17 @@ onBeforeUnmount(cancelSummaryGeneration)
             :bordered="false"
             :maxlength="200"
             :disabled="loading || isReadonly || !path"
-            :input-props="{ required: true }"
+            :input-props="{ required: true, 'aria-label': t('metadata.field_title') }"
           />
-        </label>
-        <div class="document-metadata-field">
+        </div>
+        <div class="document-metadata-field document-metadata-summary">
           <div class="document-metadata-field-head">
-            <span>{{ t('metadata.summary') }}</span>
+            <span class="metadata-summary-label">{{ t('metadata.summary') }}<small class="metadata-summary-count">{{ summary.length }} / 2000</small></span>
             <NButton
               v-if="!isReadonly"
               attr-type="button"
               :bordered="false"
-              class="metadata-generate-summary"
+              class="metadata-generate-summary metadata-field-action"
               :disabled="loading || saving || generatingSummary || !path"
               :aria-label="t(generatingSummary ? 'metadata.ai_generating_summary' : 'metadata.ai_generate_summary')"
               :title="t(generatingSummary ? 'metadata.ai_generating_summary' : 'metadata.ai_generate_summary')"
@@ -700,30 +857,49 @@ onBeforeUnmount(cancelSummaryGeneration)
               size="small"
               :bordered="false"
               :maxlength="2000"
-              :rows="4"
+              :rows="6"
+              :resizable="false"
+              :placeholder="t('metadata.summary_placeholder')"
               :input-props="{ 'aria-label': t('metadata.summary') }"
               :disabled="loading || isReadonly || !path"
             />
-            <small>{{ summary.length }} / 2000</small>
           </div>
         </div>
-        <label class="document-metadata-field">
-          <span>{{ t('metadata.tags') }}</span>
-          <NInput
-            v-model:value="tags"
-            class="document-metadata-input"
-            type="text"
-            size="small"
-            :bordered="false"
-            placeholder="rag, notes"
-            :disabled="loading || isReadonly || !path"
-          />
-        </label>
+        <div class="document-metadata-field document-metadata-tags">
+          <div class="document-metadata-field-head">
+            <div class="metadata-tags-label">
+              <span>{{ t('metadata.tags') }}</span>
+              <NPopover :show="tagEntryOpen" trigger="click" placement="bottom-end" @update:show="updateTagEntry">
+                <template #trigger>
+                  <NButton class="metadata-add-tag" attr-type="button" :bordered="false" :disabled="loading || saving || isReadonly || !path" :aria-label="t('metadata.add_tag')" :title="t('metadata.add_tag')">
+                    <NIcon class="metadata-generate-summary-icon" aria-hidden="true"><Plus /></NIcon>
+                  </NButton>
+                </template>
+                <div class="metadata-tag-entry">
+                  <NInput ref="tagEntryInput" v-model:value="newTag" size="small" :placeholder="t('metadata.tag_name')" :input-props="{ 'aria-label': t('metadata.tag_name') }" @keydown="onTagEntryKeydown" />
+                  <NButton size="small" attr-type="button" :disabled="!newTag.trim()" @click="addTag">{{ t('metadata.add_tag') }}</NButton>
+                </div>
+              </NPopover>
+            </div>
+            <NButton v-if="!isReadonly" class="metadata-generate-tags metadata-field-action" attr-type="button" :bordered="false" :disabled="loading || saving || generatingTags || !path" :aria-label="t('metadata.ai_generate_tags')" :title="t('metadata.ai_generate_tags')" @click="generateDocumentTags">
+              <NIcon class="metadata-generate-summary-icon" aria-hidden="true"><Stars /></NIcon>
+              <span>{{ t(generatingTags ? 'metadata.ai_generating_summary' : 'metadata.ai_generate_tags') }}</span>
+            </NButton>
+          </div>
+          <div class="metadata-tag-box">
+            <div class="metadata-tag-list">
+              <NTag v-for="tag in displayedTags" :key="tag" class="metadata-tag" :style="{ '--tag-hue': tagHue(tag) }" size="small" round :bordered="false" :closable="!isReadonly && !!path" :disabled="loading || saving" :title="tag" @close="removeTag(tag)">
+                <span class="metadata-tag-name">{{ tag }}</span>
+              </NTag>
+              <span v-if="!displayedTags.length" class="metadata-tag-placeholder">{{ t('metadata.no_tags') }}</span>
+            </div>
+          </div>
+        </div>
         <section class="document-metadata-readonly" :aria-label="t('metadata.readonly')">
+          <div><span>{{ t('metadata.document_id') }}</span><output class="is-mono"><button v-if="metadata?.id" type="button" class="metadata-copy-id" :title="`${metadata.id}\n${t('metadata.copy_id')}`" :aria-label="t('metadata.copy_id')" @click="copyDocumentId">{{ metadata.id }}</button><template v-else>—</template></output></div>
+          <div><span>{{ t('metadata.document_path') }}</span><output class="is-mono"><button v-if="path" type="button" class="metadata-copy-id metadata-copy-path" :title="`${documentPath}\n${t('metadata.copy_path')}`" :aria-label="t('metadata.copy_path')" @click="copyDocumentPath">{{ documentPath }}</button><template v-else>—</template></output></div>
           <div><span>{{ t('metadata.created_at') }}</span><output>{{ formatDate(metadata?.createdAt) }}</output></div>
           <div><span>{{ t('metadata.updated_at') }}</span><output>{{ formatDate(metadata?.updatedAt) }}</output></div>
-          <div><span>{{ t('metadata.document_id') }}</span><output class="is-mono" :title="metadata?.id">{{ metadata?.id ?? '—' }}</output></div>
-          <div><span>{{ t('metadata.directory') }}</span><output class="is-mono" :title="directory">{{ directory }}</output></div>
         </section>
       </template>
     </div>
@@ -731,10 +907,16 @@ onBeforeUnmount(cancelSummaryGeneration)
 
     <footer v-if="showActions && path && !isReadonly && !loadError" class="document-metadata-actions">
       <NButton v-if="showCancel" attr-type="button" :bordered="false" class="btn" @click="emit('cancel')">{{ t('metadata.cancel') }}</NButton>
-      <NButton attr-type="button" :bordered="false" class="btn" :disabled="loading || saving || generatingSummary || !dirty" @click="reset">{{ t('metadata.reset') }}</NButton>
-      <NButton attr-type="submit" :bordered="false" class="btn btn-primary" :disabled="!canSave">
-        {{ t(saving ? 'metadata.saving' : 'metadata.save') }}
-      </NButton>
+      <NButtonGroup class="document-metadata-action-group">
+        <NButton attr-type="button" :bordered="false" class="btn" :disabled="loading || saving || generatingSummary || generatingTags || generatingTitle || !dirty" @click="reset">
+          <template #icon><NIcon aria-hidden="true"><ArrowBackUp /></NIcon></template>
+          {{ t('metadata.reset') }}
+        </NButton>
+        <NButton attr-type="submit" :bordered="false" class="btn btn-primary" :disabled="!canSave">
+          <template #icon><NIcon aria-hidden="true"><DeviceFloppy /></NIcon></template>
+          {{ t(saving ? 'metadata.saving' : 'metadata.save') }}
+        </NButton>
+      </NButtonGroup>
     </footer>
   </form>
 </template>
@@ -755,19 +937,23 @@ onBeforeUnmount(cancelSummaryGeneration)
 .document-metadata-field :deep(.document-metadata-input) { width: 100%; }
 .document-metadata-field :deep(.document-metadata-input input),
 .document-metadata-field :deep(.document-metadata-input textarea) { width: 100%; box-sizing: border-box; border: 1px solid var(--border); border-radius: 4px; padding: 8px 10px; background: var(--bg-soft); color: var(--text); font: inherit; letter-spacing: 0; outline: none; }
-.document-metadata-textarea-wrap { position: relative; min-width: 0; }
-.document-metadata-textarea-wrap :deep(.document-metadata-input textarea) { padding-right: 10px; padding-bottom: 29px; }
-.document-metadata-field :deep(.document-metadata-input textarea) { resize: vertical; min-height: 92px; line-height: 1.5; }
+.document-metadata-textarea-wrap { display: grid; gap: 4px; min-width: 0; }
+.metadata-summary-label { display: inline-flex; align-items: baseline; gap: 8px; }
+.metadata-tags-label { display: inline-flex; align-items: center; gap: 4px; }
+.metadata-tags-label > span { color: var(--text-muted); font-size: 0.76rem; font-weight: 600; }
+.metadata-summary-count { color: var(--text-muted); font-size: 0.68rem; font-weight: 400; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.document-metadata-field :deep(.document-metadata-input textarea) { resize: none; min-height: 0; line-height: 1.5; }
 .document-metadata-field :deep(.document-metadata-input input:focus),
 .document-metadata-field :deep(.document-metadata-input textarea:focus) { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); }
 /* AI generate: ghost button sitting on the label row, no longer absolute over
    the textarea. Sizing baseline matches the other ghost buttons in the panel. */
-.metadata-generate-summary { display: inline-flex; align-items: center; gap: 3px; min-height: 18px; padding: 0 5px; border: 0; border-radius: 3px; background: transparent; color: var(--text-muted); font: inherit; font-size: 0.66rem; cursor: pointer; transition: color 0.12s ease, background 0.12s ease; }
+.metadata-field-action,
+.metadata-add-tag { display: inline-flex; align-items: center; gap: 3px; min-height: 18px; padding: 0 5px; border: 0; border-radius: 3px; background: transparent; color: var(--text-muted); font: inherit; font-size: 0.66rem; cursor: pointer; transition: color 0.12s ease, background 0.12s ease; }
 .metadata-generate-summary-icon { display: inline-flex; flex: 0 0 12px; }
 .metadata-generate-summary-icon :deep(svg) { display: block; width: 12px; height: 12px; }
-.metadata-generate-summary:hover:not(:disabled) { background: var(--code-bg); color: var(--accent); }
-.metadata-generate-summary:focus-visible { outline: 1px solid color-mix(in srgb, var(--accent) 72%, transparent); outline-offset: 1px; }
-.metadata-generate-summary:disabled { cursor: default; opacity: 0.5; }
+.metadata-field-action:hover:not(:disabled) { background: var(--code-bg); color: var(--accent); }
+.metadata-field-action:focus-visible { outline: 1px solid color-mix(in srgb, var(--accent) 72%, transparent); outline-offset: 1px; }
+.metadata-field-action:disabled { cursor: default; opacity: 0.5; }
 .document-metadata-readonly { display: grid; grid-template-columns: 1fr 1fr; gap: 0; margin-top: 3px; border-top: 1px solid var(--border); }
 .document-metadata-readonly > div { min-width: 0; display: grid; gap: 4px; padding: 12px 0; border-bottom: 1px solid var(--border); }
 .document-metadata-readonly > div:nth-child(odd) { padding-right: 16px; }
@@ -775,5 +961,47 @@ onBeforeUnmount(cancelSummaryGeneration)
 .document-metadata-readonly span { color: var(--text-muted); font-size: 0.7rem; }
 .document-metadata-readonly output { min-width: 0; overflow: hidden; color: var(--text); font-size: 0.78rem; text-overflow: ellipsis; white-space: nowrap; }
 .document-metadata-readonly output.is-mono { font-family: var(--mono); font-size: 0.72rem; }
+.metadata-copy-id { display: block; width: 100%; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; padding: 0; border: 0; background: transparent; color: inherit; font: inherit; text-align: inherit; cursor: pointer; }
+.metadata-copy-id:hover { color: var(--accent); }
+.metadata-add-tag:hover:not(:disabled) { background: var(--code-bg); color: var(--accent); }
+.metadata-add-tag:focus-visible { outline: 1px solid color-mix(in srgb, var(--accent) 72%, transparent); outline-offset: 1px; }
+.metadata-tag-box { display: flex; align-items: center; gap: 8px; min-height: 34px; padding: 6px 10px; box-sizing: border-box; border: 1px solid var(--border); border-radius: 6px; background: var(--bg-soft); }
+.metadata-tag-list { display: flex; flex-wrap: wrap; align-items: center; align-content: flex-start; flex: 1; min-width: 0; max-height: 26px; overflow-y: auto; overflow-x: hidden; gap: 6px; }
+.metadata-tag {
+  --tag-color: hsl(var(--tag-hue) 65% 50%);
+  --tag-text: color-mix(in srgb, var(--tag-color) 40%, var(--text));
+  --n-close-icon-color: var(--tag-text);
+  --n-close-icon-color-hover: var(--tag-text);
+  max-width: 100%;
+  background: color-mix(in srgb, var(--tag-color) 16%, transparent);
+  color: var(--tag-text);
+  font-size: 0.76rem;
+}
+.metadata-tag-name { display: block; max-width: min(180px, 100%); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.metadata-tag :deep(.n-base-close svg) { width: 12px; height: 12px; opacity: 0.55; transition: opacity 0.12s ease; }
+.metadata-tag :deep(.n-base-close:hover svg),
+.metadata-tag :deep(.n-base-close:focus-visible svg) { opacity: 1; }
+@media (hover: hover) and (pointer: fine) {
+  .metadata-tag :deep(.n-base-close) {
+    width: 0;
+    margin: 0;
+    overflow: hidden;
+    opacity: 0;
+    transition: opacity 0.12s ease;
+  }
+  .metadata-tag:hover :deep(.n-base-close),
+  .metadata-tag:focus-within :deep(.n-base-close) {
+    width: var(--n-close-size);
+    margin: var(--n-close-margin);
+    opacity: 1;
+  }
+}
+.metadata-tag-placeholder { color: var(--text-muted); font-size: 0.76rem; }
+.document-metadata-field-head .metadata-add-tag { flex: 0 0 auto; }
+.metadata-tag-entry { display: flex; align-items: center; gap: 8px; max-width: min(280px, 80vw); }
 .document-metadata-actions { display: flex; justify-content: flex-end; gap: 8px; padding: 12px 18px; border-top: 1px solid var(--border); background: var(--bg-soft); }
+.document-metadata-action-group { flex: 1; min-width: 0; border: 1px solid var(--border); border-radius: 5px; }
+.document-metadata-action-group :deep(.btn) { flex: 1; min-width: 0; margin: 0; border-radius: 0; }
+.document-metadata-action-group :deep(.btn:first-child) { border-radius: 4px 0 0 4px; }
+.document-metadata-action-group :deep(.btn:last-child) { border-radius: 0 4px 4px 0; }
 </style>

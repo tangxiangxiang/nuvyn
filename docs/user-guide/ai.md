@@ -24,6 +24,12 @@ credentials. Restore the original file from backup, or configure the matching
 key through `NUVYN_MASTER_KEY` or `NUVYN_MASTER_KEY_FILE`. The runtime accepts
 only the canonical Nuvyn key sources.
 
+## Generate Document Properties
+
+Document Properties has **Generate with AI** actions for Title, Summary, and Tags. They use the configured provider and current document body, including unsaved editor content. Generated values are drafts: review them and click **Save** to persist. Title generation changes the display title only, not the filename or document path. Tag suggestions merge with existing tags and deduplicate matches.
+
+If you manually edit the target field while generation is pending, the AI result will not overwrite your edit. Switching documents or leaving the panel cancels pending requests. Managed Diary bodies are not supported by these actions.
+
 ## Test the Current Connection
 
 Settings → AI includes a real, manual connection probe for the configuration

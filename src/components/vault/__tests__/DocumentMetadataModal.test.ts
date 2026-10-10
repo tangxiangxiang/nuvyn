@@ -49,13 +49,18 @@ describe('DocumentMetadataModal', () => {
     expect(document.body.textContent).toContain('文档属性')
     expect(document.body.textContent).toContain('doc-1')
     expect(document.body.textContent).toContain('inbox')
-    const tagInput = document.body.querySelector<HTMLInputElement>('input[placeholder="rag, notes"]')!
+    document.body.querySelector<HTMLButtonElement>('.metadata-add-tag')!.click()
+    await flushPromises()
+    const tagInput = document.body.querySelector<HTMLInputElement>('.metadata-tag-entry input')!
     tagInput.value = 'rag, RAG, new'
     tagInput.dispatchEvent(new Event('input', { bubbles: true }))
+    await flushPromises()
+    tagInput.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }))
+    await flushPromises()
     document.body.querySelector('form')!.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }))
     await flushPromises()
     expect(updateDocumentMetadata).toHaveBeenCalledWith('inbox/note', expect.objectContaining({
-      tags: ['rag', 'new'],
+      tags: ['rag', 'notes', 'new'],
     }))
     expect(wrapper.emitted('saved')?.[0]?.[0]).toMatchObject({ title: 'Updated' })
     wrapper.unmount()

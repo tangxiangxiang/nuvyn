@@ -2,11 +2,11 @@ import MarkdownIt from 'markdown-it'
 import type StateCore from 'markdown-it/lib/rules_core/state_core.mjs'
 
 export const CALLOUT_TYPES = {
-  NOTE: { title: '注意' },
-  TIP: { title: '提示' },
-  IMPORTANT: { title: '重要' },
-  WARNING: { title: '警告' },
-  CAUTION: { title: '小心' },
+  NOTE: { title: 'Note' },
+  TIP: { title: 'Tip' },
+  IMPORTANT: { title: 'Important' },
+  WARNING: { title: 'Warning' },
+  CAUTION: { title: 'Caution' },
 } as const
 
 export type CalloutType = keyof typeof CALLOUT_TYPES

@@ -850,6 +850,17 @@ main.container.auth-page-shell {
 .article :first-child { margin-top: 0; }
 .article img { max-width: 100%; height: auto; }
 
+.article blockquote {
+  border: 0;
+  border-left: 2px solid #8d9daa;
+  border-radius: 0.75rem;
+  padding: 0.65rem 1rem;
+  background: color-mix(in srgb, var(--notice-bg) 60%, transparent);
+  color: var(--vs-text-1, var(--text));
+}
+.article blockquote > :first-child { margin-top: 0; }
+.article blockquote > :last-child { margin-bottom: 0; }
+
 /* ---------- Nuvyn notice cards: Alerts + Markdown Containers ----------
    Alerts and custom containers have different Markdown syntax, but they share
    one quiet pastel-card surface. Type names are fixed by their parsers; no
@@ -870,6 +881,7 @@ main.container.auth-page-shell {
   line-height: 1.5;
 }
 .article .callout-note,
+.article blockquote,
 .article .markdown-container-info,
 .article .markdown-container-details {
   --notice-bg: #f1f2f4;
@@ -913,6 +925,7 @@ main.container.auth-page-shell {
 }
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme='light']) .article .callout-note,
+  :root:not([data-theme='light']) .article blockquote,
   :root:not([data-theme='light']) .article .markdown-container-info,
   :root:not([data-theme='light']) .article .markdown-container-details {
     --notice-bg: #24262b;
@@ -934,6 +947,7 @@ main.container.auth-page-shell {
   }
 }
 :root[data-theme='dark'] .article .callout-note,
+:root[data-theme='dark'] .article blockquote,
 :root[data-theme='dark'] .article .markdown-container-info,
 :root[data-theme='dark'] .article .markdown-container-details {
   --notice-bg: #24262b;
@@ -4819,14 +4833,6 @@ body:has(.ledger-detail-sheet-card) .n-modal-mask {
   background: var(--vs-bg-2);
   border-color: var(--vs-border);
 }
-.vault .article blockquote {
-  border-left: 3px solid var(--vs-accent);
-  background: var(--vs-bg-2);
-  color: var(--vs-text-2);
-  padding: 0.6em 1em;
-  border-radius: 0 4px 4px 0;
-}
-.vault .article blockquote p { margin: 0.3em 0; }
 .vault .article a {
   /* Inherits the global `a` color (--accent), but reading columns
      benefit from a subtle underline that signals "this jumps" — the

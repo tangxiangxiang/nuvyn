@@ -340,9 +340,35 @@ function onHistoryTabClick(): void {
   overflow-y: auto;
 }
 .metadata-slot :deep(.document-metadata-body) {
-  align-content: start;
-  gap: 18px;
-  padding: 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  padding: 16px 18px 10px;
+}
+.metadata-slot :deep(.document-metadata-body > *) {
+  flex-shrink: 0;
+}
+.metadata-slot :deep(.document-metadata-summary) {
+  display: flex;
+  flex-direction: column;
+  flex: 1 0 100px;
+  min-height: 100px;
+}
+.metadata-slot :deep(.document-metadata-summary .document-metadata-textarea-wrap) {
+  flex: 1;
+  min-height: 0;
+  grid-template-rows: minmax(0, 1fr);
+}
+.metadata-slot :deep(.document-metadata-summary .n-input),
+.metadata-slot :deep(.document-metadata-summary .n-input-wrapper),
+.metadata-slot :deep(.document-metadata-summary .n-input__textarea) {
+  height: 100%;
+  min-height: 0;
+}
+.metadata-slot :deep(.document-metadata-summary textarea) {
+  height: 100%;
+  min-height: 0;
+  box-sizing: border-box;
 }
 
 /* Keep these refinements local to the rail; metadata dialogs use their own layout. */
@@ -351,6 +377,7 @@ function onHistoryTabClick(): void {
   gap: 7px;
 }
 .metadata-slot :deep(.document-metadata-field > span),
+.metadata-slot :deep(.metadata-tags-label > span),
 .metadata-slot :deep(.document-metadata-field-head > span) {
   font-size: 0.76rem;
   font-weight: 600;
@@ -391,20 +418,14 @@ function onHistoryTabClick(): void {
   height: 34px;
   min-height: 34px;
 }
-.metadata-slot :deep(.document-metadata-textarea-wrap textarea) {
-  padding-bottom: 26px;
-}
 .metadata-slot :deep(.document-metadata-field textarea) {
-  min-height: 112px;
-  resize: vertical;
+  min-height: 0;
+  resize: none;
 }
 
-/* Char counter — tabular numerals, sits inside the textarea's bottom-right. */
+/* Keep the counter outside the scrolling text so it cannot cover content. */
 .metadata-slot :deep(.document-metadata-field small) {
-  position: absolute;
-  right: 10px;
-  bottom: 8px;
-  pointer-events: none;
+  text-align: right;
   font-size: 0.68rem;
   color: var(--text-muted);
   font-variant-numeric: tabular-nums;
@@ -412,7 +433,8 @@ function onHistoryTabClick(): void {
 
 /* AI generate — ghost button on the field-head row, label left, action right.
    No positioning needed; the head is a flex row with space-between. */
-.metadata-slot :deep(.metadata-generate-summary) {
+.metadata-slot :deep(.metadata-field-action),
+.metadata-slot :deep(.metadata-add-tag) {
   min-height: 24px;
   padding: 0 6px;
   font-size: 0.7rem;
@@ -420,7 +442,7 @@ function onHistoryTabClick(): void {
   color: var(--text-muted);
   background: transparent;
 }
-.metadata-slot :deep(.metadata-generate-summary:hover:not(:disabled)) {
+.metadata-slot :deep(.metadata-field-action:hover:not(:disabled)) {
   color: var(--accent);
   background: var(--code-bg);
 }
@@ -441,7 +463,7 @@ function onHistoryTabClick(): void {
 }
 .metadata-slot :deep(.document-metadata-readonly > div) {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(0, 1.6fr);
+  grid-template-columns: max-content minmax(0, 1fr);
   align-items: center;
   gap: 12px;
   padding: 10px 0;
@@ -500,6 +522,19 @@ function onHistoryTabClick(): void {
   background: var(--bg-soft);
   color: var(--text);
 }
+.metadata-slot :deep(.document-metadata-action-group .btn:first-child) {
+  border-radius: 4px 0 0 4px;
+}
+.metadata-slot :deep(.document-metadata-action-group) {
+  width: 100%;
+}
+.metadata-slot :deep(.document-metadata-action-group .btn) {
+  flex: 1 1 0;
+  min-width: 0;
+}
+.metadata-slot :deep(.document-metadata-action-group .btn:last-child) {
+  border-radius: 0 4px 4px 0;
+}
 .metadata-slot :deep(.document-metadata-actions .btn-primary) {
   background: var(--accent);
   color: var(--on-accent, #fff);
@@ -508,6 +543,11 @@ function onHistoryTabClick(): void {
   background: color-mix(in srgb, var(--accent) 90%, var(--text));
   color: var(--on-accent, #fff);
   border-color: transparent;
+}
+.metadata-slot :deep(.document-metadata-actions .btn-primary:disabled) {
+  background: color-mix(in srgb, var(--accent) 18%, var(--bg-soft));
+  color: color-mix(in srgb, var(--accent) 55%, var(--text));
+  opacity: 1;
 }
 .toc-panel-list {
   list-style: none;

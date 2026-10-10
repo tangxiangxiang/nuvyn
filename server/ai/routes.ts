@@ -34,6 +34,8 @@ import { parseAiLiveContext } from './live-context.js'
 import { generateSlug } from './slug.js'
 import { CommitMessagePromptLimitError, generateCommitMessage } from './commitMessage.js'
 import { generateSummary, SummaryPromptLimitError } from './summary.js'
+import { generateTags } from './tags.js'
+import { generateTitle } from './title.js'
 import { ChatError } from './errors.js'
 import { hasDiaryBodyAccess, requireDiaryBodyAccess } from '../diaryAccess/guard.js'
 import { readDiaryAccessCapability } from '../diaryAccess/service.js'
@@ -575,71 +577,73 @@ ai.post('/slug', async (c) => {
   }
 })
 
-// ---- /summary ----
-// Generate a document summary from the current Markdown body. This is
+// ---- /summary, /tags and /title ----
+// Generate document metadata from the current Markdown body. This is
 // deliberately independent from Git so it also works for clean documents.
-ai.post('/summary', async (c) => {
-  c.header('Cache-Control', 'no-store')
-  const body = await c.req.json().catch(() => null) as
-    | { path?: unknown; content?: unknown; documentId?: unknown; language?: unknown }
-    | null
-  if (!body || typeof body.path !== 'string' || !isValidPathSyntax(body.path)) {
-    return bad(c, 'valid path required')
-  }
-  if (classifyDiaryPath(normalizeLogicalContentPath(body.path) ?? body.path) === 'managed') {
-    return bad(c, 'AI summary is unavailable for managed Diary bodies', 422, 'diary-ai-summary-unsupported')
-  }
-  const bodyAccess = requireDiaryBodyAccess(c, body.path)
-  if (bodyAccess) return bodyAccess
-  if (body.content !== undefined && typeof body.content !== 'string') {
-    return bad(c, 'content must be a string')
-  }
-  if (body.documentId !== undefined && typeof body.documentId !== 'string') {
-    return bad(c, 'documentId must be a string')
-  }
-  const language = body.language === 'zh' ? 'zh' : 'en'
-  try {
-    let content: string
-    if (typeof body.content === 'string') {
-      if (Buffer.byteLength(body.content, 'utf8') > MAX_SUMMARY_FILE_BYTES) {
-        return bad(c, `AI summary content exceeds the ${MAX_SUMMARY_FILE_BYTES}-byte limit`, 413)
+for (const operation of ['summary', 'tags', 'title'] as const) {
+  ai.post(`/${operation}`, async (c) => {
+    c.header('Cache-Control', 'no-store')
+    const body = await c.req.json().catch(() => null) as
+      | { path?: unknown; content?: unknown; documentId?: unknown; language?: unknown }
+      | null
+    if (!body || typeof body.path !== 'string' || !isValidPathSyntax(body.path)) {
+      return bad(c, 'valid path required')
+    }
+    if (classifyDiaryPath(normalizeLogicalContentPath(body.path) ?? body.path) === 'managed') {
+      return bad(c, `AI ${operation} is unavailable for managed Diary bodies`, 422, `diary-ai-${operation}-unsupported`)
+    }
+    const bodyAccess = requireDiaryBodyAccess(c, body.path)
+    if (bodyAccess) return bodyAccess
+    if (body.content !== undefined && typeof body.content !== 'string') {
+      return bad(c, 'content must be a string')
+    }
+    if (body.documentId !== undefined && typeof body.documentId !== 'string') {
+      return bad(c, 'documentId must be a string')
+    }
+    const language = body.language === 'zh' ? 'zh' : 'en'
+    try {
+      let content: string
+      if (typeof body.content === 'string') {
+        if (Buffer.byteLength(body.content, 'utf8') > MAX_SUMMARY_FILE_BYTES) {
+          return bad(c, `AI ${operation} content exceeds the ${MAX_SUMMARY_FILE_BYTES}-byte limit`, 413)
+        }
+        if (body.content.length > MAX_SUMMARY_CONTENT_CHARS) {
+          return bad(c, `AI ${operation} content exceeds the ${MAX_SUMMARY_CONTENT_CHARS}-character limit`, 413)
+        }
+        content = body.content.trim()
+      } else {
+        const raw = await readSafeRelativeFile(CONTENT_DIR, `${body.path}.md`, 'utf8', {
+          maxBytes: MAX_SUMMARY_FILE_BYTES,
+          signal: c.req.raw.signal,
+        })
+        if (raw === null) return bad(c, 'not found', 404)
+        content = matter(String(raw)).content.trim()
       }
-      if (body.content.length > MAX_SUMMARY_CONTENT_CHARS) {
-        return bad(c, `AI summary content exceeds the ${MAX_SUMMARY_CONTENT_CHARS}-character limit`, 413)
-      }
-      content = body.content.trim()
-    } else {
-      const raw = await readSafeRelativeFile(CONTENT_DIR, `${body.path}.md`, 'utf8', {
-        maxBytes: MAX_SUMMARY_FILE_BYTES,
+      if (!content) return bad(c, 'document content is empty')
+      const result = await ({ summary: generateSummary, tags: generateTags, title: generateTitle }[operation])({
+        path: body.path,
+        content,
+        language,
         signal: c.req.raw.signal,
       })
-      if (raw === null) return bad(c, 'not found', 404)
-      content = matter(String(raw)).content.trim()
+      return c.json({ [operation]: result })
+    } catch (err) {
+      if (c.req.raw.signal.aborted) return c.json({ error: 'aborted' }, 499 as any)
+      if (err instanceof SummaryPromptLimitError || err instanceof SafePathResourceLimitError) {
+        return bad(c, err.message, 413)
+      }
+      if (err instanceof ChatError) {
+        if (err.reason === 'no-api-key') return bad(c, 'AI not configured', 503)
+        if (err.reason === 'key-error') return bad(c, err.message, 503, err.code)
+        if (err.reason === 'aborted') return c.json({ error: 'aborted' }, 499 as any)
+        if (err.reason === 'parse-failed') return bad(c, err.message, 502)
+        return bad(c, err.message || 'llm-error', 502)
+      }
+      if ((err as NodeJS.ErrnoException).code === 'ENOENT') return bad(c, 'not found', 404)
+      return bad(c, (err as Error).message || 'unknown', 500)
     }
-    if (!content) return bad(c, 'document content is empty')
-    const summary = await generateSummary({
-      path: body.path,
-      content,
-      language,
-      signal: c.req.raw.signal,
-    })
-    return c.json({ summary })
-  } catch (err) {
-    if (c.req.raw.signal.aborted) return c.json({ error: 'aborted' }, 499 as any)
-    if (err instanceof SummaryPromptLimitError || err instanceof SafePathResourceLimitError) {
-      return bad(c, err.message, 413)
-    }
-    if (err instanceof ChatError) {
-      if (err.reason === 'no-api-key') return bad(c, 'AI not configured', 503)
-      if (err.reason === 'key-error') return bad(c, err.message, 503, err.code)
-      if (err.reason === 'aborted') return c.json({ error: 'aborted' }, 499 as any)
-      if (err.reason === 'parse-failed') return bad(c, err.message, 502)
-      return bad(c, err.message || 'llm-error', 502)
-    }
-    if ((err as NodeJS.ErrnoException).code === 'ENOENT') return bad(c, 'not found', 404)
-    return bad(c, (err as Error).message || 'unknown', 500)
-  }
-})
+  })
+}
 
 // ---- /commit-message ----
 // Lightweight helper for the History composer. It does not create a chat

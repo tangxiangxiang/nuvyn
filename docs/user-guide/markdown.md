@@ -29,15 +29,15 @@ content inside continues to use normal Markdown.
 
 The supported markers are exactly `NOTE`, `TIP`, `IMPORTANT`, `WARNING`, and
 `CAUTION`. Markers are case-sensitive and must occupy the first line of the
-blockquote by themselves. Alert titles are localized in the rendered UI:
+blockquote by themselves. Alert titles remain English regardless of the UI language:
 
 | Marker | Display title |
 | --- | --- |
-| `NOTE` | 注意 |
-| `TIP` | 提示 |
-| `IMPORTANT` | 重要 |
-| `WARNING` | 警告 |
-| `CAUTION` | 小心 |
+| `NOTE` | Note |
+| `TIP` | Tip |
+| `IMPORTANT` | Important |
+| `WARNING` | Warning |
+| `CAUTION` | Caution |
 
 For example:
 

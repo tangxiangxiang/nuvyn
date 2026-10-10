@@ -8,6 +8,8 @@ import { useI18n } from '../../../composables/useI18n'
 const getPost = vi.fn()
 const updateDocumentMetadata = vi.fn()
 const suggestSummary = vi.fn()
+const suggestTags = vi.fn()
+const suggestTitle = vi.fn()
 const toastErrors = vi.fn()
 const toastSuccesses = vi.fn()
 
@@ -17,6 +19,8 @@ vi.mock('../../../lib/api', () => ({
 }))
 vi.mock('../../../lib/ai-api', () => ({
   suggestSummary: (...args: unknown[]) => suggestSummary(...args),
+  suggestTags: (...args: unknown[]) => suggestTags(...args),
+  suggestTitle: (...args: unknown[]) => suggestTitle(...args),
 }))
 vi.mock('../../../composables/useToast', () => ({
   useToast: () => ({ success: toastSuccesses, error: toastErrors, info: vi.fn() }),
@@ -47,13 +51,146 @@ beforeEach(() => {
     updatedAt: 99,
   }))
   suggestSummary.mockReset().mockResolvedValue({ summary: 'AI summary' })
+  suggestTags.mockReset().mockResolvedValue({ tags: ['rag', 'Vue', 'TypeScript'] })
+  suggestTitle.mockReset().mockResolvedValue({ title: 'Vue components' })
 })
 
 describe('DocumentMetadataForm', () => {
+  it('generates a title from live content without saving or changing the path', async () => {
+    const wrapper = mount(DocumentMetadataForm, { props: { path: 'a', summarySource: '# live body' } })
+    await flushPromises()
+    await wrapper.get('.metadata-generate-title').trigger('click')
+    await flushPromises()
+    expect(wrapper.get('input').element.value).toBe('Vue components')
+    expect(suggestTitle).toHaveBeenCalledWith({ path: 'a', language: 'en', content: '# live body' }, expect.any(AbortSignal))
+    expect(wrapper.get('.metadata-copy-path').text()).toBe('a.md')
+    expect(updateDocumentMetadata).not.toHaveBeenCalled()
+    wrapper.unmount()
+  })
+
+  it('does not overwrite a title edited while AI is generating', async () => {
+    let resolve!: (value: { title: string }) => void
+    suggestTitle.mockReturnValueOnce(new Promise(done => { resolve = done }))
+    const wrapper = mount(DocumentMetadataForm, { props: { path: 'a' } })
+    await flushPromises()
+    await wrapper.get('.metadata-generate-title').trigger('click')
+    await wrapper.get('input').setValue('Manual title')
+    resolve({ title: 'stale title' })
+    await flushPromises()
+    expect(wrapper.get('input').element.value).toBe('Manual title')
+    wrapper.unmount()
+  })
+
+  it('aborts title generation on unmount', async () => {
+    let signal!: AbortSignal
+    suggestTitle.mockImplementationOnce((_input: unknown, nextSignal: AbortSignal) => {
+      signal = nextSignal
+      return new Promise(() => {})
+    })
+    const wrapper = mount(DocumentMetadataForm, { props: { path: 'a' } })
+    await flushPromises()
+    await wrapper.get('.metadata-generate-title').trigger('click')
+    wrapper.unmount()
+    expect(signal.aborted).toBe(true)
+  })
+
+  it('merges AI tags into the draft using live content without saving', async () => {
+    const wrapper = mount(DocumentMetadataForm, { props: { path: 'a', summarySource: '# live body' } })
+    await flushPromises()
+    await wrapper.get('.metadata-generate-tags').trigger('click')
+    await flushPromises()
+    expect(suggestTags).toHaveBeenCalledWith({ path: 'a', language: 'en', content: '# live body' }, expect.any(AbortSignal))
+    expect(wrapper.findAll('.metadata-tag-name').map(tag => tag.text())).toEqual(['Rag', 'Vue', 'TypeScript'])
+    expect(updateDocumentMetadata).not.toHaveBeenCalled()
+    wrapper.unmount()
+  })
+
+  it('ignores AI tags when tags were edited while generating', async () => {
+    let resolve!: (value: { tags: string[] }) => void
+    suggestTags.mockReturnValueOnce(new Promise(done => { resolve = done }))
+    const wrapper = mount(DocumentMetadataForm, { props: { path: 'a' } })
+    await flushPromises()
+    await wrapper.get('.metadata-generate-tags').trigger('click')
+    await wrapper.get('.metadata-tag .n-base-close').trigger('click')
+    resolve({ tags: ['stale'] })
+    await flushPromises()
+    expect(wrapper.findAll('.metadata-tag-name')).toHaveLength(0)
+    wrapper.unmount()
+  })
+
+  it('aborts AI tags on document switch and does not write stale suggestions', async () => {
+    let signal!: AbortSignal
+    let resolve!: (value: { tags: string[] }) => void
+    suggestTags.mockImplementationOnce((_input: unknown, nextSignal: AbortSignal) => {
+      signal = nextSignal
+      return new Promise(done => { resolve = done })
+    })
+    const wrapper = mount(DocumentMetadataForm, { props: { path: 'a' } })
+    await flushPromises()
+    await wrapper.get('.metadata-generate-tags').trigger('click')
+    await wrapper.setProps({ path: 'b' })
+    await flushPromises()
+    expect(signal.aborted).toBe(true)
+    resolve({ tags: ['stale'] })
+    await flushPromises()
+    expect(wrapper.findAll('.metadata-tag-name').map(tag => tag.text())).toEqual(['Rag'])
+    wrapper.unmount()
+  })
+
+  it('adds normalized unique tags from the plus button without saving immediately', async () => {
+    const wrapper = mount(DocumentMetadataForm, { props: { path: 'a' }, attachTo: document.body })
+    try {
+      await flushPromises()
+      expect(wrapper.get('.metadata-add-tag').text()).toBe('')
+      expect(wrapper.find('.metadata-tags-label .metadata-add-tag').exists()).toBe(true)
+      expect(wrapper.get('.metadata-summary-label .metadata-summary-count').text()).toBe('9 / 2000')
+      expect(wrapper.find('.metadata-tag-box .metadata-add-tag').exists()).toBe(false)
+      await wrapper.get('.metadata-add-tag').trigger('click')
+      await flushPromises()
+      const input = document.querySelector<HTMLInputElement>('.metadata-tag-entry input')!
+      expect(input).not.toBeNull()
+      input.value = 'Rag, #notes, notes'
+      input.dispatchEvent(new Event('input', { bubbles: true }))
+      await flushPromises()
+      input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }))
+      await flushPromises()
+      expect(wrapper.findAll('.metadata-tag-name').map((tag) => tag.text())).toEqual(['Rag', 'notes'])
+      expect(updateDocumentMetadata).not.toHaveBeenCalled()
+    } finally {
+      wrapper.unmount()
+    }
+  })
+
+  it('copies the full document ID without submitting metadata', async () => {
+    const original = Object.getOwnPropertyDescriptor(navigator, 'clipboard')
+    const writeText = vi.fn().mockResolvedValue(undefined)
+    Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText } })
+    const wrapper = mount(DocumentMetadataForm, { props: { path: 'a' } })
+    try {
+      await flushPromises()
+      await wrapper.get('.metadata-copy-id').trigger('click')
+      await flushPromises()
+      expect(writeText).toHaveBeenCalledWith('id-a')
+      expect(toastSuccesses).toHaveBeenCalledWith('Document ID copied')
+      await wrapper.setProps({ path: 'inbox/a' })
+      await flushPromises()
+      await wrapper.get('.metadata-copy-path').trigger('click')
+      await flushPromises()
+      expect(writeText).toHaveBeenLastCalledWith('inbox/a.md')
+      expect(toastSuccesses).toHaveBeenLastCalledWith('Document path copied')
+      expect(updateDocumentMetadata).not.toHaveBeenCalled()
+    } finally {
+      wrapper.unmount()
+      if (original) Object.defineProperty(navigator, 'clipboard', original)
+      else Reflect.deleteProperty(navigator, 'clipboard')
+    }
+  })
+
   it('loads normally and keeps save disabled until a normalized change is made', async () => {
     const wrapper = mount(DocumentMetadataForm, { props: { path: 'a', showCancel: false } })
     await flushPromises()
     expect(wrapper.get('input').element.value).toBe('a')
+    expect(wrapper.get('.metadata-copy-path').text()).toBe('a.md')
     expect(wrapper.get('button[type="submit"]').attributes('disabled')).toBeDefined()
     await wrapper.get('input').setValue('  New title  ')
     expect(wrapper.get('button[type="submit"]').attributes('disabled')).toBeUndefined()
@@ -108,7 +245,7 @@ describe('DocumentMetadataForm', () => {
     const wrapper = mount(DocumentMetadataForm, { props: { path: 'a' } })
     await flushPromises()
     await wrapper.get('input').setValue('Changed')
-    await wrapper.get('.document-metadata-actions button:nth-of-type(2)').trigger('click')
+    await wrapper.get('.document-metadata-action-group button:first-of-type').trigger('click')
     expect(wrapper.get('input').element.value).toBe('a')
     await wrapper.get('input').setValue('Saved')
     await wrapper.get('form').trigger('submit')
@@ -129,11 +266,11 @@ describe('DocumentMetadataForm', () => {
   it('sends the tag version token only with an explicit tag edit', async () => {
     const wrapper = mount(DocumentMetadataForm, { props: { path: 'a' } })
     await flushPromises()
-    await wrapper.findAll('input')[1].setValue('Fresh')
+    await wrapper.get('.metadata-tag .n-base-close').trigger('click')
     await wrapper.get('form').trigger('submit')
     await flushPromises()
     expect(updateDocumentMetadata).toHaveBeenCalledWith('a', {
-      tags: ['Fresh'], expectedUpdatedAt: 2,
+      tags: [], expectedUpdatedAt: 2,
     })
   })
 

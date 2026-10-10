@@ -60,7 +60,7 @@ describe('GitHub-style Markdown Alerts', () => {
     }
     expect(doc.querySelectorAll('.callout')).toHaveLength(5)
     expect(Array.from(doc.querySelectorAll('.callout-title-text')).map((node) => node.textContent))
-      .toEqual(['注意', '提示', '重要', '警告', '小心'])
+      .toEqual(['Note', 'Tip', 'Important', 'Warning', 'Caution'])
   })
 
   it('requires a marker-only canonical line and does not support custom titles', async () => {
@@ -73,7 +73,7 @@ describe('GitHub-style Markdown Alerts', () => {
       'text/html',
     )
 
-    expect(canonical.querySelector('.callout-warning .callout-title-text')?.textContent).toBe('警告')
+    expect(canonical.querySelector('.callout-warning .callout-title-text')?.textContent).toBe('Warning')
     expect(titled.querySelector('.callout')).toBeNull()
     expect(titled.querySelector('blockquote')?.textContent).toContain('[!WARNING] Database migration')
   })
@@ -214,7 +214,7 @@ describe('GitHub-style Markdown Alerts', () => {
     const alert = doc.querySelector('.callout-warning')
 
     expect(alert).not.toBeNull()
-    expect(alert?.querySelector('.callout-title-text')?.textContent).toBe('警告')
+    expect(alert?.querySelector('.callout-title-text')?.textContent).toBe('Warning')
     expect(alert?.querySelector('script, img')).toBeNull()
     expect(alert?.textContent).toContain('Safe text')
     expect(doc.querySelector('[onerror], [onclick], [onload]')).toBeNull()

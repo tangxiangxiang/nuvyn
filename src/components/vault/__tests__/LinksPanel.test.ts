@@ -6,7 +6,7 @@ import { useI18n } from '../../../composables/useI18n'
 import { __resetFallbackFileChangesForTesting, getFallbackVaultFileChanges } from '../../../composables/vault/context/fileChanges'
 
 const mocks = vi.hoisted(() => ({
-  index: { value: { paths: [], outgoing: {} as Record<string, Array<{ target: string; anchor?: string; kind: 'wiki' }>> } },
+  index: { value: { paths: [], outgoing: {} as Record<string, Array<{ target: string; anchor?: string; alias?: string; kind: 'wiki' }>> } },
   fetchBacklinks: vi.fn(),
 }))
 
@@ -40,15 +40,16 @@ describe('LinksPanel', () => {
   })
   afterEach(() => useI18n().setLocale('zh'))
 
-  it('renders both relationship groups with secondary paths and navigates rows', async () => {
+  it('renders compact relationship groups and preserves anchor navigation', async () => {
     const wrapper = mount(LinksPanel, { props: { path: 'inbox/current', posts } })
     await flushPromises()
-    expect(wrapper.text()).toContain('被引用（1）')
-    expect(wrapper.text()).toContain('引用（1）')
-    expect(wrapper.text()).toContain('#source-section')
-    expect(wrapper.findAll('.link-path')).toHaveLength(2)
+    expect(wrapper.findAll('.section-title').map((title) => title.text())).toEqual(['被引用', '引用'])
+    expect(wrapper.findAll('.section-count').map((count) => count.text())).toEqual(['1', '1'])
+    expect(wrapper.text()).not.toContain('#source-section')
+    expect(wrapper.findAll('.link-path')).toHaveLength(0)
     expect(wrapper.findAll('.link-title').map((title) => title.text())).toEqual(['英语-谓语', '英语-宾语'])
-    expect(wrapper.findAll('.link-entry')[0].attributes('title')).toBe('archive/grammar/predicate')
+    expect(wrapper.findAll('.link-entry')[0].attributes('title')).toBe('英语-谓语\narchive/grammar/predicate')
+    expect(wrapper.findAll('.link-entry')[1].attributes('title')).toContain('inbox/english/object#source-section')
     await wrapper.findAll('.link-entry')[0].trigger('click')
     await wrapper.findAll('.link-entry')[1].trigger('click')
     expect(wrapper.emitted('navigate')).toEqual([
@@ -65,6 +66,43 @@ describe('LinksPanel', () => {
     expect(wrapper.text()).toContain('暂无引用关系')
   })
 
+  it('groups mutual links once per document and retains every outgoing anchor in the tooltip', async () => {
+    mocks.index.value.outgoing['inbox/current'] = [
+      { target: 'archive/grammar/predicate', anchor: 'first', kind: 'wiki' },
+      { target: 'archive/grammar/predicate', anchor: 'second', kind: 'wiki' },
+      { target: 'inbox/english/object', anchor: 'third', kind: 'wiki' },
+    ]
+    mocks.fetchBacklinks.mockResolvedValue([
+      { source: 'archive/grammar/predicate' },
+      { source: 'archive/grammar/predicate', anchor: 'another' },
+      { source: 'inbox/source-only' },
+    ])
+    const wrapper = mount(LinksPanel, { props: { path: 'inbox/current', posts } })
+    await flushPromises()
+    expect(wrapper.findAll('.section-title').map((title) => title.text())).toEqual(['互相引用', '被引用', '引用'])
+    expect(wrapper.findAll('.section-count').map((count) => count.text())).toEqual(['1', '1', '1'])
+    expect(wrapper.findAll('.link-title').map((title) => title.text())).toEqual(['英语-谓语', 'source-only', '英语-宾语'])
+    const entries = wrapper.findAll('.link-entry')
+    expect(entries[0].attributes('title')).toContain('#first')
+    expect(entries[0].attributes('title')).toContain('#second')
+    await entries[0].trigger('click')
+    await entries[2].trigger('click')
+    expect(wrapper.emitted('navigate')).toEqual([
+      ['archive/grammar/predicate'],
+      ['inbox/english/object', 'third'],
+    ])
+    wrapper.unmount()
+  })
+
+  it('hides both one-way groups when all links are mutual', async () => {
+    mocks.index.value.outgoing['inbox/current'] = [{ target: 'archive/grammar/predicate', kind: 'wiki' }]
+    const wrapper = mount(LinksPanel, { props: { path: 'inbox/current', posts } })
+    await flushPromises()
+    expect(wrapper.findAll('.section-title').map((title) => title.text())).toEqual(['互相引用'])
+    expect(wrapper.findAll('.link-entry')).toHaveLength(1)
+    wrapper.unmount()
+  })
+
   it('shows a compact directory only when titles need disambiguation', async () => {
     const duplicatePosts = [...posts, {
       path: 'inbox/other/predicate', title: '英语-谓语', created: '', updated: '',
@@ -73,6 +111,17 @@ describe('LinksPanel', () => {
     const wrapper = mount(LinksPanel, { props: { path: 'inbox/current', posts: duplicatePosts } })
     await flushPromises()
     expect(wrapper.find('.link-path').text()).toBe('Archive / grammar')
+    expect(wrapper.findAll('.link-path')).toHaveLength(1)
+  })
+
+  it('uses the target document title and keeps the link alias in the tooltip', async () => {
+    mocks.index.value.outgoing['inbox/current'] = [{ target: 'inbox/english/object', alias: '宾语', kind: 'wiki' }]
+    const wrapper = mount(LinksPanel, { props: { path: 'inbox/current', posts } })
+    await flushPromises()
+    const entry = wrapper.findAll('.link-entry')[1]
+    expect(entry.find('.link-title').text()).toBe('英语-宾语')
+    expect(entry.attributes('title')).toBe('英语-宾语\ninbox/english/object\n宾语')
+    wrapper.unmount()
   })
 
   it('does not allow a slower old-path backlinks request to replace the current path', async () => {
