@@ -13,11 +13,13 @@ import {
   Trash,
 } from '@vicons/tabler'
 import type { ToolCallRecord } from '../../lib/ai-api'
+import { useI18n } from '../../composables/useI18n'
 
 const props = defineProps<{ call: ToolCallRecord }>()
+const { t } = useI18n()
 
 const expanded = ref(false)
-const collapsible = computed(() => ['read_file', 'list_files'].includes(props.call.name))
+const collapsible = computed(() => !props.call.result.is_error && ['read_file', 'list_files'].includes(props.call.name))
 
 const TOOL_ICONS: Record<string, Component> = {
   read_file: FileText,
@@ -76,7 +78,7 @@ const summary = computed(() => {
   const result = props.call.result.is_error
     ? 'error'
     : !content
-      ? 'pending'
+      ? t(props.call.name === 'read_file' ? 'ai.activity_reading' : props.call.name === 'list_files' ? 'ai.activity_listing' : 'ai.activity_running')
       : props.call.name === 'list_files'
         ? `${countResultItems(content) ?? 0} items`
         : formatChars(content)

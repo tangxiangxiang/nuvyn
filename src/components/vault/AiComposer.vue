@@ -119,7 +119,7 @@ defineExpose({ focus })
         ref="inputEl"
         class="ai-input-control"
         type="textarea"
-        :autosize="{ minRows: 1, maxRows: 5 }"
+        :autosize="{ minRows: 2, maxRows: 5 }"
         :value="modelValue"
         :placeholder="inputPlaceholder"
         :bordered="false"

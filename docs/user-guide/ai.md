@@ -30,6 +30,8 @@ With a document open, the assistant offers **Key takeaways**, **Find related not
 
 Type `/` in the empty composer to call up these prompt templates, even after the conversation has started. Type part of a template name to filter, use Up/Down to select and Enter or Tab to insert, or click a template. Escape dismisses the menu. Inserting a template does not send a message.
 
+Successful document reads and directory lookups appear in a single collapsed activity summary beneath the answer. Expand it to inspect individual calls and results. In-flight actions, failed calls, file mutations, and unknown tool types remain visible; failed results are never collapsed by default.
+
 The prompts ask for concise, evidence-based answers, links to existing notes, and advice before file changes. They do not override server access controls or make protected Diary content available.
 
 ## Generate Document Properties

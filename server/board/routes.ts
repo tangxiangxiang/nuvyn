@@ -84,6 +84,19 @@ export function createBoardRoutes(getService: BoardServiceFactory = boardService
     }
   })
 
+  // Embedding a Board in a Note is a read, not a visit to the Board editor.
+  routes.get('/:boardId/preview', async (c) => {
+    try {
+      c.header('Cache-Control', 'no-store')
+      return c.json(await getService().getBoardPreview(c.req.param('boardId')))
+    } catch (error) {
+      return apiErrorResponse(c, error, {
+        code: 'BOARD_INTERNAL_ERROR',
+        message: 'Board preview could not be loaded.',
+      })
+    }
+  })
+
   routes.get('/:boardId', async (c) => {
     try {
       return c.json(await getService().getBoard(c.req.param('boardId')))

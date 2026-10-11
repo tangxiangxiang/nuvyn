@@ -918,7 +918,10 @@ main.container.auth-page-shell {
 .article .markdown-container > :last-child { margin-bottom: 0; }
 .article .markdown-container-details > summary {
   cursor: pointer;
-  list-style-position: inside;
+  list-style: none;
+}
+.article .markdown-container-details > summary::-webkit-details-marker {
+  display: none;
 }
 .article .markdown-container-details:not([open]) > summary.markdown-container-title {
   margin-bottom: 0;
@@ -5362,6 +5365,16 @@ body:has(.ledger-detail-sheet-card) .n-modal-mask {
 .article .mermaid-widget-host > * {
   margin: 0;
 }
+.article .mermaid-widget-host .edgeLabel rect {
+  fill: transparent !important;
+  opacity: 0 !important;
+}
+.article .mermaid-widget-host .edgeLabel,
+.article .mermaid-widget-host .edgeLabel p,
+.article .mermaid-widget-host .edgeLabel span {
+  background: transparent !important;
+  font-size: 0.82em !important;
+}
 .article .mermaid-mount {
   display: block;
   min-height: 80px;
@@ -5616,15 +5629,15 @@ body:has(.ledger-detail-sheet-card) .n-modal-mask {
 .ai-panel .ai-composer {
   position: relative;
   flex: 0 0 auto;
-  padding: 6px 8px 7px;
+  padding: 8px 10px 10px;
   background: transparent;
 }
 
 .ai-panel .ai-prompt-menu {
   position: absolute;
   bottom: 100%;
-  left: 8px;
-  right: 8px;
+  left: 10px;
+  right: 10px;
   z-index: 2;
   max-height: 220px;
   overflow-y: auto;
@@ -5662,15 +5675,16 @@ body:has(.ledger-detail-sheet-card) .n-modal-mask {
   display: flex;
   flex-direction: column;
   min-width: 0;
-  background: color-mix(in srgb, var(--vs-bg-2) 75%, var(--vs-bg-1));
-  border: 1px solid var(--vs-border);
-  border-radius: 9px;
+  background: var(--vs-bg-1);
+  border: 1px solid color-mix(in srgb, var(--vs-border) 75%, var(--vs-bg-1));
+  border-radius: 16px;
+  box-shadow: 0 2px 8px #00000006;
   overflow: hidden;
   transition: border-color 0.15s, box-shadow 0.15s;
 }
 .ai-panel .ai-composer-card:focus-within {
-  border-color: color-mix(in srgb, var(--vs-accent) 65%, var(--vs-border));
-  box-shadow: 0 0 0 2px color-mix(in srgb, var(--vs-accent) 12%, transparent);
+  border-color: color-mix(in srgb, var(--vs-accent) 35%, var(--vs-border));
+  box-shadow: 0 2px 10px #00000008;
 }
 .ai-panel .ai-input {
   display: block;
@@ -5682,9 +5696,7 @@ body:has(.ledger-detail-sheet-card) .n-modal-mask {
   resize: none;
   background: transparent;
   border: 0;
-  /* A small inset keeps the placeholder close to the toolbar while
-     leaving enough room to type comfortably. */
-  padding: 10px 10px 6px;
+  padding: 12px 12px 8px;
   font-family: var(--sans);
   font-size: 0.82rem;
   color: var(--vs-text-1);
@@ -5713,9 +5725,9 @@ body:has(.ledger-detail-sheet-card) .n-modal-mask {
   align-items: center;
   justify-content: space-between;
   gap: 6px;
-  padding: 2px 8px 7px;
+  padding: 2px 10px 9px;
   border-top: 0;
-  min-height: 33px;
+  min-height: 43px;
   box-sizing: border-box;
 }
 .ai-panel .ai-toolbar-left {
@@ -5738,8 +5750,8 @@ body:has(.ledger-detail-sheet-card) .n-modal-mask {
   align-items: center;
   min-width: 0;
   overflow: hidden;
-  color: var(--vs-text-3);
-  font-size: 0.64rem;
+  color: var(--vs-text-2);
+  font-size: 0.7rem;
   line-height: 1;
   white-space: nowrap;
 }
@@ -5751,9 +5763,9 @@ body:has(.ledger-detail-sheet-card) .n-modal-mask {
 }
 .ai-panel .ai-send {
   flex: 0 0 auto;
-  width: 28px;
-  height: 28px;
-  border-radius: 6px;
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
   border: 0;
   background: var(--vs-accent);
   color: var(--vs-status-fg);
@@ -5766,8 +5778,8 @@ body:has(.ledger-detail-sheet-card) .n-modal-mask {
   transition: background 0.12s, transform 0.12s;
 }
 .ai-panel .ai-send:disabled {
-  background: var(--vs-bg-4);
-  color: var(--vs-text-3);
+  background: var(--vs-bg-2);
+  color: color-mix(in srgb, var(--vs-text-2) 60%, var(--vs-bg-1));
   opacity: 1;
   cursor: not-allowed;
   box-shadow: none;
@@ -5782,16 +5794,13 @@ body:has(.ledger-detail-sheet-card) .n-modal-mask {
   outline: 2px solid var(--vs-accent);
   outline-offset: 2px;
 }
-/* The button doubles as Stop while a stream is in flight. A
-   slightly deeper red makes the destructive semantics obvious at
-   a glance, and ICON_STOP (filled square) is intentionally different
-   from ICON_SEND (paper plane) so a power user recognizes the
-   toggle from across the panel. */
+/* Stop stays in the same accent control; it cancels generation rather
+   than deleting content. The square icon distinguishes it from Send. */
 .ai-panel .ai-send.ai-send-busy {
-  background: #e85a4f;
+  background: var(--vs-accent);
 }
 .ai-panel .ai-send.ai-send-busy:hover {
-  background: #f06a5f;
+  background: var(--vs-accent-hover);
 }
 
 /* NavBar panel toggles — compact controls with a soft-filled accent when

@@ -44,6 +44,7 @@ export interface BoardEditorMenuOptions {
     unfavorite: string
     exportPng: string
     exportSvg: string
+    copyReference: string
     copy: string
     delete: string
     materials: string
@@ -54,6 +55,7 @@ export interface BoardEditorMenuOptions {
   onToggleFavorite: () => void
   onExportPng: () => void
   onExportSvg: () => void
+  onCopyReference: () => void
   onCopy: () => void
   onDelete: () => void
   onOpenMaterials: () => void
@@ -193,6 +195,7 @@ function BoardEditorMainMenu({ menu }: { menu: BoardEditorMenuOptions }): React.
     React.createElement(MainMenu.Separator),
     React.createElement(MainMenu.Item, { onSelect: menu.onExportPng, disabled: menu.busy, children: menu.labels.exportPng }),
     React.createElement(MainMenu.Item, { onSelect: menu.onExportSvg, disabled: menu.busy, children: menu.labels.exportSvg }),
+    React.createElement(MainMenu.Item, { onSelect: menu.onCopyReference, disabled: menu.busy, children: menu.labels.copyReference }),
     React.createElement(MainMenu.Item, { onSelect: menu.onCopy, disabled: menu.busy, children: menu.labels.copy }),
     React.createElement(MainMenu.Separator),
     React.createElement(MainMenu.Item, {

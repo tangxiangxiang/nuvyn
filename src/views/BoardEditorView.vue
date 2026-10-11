@@ -50,6 +50,8 @@ import {
 import { useBoardFavorites } from '../composables/useBoardFavorites'
 import type { BoardEditorMenuOptions } from '../features/board/engine/excalidraw/reactIsland'
 import type { BoardMaterial } from '../../shared/boardMaterialProtocol'
+import { createBoardReference } from '../lib/boardReferences'
+import { copyTextToClipboard } from '../components/vault/workspaceTabActions'
 
 type EditorStatus = 'loading' | 'reconciling' | 'recovery-choice' | 'recovery-conflict' | 'hydrating' | 'ready' | 'error'
 type EditorErrorKind = 'load' | 'not-found' | 'compatibility' | 'corrupt' | 'canvas' | 'recovery'
@@ -102,6 +104,7 @@ const exportBusy = ref<BoardExportFormat | null>(null)
 const deleting = ref(false)
 const renaming = ref(false)
 const copying = ref(false)
+const copyingReference = ref(false)
 const showMaterialPanel = ref(false)
 const excalidrawHost = ref<{ insertMaterial: (material: BoardMaterial) => Promise<void> } | null>(null)
 const loadGeneration = ref(0)
@@ -816,6 +819,29 @@ async function exportBoard(format: BoardExportFormat): Promise<void> {
   }
 }
 
+async function copyNoteReference(): Promise<void> {
+  const id = session.value?.boardId
+  if (!id || status.value !== 'ready' || copyingReference.value) return
+  copyingReference.value = true
+  try {
+    await assetIntakePromise
+    await hostChangePromise
+    const result = await saveCoordinator.value?.flush()
+    if (!result?.ok) {
+      toast.error(t('board.editor_save_failed_notice'))
+      return
+    }
+    if (session.value?.boardId !== id) return
+    const copied = await copyTextToClipboard(createBoardReference(id, boardTitle.value))
+    if (!copied) throw new Error('Clipboard unavailable')
+    toast.success(t('board.editor_reference_copied'))
+  } catch {
+    toast.error(t('board.editor_reference_failed'))
+  } finally {
+    copyingReference.value = false
+  }
+}
+
 async function renameCurrentBoard(title: string): Promise<boolean> {
   const id = session.value?.boardId
   const normalizedTitle = title.trim()
@@ -888,7 +914,7 @@ const editorMenu = computed<BoardEditorMenuOptions>(() => ({
   title: boardTitle.value,
   saveStatusLabel: saveStatusLabel.value,
   favorite: favorite.value,
-  busy: status.value !== 'ready' || deleting.value || renaming.value || copying.value || exportBusy.value !== null,
+  busy: status.value !== 'ready' || deleting.value || renaming.value || copying.value || copyingReference.value || exportBusy.value !== null,
   labels: {
     back: t('board.back_to_boards'),
     rename: t('board.rename'),
@@ -896,6 +922,7 @@ const editorMenu = computed<BoardEditorMenuOptions>(() => ({
     unfavorite: t('board.unfavorite'),
     exportPng: t('board.editor_export_png'),
     exportSvg: t('board.editor_export_svg'),
+    copyReference: t('board.editor_copy_reference'),
     copy: t('board.editor_copy'),
     delete: t('board.editor_delete'),
     materials: t('board.materials_open'),
@@ -906,6 +933,7 @@ const editorMenu = computed<BoardEditorMenuOptions>(() => ({
   onToggleFavorite: toggleCurrentFavorite,
   onExportPng: () => { void exportBoard('png') },
   onExportSvg: () => { void exportBoard('svg') },
+  onCopyReference: () => { void copyNoteReference() },
   onCopy: () => { void copyCurrentBoard() },
   onDelete: () => { void deleteCurrentBoard() },
   onOpenMaterials: () => { showMaterialPanel.value = true },

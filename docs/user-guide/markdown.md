@@ -15,6 +15,7 @@ Nuvyn renders Markdown with `markdown-it` and supports the core syntax plus:
 - GitHub-style Alerts;
 - KaTeX inline and block math;
 - Mermaid and Markmap fences.
+- live Board embeds.
 
 ## Callouts
 
@@ -100,6 +101,29 @@ Known targets navigate inside the vault. Missing Wiki targets are styled as miss
 When renaming a file or folder, Nuvyn can update incoming Wiki and Markdown references. The Links panel shows both outgoing links and backlinks for the current note.
 
 ## Diagrams
+
+### Embed a Board
+
+Draw a diagram in **Board**, then choose **Copy Note reference** in the Board
+editor's menu. Paste the copied Markdown on its own line in a Note:
+
+```md
+![System diagram](board:8a1c2544-dad0-4f20-a593-7bbc59882921)
+```
+
+Reading and preview modes display a crisp SVG image of the saved Board. Click
+the image or its caption to return to the Board editor. The reference uses a
+stable Board ID, so renaming the Board does not break it; the caption displays
+its current title. Saving a Board updates the embed when you return to the
+Note. Visible Notes also check for changes every 15 seconds while the browser
+tab is active. Only the saved server version is shown, not recovery drafts.
+
+Deleted Boards show a clear missing-reference message. Network/rendering
+failures offer **Reload**. Embeds use the existing authenticated Board/Asset
+APIs and do not change the Board's last-opened time. They require Nuvyn to
+render; use PNG/SVG export when sharing a static diagram outside Nuvyn.
+
+### Mermaid and Markmap
 
 Use a `mermaid` fence for diagrams and a `markmap` fence for an interactive outline map:
 

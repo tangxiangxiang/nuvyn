@@ -249,12 +249,12 @@ export async function cleanupUnreferencedAsset(assetId: string): Promise<void> {
   }
 }
 
-export async function fetchAssetBlob(assetId: string): Promise<Blob> {
+export async function fetchAssetBlob(assetId: string, signal?: AbortSignal): Promise<Blob> {
   if (!isAssetId(assetId)) {
     throw new BoardAssetError('ASSET_RESOLVE_FAILED', 'Asset ID must be a UUID.', 400, { uncertain: false, assetId })
   }
   try {
-    const response = await authFetch(boardAssetUrl(assetId))
+    const response = await authFetch(boardAssetUrl(assetId), { signal })
     if (response.status === 404) {
       throw new BoardAssetError('ASSET_MISSING', 'Board asset was not found.', 404, { uncertain: false, assetId })
     }

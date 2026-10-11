@@ -5,6 +5,7 @@ import {
   mathWidgetsReady,
   mermaidWidgetsReady,
   pdfEnhancementsReady,
+  boardEmbedsReady,
 } from '../pdf-readiness'
 
 function articleWith(markup: string): HTMLElement {
@@ -14,6 +15,16 @@ function articleWith(markup: string): HTMLElement {
 }
 
 describe('PDF enhancement readiness', () => {
+  describe('Board', () => {
+    it('waits for mounted previews and treats missing references as settled errors', () => {
+      expect(boardEmbedsReady(articleWith('<span class="board-embed-mount"></span>'))).toBe(false)
+      expect(boardEmbedsReady(articleWith('<span class="board-embed-host"></span>'))).toBe(false)
+      expect(pdfEnhancementsReady(articleWith('<span class="board-embed-host"><span class="board-embed" data-board-state="pending"></span></span>'))).toBe(false)
+      expect(boardEmbedsReady(articleWith('<span class="board-embed-host"><span class="board-embed" data-board-state="ready"></span></span>'))).toBe(true)
+      expect(boardEmbedsReady(articleWith('<span class="board-embed-host"><span class="board-embed" data-board-state="error"></span></span>'))).toBe(true)
+    })
+  })
+
   describe('Math', () => {
     it.each([
       ['pending', false],

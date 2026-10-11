@@ -10,7 +10,7 @@ function widgetsHaveSettledState(
   article: HTMLElement,
   hostSelector: string,
   widgetSelector: string,
-  stateKey: 'mathState' | 'mermaidState' | 'markmapState',
+  stateKey: 'mathState' | 'mermaidState' | 'markmapState' | 'boardState',
 ): boolean {
   for (const host of article.querySelectorAll<HTMLElement>(hostSelector)) {
     const widget = host.querySelector<HTMLElement>(widgetSelector)
@@ -52,10 +52,16 @@ export function markmapWidgetsReady(article: HTMLElement): boolean {
  * reached an explicit terminal state. `error` is settled: it preserves the
  * enhancement's fallback/error representation without blocking the export.
  */
+export function boardEmbedsReady(article: HTMLElement): boolean {
+  if (article.querySelector('.board-embed-mount')) return false
+  return widgetsHaveSettledState(article, '.board-embed-host', '.board-embed', 'boardState')
+}
+
 export function pdfEnhancementsReady(article: HTMLElement): boolean {
   return (
     mathWidgetsReady(article)
     && mermaidWidgetsReady(article)
     && markmapWidgetsReady(article)
+    && boardEmbedsReady(article)
   )
 }

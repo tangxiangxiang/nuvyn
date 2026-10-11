@@ -46,4 +46,12 @@ describe('AiToolCallCard', () => {
     expect(error.get('.ai-tool-pill').classes()).toContain('ai-tool-pill-error')
     expect(error.find('.ai-tool-toggle').exists()).toBe(false)
   })
+
+  it('never collapses a failed read result', () => {
+    const wrapper = mount(AiToolCallCard, {
+      props: { call: call({ result: { content: 'Access denied', is_error: true } }) },
+    })
+    expect(wrapper.get('.ai-tool-result').text()).toContain('Access denied')
+    expect(wrapper.find('.ai-tool-toggle').exists()).toBe(false)
+  })
 })

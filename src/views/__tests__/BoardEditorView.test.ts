@@ -1021,6 +1021,24 @@ describe('Board Editor B4 lifecycle', () => {
     wrapper.unmount()
   })
 
+  it('copies a stable Markdown reference from the canvas menu', async () => {
+    const id = '8a1c2544-dad0-4f20-a593-7bbc59882921'
+    const writeText = vi.fn().mockResolvedValue(undefined)
+    Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText } })
+    api.getBoard.mockResolvedValueOnce(board(id, 'My [diagram]'))
+    const { wrapper } = await mountEditor(id)
+    await flushPromises()
+    const host = wrapper.findComponent(ExcalidrawHost)
+    host.vm.$emit('ready')
+    const menu = host.props('editorMenu')
+    expect(menu!.labels.copyReference).toBe('Copy Note reference')
+    menu!.onCopyReference()
+    await flushPromises()
+    expect(writeText).toHaveBeenCalledWith(`![My \\[diagram\\]](board:${id})`)
+    expect(toast.success).toHaveBeenCalledWith('Reference copied. Paste it into a Note to embed this Board.')
+    wrapper.unmount()
+  })
+
   it('deletes the current Board only after confirmation and navigates after cleanup', async () => {
     api.getBoard.mockResolvedValueOnce(board('a', 'Delete me'))
     api.deleteBoard.mockResolvedValueOnce(undefined)

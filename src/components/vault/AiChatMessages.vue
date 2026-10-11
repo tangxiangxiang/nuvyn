@@ -2,7 +2,7 @@
 import { NButton, NIcon } from 'naive-ui'
 import type { Message } from '../../lib/ai-api'
 import { Link, ListCheck, Search, Stars } from '@vicons/tabler'
-import AiToolCallCard from './AiToolCallCard.vue'
+import AiToolActivity from './AiToolActivity.vue'
 import AiMarkdown from './AiMarkdown.vue'
 import { useI18n } from '../../composables/useI18n'
 
@@ -79,11 +79,7 @@ const { t } = useI18n()
           role="status"
           :aria-label="t('ai.generating')"
         ><span /><span /><span /></span>
-        <AiToolCallCard
-          v-for="call in message.blocks?.toolCalls ?? []"
-          :key="call.id"
-          :call="call"
-        />
+        <AiToolActivity v-if="message.blocks?.toolCalls.length" :calls="message.blocks.toolCalls" />
       </div>
     </div>
   </div>

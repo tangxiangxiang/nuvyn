@@ -2779,7 +2779,7 @@ async function waitForPdfWidgets(article: HTMLElement): Promise<void> {
     const timeout = window.setTimeout(() => {
       observer.disconnect()
       reject(new Error('PDF_WIDGET_TIMEOUT'))
-    }, 5000)
+    }, article.querySelector('.board-embed-mount, .board-embed-host') ? 15_000 : 5000)
     function check() {
       if (!pdfWidgetsReady(article)) return
       window.clearTimeout(timeout)
@@ -2794,6 +2794,7 @@ async function waitForPdfWidgets(article: HTMLElement): Promise<void> {
         'data-math-state',
         'data-mermaid-state',
         'data-markmap-state',
+        'data-board-state',
         'data-mermaid-ready',
         'data-markmap-ready',
         'data-mermaid-error',

@@ -210,6 +210,24 @@ describe('Board V1 HTTP authentication boundary', () => {
 })
 
 describe('Board HTTP API', () => {
+  it('reads the latest preview without changing last-opened activity and requires authentication', async () => {
+    const board = await createBoard({ title: 'Embedded diagram' })
+    const url = `/api/board/${board.metadata.id}/preview`
+    expect((await request(url, { authenticated: false })).status).toBe(401)
+    now += 100
+    const initial = await request(url)
+    expect(initial.status).toBe(200)
+    expect(initial.headers.get('Cache-Control')).toBe('no-store')
+    expect(await responseJson(initial)).toMatchObject({ metadata: { lastOpenedAt: null }, sceneRecord: { revision: 0 } })
+    const saved = await request(`/api/board/${board.metadata.id}/scene`, {
+      method: 'PUT', body: { engine: 'excalidraw', sceneVersion: 1, expectedRevision: 0, scene: scene() },
+    })
+    expect(saved.status).toBe(200)
+    const result = await responseJson(await request(url))
+    expect(result).toMatchObject({ metadata: { title: 'Embedded diagram', updatedAt: now, lastOpenedAt: null }, sceneRecord: { revision: 1 } })
+    expect((await request(`/api/board/${randomUUID()}/preview`)).status).toBe(404)
+  })
+
   it('lists, creates, gets, and renames Boards through the mounted routes', async () => {
     const emptyList = await request('/api/board')
     expect(emptyList.status).toBe(200)

@@ -27,6 +27,7 @@ import {
   syncGeneratedShikiStylesheet,
 } from './shiki'
 import { parseFenceMeta, type FenceMeta } from './fenceMeta'
+import { parseBoardReference } from './boardReferences'
 import {
   authenticatedMarkdownResourceResolver,
   expandMarkdownResources,
@@ -393,6 +394,19 @@ async function getMd(): Promise<MarkdownIt> {
       // This renderer is reached only for Markdown image tokens. Raw HTML
       // <img> remains html_inline and therefore keeps its existing contract.
       const token = tokens[index]
+      const boardId = parseBoardReference(token.attrGet('src') ?? '')
+      if (boardId) {
+        // MarkdownIt's alt helper skips escape/code/emoji tokens. Preserve
+        // those literal title characters in the copy-and-paste round trip.
+        const label = (token.children ?? []).map((child) => (
+          ['text_special', 'code_inline', 'emoji'].includes(child.type)
+            ? child.content
+            : self.renderInlineAsText([child], options, env)
+        )).join('')
+        // A span keeps this Markdown image valid inside a paragraph. The Vue
+        // enhancement renders a block-sized, read-only Board preview here.
+        return `<span class="board-embed-mount" data-target="${boardId}" title="${escapeHtml(label)}">${escapeHtml(label)}</span>`
+      }
       const sourcePath = typeof token.meta?.nuvynSourcePath === 'string'
         ? token.meta.nuvynSourcePath
         : undefined

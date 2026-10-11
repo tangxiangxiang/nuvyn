@@ -253,6 +253,31 @@ describe('PDF export helpers', () => {
     expect(article.querySelector('img')?.getAttribute('src')).toBe(originalSrc)
   })
 
+  it('snapshots Board preview images before their live object URLs are disposed', () => {
+    const article = document.createElement('article')
+    article.innerHTML = '<span class="board-embed-host"><span class="board-embed"><a class="board-embed-preview"><img src="blob:board" alt="Diagram"></a><span class="board-embed-open">Open</span></span></span>'
+    const image = article.querySelector('img')!
+    Object.defineProperties(image, {
+      complete: { configurable: true, value: true },
+      naturalWidth: { configurable: true, value: 100 },
+      naturalHeight: { configurable: true, value: 100 },
+    })
+    const drawImage = vi.fn()
+    const getContext = vi.spyOn(HTMLCanvasElement.prototype, 'getContext').mockReturnValue({ drawImage } as unknown as CanvasRenderingContext2D)
+    const toDataURL = vi.spyOn(HTMLCanvasElement.prototype, 'toDataURL').mockReturnValue('data:image/png;base64,cHJldmlldw==')
+    try {
+      const html = preparePdfArticleHtml(article)
+      expect(html).toContain('data:image/png;base64,cHJldmlldw==')
+      expect(html).not.toContain('blob:board')
+      expect(html).not.toContain('board-embed-open')
+      expect(drawImage).toHaveBeenCalledWith(image, 0, 0)
+      expect(article.querySelector('img')?.getAttribute('src')).toBe('blob:board')
+    } finally {
+      getContext.mockRestore()
+      toDataURL.mockRestore()
+    }
+  })
+
   it('expands generated details only in the PDF clone and preserves reader state', () => {
     const article = document.createElement('article')
     article.className = 'article reading'

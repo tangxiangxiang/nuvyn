@@ -816,13 +816,18 @@ function snapshotSettledMarkdownResourceImage(image: HTMLImageElement): string |
   }
 }
 
+function isBoardPreviewImage(image: HTMLImageElement): boolean {
+  return image.matches('.board-embed-preview > img') && (image.getAttribute('src') ?? '').startsWith('blob:')
+}
+
 function clonePdfNode(node: Node): Node {
   if (node.nodeType !== Node.ELEMENT_NODE) return node.cloneNode(true)
   const element = node as HTMLElement
   if (element.tagName === 'IMG') {
     const sourceImage = element as HTMLImageElement
     const clone = element.ownerDocument.createElement('img')
-    const dataUrl = isLocalMarkdownResourceImage(sourceImage)
+    const needsSnapshot = isLocalMarkdownResourceImage(sourceImage) || isBoardPreviewImage(sourceImage)
+    const dataUrl = needsSnapshot
       ? snapshotSettledMarkdownResourceImage(sourceImage)
       : null
 
@@ -835,7 +840,7 @@ function clonePdfNode(node: Node): Node {
     }
     if (dataUrl) {
       clone.setAttribute('src', dataUrl)
-    } else if (!isLocalMarkdownResourceImage(sourceImage)) {
+    } else if (!needsSnapshot) {
       const src = element.getAttribute('src')
       if (src) clone.setAttribute('src', src)
       const srcset = element.getAttribute('srcset')
@@ -872,6 +877,8 @@ export function preparePdfArticleHtml(article: HTMLElement): string {
 
   clone.querySelectorAll('.mermaid-toolbar-area, .markmap-toolbar-area')
     .forEach((toolbar) => toolbar.remove())
+  clone.querySelectorAll('.board-embed-open, .board-embed-retry')
+    .forEach((control) => control.remove())
 
   for (const host of clone.querySelectorAll<HTMLElement>('.mermaid-widget-host')) {
     const sourceSvg = host.querySelector<SVGSVGElement>('.mermaid-svg > svg')

@@ -106,9 +106,17 @@ export async function getBoard(boardId: string): Promise<BoardAggregate> {
   }
 }
 
-export async function getBoardMetadata(boardId: string): Promise<BoardMetadata> {
+export async function getBoardPreview(boardId: string, signal?: AbortSignal): Promise<BoardAggregate> {
   try {
-    return await readJson<BoardMetadata>(await authFetch(`/api/board/${encodeURIComponent(boardId)}/metadata`))
+    return await readJson<BoardAggregate>(await authFetch(`/api/board/${encodeURIComponent(boardId)}/preview`, { signal }))
+  } catch (error) {
+    throw asBoardApiError(error)
+  }
+}
+
+export async function getBoardMetadata(boardId: string, signal?: AbortSignal): Promise<BoardMetadata> {
+  try {
+    return await readJson<BoardMetadata>(await authFetch(`/api/board/${encodeURIComponent(boardId)}/metadata`, { signal }))
   } catch (error) {
     throw asBoardApiError(error)
   }
