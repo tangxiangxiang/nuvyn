@@ -4,6 +4,37 @@ import { observeBrandJourney, readBrandJourneyProbe } from './helpers/brand-jour
 
 const RUN_ID = String(Date.now())
 
+test('Monaco scrollbars fade in on scroll and hide again when idle', async ({ page, request }) => {
+  const path = `inbox/scrollbar-auto-hide-${RUN_ID}`
+  const createdPaths: string[] = []
+
+  try {
+    const body = Array.from({ length: 120 }, (_, index) => `Scrollable line ${index + 1}`).join('\n')
+    await createDoc(request, path, `# Scrollbar Auto Hide\n\n${body}\n`, createdPaths)
+    await gotoVaultReady(page)
+    await openDoc(page, path)
+
+    const host = page.locator('.monaco-host')
+    const slider = host.locator('.monaco-scrollable-element > .scrollbar.vertical > .slider').first()
+    await expect(slider).toHaveCount(1)
+    expect(await slider.evaluate((element) => getComputedStyle(element).opacity)).toBe('0')
+
+    await host.hover()
+    await page.waitForTimeout(250)
+    expect(await slider.evaluate((element) => getComputedStyle(element).opacity)).toBe('0')
+
+    await page.mouse.wheel(0, 500)
+    await expect.poll(() => slider.evaluate((element) => getComputedStyle(element).opacity)).toBe('1')
+    await page.waitForTimeout(1150)
+    await expect.poll(() => slider.evaluate((element) => getComputedStyle(element).opacity)).toBe('0')
+  } finally {
+    for (const createdPath of createdPaths) {
+      const deleted = await request.delete(`/api/posts/${createdPath}`)
+      expect([200, 404]).toContain(deleted.status())
+    }
+  }
+})
+
 test('Zen Mode preserves Vault layout and the mounted editor across edit and read surfaces', async ({ page, request }) => {
   const path = `inbox/zen-mode-${RUN_ID}`
   const createdPaths: string[] = []
@@ -23,6 +54,7 @@ test('Zen Mode preserves Vault layout and the mounted editor across edit and rea
     for (const layout of layouts) {
       await page.evaluate((value) => {
         localStorage.setItem('nuvyn.vault.layout', JSON.stringify(value))
+        localStorage.setItem('nuvyn.editor.focus-width', 'true')
       }, layout)
       await page.reload()
       await expect(page.locator('.editor-pane .monaco-editor')).toBeVisible()
@@ -34,6 +66,16 @@ test('Zen Mode preserves Vault layout and the mounted editor across edit and rea
         Object.defineProperty(window, '__zenModeEditorNode', { value: element, configurable: true })
       })
       await editor.locator('.view-lines').click()
+      await expect(page.locator('.monaco-host')).toHaveClass(/focus-width/)
+      await page.keyboard.press('ControlOrMeta+K')
+      await page.keyboard.press('f')
+      await expect(page.locator('.monaco-host')).not.toHaveClass(/focus-width/)
+      await expect.poll(() => page.evaluate(() => localStorage.getItem('nuvyn.editor.focus-width'))).toBe('false')
+      await page.keyboard.press('ControlOrMeta+K')
+      await page.keyboard.press('f')
+      await expect(page.locator('.monaco-host')).toHaveClass(/focus-width/)
+      await expect.poll(() => page.evaluate(() => localStorage.getItem('nuvyn.editor.focus-width'))).toBe('true')
+      await expect(page.locator('.editor-pane .monaco-editor .view-lines')).toContainText('Original body.')
       await page.keyboard.press('ControlOrMeta+K')
       await page.keyboard.press('z')
 
@@ -47,6 +89,33 @@ test('Zen Mode preserves Vault layout and the mounted editor across edit and rea
       await expect(page.locator('.editor-tabs-shell')).toBeHidden()
       await expect(page.locator('.status-bar-row')).toHaveCount(0)
       await expect(page.locator('.splitter')).toHaveCount(0)
+      await expect(page.locator('.monaco-host.zen-mode-width')).not.toHaveClass(/focus-width/)
+
+      const fullWidthLayout = await page.locator('.monaco-host.zen-mode-width').evaluate((element) => {
+        const pane = element.parentElement!
+        const style = getComputedStyle(pane)
+        const availableWidth = pane.clientWidth
+          - Number.parseFloat(style.paddingLeft)
+          - Number.parseFloat(style.paddingRight)
+        return {
+          editorWidth: element.getBoundingClientRect().width,
+          availableWidth,
+        }
+      })
+      expect(Math.abs(fullWidthLayout.editorWidth - fullWidthLayout.availableWidth)).toBeLessThan(3)
+
+      await editor.locator('.view-lines').click()
+      await page.keyboard.press('ControlOrMeta+K')
+      await page.keyboard.press('f')
+      await expect(page.locator('.monaco-host.zen-mode-width')).toHaveClass(/focus-width/)
+      const focusedZenEditorWidth = await page.locator('.monaco-host.zen-mode-width').evaluate((element) => (
+        element.getBoundingClientRect().width
+      ))
+      expect(focusedZenEditorWidth).toBeLessThanOrEqual(920)
+      expect(await page.evaluate(() => localStorage.getItem('nuvyn.editor.focus-width'))).toBe('true')
+      await page.keyboard.press('ControlOrMeta+K')
+      await page.keyboard.press('f')
+      await expect(page.locator('.monaco-host.zen-mode-width')).not.toHaveClass(/focus-width/)
 
       const zenLayout = await vault.evaluate((element) => {
         const style = getComputedStyle(element)
@@ -77,6 +146,7 @@ test('Zen Mode preserves Vault layout and the mounted editor across edit and rea
       await page.keyboard.press('ControlOrMeta+K')
       await page.keyboard.press('z')
       await expect(vault).toHaveAttribute('data-zen-mode', 'false')
+      await expect(page.locator('.monaco-host')).toHaveClass(/focus-width/)
       expect(await page.evaluate(() => (
         (window as Window & { __zenModeEditorNode?: Element }).__zenModeEditorNode
         === document.querySelector('.editor-pane .monaco-editor')
@@ -90,6 +160,7 @@ test('Zen Mode preserves Vault layout and the mounted editor across edit and rea
     await page.keyboard.press('ControlOrMeta+K')
     await page.keyboard.press('z')
     await expect(page.locator('.vault')).toHaveAttribute('data-zen-mode', 'true')
+    await expect(page.locator('.monaco-host.zen-mode-width')).not.toHaveClass(/focus-width/)
     await expect(page.locator('.editor-pane .monaco-editor .view-lines')).toContainText('ZENMODE_UNSAVED_MARKER')
 
     // Escape exits while keeping the same editor, selection model, and dirty text alive.
@@ -108,6 +179,9 @@ test('Zen Mode preserves Vault layout and the mounted editor across edit and rea
     await expect(page.locator('.vault')).toHaveAttribute('data-zen-mode', 'true')
     await expect(page.locator('.navbar')).toHaveCount(0)
     await expect(page.locator('.activity-bar, .file-tree, .right-rail-slot, .status-bar-row')).toHaveCount(0)
+    expect(await page.locator('.reading-layout').evaluate((element) => (
+      getComputedStyle(element).maxWidth
+    ))).toBe('800px')
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth)).toBe(true)
     await page.keyboard.press('ControlOrMeta+K')
     await page.keyboard.press('z')

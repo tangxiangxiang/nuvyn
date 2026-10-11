@@ -4791,9 +4791,13 @@ body:has(.ledger-detail-sheet-card) .n-modal-mask {
 .vault .monaco-host .monaco-scrollable-element > .scrollbar > .slider {
   background: var(--sb-thumb) !important;
   border-radius: var(--sb-radius);
-  transition: background 0.15s;
+  opacity: 0;
+  transition: opacity 200ms ease, background 0.15s;
 }
-.vault .monaco-host:hover .monaco-scrollable-element > .scrollbar > .slider,
+.vault .monaco-host.is-scrollbar-visible .monaco-scrollable-element > .scrollbar > .slider {
+  opacity: 1;
+  transition-duration: 120ms, 0.15s;
+}
 .vault .monaco-host .monaco-scrollable-element > .scrollbar > .slider:hover {
   background: var(--sb-thumb-hover) !important;
 }
@@ -4808,6 +4812,12 @@ body:has(.ledger-detail-sheet-card) .n-modal-mask {
 .vault .monaco-host .monaco-editor .find-widget.visible {
   top: 30px !important;
   right: 50px !important;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .vault .monaco-host .monaco-scrollable-element > .scrollbar > .slider {
+    transition: none;
+  }
 }
 
 /* Reading pane owns its native scrolling; Monaco keeps its
@@ -4855,8 +4865,9 @@ body:has(.ledger-detail-sheet-card) .n-modal-mask {
   align-items: center;
 }
 .vault .monaco-host.zen-mode-width {
-  width: min(100%, 800px);
-  max-width: 100%;
+  width: 100%;
+  max-width: none;
+  min-width: 0;
 }
 .vault.is-zen-mode {
   box-sizing: border-box;
@@ -4880,8 +4891,9 @@ body:has(.ledger-detail-sheet-card) .n-modal-mask {
     max(24px, env(safe-area-inset-bottom))
     max(24px, env(safe-area-inset-left));
 }
-.vault.is-zen-mode .monaco-host.zen-mode-width {
-  width: min(100%, 800px);
+.vault.is-zen-mode .monaco-host.zen-mode-width.focus-width {
+  width: min(100%, 920px);
+  max-width: 100%;
 }
 .vault.is-zen-mode .reading-pane {
   padding:

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import * as monaco from 'monaco-editor/esm/vs/editor/editor.api.js'
 import 'monaco-editor/esm/vs/basic-languages/markdown/markdown.contribution.js'
 import EditorWorker from 'monaco-editor/esm/vs/editor/editor.worker?worker'
@@ -54,6 +54,7 @@ const emit = defineEmits<{
   'open-link': [target: { path: string; anchor?: string }]
   'create-link': [ref: string]
   'toggle-view-mode': []
+  'toggle-focus-width': []
   'toggle-zen-mode': []
   'exit-zen-mode': []
 }>()
@@ -68,15 +69,22 @@ let pasteHandler: ((event: ClipboardEvent) => void) | null = null
 let rememberLinkCommand: string | null = null
 let composing = false
 let zenToggleAction: { dispose: () => void } | null = null
+let focusWidthChordPending = false
+let focusWidthChordTimer: ReturnType<typeof setTimeout> | null = null
+let focusWidthChordListener: { dispose: () => void } | null = null
 let zenEscapeAction: { dispose: () => void } | null = null
 let zenOverlayContext: monaco.editor.IContextKey<boolean> | null = null
 let zenOverlayObserver: MutationObserver | null = null
 const observedZenOverlays = new Set<Element>()
-const zenOverlaySelector = '[role="dialog"], [aria-modal="true"], [role="menu"], .n-modal, .n-dialog, .n-popover, .context-view, .monaco-hover'
+const zenOverlaySelector = '[role="dialog"], [aria-modal="true"], [role="menu"], .n-modal, .n-dialog, .n-popover, .context-view, .monaco-hover, .suggest-widget, .find-widget'
 let revealAnchorSequence = 0
 let decorationTimer: ReturnType<typeof setTimeout> | null = null
+let scrollbarHideTimer: ReturnType<typeof setTimeout> | null = null
+let scrollbarPointerId: number | null = null
 const VIEW_STATE_KEY = NUVYN_BROWSER_STORAGE_KEYS.editorMonacoViewState
 const RECENT_LINKS_KEY = NUVYN_BROWSER_STORAGE_KEYS.editorRecentWikiLinks
+const MONACO_SCROLLBAR_SELECTOR = '.monaco-scrollable-element > .scrollbar'
+const SCROLLBAR_HIDE_DELAY_MS = 900
 let linkPaths: string[] = []
 let targetsByPath = new Map<string, EditorLinkTarget>()
 const resolvedLinkCache = new Map<string, string | null>()
@@ -105,6 +113,56 @@ monacoGlobal.MonacoEnvironment = {
 
 function activeTheme(): 'nuvyn-light' | 'nuvyn-dark' {
   return nuvynMonacoTheme(document.documentElement.getAttribute('data-theme') === 'light' ? 'light' : 'dark') as 'nuvyn-light' | 'nuvyn-dark'
+}
+
+function clearScrollbarHideTimer() {
+  if (scrollbarHideTimer !== null) clearTimeout(scrollbarHideTimer)
+  scrollbarHideTimer = null
+}
+
+function revealEditorScrollbars() {
+  if (!host.value) return
+  clearScrollbarHideTimer()
+  host.value.classList.add('is-scrollbar-visible')
+  if (scrollbarPointerId !== null) return
+  scrollbarHideTimer = setTimeout(() => {
+    host.value?.classList.remove('is-scrollbar-visible')
+    scrollbarHideTimer = null
+  }, SCROLLBAR_HIDE_DELAY_MS)
+}
+
+function finishScrollbarDrag(event?: PointerEvent) {
+  if (scrollbarPointerId === null || (event && event.pointerId !== scrollbarPointerId)) return
+  scrollbarPointerId = null
+  window.removeEventListener('pointerup', onScrollbarPointerEnd)
+  window.removeEventListener('pointercancel', onScrollbarPointerEnd)
+  window.removeEventListener('blur', onScrollbarWindowBlur)
+  document.removeEventListener('visibilitychange', onScrollbarVisibilityChange)
+  revealEditorScrollbars()
+}
+
+function onScrollbarPointerEnd(event: PointerEvent) {
+  finishScrollbarDrag(event)
+}
+
+function onScrollbarWindowBlur() {
+  finishScrollbarDrag()
+}
+
+function onScrollbarVisibilityChange() {
+  if (document.hidden) finishScrollbarDrag()
+}
+
+function onHostPointerDown(event: PointerEvent) {
+  const target = event.target
+  if (!(target instanceof Element) || !target.closest(MONACO_SCROLLBAR_SELECTOR)) return
+  clearScrollbarHideTimer()
+  scrollbarPointerId = event.pointerId
+  host.value?.classList.add('is-scrollbar-visible')
+  window.addEventListener('pointerup', onScrollbarPointerEnd)
+  window.addEventListener('pointercancel', onScrollbarPointerEnd)
+  window.addEventListener('blur', onScrollbarWindowBlur)
+  document.addEventListener('visibilitychange', onScrollbarVisibilityChange)
 }
 
 monaco.editor.defineTheme('nuvyn-light', {
@@ -206,6 +264,55 @@ function updateZenOverlayContext(): void {
     })
   })
   zenOverlayContext.set(hasBlockingOverlay())
+}
+
+function resetFocusWidthChord(): void {
+  focusWidthChordPending = false
+  if (focusWidthChordTimer) clearTimeout(focusWidthChordTimer)
+  focusWidthChordTimer = null
+}
+
+// Keep the second stroke unmodified and scoped to Monaco so Ctrl+K, Ctrl+F
+// remains available to Monaco's built-in Format Selection command.
+function onFocusWidthChordKeydown(event: monaco.IKeyboardEvent): void {
+  const nativeEvent = event.browserEvent
+  if (
+    composing
+    || nativeEvent.isComposing
+    || nativeEvent.keyCode === 229
+    || nativeEvent.defaultPrevented
+    || hasBlockingOverlay()
+  ) {
+    resetFocusWidthChord()
+    return
+  }
+
+  if (focusWidthChordPending) {
+    resetFocusWidthChord()
+    if (
+      event.keyCode === monaco.KeyCode.KeyF
+      && !nativeEvent.ctrlKey
+      && !nativeEvent.metaKey
+      && !nativeEvent.altKey
+      && !nativeEvent.shiftKey
+    ) {
+      event.preventDefault()
+      event.stopPropagation()
+      emit('toggle-focus-width')
+    }
+    return
+  }
+
+  if (
+    event.keyCode === monaco.KeyCode.KeyK
+    && (nativeEvent.ctrlKey || nativeEvent.metaKey)
+    && !nativeEvent.altKey
+    && !nativeEvent.shiftKey
+    && !nativeEvent.repeat
+  ) {
+    focusWidthChordPending = true
+    focusWidthChordTimer = setTimeout(resetFocusWidthChord, 1000)
+  }
 }
 
 function syncZenModeActions(): void {
@@ -463,6 +570,7 @@ const hoverProvider: monaco.languages.HoverProvider = {
 
 onMounted(() => {
   if (!host.value) return
+  host.value.addEventListener('pointerdown', onHostPointerDown)
   model = acquireMarkdownModel(props.path, props.modelValue)
   fenceStateCache.reset()
   bindMarkdownProviderContext(model, { completion: completionProvider, hover: hoverProvider })
@@ -591,10 +699,14 @@ onMounted(() => {
   editor.onDidCompositionStart(() => { composing = true })
   editor.onDidCompositionEnd(() => {
     composing = false
+    resetFocusWidthChord()
     if (!suppressChange && model) emit('update:modelValue', model.getValue())
   })
+  focusWidthChordListener = editor.onKeyDown(onFocusWidthChordKeydown)
+  editor.onDidBlurEditorWidget(resetFocusWidthChord)
   syncZenModeActions()
   editor.onDidScrollChange((event) => {
+    if (event.scrollTopChanged || event.scrollLeftChanged) revealEditorScrollbars()
     if (!editor || !event.scrollTopChanged) return
     if (isLargeDocument.value) return
     scheduleMarkdownDecorations()
@@ -717,9 +829,11 @@ watch(() => props.path, (nextPath, previousPath) => {
   refreshMarkdownDecorations()
 })
 
-watch(() => props.focusWidth, (focused) => {
+watch(() => [props.focusWidth, props.zenMode] as const, async ([focused]) => {
   editor?.updateOptions({ wordWrap: focused ? 'wordWrapColumn' : 'on', wordWrapColumn: preferences.wrapColumn.value })
-})
+  await nextTick()
+  editor?.layout()
+}, { flush: 'post' })
 
 watch(
   [preferences.fontSize, preferences.lineHeight, preferences.tabSize, preferences.wrapColumn, preferences.fontFamily],
@@ -743,14 +857,27 @@ onBeforeUnmount(() => {
   saveViewState()
   themeObserver?.disconnect()
   if (decorationTimer) clearTimeout(decorationTimer)
+  clearScrollbarHideTimer()
+  host.value?.removeEventListener('pointerdown', onHostPointerDown)
+  if (scrollbarPointerId !== null) {
+    scrollbarPointerId = null
+    window.removeEventListener('pointerup', onScrollbarPointerEnd)
+    window.removeEventListener('pointercancel', onScrollbarPointerEnd)
+    window.removeEventListener('blur', onScrollbarWindowBlur)
+    document.removeEventListener('visibilitychange', onScrollbarVisibilityChange)
+  }
+  host.value?.classList.remove('is-scrollbar-visible')
   if (pasteHandler && host.value) host.value.removeEventListener('paste', pasteHandler, true)
+  resetFocusWidthChord()
   zenOverlayObserver?.disconnect()
   zenOverlayObserver = null
   observedZenOverlays.clear()
   zenOverlayContext = null
   zenToggleAction?.dispose()
+  focusWidthChordListener?.dispose()
   zenEscapeAction?.dispose()
   zenToggleAction = null
+  focusWidthChordListener = null
   zenEscapeAction = null
   editor?.dispose()
   if (model) unbindMarkdownProviderContext(model)

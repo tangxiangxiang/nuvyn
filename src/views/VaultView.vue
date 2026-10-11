@@ -271,6 +271,17 @@ const { locale, t } = useI18n()
 const auth = useAuth()
 const diaryAccess = useDiaryAccessSession()
 const { active: zenModeActive, enter: enterZenMode, exit: exitZenMode, toggle: toggleZenMode } = useZenMode()
+const zenFocusWidth = ref(false)
+const effectiveEditorFocusWidth = computed(() => (
+  zenModeActive.value ? zenFocusWidth.value : editorFocusWidth.value
+))
+function toggleEditorFocusWidth(): void {
+  if (zenModeActive.value) {
+    zenFocusWidth.value = !zenFocusWidth.value
+    return
+  }
+  editorFocusWidth.value = !editorFocusWidth.value
+}
 const diaryAccessContext = inject(DiaryAccessContextKey, null)
 const { activeScope, selectScope } = useScopeFilter()
 const noteActivePath = ref<string | null>(null)
@@ -1977,6 +1988,9 @@ watch([activePath, activeWorkspaceTabId], ([path, tabId], [previousPath, previou
   ) exitZenMode()
 }, { flush: 'sync' })
 watch(zenModeActive, (active) => {
+  if (active) zenFocusWidth.value = false
+}, { flush: 'sync' })
+watch(zenModeActive, (active) => {
   if (!active) return
   if (
     activeSavePresentation.value.status === 'error'
@@ -3189,7 +3203,7 @@ watch(isReadMode, async (reading) => {
             :key="activeTab.path"
             :model-value="activeTab.raw"
             :path="activeTab.path"
-            :focus-width="editorFocusWidth"
+            :focus-width="effectiveEditorFocusWidth"
             :zen-mode-available="canUseZenMode"
             :zen-mode="zenModeActive"
             :link-targets="editorLinkTargets"
@@ -3197,6 +3211,7 @@ watch(isReadMode, async (reading) => {
             @open-link="openEditorLink"
             @create-link="createMissingWikiNote"
             @toggle-view-mode="viewModeApi?.toggle()"
+            @toggle-focus-width="toggleEditorFocusWidth"
             @toggle-zen-mode="toggleZenMode"
             @exit-zen-mode="exitZenMode"
           />
@@ -3316,9 +3331,9 @@ watch(isReadMode, async (reading) => {
       :save="activeSavePresentation"
       :error="activeHistoryComparison || activeWorkingTreeDiff || activeDraftRecovery ? null : (activeTab?.error ?? null)"
       :size="activeDraftRecovery ? activeDraftRecovery.draftRaw.length : (activeHistoryComparison ? activeHistoryComparison.afterRaw.length : activeSize)"
-      :focus-width="editorFocusWidth"
+      :focus-width="effectiveEditorFocusWidth"
       :external-kind="activeHistoryComparison || activeWorkingTreeDiff || activeDraftRecovery ? null : (activeTab?.externalKind ?? null)"
-      @toggle-focus-width="editorFocusWidth = !editorFocusWidth"
+      @toggle-focus-width="toggleEditorFocusWidth"
       @retry-save="doSaveNow"
       @copy-content="copyActiveContent"
       @external-diff="showExternalDiff"

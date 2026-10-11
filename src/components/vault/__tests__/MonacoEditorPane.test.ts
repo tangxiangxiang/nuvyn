@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { mount } from '@vue/test-utils'
 
 const mocks = vi.hoisted(() => {
@@ -7,7 +7,8 @@ const mocks = vi.hoisted(() => {
   const blurListeners: Array<() => void> = []
   const compositionStartListeners: Array<() => void> = []
   const compositionEndListeners: Array<() => void> = []
-  const scrollListeners: Array<(event: { scrollTopChanged: boolean }) => void> = []
+  const keyDownListeners: Array<(event: any) => void> = []
+  const scrollListeners: Array<(event: { scrollTopChanged: boolean; scrollLeftChanged: boolean }) => void> = []
   const mouseDownListeners: Array<(event: any) => void> = []
   const completionProviders: Array<any> = []
   const createEditor = vi.fn()
@@ -43,11 +44,13 @@ const mocks = vi.hoisted(() => {
     onDidBlurEditorWidget: vi.fn((fn: () => void) => { blurListeners.push(fn) }),
     onDidCompositionStart: vi.fn((fn: () => void) => { compositionStartListeners.push(fn) }),
     onDidCompositionEnd: vi.fn((fn: () => void) => { compositionEndListeners.push(fn) }),
+    onKeyDown: vi.fn((fn: (event: any) => void) => { keyDownListeners.push(fn); return { dispose: vi.fn() } }),
     onMouseDown: vi.fn((fn: (event: any) => void) => { mouseDownListeners.push(fn) }),
-    onDidScrollChange: vi.fn((fn: (event: { scrollTopChanged: boolean }) => void) => { scrollListeners.push(fn) }),
+    onDidScrollChange: vi.fn((fn: (event: { scrollTopChanged: boolean; scrollLeftChanged: boolean }) => void) => { scrollListeners.push(fn) }),
     getScrollHeight: vi.fn(() => 1000),
     getScrollTop: vi.fn(() => 250),
     getLayoutInfo: vi.fn(() => ({ height: 500 })),
+    layout: vi.fn(),
     setScrollTop: vi.fn(),
     revealLineInCenter: vi.fn(),
     getVisibleRanges: vi.fn(() => [{ startLineNumber: 1, endLineNumber: 20 }]),
@@ -68,6 +71,7 @@ const mocks = vi.hoisted(() => {
     blurListeners,
     compositionStartListeners,
     compositionEndListeners,
+    keyDownListeners,
     scrollListeners,
     mouseDownListeners,
     completionProviders,
@@ -132,7 +136,7 @@ vi.mock('monaco-editor/esm/vs/editor/editor.api.js', () => ({
       this.positionColumn = positionColumn
     }
   },
-  KeyCode: { Enter: 3, Tab: 2, KeyB: 31, KeyE: 33, KeyI: 38, KeyK: 40, KeyZ: 56, Escape: 9, Backquote: 85 },
+  KeyCode: { Enter: 3, Tab: 2, KeyB: 31, KeyE: 33, KeyF: 36, KeyI: 38, KeyK: 40, KeyZ: 56, Escape: 9, Backquote: 85 },
   KeyMod: { Shift: 1024, CtrlCmd: 2048, chord: mocks.chord },
   MarkerSeverity: { Hint: 1 },
 }))
@@ -184,6 +188,7 @@ describe('Monaco EditorPane', () => {
     mocks.blurListeners.length = 0
     mocks.compositionStartListeners.length = 0
     mocks.compositionEndListeners.length = 0
+    mocks.keyDownListeners.length = 0
     mocks.scrollListeners.length = 0
     mocks.mouseDownListeners.length = 0
     vi.clearAllMocks()
@@ -204,6 +209,56 @@ describe('Monaco EditorPane', () => {
       return { startLineNumber: 1, startColumn: 1, endLineNumber: lines.length, endColumn: lines.at(-1)!.length + 1 }
     })
     document.documentElement.setAttribute('data-theme', 'light')
+  })
+
+  afterEach(() => {
+    vi.useRealTimers()
+  })
+
+  it('reveals Monaco scrollbars while scrolling and hides them after 900ms idle', () => {
+    vi.useFakeTimers()
+    const wrapper = mount(EditorPane, { props: { modelValue: 'start', path: 'inbox/test' } })
+    const host = wrapper.element as HTMLElement
+
+    expect(host.classList.contains('is-scrollbar-visible')).toBe(false)
+    mocks.scrollListeners.forEach((fn) => fn({ scrollTopChanged: true, scrollLeftChanged: false }))
+    expect(host.classList.contains('is-scrollbar-visible')).toBe(true)
+
+    vi.advanceTimersByTime(899)
+    expect(host.classList.contains('is-scrollbar-visible')).toBe(true)
+    mocks.scrollListeners.forEach((fn) => fn({ scrollTopChanged: false, scrollLeftChanged: true }))
+    vi.advanceTimersByTime(899)
+    expect(host.classList.contains('is-scrollbar-visible')).toBe(true)
+    vi.advanceTimersByTime(1)
+    expect(host.classList.contains('is-scrollbar-visible')).toBe(false)
+    wrapper.unmount()
+  })
+
+  it('keeps Monaco scrollbars visible while dragging and starts the idle delay on release', () => {
+    vi.useFakeTimers()
+    const wrapper = mount(EditorPane, { props: { modelValue: 'start', path: 'inbox/test' } })
+    const host = wrapper.element as HTMLElement
+    const scrollable = document.createElement('div')
+    scrollable.className = 'monaco-scrollable-element'
+    const scrollbar = document.createElement('div')
+    scrollbar.className = 'scrollbar vertical'
+    scrollable.append(scrollbar)
+    host.append(scrollable)
+
+    const pointerDown = new Event('pointerdown', { bubbles: true })
+    Object.defineProperty(pointerDown, 'pointerId', { value: 7 })
+    scrollbar.dispatchEvent(pointerDown)
+    vi.advanceTimersByTime(1200)
+    expect(host.classList.contains('is-scrollbar-visible')).toBe(true)
+
+    const pointerUp = new Event('pointerup')
+    Object.defineProperty(pointerUp, 'pointerId', { value: 7 })
+    window.dispatchEvent(pointerUp)
+    vi.advanceTimersByTime(899)
+    expect(host.classList.contains('is-scrollbar-visible')).toBe(true)
+    vi.advanceTimersByTime(1)
+    expect(host.classList.contains('is-scrollbar-visible')).toBe(false)
+    wrapper.unmount()
   })
 
   it('emits local model changes once', async () => {
@@ -765,6 +820,49 @@ describe('Monaco EditorPane', () => {
 
     zenAction?.run?.()
     expect(wrapper.emitted('toggle-zen-mode')).toEqual([[]])
+    wrapper.unmount()
+  })
+
+  it('handles Ctrl/Cmd+K then F in the editor without conflicting with Format Selection', () => {
+    const wrapper = mount(EditorPane, { props: { modelValue: 'body', path: 'inbox/source' } })
+    const [onKeydown] = mocks.keyDownListeners
+    const keydown = (keyCode: number, modifiers: Partial<KeyboardEvent> = {}) => onKeydown({
+      keyCode,
+      browserEvent: {
+        ctrlKey: false,
+        metaKey: false,
+        altKey: false,
+        shiftKey: false,
+        repeat: false,
+        isComposing: false,
+        keyCode,
+        defaultPrevented: false,
+        ...modifiers,
+      },
+      preventDefault: vi.fn(),
+      stopPropagation: vi.fn(),
+    })
+
+    keydown(40, { ctrlKey: true })
+    const completeKey = { preventDefault: vi.fn(), stopPropagation: vi.fn() }
+    onKeydown({
+      keyCode: 36,
+      browserEvent: { ctrlKey: false, metaKey: false, altKey: false, shiftKey: false, repeat: false, isComposing: false, keyCode: 36, defaultPrevented: false },
+      ...completeKey,
+    })
+    expect(wrapper.emitted('toggle-focus-width')).toEqual([[]])
+    expect(completeKey.preventDefault).toHaveBeenCalledOnce()
+    expect(completeKey.stopPropagation).toHaveBeenCalledOnce()
+
+    keydown(40, { ctrlKey: true })
+    keydown(56)
+    keydown(36)
+    expect(wrapper.emitted('toggle-focus-width')).toEqual([[]])
+
+    mocks.compositionStartListeners.forEach((listener) => listener())
+    keydown(40, { ctrlKey: true })
+    keydown(36)
+    expect(wrapper.emitted('toggle-focus-width')).toEqual([[]])
     wrapper.unmount()
   })
 
