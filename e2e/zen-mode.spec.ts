@@ -303,10 +303,26 @@ test('touch long press on the brand enters Zen Mode after the constellation fini
     await expect(page.locator('.brand-network-virtue-primary')).toHaveText('归一')
     await expect(page.locator('.brand-network-virtue-subtitle')).toHaveText('Oneness')
     await expect(page.locator('.brand-journey-rim')).toHaveClass(/is-fracturing/)
+    const rimTransition = await page.locator('.brand-journey-rim circle.is-active').first().evaluate((element) => {
+      const style = getComputedStyle(element)
+      return {
+        properties: style.transitionProperty.split(',').map((item) => item.trim()),
+        durations: style.transitionDuration.split(',').map((item) => item.trim()),
+        delays: style.transitionDelay.split(',').map((item) => item.trim()),
+        stroke: style.stroke,
+      }
+    })
+    expect(rimTransition.properties).toEqual(['opacity', 'transform', 'stroke'])
+    expect(rimTransition.durations).toEqual(['0.2s', '0.9s', '0.6s'])
+    expect(rimTransition.delays).toEqual(['0.3s', '0.3s', '0s'])
+    expect(rimTransition.stroke).toBe('rgb(196, 193, 250)')
     await expect(page.locator('.brand-network-virtue')).not.toHaveClass(/enter-active/)
     await expect(page.locator('.brand-journey-point')).toHaveCount(0)
     await expect(page.locator('.vault')).toHaveAttribute('data-zen-mode', 'false')
     await expect(page.locator('.vault')).toHaveAttribute('data-zen-mode', 'true')
+    await expect(page.locator('.navbar')).toHaveClass(/is-zen-transitioning/)
+    await page.locator('.navbar .brand').dispatchEvent('pointerleave', { pointerType: 'mouse' })
+    await expect(page.locator('.navbar')).toHaveCount(1)
     const probe = await readBrandJourneyProbe(page, true)
     expect(probe.maxWords).toBe(1)
     const virtues = ['courage', 'honesty', 'reflection', 'humility', 'kindness', 'patience', 'restraint', 'focus', 'clarity']
@@ -339,6 +355,11 @@ test('touch long press on the brand enters Zen Mode after the constellation fini
     await expect(page.locator('.brand-constellation')).toBeVisible({ timeout: 5000 })
     // Reduced motion still holds Courage (450ms), Clarity (800ms), and
     // Oneness (1500ms); observe after recognition, not from pointerdown.
+    await expect(page.locator('.brand-network-virtue-primary')).toHaveText('归一', { timeout: 3500 })
+    const reducedMotionTransition = await page.locator('.brand-journey-rim circle.is-active').first().evaluate((element) => (
+      getComputedStyle(element).transitionDuration
+    ))
+    expect(reducedMotionTransition).toBe('0s')
     await expect(page.locator('.vault')).toHaveAttribute('data-zen-mode', 'true', { timeout: 3500 })
   } finally {
     for (const createdPath of createdPaths) {

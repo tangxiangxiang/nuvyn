@@ -639,7 +639,10 @@ body.brand-constellation-active * {
   opacity: 0;
   transform-box: view-box;
   transform-origin: 500px 500px;
-  transition: opacity 200ms ease, transform 900ms cubic-bezier(0.2, 0.7, 0.3, 1);
+  transition-property: opacity, transform, stroke;
+  transition-duration: 200ms, 900ms, 600ms;
+  transition-timing-function: ease, cubic-bezier(0.2, 0.7, 0.3, 1), ease;
+  transition-delay: 0ms, 0ms, 0ms;
 }
 .brand-journey-rim circle.is-active {
   opacity: 1;
@@ -653,7 +656,7 @@ body.brand-constellation-active * {
 .brand-journey-rim.is-fracturing circle.is-active {
   opacity: 0;
   transform: translate(var(--brand-fragment-x), var(--brand-fragment-y));
-  transition-delay: calc(var(--brand-fragment-index) * 55ms);
+  transition-delay: var(--brand-fracture-delay), var(--brand-fracture-delay), 0ms;
 }
 .brand-journey-trail {
   fill: none;

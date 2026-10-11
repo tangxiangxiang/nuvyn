@@ -665,6 +665,24 @@ describe('NavBar — brand constellation', () => {
     expect(wrapper.find('.brand-constellation').exists()).toBe(false)
   })
 
+  it('still allows pointerleave to cancel a running eligible virtue journey', async () => {
+    const smil = installSvgAnimationMock({ supportsBeginElement: false })
+    const enter = vi.fn(() => true)
+    const { wrapper } = mountNavBar('edit', { canEnter: () => true, enter })
+    try {
+      await wrapper.get('.brand').trigger('pointerenter', { pointerType: 'mouse' })
+      await advanceAnimation(3800)
+      expect(wrapper.find('.brand-network-virtue-primary').text()).toBe('勇气')
+      await wrapper.get('.brand').trigger('pointerleave', { pointerType: 'mouse' })
+      expect(wrapper.find('.brand-constellation').exists()).toBe(false)
+      expect(enter).not.toHaveBeenCalled()
+      expect(document.body.classList.contains('brand-constellation-active')).toBe(false)
+    } finally {
+      wrapper.unmount()
+      smil.restore()
+    }
+  })
+
   it.each(['Escape', 'blur'])('cleans the body cursor class on %s', async (event) => {
     const { wrapper } = mountNavBar()
     await wrapper.find('.brand').trigger('pointerenter', { pointerType: 'mouse' })
@@ -847,8 +865,9 @@ describe('NavBar — brand constellation', () => {
       await advanceAnimation(1)
       expect(enter).toHaveBeenCalledOnce()
       expect(zenModeBrandTransitioning.value).toBe(true)
-      expect(wrapper.find('.brand-constellation').exists()).toBe(true)
-      await advanceAnimation(500)
+      await wrapper.get('.brand').trigger('pointerleave', { pointerType: 'mouse' })
+      expect(zenModeBrandTransitioning.value).toBe(true)
+      await advanceAnimation(600)
       await flushPromises()
       expect(canEnter).toHaveBeenCalled()
       expect(wrapper.find('.brand-constellation').exists()).toBe(false)
@@ -915,29 +934,136 @@ describe('NavBar — brand constellation', () => {
     }
   })
 
-  it('cancels a prepared entry if the window blurs during the fade', async () => {
+  it('cleans up the transition if the window blurs during the Zen reveal', async () => {
     const smil = installSvgAnimationMock({ supportsBeginElement: false })
     const enter = vi.fn(() => true)
     const canEnter = vi.fn(() => true)
     const container = document.createElement('div')
     document.body.appendChild(container)
-    const { wrapper } = mountNavBar('edit', { canEnter, enter }, container)
+    const { wrapper, zenModeBrandTransitioning } = mountNavBar('edit', { canEnter, enter }, container)
     try {
       await wrapper.find('.brand').trigger('pointerenter', { pointerType: 'mouse' })
       await advanceAnimation(7350)
       expect(container.querySelector('.brand-network-virtue-primary')?.textContent).toBe('归一')
       expect(container.querySelector('.brand-constellation')?.classList.contains('brand-constellation-leave-active')).toBe(true)
-      expect(enter).not.toHaveBeenCalled()
+      expect(enter).toHaveBeenCalledOnce()
+      expect(zenModeBrandTransitioning.value).toBe(true)
 
       window.dispatchEvent(new Event('blur'))
       await nextTick()
       await advanceAnimation(600)
       await flushPromises()
-      expect(enter).not.toHaveBeenCalled()
+      expect(enter).toHaveBeenCalledOnce()
+      expect(zenModeBrandTransitioning.value).toBe(false)
+      expect(container.querySelector('.brand-constellation')).toBeNull()
       expect(document.body.classList.contains('brand-constellation-active')).toBe(false)
     } finally {
       wrapper.unmount()
       container.remove()
+      smil.restore()
+    }
+  })
+
+  it('restores the normal layout when Zen entry fails after the Oneness hold', async () => {
+    const smil = installSvgAnimationMock({ supportsBeginElement: false })
+    const enter = vi.fn(() => false)
+    const { wrapper, zenModeBrandTransitioning } = mountNavBar('edit', { canEnter: () => true, enter })
+    try {
+      await wrapper.get('.brand').trigger('pointerenter', { pointerType: 'mouse' })
+      await advanceAnimation(7350)
+      expect(enter).toHaveBeenCalledOnce()
+      expect(zenModeBrandTransitioning.value).toBe(false)
+      expect(wrapper.find('.brand-constellation').exists()).toBe(false)
+      await advanceAnimation(500)
+      await flushPromises()
+      expect(wrapper.find('.brand-constellation').exists()).toBe(false)
+      expect(document.body.classList.contains('brand-constellation-active')).toBe(false)
+    } finally {
+      wrapper.unmount()
+      smil.restore()
+    }
+  })
+
+  it.each(['visibilitychange', 'unmount'] as const)('releases the final handoff on %s', async (reason) => {
+    const smil = installSvgAnimationMock({ supportsBeginElement: false })
+    const enter = vi.fn(() => true)
+    const container = document.createElement('div')
+    document.body.appendChild(container)
+    const { wrapper, zenModeBrandTransitioning } = mountNavBar('edit', { canEnter: () => true, enter }, container)
+    const originalHidden = document.hidden
+    try {
+      await wrapper.get('.brand').trigger('pointerenter', { pointerType: 'mouse' })
+      await advanceAnimation(7350)
+      expect(enter).toHaveBeenCalledOnce()
+      expect(zenModeBrandTransitioning.value).toBe(true)
+
+      if (reason === 'visibilitychange') {
+        Object.defineProperty(document, 'hidden', { configurable: true, value: true })
+        document.dispatchEvent(new Event('visibilitychange'))
+        await advanceAnimation(500)
+        expect(wrapper.find('.brand-constellation').exists()).toBe(false)
+      } else {
+        wrapper.unmount()
+      }
+
+      expect(zenModeBrandTransitioning.value).toBe(false)
+      expect(document.body.classList.contains('brand-constellation-active')).toBe(false)
+    } finally {
+      Object.defineProperty(document, 'hidden', { configurable: true, value: originalHidden })
+      wrapper.unmount()
+      container.remove()
+      smil.restore()
+    }
+  })
+
+  it('clears the final handoff when the route changes beneath the curtain', async () => {
+    const smil = installSvgAnimationMock({ supportsBeginElement: false })
+    const router = createRouter({
+      history: createMemoryHistory(),
+      routes: [
+        { path: '/vault', component: { template: '<div />' } },
+        { path: '/other', component: { template: '<div />' } },
+      ],
+    })
+    await router.push('/vault')
+    await router.isReady()
+    const zenModeBrandTransitioning = ref(false)
+    const zenModeActive = ref(false)
+    const wrapper = mount(NavBar, {
+      props: { isVault: true },
+      global: {
+        plugins: [router],
+        provide: {
+          [VaultViewModeKey as symbol]: makeViewModeApi(),
+          [AppShellContextKey as symbol]: {
+            settingsRequestTick: ref(0),
+            diaryCalendarVisible: ref(false),
+            zenModeBrandEntry: ref({
+              canEnter: () => true,
+              enter: () => {
+                zenModeActive.value = true
+                return true
+              },
+            }),
+            zenModeBrandTransitioning,
+          },
+        },
+      },
+    })
+    try {
+      await wrapper.get('.brand').trigger('pointerenter', { pointerType: 'mouse' })
+      await advanceAnimation(7350)
+      expect(zenModeActive.value).toBe(true)
+      expect(zenModeBrandTransitioning.value).toBe(true)
+
+      await router.push('/other')
+      await nextTick()
+      expect(zenModeBrandTransitioning.value).toBe(false)
+      await advanceAnimation(500)
+      expect(wrapper.find('.brand-constellation').exists()).toBe(false)
+      expect(document.body.classList.contains('brand-constellation-active')).toBe(false)
+    } finally {
+      wrapper.unmount()
       smil.restore()
     }
   })

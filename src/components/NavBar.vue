@@ -801,6 +801,10 @@ function onBrandPointerEnter(event: PointerEvent) {
 }
 
 function onBrandPointerLeave(event: PointerEvent) {
+  // The finite journey has already committed to its exit once completed.
+  // Pointer hit-testing can emit leave when the navbar becomes non-interactive during
+  // the black-curtain handoff; that must not tear down the active transition.
+  if (brandAnimationFinished || pendingBrandZenTransitionFinish) return
   if (event.pointerType !== 'touch' && brandConstellationTrigger !== 'touch') {
     stopBrandConstellation()
   }
@@ -1143,7 +1147,7 @@ onBeforeUnmount(() => {
               :stroke-dashoffset="brandVirtueSegmentOffset(index)"
               :class="{ 'is-active': activeBrandVirtueIndex !== null && index <= activeBrandVirtueIndex }"
               :style="{
-                '--brand-fragment-index': index,
+                '--brand-fracture-delay': `${300 + index * 55}ms`,
                 '--brand-fragment-x': `${Math.cos((index + 0.5) * Math.PI * 2 / BRAND_VIRTUES.length) * 16}px`,
                 '--brand-fragment-y': `${Math.sin((index + 0.5) * Math.PI * 2 / BRAND_VIRTUES.length) * 16}px`,
               }"
