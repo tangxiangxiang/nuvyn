@@ -4,6 +4,7 @@ import { useMediaQuery, useStorage } from '@vueuse/core'
 import { useRoute, useRouter } from 'vue-router'
 import { useShortcutDisplay } from '../composables/useShortcutDisplay'
 import { useVaultLayout } from '../composables/vault/useVaultLayout'
+import { useZenMode } from '../composables/vault/useZenMode'
 import { useSplitterDrag } from '../composables/vault/useSplitterDrag'
 import { useToast } from '../composables/useToast'
 import { NUVYN_BROWSER_STORAGE_KEYS } from '../technicalNamespace'
@@ -90,6 +91,7 @@ import { scopeRootsFor } from '../../shared/scopeProtocol'
 import type { DiaryMoodId as MoodId } from '../../shared/diaryMood'
 import { handleDiaryHomeKeydown } from './diaryHomeKeyboard'
 import { createDiaryShortcutChord, isDiaryShortcutBlocked, isDiaryTextEntryContext } from './diaryShortcutChord'
+import { createZenModeChord } from './zenModeChord'
 import FileTree from '../components/vault/FileTree.vue'
 import { projectFileTree } from '../components/vault/fileTreeProjection'
 import {
@@ -268,6 +270,7 @@ const { confirm, confirmCancellable } = useConfirm()
 const { locale, t } = useI18n()
 const auth = useAuth()
 const diaryAccess = useDiaryAccessSession()
+const { active: zenModeActive, exit: exitZenMode, toggle: toggleZenMode } = useZenMode()
 const diaryAccessContext = inject(DiaryAccessContextKey, null)
 const { activeScope, selectScope } = useScopeFilter()
 const noteActivePath = ref<string | null>(null)
@@ -1617,6 +1620,7 @@ async function revealWorkspaceTabInTree(path: string): Promise<void> {
 }
 
 function onVaultKeydown(event: KeyboardEvent): void {
+  if (zenModeChord.onKeydown(event)) return
   if (isNuvynShortcutBlocked(event)) return
   if (diaryBackChord.onKeydown(event)) return
 
@@ -1899,6 +1903,7 @@ const isDiaryCalendarVisible = computed(() => (
   isDiaryCalendarMode.value && !isManagedDiaryDocumentActive.value
 ))
 const workspaceTabStripVisible = computed(() => {
+  if (zenModeActive.value) return false
   if (workspaceTabs.value.length === 0 || isDiaryPresentationPrimary.value) return false
   return !(isDiaryScope.value
     && (isDiaryDocumentMode.value || isManagedDiaryDocumentActive.value)
@@ -1914,6 +1919,70 @@ const isOrdinaryDocumentPresentation = computed(() => (
   && !activeWorkingTreeDiff.value
   && !activeDraftRecovery.value
 ))
+const canUseZenMode = computed(() => {
+  const tab = activeTab.value
+  if (
+    route.meta.workspaceKind !== 'vault'
+    || !activePath.value
+    || !tab
+    || tab.path !== activePath.value
+    || tab.loading
+    || tab.loadError
+    || specialWorkspaceSurfaceActive.value
+    || isDiaryCalendarVisible.value
+    || isMobileDiaryViewport.value
+  ) return false
+
+  if (isDiaryScope.value) {
+    return diaryAccess.isUnlocked.value && classifyDiaryPath(activePath.value) === 'managed'
+  }
+  return activeScope.value === 'note'
+})
+const zenModeChord = createZenModeChord({
+  canToggle: () => canUseZenMode.value,
+  isActive: () => zenModeActive.value,
+  isBlocked: (event) => {
+    if (isNuvynShortcutBlocked(event) || isDiaryShortcutBlocked(event)) return true
+    const overlaySelector = '[role="menu"], .context-view, .monaco-menu-container, .monaco-hover, .suggest-widget, .find-widget'
+    const path = event.composedPath().filter((entry): entry is Element => entry instanceof Element)
+    const focused = document.activeElement instanceof Element ? document.activeElement : null
+    return path.some((element) => element.closest(overlaySelector) !== null)
+      || Boolean(focused?.closest(overlaySelector))
+  },
+  toggle: () => {
+    if (canUseZenMode.value) toggleZenMode()
+  },
+  exit: exitZenMode,
+})
+watch(canUseZenMode, (available) => {
+  if (!available) exitZenMode()
+}, { flush: 'sync' })
+watch([activePath, activeWorkspaceTabId], ([path, tabId], [previousPath, previousTabId]) => {
+  if (
+    zenModeActive.value
+    && (path !== previousPath || tabId !== previousTabId)
+  ) exitZenMode()
+}, { flush: 'sync' })
+watch(zenModeActive, (active) => {
+  if (!active) return
+  if (
+    activeSavePresentation.value.status === 'error'
+    || activeSavePresentation.value.status === 'offline'
+    || activeSavePresentation.value.status === 'external'
+    || activeTab.value?.externalRaw != null
+    || activeTab.value?.loadError
+  ) exitZenMode()
+}, { flush: 'sync' })
+watch(
+  [() => activeSavePresentation.value.status, () => activeTab.value?.externalRaw, () => activeTab.value?.loadError],
+  ([status, externalRaw, loadError]) => {
+    if (
+      zenModeActive.value
+      && (status === 'error' || status === 'offline' || status === 'external' || externalRaw != null || loadError)
+    ) exitZenMode()
+  },
+  { flush: 'sync' },
+)
 
 watch([activePath, () => activeTab.value?.raw, isReadMode], () => {
   readingPaneReady.value = false
@@ -2081,17 +2150,27 @@ watch([canBackToDiaryHome, activeWorkspaceTabId], () => {
 
 onMounted(() => {
   window.addEventListener('blur', diaryBackChord.reset)
+  window.addEventListener('blur', zenModeChord.reset)
   document.addEventListener('visibilitychange', diaryBackChord.reset)
+  document.addEventListener('visibilitychange', zenModeChord.reset)
 })
 
 onBeforeUnmount(() => {
   window.removeEventListener('blur', diaryBackChord.reset)
+  window.removeEventListener('blur', zenModeChord.reset)
   document.removeEventListener('visibilitychange', diaryBackChord.reset)
+  document.removeEventListener('visibilitychange', zenModeChord.reset)
   diaryBackChord.dispose()
+  zenModeChord.dispose()
+  exitZenMode()
 })
 
 const routeSidebarVisible = computed(() => route.meta.sidebar !== false)
-const workspaceSidebarVisible = computed(() => routeSidebarVisible.value && !isDiaryCalendarVisible.value)
+const workspaceSidebarVisible = computed(() => (
+  routeSidebarVisible.value
+  && !isDiaryCalendarVisible.value
+  && !zenModeActive.value
+))
 const workspaceLeftSidebarVisible = computed(() => workspaceSidebarVisible.value && leftSidebarVisible.value)
 const workspaceActivityBarVisible = computed(() => (
   workspaceLeftSidebarVisible.value && !isDiaryScope.value
@@ -2927,7 +3006,8 @@ watch(isReadMode, async (reading) => {
   <div
     ref="vaultRef"
     class="vault"
-    :class="{ 'is-read': isReadMode, 'right-rail-open': rightRailVisible, 'side-panel-open': sidePanelOpen, 'diary-calendar-mode': isDiaryCalendarVisible, 'diary-native-document-mode': isOrdinaryManagedDiaryDocumentActive }"
+    :class="{ 'is-read': isReadMode, 'is-zen-mode': zenModeActive, 'right-rail-open': rightRailVisible, 'side-panel-open': sidePanelOpen, 'diary-calendar-mode': isDiaryCalendarVisible, 'diary-native-document-mode': isOrdinaryManagedDiaryDocumentActive }"
+    :data-zen-mode="zenModeActive ? 'true' : 'false'"
     tabindex="0"
     :style="vaultStyle"
     @keydown="onVaultKeydown"
@@ -3097,11 +3177,15 @@ watch(isReadMode, async (reading) => {
             :model-value="activeTab.raw"
             :path="activeTab.path"
             :focus-width="editorFocusWidth"
+            :zen-mode-available="canUseZenMode"
+            :zen-mode="zenModeActive"
             :link-targets="editorLinkTargets"
             @update:model-value="(val: string) => onEditorChange(activeTab!.path, val)"
             @open-link="openEditorLink"
             @create-link="createMissingWikiNote"
             @toggle-view-mode="viewModeApi?.toggle()"
+            @toggle-zen-mode="toggleZenMode"
+            @exit-zen-mode="exitZenMode"
           />
         </div>
         <div v-if="!tabs.length" class="content-empty">

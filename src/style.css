@@ -4692,6 +4692,42 @@ body:has(.ledger-detail-sheet-card) .n-modal-mask {
   align-items: center;
 }
 .vault .monaco-host.focus-width { width: min(100%, 920px); }
+.vault .editor-pane:has(> .monaco-host.zen-mode-width) {
+  align-items: center;
+}
+.vault .monaco-host.zen-mode-width {
+  width: min(100%, 800px);
+  max-width: 100%;
+}
+.vault.is-zen-mode {
+  height: calc(100vh - var(--navbar-h, 0px));
+  grid-template-columns: minmax(0, 1fr) !important;
+  grid-template-rows: minmax(0, 1fr) !important;
+}
+.vault.is-zen-mode > .editor-area {
+  grid-template-rows: minmax(0, 1fr) !important;
+}
+.vault.is-zen-mode .editor-pane {
+  box-sizing: border-box;
+  align-items: center;
+  padding: clamp(24px, 5vh, 56px) 24px 24px;
+}
+.vault.is-zen-mode .monaco-host.zen-mode-width {
+  width: min(100%, 800px);
+}
+.vault.is-zen-mode .reading-pane {
+  padding-top: clamp(32px, 6vh, 72px);
+}
+.vault.is-zen-mode .reading-layout {
+  max-width: 800px;
+}
+.vault.is-zen-mode .reading-pane .article.reading {
+  flex-basis: 800px;
+  max-width: 800px;
+}
+.vault.is-zen-mode .status-bar-row {
+  display: none;
+}
 .vault .monaco-host .monaco-md-marker { color: var(--vs-accent) !important; }
 .vault .monaco-host .monaco-md-code { background: var(--vs-bg-2); color: var(--vs-text-1) !important; }
 .vault .monaco-host .monaco-md-strong { color: var(--vs-text-1) !important; font-weight: 700; }

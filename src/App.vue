@@ -15,6 +15,7 @@ import { useI18n } from './composables/useI18n'
 import { ensureVaultIdentity, getVaultIdentityState } from './lib/vault-identity'
 import { useToast } from './composables/useToast'
 import { useScopeFilter } from './composables/vault/useScopeFilter'
+import { useZenMode } from './composables/vault/useZenMode'
 import { useDiaryAccessSession } from './composables/diary/useDiaryAccessSession'
 import { DiaryAccessContextKey } from './composables/diary/diaryAccessContext'
 import { AppShellContextKey } from './composables/appShellContext'
@@ -36,6 +37,7 @@ const vaultIdentity = getVaultIdentityState()
 const { t } = useI18n()
 const toast = useToast()
 const diaryAccess = useDiaryAccessSession()
+const { active: zenModeActive, exit: exitZenMode } = useZenMode()
 const { activeScope, selectScope } = useScopeFilter()
 const settingsRequestTick = ref(0)
 const ledgerSettingsOpen = ref(false)
@@ -83,6 +85,10 @@ const isVaultRoute = computed(() => (
   && auth.state.value === 'authenticated'
   && vaultIdentity.state.value === 'ready'
 ))
+const zenModeOwnsChrome = computed(() => isVaultRoute.value && zenModeActive.value)
+watch(isVaultRoute, (isVault) => {
+  if (!isVault) exitZenMode()
+}, { flush: 'sync' })
 const isLedgerRoute = computed(() => workspaceKind.value === 'ledger')
 // Ledger's sibling routes have no shared view owner. Keep one module command
 // across them, and invalidate it when leaving Ledger or changing auth owner.
@@ -336,7 +342,7 @@ provide(VaultViewModeKey, { mode: viewMode, set: setViewMode, toggle: toggleView
 
 <template>
   <NavBar
-    v-if="showNormalChrome"
+    v-if="showNormalChrome && !zenModeOwnsChrome"
     :workspace-kind="workspaceKind"
     :chrome-style="chromeStyle"
     :username="auth.user.value?.username"
@@ -386,7 +392,7 @@ provide(VaultViewModeKey, { mode: viewMode, set: setViewMode, toggle: toggleView
         'full-width': r.meta.fullWidth,
         'auth-page-shell': r.meta.authPage === true,
       }]"
-      :style="{ '--navbar-h': showNormalChrome ? (isWorkspaceChrome ? '36px' : '56px') : '0px' }"
+      :style="{ '--navbar-h': zenModeOwnsChrome ? '0px' : (showNormalChrome ? (isWorkspaceChrome ? '36px' : '56px') : '0px') }"
       :inert="auth.transitionKind.value !== null || undefined"
       :aria-busy="auth.transitionKind.value !== null || undefined"
     >

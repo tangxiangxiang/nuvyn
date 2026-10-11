@@ -812,7 +812,11 @@ describe('VaultView D3.2 Diary surface wiring', () => {
     expect(source).toContain('v-if="isDiaryCalendarMounted"')
     expect(source).toContain('v-show="!isDiaryPresentationPrimary"')
     expect(source).toContain('const routeSidebarVisible = computed(() => route.meta.sidebar !== false)')
-    expect(source).toContain('const workspaceSidebarVisible = computed(() => routeSidebarVisible.value && !isDiaryCalendarVisible.value)')
+    expect(source).toContain(`const workspaceSidebarVisible = computed(() => (
+  routeSidebarVisible.value
+  && !isDiaryCalendarVisible.value
+  && !zenModeActive.value
+))`)
     expect(source).toContain('const workspaceLeftSidebarVisible = computed(() => workspaceSidebarVisible.value && leftSidebarVisible.value)')
     expect(source).toContain('useVaultLayout({')
     expect(source).toContain('statusBarVisible: statusBarLayoutVisible')

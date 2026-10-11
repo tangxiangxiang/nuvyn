@@ -10,6 +10,8 @@ const mocks = vi.hoisted(() => {
   const scrollListeners: Array<(event: { scrollTopChanged: boolean }) => void> = []
   const mouseDownListeners: Array<(event: any) => void> = []
   const completionProviders: Array<any> = []
+  const createEditor = vi.fn()
+  const chord = vi.fn(() => 123456)
   const model = {
     uri: { toString: () => 'nuvyn://vault/test' },
     value: '',
@@ -50,7 +52,8 @@ const mocks = vi.hoisted(() => {
     revealLineInCenter: vi.fn(),
     getVisibleRanges: vi.fn(() => [{ startLineNumber: 1, endLineNumber: 20 }]),
     addCommand: vi.fn(() => 'remember-link-command'),
-    addAction: vi.fn(),
+    addAction: vi.fn(() => ({ dispose: vi.fn() })),
+    createContextKey: vi.fn((_key: string, defaultValue: boolean) => ({ set: vi.fn(), get: vi.fn(() => defaultValue) })),
     getSelection: vi.fn(() => null),
     executeEdits: vi.fn(),
     setModel: vi.fn(),
@@ -68,6 +71,8 @@ const mocks = vi.hoisted(() => {
     scrollListeners,
     mouseDownListeners,
     completionProviders,
+    createEditor,
+    chord,
     model,
     editor,
     defineTheme: vi.fn(),
@@ -83,7 +88,7 @@ vi.mock('monaco-editor/esm/vs/editor/editor.api.js', () => ({
     defineTheme: mocks.defineTheme,
     setTheme: mocks.setTheme,
     createModel: vi.fn((value: string) => { mocks.model.value = value; return mocks.model }),
-    create: vi.fn(() => mocks.editor),
+    create: vi.fn(() => { mocks.createEditor(); return mocks.editor }),
     setModelMarkers: vi.fn(),
   },
   languages: {
@@ -127,8 +132,8 @@ vi.mock('monaco-editor/esm/vs/editor/editor.api.js', () => ({
       this.positionColumn = positionColumn
     }
   },
-  KeyCode: { Enter: 3, Tab: 2, KeyB: 31, KeyI: 38, KeyK: 40, Backquote: 85 },
-  KeyMod: { Shift: 1024, CtrlCmd: 2048 },
+  KeyCode: { Enter: 3, Tab: 2, KeyB: 31, KeyE: 33, KeyI: 38, KeyK: 40, KeyZ: 56, Escape: 9, Backquote: 85 },
+  KeyMod: { Shift: 1024, CtrlCmd: 2048, chord: mocks.chord },
   MarkerSeverity: { Hint: 1 },
 }))
 vi.mock('monaco-editor/esm/vs/basic-languages/markdown/markdown.contribution.js', () => ({}))
@@ -140,6 +145,18 @@ import { resetMarkdownModelsForTesting } from '../monacoModels'
 import { parseDoc } from '../../../lib/frontmatter'
 
 describe('Monaco EditorPane', () => {
+  function registeredActions() {
+    return mocks.editor.addAction.mock.calls as unknown as Array<[{
+      id: string
+      label?: string
+      keybindings?: number[]
+      keybindingContext?: string
+      contextMenuGroupId?: string
+      contextMenuOrder?: number
+      run?: () => void
+    }]>
+  }
+
   function setDocumentLines(lines: string[]) {
     mocks.model.value = lines.join('\n')
     mocks.model.getLineContent.mockImplementation((lineNumber?: number) => lines[(lineNumber ?? 1) - 1] ?? '')
@@ -722,11 +739,68 @@ describe('Monaco EditorPane', () => {
 
   it('leaves Enter to Monaco while the suggestion widget is visible', () => {
     const wrapper = mount(EditorPane, { props: { modelValue: '- item', path: 'inbox/source' } })
-    const action = mocks.editor.addAction.mock.calls
+    const action = registeredActions()
       .map(([options]) => options)
       .find((options) => options.id === 'nuvyn.markdown-enter')
 
     expect(action).toMatchObject({ keybindingContext: '!suggestWidgetVisible' })
+    wrapper.unmount()
+  })
+
+  it('uses Monaco-native Ctrl/Cmd+K then Z and keeps Markdown link wrapping in the context menu', () => {
+    const wrapper = mount(EditorPane, {
+      props: { modelValue: 'selected text', path: 'inbox/source', zenModeAvailable: true },
+    })
+    const actions = registeredActions().map(([options]) => options)
+    const zenAction = actions.find((options) => options.id === 'nuvyn.toggle-zen-mode')
+    const linkAction = actions.find((options) => options.id === 'nuvyn.markdown-link')
+
+    expect(zenAction?.keybindings).toEqual([123456])
+    expect(mocks.chord).toHaveBeenCalledWith(2048 | 40, 56)
+    expect(linkAction).toMatchObject({
+      contextMenuGroupId: '1_modification',
+      contextMenuOrder: 2,
+    })
+    expect(linkAction).not.toHaveProperty('keybindings')
+
+    zenAction?.run?.()
+    expect(wrapper.emitted('toggle-zen-mode')).toEqual([[]])
+    wrapper.unmount()
+  })
+
+  it('preserves the existing Ctrl/Cmd+E edit/read shortcut in Zen Mode', async () => {
+    const wrapper = mount(EditorPane, {
+      props: { modelValue: 'body', path: 'inbox/source', zenModeAvailable: true },
+    })
+    const action = registeredActions()
+      .map(([options]) => options)
+      .find((options) => options.id === 'nuvyn.toggle-view-mode')
+    expect(action?.keybindings).toEqual([2048 | 33])
+    await wrapper.setProps({ zenMode: true })
+    expect(registeredActions().map(([options]) => options.id)).not.toContain('nuvyn.toggle-view-mode-in-zen')
+    action?.run?.()
+    expect(wrapper.emitted('toggle-view-mode')).toEqual([[]])
+    wrapper.unmount()
+  })
+
+  it('adds a context-aware Escape action only in Zen Mode and keeps the editor instance', async () => {
+    const wrapper = mount(EditorPane, {
+      props: { modelValue: 'body', path: 'inbox/source', zenModeAvailable: true },
+    })
+    const createCalls = mocks.createEditor.mock.calls.length
+    await wrapper.setProps({ zenMode: true })
+    const action = registeredActions()
+      .map(([options]) => options)
+      .find((options) => options.id === 'nuvyn.exit-zen-mode')
+
+    expect(action).toMatchObject({
+      keybindings: [9],
+      keybindingContext: '!suggestWidgetVisible && !findWidgetVisible && !nuvynZenBlockingOverlay',
+    })
+    action?.run?.()
+    expect(wrapper.emitted('exit-zen-mode')).toEqual([[]])
+    expect(mocks.createEditor).toHaveBeenCalledTimes(createCalls)
+    expect(mocks.editor.setModel).not.toHaveBeenCalled()
     wrapper.unmount()
   })
 

@@ -43,6 +43,8 @@ const props = defineProps<{
   modelValue: string
   path: string
   focusWidth?: boolean
+  zenModeAvailable?: boolean
+  zenMode?: boolean
   linkTargets?: EditorLinkTarget[]
 }>()
 const preferences = useEditorPreferences()
@@ -52,6 +54,8 @@ const emit = defineEmits<{
   'open-link': [target: { path: string; anchor?: string }]
   'create-link': [ref: string]
   'toggle-view-mode': []
+  'toggle-zen-mode': []
+  'exit-zen-mode': []
 }>()
 
 const host = ref<HTMLDivElement | null>(null)
@@ -63,6 +67,12 @@ let decorationIds: string[] = []
 let pasteHandler: ((event: ClipboardEvent) => void) | null = null
 let rememberLinkCommand: string | null = null
 let composing = false
+let zenToggleAction: { dispose: () => void } | null = null
+let zenEscapeAction: { dispose: () => void } | null = null
+let zenOverlayContext: monaco.editor.IContextKey<boolean> | null = null
+let zenOverlayObserver: MutationObserver | null = null
+const observedZenOverlays = new Set<Element>()
+const zenOverlaySelector = '[role="dialog"], [aria-modal="true"], [role="menu"], .n-modal, .n-dialog, .n-popover, .context-view, .monaco-hover'
 let revealAnchorSequence = 0
 let decorationTimer: ReturnType<typeof setTimeout> | null = null
 const VIEW_STATE_KEY = NUVYN_BROWSER_STORAGE_KEYS.editorMonacoViewState
@@ -175,6 +185,68 @@ function rebuildLinkIndex() {
   targetsByPath = new Map((props.linkTargets ?? []).map((target) => [target.path, target]))
   resolvedLinkCache.clear()
 }
+
+function hasBlockingOverlay(): boolean {
+  return Array.from(document.querySelectorAll<HTMLElement>(zenOverlaySelector)).some((element) => {
+    if (element.getAttribute('aria-hidden') === 'true') return false
+    const style = getComputedStyle(element)
+    return style.display !== 'none' && style.visibility !== 'hidden'
+  })
+}
+
+function updateZenOverlayContext(): void {
+  if (!zenOverlayContext || !zenOverlayObserver) return
+  document.querySelectorAll<HTMLElement>(zenOverlaySelector).forEach((element) => {
+    if (observedZenOverlays.has(element)) return
+    observedZenOverlays.add(element)
+    zenOverlayObserver?.observe(element, {
+      attributes: true,
+      attributeFilter: ['aria-hidden', 'class', 'style'],
+      childList: true,
+    })
+  })
+  zenOverlayContext.set(hasBlockingOverlay())
+}
+
+function syncZenModeActions(): void {
+  if (!editor) return
+
+  if (props.zenModeAvailable && !zenToggleAction) {
+    zenToggleAction = editor.addAction({
+      id: 'nuvyn.toggle-zen-mode',
+      label: 'Toggle Zen Mode',
+      keybindingContext: '!suggestWidgetVisible && !findWidgetVisible && !nuvynZenBlockingOverlay',
+      keybindings: [monaco.KeyMod.chord(
+        monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyK,
+        monaco.KeyCode.KeyZ,
+      )],
+      run() {
+        if (props.zenModeAvailable && !composing) emit('toggle-zen-mode')
+      },
+    })
+  } else if (!props.zenModeAvailable && zenToggleAction) {
+    zenToggleAction.dispose()
+    zenToggleAction = null
+  }
+
+  if (props.zenMode && !zenEscapeAction) {
+    zenEscapeAction = editor.addAction({
+      id: 'nuvyn.exit-zen-mode',
+      label: 'Exit Zen Mode',
+      keybindings: [monaco.KeyCode.Escape],
+      keybindingContext: '!suggestWidgetVisible && !findWidgetVisible && !nuvynZenBlockingOverlay',
+      run() {
+        if (props.zenMode && !composing && !hasBlockingOverlay()) emit('exit-zen-mode')
+      },
+    })
+  } else if (!props.zenMode && zenEscapeAction) {
+    zenEscapeAction.dispose()
+    zenEscapeAction = null
+  }
+
+}
+
+watch(() => [props.zenModeAvailable, props.zenMode], syncZenModeActions, { flush: 'sync' })
 
 rebuildLinkIndex()
 
@@ -448,6 +520,12 @@ onMounted(() => {
     // owns its Markdown decorations and does not use occurrence highlights.
     occurrencesHighlight: 'off',
   })
+  zenOverlayContext = editor.createContextKey('nuvynZenBlockingOverlay', false)
+  zenOverlayObserver = new MutationObserver(updateZenOverlayContext)
+  // Watch only portal roots and the overlay containers themselves: observing
+  // Monaco's entire DOM would re-scan it during every editor token update.
+  zenOverlayObserver.observe(document.body, { childList: true })
+  updateZenOverlayContext()
   rememberLinkCommand = editor.addCommand(0, (_context, path: string) => recordRecentLink(path))
   const saved = readViewState()
   if (saved) editor.restoreViewState(saved)
@@ -466,7 +544,6 @@ onMounted(() => {
     ['nuvyn.markdown-bold', 'Toggle bold', monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyB, MARKDOWN_WRAPS.bold],
     ['nuvyn.markdown-italic', 'Toggle italic', monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyI, MARKDOWN_WRAPS.italic],
     ['nuvyn.markdown-code', 'Toggle inline code', monaco.KeyMod.CtrlCmd | monaco.KeyCode.Backquote, MARKDOWN_WRAPS.code],
-    ['nuvyn.markdown-link', 'Insert Markdown link', monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyK, MARKDOWN_WRAPS.link],
   ] as const) {
     editor.addAction({
       id,
@@ -485,6 +562,24 @@ onMounted(() => {
       },
     })
   }
+  // Keep link wrapping available in Monaco's context menu without reserving
+  // Ctrl/Cmd+K, which now begins the Zen Mode chord.
+  editor.addAction({
+    id: 'nuvyn.markdown-link',
+    label: 'Insert Markdown link',
+    contextMenuGroupId: '1_modification',
+    contextMenuOrder: 2,
+    run(instance) {
+      if (!model) return
+      const selection = instance.getSelection()
+      if (!selection) return
+      const edit = markdownWrapEdit(model.getValueInRange(selection), MARKDOWN_WRAPS.link)
+      instance.executeEdits('nuvyn.markdown-link', [{ range: selection, text: edit.text }])
+      const start = model.getPositionAt(model.getOffsetAt(selection.getStartPosition()) + edit.selectionOffset)
+      const end = model.getPositionAt(model.getOffsetAt(start) + edit.selectionLength)
+      instance.setSelection(new monaco.Selection(start.lineNumber, start.column, end.lineNumber, end.column))
+    },
+  })
   editor.addAction({
     id: 'nuvyn.toggle-view-mode',
     label: 'Toggle Edit / Reading Mode',
@@ -498,6 +593,7 @@ onMounted(() => {
     composing = false
     if (!suppressChange && model) emit('update:modelValue', model.getValue())
   })
+  syncZenModeActions()
   editor.onDidScrollChange((event) => {
     if (!editor || !event.scrollTopChanged) return
     if (isLargeDocument.value) return
@@ -648,6 +744,14 @@ onBeforeUnmount(() => {
   themeObserver?.disconnect()
   if (decorationTimer) clearTimeout(decorationTimer)
   if (pasteHandler && host.value) host.value.removeEventListener('paste', pasteHandler, true)
+  zenOverlayObserver?.disconnect()
+  zenOverlayObserver = null
+  observedZenOverlays.clear()
+  zenOverlayContext = null
+  zenToggleAction?.dispose()
+  zenEscapeAction?.dispose()
+  zenToggleAction = null
+  zenEscapeAction = null
   editor?.dispose()
   if (model) unbindMarkdownProviderContext(model)
   editor = null
@@ -685,5 +789,5 @@ defineExpose({
 </script>
 
 <template>
-  <div ref="host" class="monaco-host" :class="{ 'focus-width': focusWidth }" />
+  <div ref="host" class="monaco-host" :class="{ 'focus-width': focusWidth, 'zen-mode-width': zenMode }" />
 </template>
