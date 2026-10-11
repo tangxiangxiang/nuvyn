@@ -108,6 +108,7 @@ test('exports exactly the final FileTree scope for empty, month, day, and exact-
   await calendarDay(page.getByTestId('diary-calendar'), activeDate).click()
   await expect(page.locator('.reading-pane article')).toContainText('DiaryAnalysisSentinel')
   await expect(page.locator('.search-input')).toHaveValue(activeDate)
+  await page.waitForURL((url) => url.pathname === `/vault/diary/${activeDate}`)
   const route = page.url()
   await diaryChip(page).hover()
   await diaryChip(page).evaluate(async (element) => {

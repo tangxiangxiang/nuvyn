@@ -26,7 +26,7 @@ const alertBackgrounds = {
     caution: 'rgb(53, 34, 38)',
   },
 } as const
-const alertTitles = ['注意', '提示', '重要', '警告', '小心']
+const alertTitles = ['Note', 'Tip', 'Important', 'Warning', 'Caution']
 
 for (const theme of ['light', 'dark'] as const) {
   test(`${mode} ${theme} Markdown visual regression`, async ({ page }) => {

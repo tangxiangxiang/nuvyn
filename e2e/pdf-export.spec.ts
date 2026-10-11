@@ -409,7 +409,7 @@ test('exports the Kitchen Sink with settled content from the file-tree menu', as
     'callout-caution',
   ])
   expect(snapshot.calloutEvidence.map((alert) => alert.title)).toEqual([
-    '注意', '提示', '重要', '警告', '小心',
+    'Note', 'Tip', 'Important', 'Warning', 'Caution',
   ])
   expect(snapshot.calloutEvidence).toHaveLength(5)
   for (const alert of snapshot.calloutEvidence) {

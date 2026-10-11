@@ -215,10 +215,12 @@ test('Long Flow A — Recovery → History/Diff → Rename across one document l
   await expect(renamedDay).toBeVisible({ timeout: 10000 })
   await renamedDay.click()
   const renamedCommit = page.locator('.history-commit-row').first()
-  await expect(renamedCommit).toContainText('E2E pinned after rename')
+  await expect(renamedCommit).toHaveAttribute('title', expect.stringContaining('E2E pinned after rename'))
   await renamedCommit.click()
   // The display title remains the document's content title across rename;
   // the commit row itself proves that this is the post-rename pin.
-  await page.locator('.history-file-row', { hasText: name }).click()
+  const renamedFile = page.locator('.history-file-row', { hasText: name })
+  await expect(renamedFile).toBeVisible()
+  await renamedFile.click()
   await expect(page.locator('.history-comparison-pane')).toBeVisible({ timeout: 10000 })
 })

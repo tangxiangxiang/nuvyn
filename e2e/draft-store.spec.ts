@@ -2672,21 +2672,23 @@ test('an emptied-family retry converges when another window renames between the 
 
 async function openTreeDocument(
   page: import('@playwright/test').Page,
-  title: string,
   path: string,
 ) {
-  // Click the filename button itself, matched by its EXACT aria-label
-  // ("Title, path"): an ancestor `.tree-row.folder` contains every child
-  // row's markup, so any row-level filter + .first() resolves to the
-  // FOLDER row and the click opens whichever document its center lands
-  // on. The button's aria-label is unique per document.
-  const button = page.locator(`button[aria-label="${title}, ${path}"]`)
-  if (await button.count() === 0) {
-    await page.locator('.tree-row.folder').filter({ hasText: 'inbox' }).first()
-      .locator('.chevron').click()
+  const pathParts = path.split('/')
+  for (let index = 1; index < pathParts.length; index += 1) {
+    const parentPath = pathParts.slice(0, index).join('/')
+    const folder = page.locator(`[data-tree-key="folder:${parentPath}"]`)
+    await folder.waitFor({ state: 'visible' })
+    if (await folder.getAttribute('aria-expanded') !== 'true') {
+      await folder.locator(':scope > .row-line .chevron').click()
+    }
   }
-  await button.waitFor({ state: 'visible', timeout: 10_000 })
-  await button.click()
+
+  const file = page.locator(`[data-tree-key="file:${path}"]`)
+  await file.waitFor({ state: 'visible' })
+  const visibleRow = file.locator(':scope > .row-line')
+  await visibleRow.waitFor({ state: 'visible' })
+  await visibleRow.click()
 }
 
 async function focusMonacoEditor(page: import('@playwright/test').Page) {
@@ -2720,7 +2722,7 @@ async function typeAndAwaitDraft(
     route.request().method() === 'PUT' ? route.abort() : route.continue())
   await page.request.post('/api/posts', { data: { path, title } })
   await page.goto('/vault')
-  await openTreeDocument(page, title, path)
+  await openTreeDocument(page, path)
   const editor = await focusMonacoEditor(page)
   await page.keyboard.press('Control+End')
   await page.keyboard.press('Enter')
@@ -3063,7 +3065,7 @@ test('E2E-9: document and recovery viewers coexist without cross-saving', async 
   // coexist in one stable tab strip. Recovery and the formal document share
   // currentPath here, so this click must still emit a fresh FileTree select
   // intent to activate the ordinary document surface.
-  await openTreeDocument(page, `Coexist Closure ${suffix}`, path)
+  await openTreeDocument(page, path)
   await expect(page.locator('.editor-pane .monaco-editor')).toBeVisible()
   const tabs = page.locator('.tabs .tab')
   await expect(tabs).toHaveCount(2)
