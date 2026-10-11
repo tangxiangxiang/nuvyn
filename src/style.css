@@ -544,6 +544,10 @@ hr {
 .navbar.is-workspace .brand { font-size: 0.95rem; }
 .navbar.is-workspace .brand-logo { width: 24px; height: 24px; }
 .navbar.is-workspace .brand-wordmark { font-size: 0.9rem; }
+.navbar.is-zen-transitioning {
+  opacity: 0;
+  pointer-events: none;
+}
 
 /* Brand entry — a finite, quiet journey from darkness to Oneness. */
 .brand-constellation {
@@ -597,7 +601,7 @@ body.brand-constellation-active * {
   fill: #080b14;
   stroke: var(--brand-core-color);
   stroke-width: 2;
-  stroke-opacity: 0.72;
+  stroke-opacity: var(--brand-core-opacity, 0.72);
   transform-origin: 500px 500px;
   transition: stroke 200ms ease, filter 200ms ease;
   filter: drop-shadow(0 0 10px color-mix(in srgb, var(--brand-core-color) 18%, transparent));
@@ -611,15 +615,18 @@ body.brand-constellation-active * {
 .brand-journey-core.is-responding {
   animation: brand-journey-core-response 200ms ease both;
 }
-.brand-journey-core.is-final {
-  stroke-opacity: 0.58;
-}
 .brand-journey-core.is-oneness {
   stroke: #C4C1FA;
   stroke-opacity: 0.48;
   transform: scale(0.985);
   filter: drop-shadow(0 0 14px rgb(196 193 250 / 0.2));
   transition: stroke 600ms ease, stroke-opacity 600ms ease, transform 600ms ease, filter 600ms ease;
+}
+.brand-journey-core.is-fracturing {
+  opacity: 0;
+  stroke-opacity: 0;
+  filter: none;
+  transition: opacity 900ms ease, stroke-opacity 900ms ease, filter 900ms ease;
 }
 .brand-journey-rim {
   fill: none;
@@ -629,10 +636,24 @@ body.brand-constellation-active * {
   pointer-events: none;
 }
 .brand-journey-rim circle {
-  transition: opacity 200ms ease;
+  opacity: 0;
+  transform-box: view-box;
+  transform-origin: 500px 500px;
+  transition: opacity 200ms ease, transform 900ms cubic-bezier(0.2, 0.7, 0.3, 1);
+}
+.brand-journey-rim circle.is-active {
+  opacity: 1;
 }
 .brand-journey-rim.is-unified {
+  opacity: 0.72;
+}
+.brand-journey-rim.is-unified circle.is-active {
+  stroke: #C4C1FA;
+}
+.brand-journey-rim.is-fracturing circle.is-active {
   opacity: 0;
+  transform: translate(var(--brand-fragment-x), var(--brand-fragment-y));
+  transition-delay: calc(var(--brand-fragment-index) * 55ms);
 }
 .brand-journey-trail {
   fill: none;
@@ -700,8 +721,8 @@ body.brand-constellation-active * {
   to { opacity: 1; transform: scale(1); }
 }
 @keyframes brand-journey-core-response {
-  0%, 100% { stroke-opacity: 0.72; }
-  45% { stroke-opacity: 1; }
+  0%, 100% { stroke-opacity: var(--brand-core-opacity, 0.72); }
+  45% { stroke-opacity: calc(var(--brand-core-opacity, 0.72) + 0.14); }
 }
 .brand-network-virtue {
   fill: rgba(255, 255, 255, 0.94);

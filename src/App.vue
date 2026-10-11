@@ -47,6 +47,7 @@ const diaryAnalysisExportCommand = ref<(() => Promise<void>) | null>(null)
 const ledgerAnalysisExportCommand = ref<(() => Promise<void>) | null>(null)
 const vaultScopeChangeCommand = ref<((scope: 'note' | 'diary') => Promise<boolean>) | null>(null)
 const zenModeBrandEntry = ref<{ canEnter: () => boolean; enter: () => boolean } | null>(null)
+const zenModeBrandTransitioning = ref(false)
 const globalSearchHost = ref<{ show: () => void } | null>(null)
 const boardRecoveryStore = createIndexedDbBoardCheckpointStore()
 
@@ -67,6 +68,7 @@ provide(AppShellContextKey, {
   ledgerAnalysisExportCommand,
   vaultScopeChangeCommand,
   zenModeBrandEntry,
+  zenModeBrandTransitioning,
   openGlobalSearch: onOpenSearch,
 })
 
@@ -89,7 +91,10 @@ const isVaultRoute = computed(() => (
 ))
 const zenModeOwnsChrome = computed(() => isVaultRoute.value && zenModeActive.value)
 watch(isVaultRoute, (isVault) => {
-  if (!isVault) exitZenMode()
+  if (!isVault) {
+    exitZenMode()
+    zenModeBrandTransitioning.value = false
+  }
 }, { flush: 'sync' })
 const isLedgerRoute = computed(() => workspaceKind.value === 'ledger')
 // Ledger's sibling routes have no shared view owner. Keep one module command
@@ -344,7 +349,8 @@ provide(VaultViewModeKey, { mode: viewMode, set: setViewMode, toggle: toggleView
 
 <template>
   <NavBar
-    v-if="showNormalChrome && !zenModeOwnsChrome"
+    v-if="showNormalChrome && (!zenModeOwnsChrome || zenModeBrandTransitioning)"
+    :zen-mode-transitioning="zenModeBrandTransitioning"
     :workspace-kind="workspaceKind"
     :chrome-style="chromeStyle"
     :username="auth.user.value?.username"

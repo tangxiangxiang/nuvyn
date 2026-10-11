@@ -92,12 +92,14 @@ function mountNavBar(
   attachTo?: HTMLElement,
 ) {
   const api = makeViewModeApi(initial)
+  const zenModeBrandTransitioning = ref(false)
   const provided: Record<symbol, unknown> = { [VaultViewModeKey as symbol]: api }
   if (zenModeBrandEntry) {
     provided[AppShellContextKey as symbol] = {
       settingsRequestTick: ref(0),
       diaryCalendarVisible: ref(false),
       zenModeBrandEntry: ref(zenModeBrandEntry),
+      zenModeBrandTransitioning,
     }
   }
   const wrapper = mount(NavBar, {
@@ -105,7 +107,7 @@ function mountNavBar(
     props: { isVault: true },
     global: { provide: provided, stubs: { transition: false } },
   })
-  return { wrapper, api }
+  return { wrapper, api, zenModeBrandTransitioning }
 }
 
 describe('NavBar — view-toggle button', () => {
@@ -732,7 +734,7 @@ describe('NavBar — brand constellation', () => {
     const smil = installSvgAnimationMock()
     const enter = vi.fn(() => true)
     const canEnter = vi.fn(() => true)
-    const { wrapper } = mountNavBar('edit', { canEnter, enter })
+    const { wrapper, zenModeBrandTransitioning } = mountNavBar('edit', { canEnter, enter })
     try {
       await wrapper.find('.brand').trigger('pointerenter', { pointerType: 'mouse' })
       await advanceAnimation(3000)
@@ -821,12 +823,13 @@ describe('NavBar — brand constellation', () => {
       }
 
       expect(smil.beginElement).toHaveBeenCalledTimes(9)
-      const finalWord = wrapper.find('.brand-network-virtue.is-final')
+      const finalWord = wrapper.find('.brand-network-virtue[data-word="brand.virtue.clarity"]')
       expect(finalWord.get('.brand-network-virtue-primary').text()).toBe('清明')
-      expect(wrapper.get('.brand-journey-core').classes()).toContain('is-final')
+      expect(wrapper.get('.brand-journey-core').classes()).toContain('is-steady')
       expect(wrapper.findAll('.brand-journey-rim circle').map((arc) => arc.attributes('stroke'))).toEqual(colors)
-      await advanceAnimation(1099)
+      await advanceAnimation(499)
       expect(enter).not.toHaveBeenCalled()
+      expect(journey.attributes('data-phase')).toBe('final')
       await advanceAnimation(1)
       expect(journey.attributes('data-phase')).toBe('merging')
       expect(wrapper.get('.brand-journey-rim').classes()).toContain('is-unified')
@@ -834,17 +837,23 @@ describe('NavBar — brand constellation', () => {
       await advanceAnimation(900)
       expect(wrapper.get('.brand-network-virtue-primary').text()).toBe('归一')
       expect(wrapper.get('.brand-network-virtue-subtitle').text()).toBe('Oneness')
+      expect(wrapper.get('.brand-journey-rim').classes()).toContain('is-fracturing')
+      expect(wrapper.findAll('.brand-journey-rim circle')).toHaveLength(9)
+      expect(wrapper.get('.brand-journey-core').classes()).toContain('is-fracturing')
       expect(smil.beginElement).toHaveBeenCalledTimes(9)
       await advanceAnimation(1499)
       expect(enter).not.toHaveBeenCalled()
       expect(wrapper.find('.brand-constellation').exists()).toBe(true)
       await advanceAnimation(1)
-      expect(enter).not.toHaveBeenCalled()
-      await advanceAnimation(600)
+      expect(enter).toHaveBeenCalledOnce()
+      expect(zenModeBrandTransitioning.value).toBe(true)
+      expect(wrapper.find('.brand-constellation').exists()).toBe(true)
+      await advanceAnimation(500)
       await flushPromises()
       expect(canEnter).toHaveBeenCalled()
       expect(wrapper.find('.brand-constellation').exists()).toBe(false)
       expect(enter).toHaveBeenCalledOnce()
+      expect(zenModeBrandTransitioning.value).toBe(false)
     } finally {
       wrapper.unmount()
       smil.restore()
@@ -1243,7 +1252,7 @@ describe('NavBar — brand constellation', () => {
       expect(wrapper.find('.brand-network-virtue-primary').text()).toBe('勇气')
       expect(wrapper.find('.brand-journey-round').exists()).toBe(false)
       await advanceAnimation(750)
-      expect(wrapper.find('.brand-network-virtue.is-final .brand-network-virtue-primary').text()).toBe('清明')
+      expect(wrapper.find('.brand-network-virtue[data-word="brand.virtue.clarity"] .brand-network-virtue-primary').text()).toBe('清明')
       await advanceAnimation(3500)
       await flushPromises()
       expect(enter).toHaveBeenCalledOnce()
@@ -1308,7 +1317,7 @@ describe('NavBar — brand constellation', () => {
       await nextTick()
       await nextTick()
       expect(wrapper.find('.brand-network-virtue-primary').text()).toBe('清明')
-      vi.advanceTimersByTime(799)
+      vi.advanceTimersByTime(599)
       await nextTick()
       expect(wrapper.find('.brand-constellation').exists()).toBe(true)
       vi.advanceTimersByTime(1)
@@ -1316,6 +1325,7 @@ describe('NavBar — brand constellation', () => {
       await advanceAnimation(0)
       expect(wrapper.get('.brand-network-virtue-primary').text()).toBe('归一')
       expect(wrapper.get('.brand-network-virtue-subtitle').text()).toBe('Oneness')
+      expect(wrapper.get('.brand-journey-rim').classes()).not.toContain('is-fracturing')
       await advanceAnimation(1499)
       expect(enter).not.toHaveBeenCalled()
       await advanceAnimation(1)

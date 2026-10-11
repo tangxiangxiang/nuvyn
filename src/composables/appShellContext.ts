@@ -31,6 +31,8 @@ export interface AppShellContext {
     canEnter: () => boolean
     enter: () => boolean
   } | null>
+  /** Keeps the brand transition mounted while Zen Mode is revealed underneath it. */
+  readonly zenModeBrandTransitioning?: Ref<boolean>
 }
 
 export const AppShellContextKey: InjectionKey<AppShellContext> = Symbol('nuvyn.app-shell')
