@@ -338,6 +338,7 @@ let brandHoverTimer: ReturnType<typeof setTimeout> | undefined
 let brandClickSuppressTimer: ReturnType<typeof setTimeout> | undefined
 let brandVirtueLaunchTimer: ReturnType<typeof setTimeout> | undefined
 let brandVirtueFinalHoldTimer: ReturnType<typeof setTimeout> | undefined
+const brandVirtueParticleWatchdogs = new Map<number, ReturnType<typeof setTimeout>>()
 let reducedMotionMediaQuery: MediaQueryList | null = null
 let brandConstellationCycle = 0
 let brandVirtueRun = 0
@@ -346,6 +347,7 @@ let brandVirtueFinalizing = false
 let touchPointerId: number | null = null
 let touchPointerOrigin: { x: number; y: number } | null = null
 let touchLongPressTriggered = false
+let brandConstellationTrigger: 'hover' | 'touch' | null = null
 let suppressBrandClick = false
 let pendingBrandZenEntry: (() => boolean) | null = null
 
@@ -373,10 +375,12 @@ const BRAND_VIRTUES = [
   { key: 'clarity', color: '#C4C1FA' },
 ] as const
 
-const BRAND_VIRTUE_PARTICLE_INTERVAL_MS = 440
-const BRAND_VIRTUE_PARTICLE_DURATION_MS = 780
+const BRAND_VIRTUE_PARTICLE_INTERVAL_MS = 600
+const BRAND_VIRTUE_PARTICLE_DURATION_MS = 540
+const BRAND_VIRTUE_PARTICLE_END_EVENT_GRACE_MS = 180
 const BRAND_VIRTUE_FINAL_HOLD_MS = 800
-const BRAND_VIRTUE_WORD_TRANSITION_MS = 180
+const BRAND_VIRTUE_WORD_TRANSITION_MS = 160
+const BRAND_PARTICLE_TARGET_RADIUS = 189
 
 type BrandParticleMotion = Element & {
   beginElement?: () => void
@@ -399,6 +403,14 @@ const activeBrandVirtueLabel = computed(() => {
   return virtue ? t(`brand.virtue.${virtue.key}`) : ''
 })
 
+function brandParticleMotionPath(node: typeof BRAND_NODES[number]) {
+  const dx = 500 - node.x
+  const dy = 500 - node.y
+  const distance = Math.hypot(dx, dy)
+  const travelRatio = 1 - BRAND_PARTICLE_TARGET_RADIUS / distance
+  return `M 0 0 L ${dx * travelRatio} ${dy * travelRatio}`
+}
+
 const brandZenEligibility = computed(() => (
   appShell?.zenModeBrandEntry?.value?.canEnter() ?? false
 ))
@@ -413,8 +425,17 @@ function clearBrandHoverTimer() {
 function clearBrandVirtueTimers() {
   if (brandVirtueLaunchTimer) clearTimeout(brandVirtueLaunchTimer)
   if (brandVirtueFinalHoldTimer) clearTimeout(brandVirtueFinalHoldTimer)
+  for (const timer of brandVirtueParticleWatchdogs.values()) clearTimeout(timer)
+  brandVirtueParticleWatchdogs.clear()
   brandVirtueLaunchTimer = undefined
   brandVirtueFinalHoldTimer = undefined
+}
+
+function clearBrandParticleWatchdog(index: number) {
+  const timer = brandVirtueParticleWatchdogs.get(index)
+  if (timer === undefined) return
+  clearTimeout(timer)
+  brandVirtueParticleWatchdogs.delete(index)
 }
 
 function resetBrandVirtueAnimation() {
@@ -454,6 +475,12 @@ function suppressNextBrandClick() {
   brandClickSuppressTimer = undefined
 }
 
+function clearSuppressedBrandClick() {
+  suppressBrandClick = false
+  if (brandClickSuppressTimer) clearTimeout(brandClickSuppressTimer)
+  brandClickSuppressTimer = undefined
+}
+
 function showFinalBrandVirtue(run: number) {
   if (
     run !== brandVirtueRun
@@ -487,7 +514,7 @@ function onBrandParticleArrival(index: number, run: number) {
   ) return
 
   arrivedBrandVirtueIndices.value = new Set([...arrivedBrandVirtueIndices.value, index])
-  activeBrandVirtueIndex.value = index
+  clearBrandParticleWatchdog(index)
   if (index !== BRAND_VIRTUES.length - 1) return
 
   brandVirtueFinalizing = true
@@ -495,7 +522,7 @@ function onBrandParticleArrival(index: number, run: number) {
   brandVirtueFinalHoldTimer = setTimeout(() => {
     brandVirtueFinalHoldTimer = undefined
     if (run === brandVirtueRun) completeBrandConstellation()
-  }, BRAND_VIRTUE_FINAL_HOLD_MS + BRAND_VIRTUE_WORD_TRANSITION_MS)
+  }, BRAND_VIRTUE_FINAL_HOLD_MS)
 }
 
 function launchBrandParticle(index: number, run: number) {
@@ -517,6 +544,16 @@ function launchBrandParticle(index: number, run: number) {
   }
 
   launchedBrandVirtueIndices.value = new Set([...launchedBrandVirtueIndices.value, index])
+  // The particle and its virtue share one sequence beat. Arrival is kept
+  // separate below so only the final particle's completion starts the hold.
+  activeBrandVirtueIndex.value = index
+  // SMIL's endEvent is the normal source of truth. Keep an event-derived,
+  // duration-bounded fallback for browsers that expose beginElement() but
+  // fail to deliver the finite motion's endEvent.
+  brandVirtueParticleWatchdogs.set(index, setTimeout(() => {
+    brandVirtueParticleWatchdogs.delete(index)
+    onBrandParticleArrival(index, run)
+  }, BRAND_VIRTUE_PARTICLE_DURATION_MS + BRAND_VIRTUE_PARTICLE_END_EVENT_GRACE_MS))
   try {
     motion.beginElement()
   } catch {
@@ -562,6 +599,7 @@ function startBrandConstellation(trigger: 'hover' | 'touch' = 'hover') {
     brandHoverTimer = undefined
     if (cycle !== brandConstellationCycle || showBrandConstellation.value) return
     resetBrandVirtueAnimation()
+    brandConstellationTrigger = trigger
     brandVirtueModeActive.value = brandZenEligibility.value
     showBrandConstellation.value = true
     setBrandCursorHidden(true)
@@ -579,14 +617,19 @@ function startBrandConstellation(trigger: 'hover' | 'touch' = 'hover') {
 }
 
 function stopBrandConstellation() {
+  const recognizedTouch = touchLongPressTriggered
   clearBrandHoverTimer()
   brandConstellationCycle += 1
   resetBrandVirtueAnimation()
   brandVirtueModeActive.value = false
   brandAnimationFinished = false
-  if (!touchLongPressTriggered) {
-    touchPointerId = null
-    touchPointerOrigin = null
+  brandConstellationTrigger = null
+  touchPointerId = null
+  touchPointerOrigin = null
+  touchLongPressTriggered = false
+  if (recognizedTouch) {
+    suppressNextBrandClick()
+    expireSuppressedBrandClickAfterPointerUp()
   }
   pendingBrandZenEntry = null
   showBrandConstellation.value = false
@@ -607,7 +650,7 @@ function completeBrandConstellation() {
   if (entry?.canEnter()) {
     pendingBrandZenEntry = entry.enter
     closeBrandConstellationForZenEntry()
-  } else if (touchLongPressTriggered) {
+  } else if (brandConstellationTrigger === 'touch') {
     // Touch has no hover-leave signal. On unsupported surfaces, let users
     // see the complete mark once and then restore the unobstructed page.
     closeBrandConstellationForZenEntry()
@@ -640,6 +683,7 @@ function onBrandConstellationAfterLeave() {
   const enter = pendingBrandZenEntry
   pendingBrandZenEntry = null
   if (touchPointerId === null) touchLongPressTriggered = false
+  brandConstellationTrigger = null
   brandAnimationFinished = false
   brandVirtueModeActive.value = false
   resetBrandVirtueAnimation()
@@ -655,10 +699,15 @@ function onBrandPointerEnter(event: PointerEvent) {
 }
 
 function onBrandPointerLeave(event: PointerEvent) {
-  if (event.pointerType !== 'touch') stopBrandConstellation()
+  if (event.pointerType !== 'touch' && brandConstellationTrigger !== 'touch') {
+    stopBrandConstellation()
+  }
 }
 
 function onBrandPointerDown(event: PointerEvent) {
+  // A fresh pointer sequence proves any still-pending compatibility-click
+  // suppression belonged to the previous gesture, not this one.
+  clearSuppressedBrandClick()
   if (event.pointerType !== 'touch' || showBrandConstellation.value) return
   clearBrandHoverTimer()
   touchPointerId = event.pointerId
@@ -698,26 +747,28 @@ function onBrandPointerUp(event: PointerEvent) {
 
 function onBrandPointerCancel(event: PointerEvent) {
   if (event.pointerId !== touchPointerId) return
+  const wasLongPress = touchLongPressTriggered
   clearBrandHoverTimer()
   touchPointerId = null
   touchPointerOrigin = null
   touchLongPressTriggered = false
-  suppressBrandClick = false
-  if (brandClickSuppressTimer) clearTimeout(brandClickSuppressTimer)
-  brandClickSuppressTimer = undefined
+  if (wasLongPress) expireSuppressedBrandClickAfterPointerUp()
+  else clearSuppressedBrandClick()
 }
 
 function onBrandContextMenu(event: MouseEvent) {
-  if (touchPointerId !== null || touchLongPressTriggered) event.preventDefault()
+  if (
+    touchPointerId !== null
+    || touchLongPressTriggered
+    || (showBrandConstellation.value && brandConstellationTrigger === 'touch')
+  ) event.preventDefault()
 }
 
 function onBrandClick(event: MouseEvent) {
   if (suppressBrandClick) {
     event.preventDefault()
     event.stopPropagation()
-    suppressBrandClick = false
-    if (brandClickSuppressTimer) clearTimeout(brandClickSuppressTimer)
-    brandClickSuppressTimer = undefined
+    clearSuppressedBrandClick()
     return
   }
   void router.push('/')
@@ -985,10 +1036,13 @@ onBeforeUnmount(() => {
                 v-if="brandVirtueModeActive && !reducedMotionActive"
                 :ref="brandParticleMotionRefCallbacks[index]"
                 :dur="`${BRAND_VIRTUE_PARTICLE_DURATION_MS}ms`"
+                calcMode="spline"
+                keyTimes="0;1"
+                keySplines="0.2 0.8 0.2 1"
                 begin="indefinite"
                 fill="freeze"
                 repeatCount="1"
-                :path="`M 0 0 L ${500 - node.x} ${500 - node.y}`"
+                :path="brandParticleMotionPath(node)"
               />
               <animateMotion
                 v-else-if="!brandVirtueModeActive && !reducedMotionActive"

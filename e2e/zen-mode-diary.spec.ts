@@ -33,11 +33,40 @@ test('Zen Mode works on an unlocked Diary document and Diary Back still returns 
     await expect(page.locator('.editor-pane .monaco-editor')).toBeVisible()
     await page.setViewportSize({ width: 375, height: 812 })
     const vault = page.locator('.vault')
+    const editor = page.locator('.editor-pane .monaco-editor').first()
+    await editor.evaluate((element) => {
+      Object.defineProperty(window, '__zenModeDiaryEditorNode', { value: element, configurable: true })
+    })
 
-    await page.locator('.editor-pane .monaco-editor .view-lines').click()
-    await page.keyboard.press('ControlOrMeta+K')
-    await page.keyboard.press('z')
-    await expect(vault).toHaveAttribute('data-zen-mode', 'true')
+    const brand = page.locator('.navbar .brand')
+    const originalUrl = page.url()
+    await brand.evaluate((element) => {
+      element.dispatchEvent(new PointerEvent('pointerdown', {
+        bubbles: true,
+        pointerId: 51,
+        pointerType: 'touch',
+        clientX: 24,
+        clientY: 18,
+      }))
+    })
+    await expect(page.locator('.brand-constellation')).toBeVisible({ timeout: 5000 })
+    await expect(page.locator('.brand-network-virtue')).toHaveText(/Courage|勇气/, { timeout: 1000 })
+    await brand.evaluate((element) => {
+      element.dispatchEvent(new PointerEvent('pointerup', {
+        bubbles: true,
+        pointerId: 51,
+        pointerType: 'touch',
+        clientX: 24,
+        clientY: 18,
+      }))
+      element.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }))
+    })
+    await expect(vault).toHaveAttribute('data-zen-mode', 'true', { timeout: 8500 })
+    expect(page.url()).toBe(originalUrl)
+    expect(await page.evaluate(() => (
+      (window as Window & { __zenModeDiaryEditorNode?: Element }).__zenModeDiaryEditorNode
+      === document.querySelector('.editor-pane .monaco-editor')
+    ))).toBe(true)
     await expect(page.locator('.navbar')).toHaveCount(0)
     await expect(page.locator('.activity-bar, .file-tree, .right-rail-slot, .status-bar-row')).toHaveCount(0)
     const mobileLayout = await page.evaluate(() => ({

@@ -63,13 +63,16 @@ function dispatchPointerEvent(
   target.dispatchEvent(event)
 }
 
-function installSvgAnimationMock() {
+function installSvgAnimationMock(options: { supportsBeginElement?: boolean } = {}) {
   const element = document.createElementNS('http://www.w3.org/2000/svg', 'animateMotion')
   const prototype = Object.getPrototypeOf(element) as object
   const originalBegin = Object.getOwnPropertyDescriptor(prototype, 'beginElement')
   const originalEnd = Object.getOwnPropertyDescriptor(prototype, 'endElement')
   const beginElement = vi.fn()
-  Object.defineProperty(prototype, 'beginElement', { configurable: true, value: beginElement })
+  Object.defineProperty(prototype, 'beginElement', {
+    configurable: true,
+    value: options.supportsBeginElement === false ? undefined : beginElement,
+  })
   Object.defineProperty(prototype, 'endElement', { configurable: true, value: vi.fn() })
 
   return {
@@ -714,7 +717,7 @@ describe('NavBar — brand constellation', () => {
     expect(document.body.classList.contains('brand-constellation-active')).toBe(false)
   })
 
-  it('plays the fixed Nine Virtues sequence and enters only after Clarity has held', async () => {
+  it('synchronizes each virtue with its particle launch and enters after Clarity arrives and holds', async () => {
     useI18n().setLocale('zh')
     const smil = installSvgAnimationMock()
     const enter = vi.fn(() => true)
@@ -737,21 +740,38 @@ describe('NavBar — brand constellation', () => {
         '#969CE0', '#A5A8E9', '#B3B3F1', '#C4C1FA',
       ])
       expect(motions).toHaveLength(9)
-      expect(motions.map((motion) => motion.attributes('dur'))).toEqual(Array(9).fill('780ms'))
+      expect(motions.map((motion) => motion.attributes('dur'))).toEqual(Array(9).fill('540ms'))
+      expect(motions[0].attributes('calcMode')).toBe('spline')
+      expect(motions[0].attributes('keySplines')).toBe('0.2 0.8 0.2 1')
+      const firstPath = motions[0].attributes('path')!.match(/L\s+(-?[\d.]+)\s+(-?[\d.]+)/)
+      expect(firstPath).not.toBeNull()
+      const firstParticle = nodes[0].element.querySelector('.brand-network-particle')!
+      const endX = Number(firstPath![1]) + Number(firstParticle.getAttribute('cx'))
+      const endY = Number(firstPath![2]) + Number(firstParticle.getAttribute('cy'))
+      expect(Math.hypot(endX - 500, endY - 500)).toBeCloseTo(189, 0)
       expect(smil.beginElement).toHaveBeenCalledTimes(1)
-      expect(wrapper.find('.brand-network-virtue').exists()).toBe(false)
+      expect(wrapper.find('.brand-network-virtue').text()).toBe('勇气')
+      expect(nodes[0].classes()).toContain('is-current')
+      expect(nodes[0].find('.brand-network-particle').classes()).not.toContain('is-arrived')
 
       const chineseWords = ['勇气', '诚实', '自省', '谦逊', '善意', '耐心', '克制', '专注', '清明']
       for (let index = 0; index < chineseWords.length; index += 1) {
         if (index > 0) {
-          vi.advanceTimersByTime(440)
+          vi.advanceTimersByTime(600)
           await nextTick()
-          expect(smil.beginElement).toHaveBeenCalled()
         }
-        motions[index].element.dispatchEvent(new Event('endEvent'))
-        await nextTick()
+        expect(smil.beginElement).toHaveBeenCalledTimes(index + 1)
         expect(wrapper.findAll('.brand-network-virtue').map((word) => word.text())).toContain(chineseWords[index])
         expect(nodes[index].classes()).toContain('is-current')
+        motions[index].element.dispatchEvent(new Event('endEvent'))
+        await nextTick()
+        expect(nodes[index].find('.brand-network-particle').classes()).toContain('is-arrived')
+        if (index === 1) {
+          motions[0].element.dispatchEvent(new Event('endEvent'))
+          await nextTick()
+          expect(wrapper.find('.brand-network-node.is-current').attributes('data-virtue')).toBe('honesty')
+          expect(wrapper.findAll('.brand-network-virtue').map((word) => word.text())).toContain('诚实')
+        }
       }
 
       expect(smil.beginElement).toHaveBeenCalledTimes(9)
@@ -775,7 +795,7 @@ describe('NavBar — brand constellation', () => {
     }
   })
 
-  it('uses only the active English label for the arriving virtue', async () => {
+  it('shows the active English label on particle launch without waiting for arrival', async () => {
     useI18n().setLocale('en')
     const smil = installSvgAnimationMock()
     const { wrapper } = mountNavBar('edit', { canEnter: () => true, enter: vi.fn(() => true) })
@@ -784,6 +804,7 @@ describe('NavBar — brand constellation', () => {
       vi.advanceTimersByTime(3000)
       await nextTick()
       await nextTick()
+      expect(wrapper.find('.brand-network-virtue').text()).toBe('Courage')
       wrapper.findAll('animateMotion')[0].element.dispatchEvent(new Event('endEvent'))
       await nextTick()
       expect(wrapper.findAll('.brand-network-virtue')).toHaveLength(1)
@@ -815,6 +836,42 @@ describe('NavBar — brand constellation', () => {
       await flushPromises()
       expect(enter).not.toHaveBeenCalled()
       expect(document.body.classList.contains('brand-constellation-active')).toBe(false)
+    } finally {
+      wrapper.unmount()
+      smil.restore()
+    }
+  })
+
+  it('ignores a late particle endEvent from a cancelled animation after a new run starts', async () => {
+    const smil = installSvgAnimationMock()
+    const enter = vi.fn(() => true)
+    const { wrapper } = mountNavBar('edit', { canEnter: () => true, enter })
+    try {
+      const brand = wrapper.get('.brand')
+      await brand.trigger('pointerenter', { pointerType: 'mouse' })
+      await vi.advanceTimersByTimeAsync(3000)
+      await nextTick()
+      await nextTick()
+      const oldMotion = wrapper.get('animateMotion').element
+
+      window.dispatchEvent(new Event('blur'))
+      await nextTick()
+      expect(document.body.classList.contains('brand-constellation-active')).toBe(false)
+      oldMotion.dispatchEvent(new Event('endEvent'))
+      expect(enter).not.toHaveBeenCalled()
+
+      await brand.trigger('pointerenter', { pointerType: 'mouse' })
+      await vi.advanceTimersByTimeAsync(3000)
+      await nextTick()
+      await nextTick()
+      expect(smil.beginElement).toHaveBeenCalledTimes(2)
+      oldMotion.dispatchEvent(new Event('endEvent'))
+      expect(wrapper.find('.brand-network-virtue').text()).toBe('勇气')
+      expect(wrapper.find('.brand-network-node.is-current .brand-network-particle').classes()).not.toContain('is-arrived')
+
+      wrapper.get('animateMotion').element.dispatchEvent(new Event('endEvent'))
+      await nextTick()
+      expect(wrapper.find('.brand-network-virtue').text()).toBe('勇气')
     } finally {
       wrapper.unmount()
       smil.restore()
@@ -874,6 +931,183 @@ describe('NavBar — brand constellation', () => {
     expect(click.defaultPrevented).toBe(true)
     expect(wrapper.find('.brand-constellation').exists()).toBe(true)
     wrapper.unmount()
+  })
+
+  it.each([
+    { name: 'Ledger', path: '/ledger', scope: 'ledger' as const, diaryCalendarVisible: false },
+    { name: 'Diary Calendar', path: '/vault', scope: 'diary' as const, diaryCalendarVisible: true },
+    { name: 'Vault blank page', path: '/vault', scope: 'note' as const, diaryCalendarVisible: false },
+  ])('closes a released touch constellation after its decorative animation on $name', async ({ path, scope, diaryCalendarVisible }) => {
+    const router = createRouter({
+      history: createMemoryHistory(),
+      routes: [
+        { path: '/', component: { template: '<div />' } },
+        { path: '/ledger', component: { template: '<div />' } },
+        { path: '/vault', component: { template: '<div />' } },
+      ],
+    })
+    await router.push(path)
+    await router.isReady()
+    useScopeFilter().activeScope.value = scope
+    const wrapper = mount(NavBar, {
+      // The legacy Vault prop lets the real /ledger route select its Ledger
+      // presentation while keeping this test's mount prop type uniform.
+      props: { isVault: true, diaryUnlocked: diaryCalendarVisible },
+      global: {
+        plugins: [router],
+        stubs: { transition: false },
+        provide: {
+          [VaultViewModeKey as symbol]: makeViewModeApi(),
+          [AppShellContextKey as symbol]: {
+            settingsRequestTick: ref(0),
+            diaryCalendarVisible: ref(diaryCalendarVisible),
+            zenModeBrandEntry: ref({ canEnter: () => false, enter: vi.fn(() => true) }),
+          },
+        },
+      },
+    })
+    const brand = wrapper.get('.brand')
+    const originalPath = router.currentRoute.value.fullPath
+    try {
+      dispatchPointerEvent(brand.element, 'pointerdown', { pointerType: 'touch', pointerId: 31, clientX: 20, clientY: 30 })
+      await vi.advanceTimersByTimeAsync(3000)
+      await nextTick()
+      expect(wrapper.find('.brand-constellation').exists()).toBe(true)
+      expect(document.body.classList.contains('brand-constellation-active')).toBe(true)
+
+      // The touch contact ends as soon as recognition succeeds; the visible
+      // constellation's source remains touch until its own completion.
+      dispatchPointerEvent(brand.element, 'pointerup', { pointerType: 'touch', pointerId: 31 })
+      expect(wrapper.find('.brand-constellation').exists()).toBe(true)
+      await wrapper.findAll('.brand-network-node')[8].trigger('animationend', {
+        animationName: 'brand-network-node-in',
+      })
+      await vi.advanceTimersByTimeAsync(500)
+      await flushPromises()
+
+      expect(wrapper.find('.brand-constellation').exists()).toBe(false)
+      expect(document.body.classList.contains('brand-constellation-active')).toBe(false)
+      expect(router.currentRoute.value.fullPath).toBe(originalPath)
+
+      dispatchPointerEvent(brand.element, 'pointerdown', { pointerType: 'touch', pointerId: 32, clientX: 20, clientY: 30 })
+      await vi.advanceTimersByTimeAsync(3000)
+      await nextTick()
+      expect(wrapper.find('.brand-constellation').exists()).toBe(true)
+    } finally {
+      wrapper.unmount()
+      expect(document.body.classList.contains('brand-constellation-active')).toBe(false)
+      useScopeFilter().activeScope.value = 'note'
+    }
+  })
+
+  it('keeps click suppression separate from the touch animation and clears stale suppression on the next pointer sequence', async () => {
+    const router = createRouter({
+      history: createMemoryHistory(),
+      routes: [
+        { path: '/', component: { template: '<div />' } },
+        { path: '/vault', component: { template: '<div />' } },
+      ],
+    })
+    await router.push('/vault')
+    await router.isReady()
+    const wrapper = mount(NavBar, {
+      props: { isVault: true },
+      global: {
+        plugins: [router],
+        stubs: { transition: false },
+        provide: {
+          [VaultViewModeKey as symbol]: makeViewModeApi(),
+          [AppShellContextKey as symbol]: {
+            settingsRequestTick: ref(0),
+            diaryCalendarVisible: ref(false),
+            zenModeBrandEntry: ref({ canEnter: () => false, enter: vi.fn(() => true) }),
+          },
+        },
+      },
+    })
+    const brand = wrapper.get('.brand')
+    try {
+      dispatchPointerEvent(brand.element, 'pointerdown', { pointerType: 'touch', pointerId: 41, clientX: 20, clientY: 30 })
+      await vi.advanceTimersByTimeAsync(3000)
+      dispatchPointerEvent(brand.element, 'pointerup', { pointerType: 'touch', pointerId: 41 })
+      const compatibilityClick = new MouseEvent('click', { bubbles: true, cancelable: true })
+      brand.element.dispatchEvent(compatibilityClick)
+      expect(compatibilityClick.defaultPrevented).toBe(true)
+      expect(router.currentRoute.value.fullPath).toBe('/vault')
+      expect(wrapper.find('.brand-constellation').exists()).toBe(true)
+
+      // A new normal pointer interaction cannot inherit suppression if the
+      // browser did not emit a compatibility click for the prior long press.
+      dispatchPointerEvent(brand.element, 'pointerdown', { pointerType: 'mouse', pointerId: 42 })
+      brand.element.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }))
+      await flushPromises()
+      expect(router.currentRoute.value.fullPath).toBe('/')
+    } finally {
+      wrapper.unmount()
+    }
+  })
+
+  it('recovers when SMIL beginElement exists but the particle endEvent is missing', async () => {
+    const smil = installSvgAnimationMock()
+    const enter = vi.fn(() => true)
+    const { wrapper } = mountNavBar('edit', { canEnter: () => true, enter })
+    try {
+      await wrapper.find('.brand').trigger('pointerenter', { pointerType: 'mouse' })
+      await vi.advanceTimersByTimeAsync(3000)
+      await nextTick()
+      await nextTick()
+      expect(smil.beginElement).toHaveBeenCalledTimes(1)
+      expect(wrapper.find('.brand-network-virtue').text()).toBe('勇气')
+      expect(wrapper.find('.brand-network-node.is-current .brand-network-particle').classes()).not.toContain('is-arrived')
+
+      await vi.advanceTimersByTimeAsync(719)
+      await nextTick()
+      expect(wrapper.findAll('.brand-network-virtue').map((word) => word.text())).toContain('诚实')
+      expect(wrapper.find('.brand-network-node.is-current').attributes('data-virtue')).toBe('honesty')
+      expect(wrapper.findAll('.brand-network-node')[0].find('.brand-network-particle').classes()).not.toContain('is-arrived')
+      await vi.advanceTimersByTimeAsync(1)
+      await nextTick()
+      expect(wrapper.findAll('.brand-network-node')[0].find('.brand-network-particle').classes()).toContain('is-arrived')
+      expect(wrapper.findAll('.brand-network-virtue').map((word) => word.text())).toContain('诚实')
+
+      // Missing endEvents are recovered one finite motion at a time; the
+      // final word is launched with its particle, but its hold starts only
+      // when the final particle's bounded recovery marks it arrived.
+      await vi.advanceTimersByTimeAsync(4800)
+      await nextTick()
+      expect(wrapper.find('.brand-network-virtue.is-final').text()).toBe('清明')
+      expect(wrapper.findAll('.brand-network-node')[8].find('.brand-network-particle').classes()).toContain('is-arrived')
+      expect(enter).not.toHaveBeenCalled()
+      await vi.advanceTimersByTimeAsync(799)
+      expect(enter).not.toHaveBeenCalled()
+      await vi.advanceTimersByTimeAsync(1)
+      await vi.advanceTimersByTimeAsync(500)
+      await flushPromises()
+      expect(enter).toHaveBeenCalledOnce()
+    } finally {
+      wrapper.unmount()
+      smil.restore()
+    }
+  })
+
+  it('falls back to the final virtue when SMIL beginElement is unavailable', async () => {
+    const smil = installSvgAnimationMock({ supportsBeginElement: false })
+    const enter = vi.fn(() => true)
+    const { wrapper } = mountNavBar('edit', { canEnter: () => true, enter })
+    try {
+      await wrapper.find('.brand').trigger('pointerenter', { pointerType: 'mouse' })
+      await vi.advanceTimersByTimeAsync(3000)
+      await nextTick()
+      await nextTick()
+      expect(wrapper.find('.brand-network-virtue.is-final').text()).toBe('清明')
+      await vi.advanceTimersByTimeAsync(980)
+      await vi.advanceTimersByTimeAsync(500)
+      await flushPromises()
+      expect(enter).toHaveBeenCalledOnce()
+    } finally {
+      wrapper.unmount()
+      smil.restore()
+    }
   })
 
   it('starts constellation completion without animation events under reduced motion', async () => {

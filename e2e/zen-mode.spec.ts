@@ -197,6 +197,10 @@ test('touch long press on the brand enters Zen Mode after the constellation fini
     await page.setViewportSize({ width: touchViewportWidth, height: 812 })
 
     const brand = page.locator('.navbar .brand')
+    const editor = page.locator('.editor-pane .monaco-editor').first()
+    await editor.evaluate((element) => {
+      Object.defineProperty(window, '__zenModeEditorNode', { value: element, configurable: true })
+    })
     const originalUrl = page.url()
     await brand.evaluate((element) => {
       element.dispatchEvent(new PointerEvent('pointerdown', {
@@ -208,6 +212,7 @@ test('touch long press on the brand enters Zen Mode after the constellation fini
       }))
     })
     await expect(page.locator('.brand-constellation')).toBeVisible({ timeout: 5000 })
+    await expect(page.locator('.brand-network-virtue')).toHaveText(/Courage|勇气/, { timeout: 1000 })
 
     // Releasing after recognition does not stop the animation. The click
     // synthesized by mobile browsers is consumed rather than routed home.
@@ -221,9 +226,13 @@ test('touch long press on the brand enters Zen Mode after the constellation fini
       }))
       element.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }))
     })
-    await expect(page.locator('.vault')).toHaveAttribute('data-zen-mode', 'true', { timeout: 7000 })
+    await expect(page.locator('.vault')).toHaveAttribute('data-zen-mode', 'true', { timeout: 8500 })
     await expect(page.locator('.navbar')).toHaveCount(0)
     expect(page.url()).toBe(originalUrl)
+    expect(await page.evaluate(() => (
+      (window as Window & { __zenModeEditorNode?: Element }).__zenModeEditorNode
+      === document.querySelector('.editor-pane .monaco-editor')
+    ))).toBe(true)
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth)).toBe(true)
 
     // Reload is the mobile-safe reset path: Zen Mode is intentionally not
