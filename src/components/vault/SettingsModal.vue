@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { NButton, NIcon } from 'naive-ui'
-import { Book, Edit, FileText, MoodSmile, Robot, Tag, Wallet, X } from '@vicons/tabler'
+import { Book, Edit, FileText, MoodSmile, Paperclip, Robot, Tag, Wallet, X } from '@vicons/tabler'
 import {
   clearAiApiKey,
   getAiCredentialStatus,
@@ -39,6 +39,7 @@ import SettingsDiaryMigrationSection from './SettingsDiaryMigrationSection.vue'
 import SettingsLedgerAccountIconsSection from './SettingsLedgerAccountIconsSection.vue'
 import SettingsLedgerCategoriesSection from './SettingsLedgerCategoriesSection.vue'
 import SettingsDiaryMoodIconsSection from './SettingsDiaryMoodIconsSection.vue'
+import SettingsAttachmentManagerSection from './SettingsAttachmentManagerSection.vue'
 
 const props = withDefaults(defineProps<{
   open: boolean
@@ -97,7 +98,7 @@ async function refreshCredentialStatus() {
    so the shell stays a routing layer — no inline form templates.
    The active pane resets to AI every time the modal opens so a
    returning user always lands somewhere predictable. */
-type SectionId = 'ai' | 'editor' | 'metadata' | 'diary-migration' | 'tags' | 'ledger-account-icons' | 'ledger-categories' | 'diary-mood-icons'
+type SectionId = 'ai' | 'editor' | 'metadata' | 'diary-migration' | 'tags' | 'ledger-account-icons' | 'ledger-categories' | 'diary-mood-icons' | 'storage-attachments'
 const SECTIONS = [
   { id: 'ai', labelKey: 'settings.ai', icon: Robot },
   { id: 'editor', labelKey: 'settings.editor', icon: Edit },
@@ -107,6 +108,7 @@ const SECTIONS = [
   { id: 'ledger-account-icons', labelKey: 'settings.ledger_account_icons', icon: Wallet },
   { id: 'ledger-categories', labelKey: 'settings.ledger_categories', icon: Tag },
   { id: 'diary-mood-icons', labelKey: 'settings.diary_mood_icons', icon: MoodSmile },
+  { id: 'storage-attachments', labelKey: 'settings.storage_attachments', icon: Paperclip },
 ] as const satisfies ReadonlyArray<{ id: SectionId; labelKey: string; icon: typeof Robot }>
 const active = ref<SectionId>('ai')
 
@@ -438,6 +440,7 @@ onBeforeUnmount(() => {
       <section
         ref="modalRef"
         class="settings-modal"
+        :class="{ 'is-attachment-manager': active === 'storage-attachments' }"
         role="dialog"
         aria-modal="true"
         :aria-label="t('settings.title')"
@@ -458,7 +461,7 @@ onBeforeUnmount(() => {
         </header>
 
         <div class="settings-body">
-          <nav class="settings-nav" :aria-label="t('settings.title')">
+          <nav v-if="active !== 'storage-attachments'" class="settings-nav" :aria-label="t('settings.title')">
             <NButton
               v-for="section in SECTIONS"
               :key="section.id"
@@ -476,8 +479,12 @@ onBeforeUnmount(() => {
           </nav>
 
           <div class="settings-detail" role="region" aria-live="polite">
+            <SettingsAttachmentManagerSection
+              v-if="active === 'storage-attachments'"
+              @back="active = 'ai'"
+            />
             <SettingsAiSection
-              v-if="active === 'ai'"
+              v-else-if="active === 'ai'"
               :settings="settings"
               :apiKey="apiKey"
               :baseURL="baseURL"

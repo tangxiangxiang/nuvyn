@@ -28,6 +28,8 @@ const toastSuccess = vi.fn()
 const toastError = vi.fn()
 const listManagedTags = vi.fn()
 const getUndoAvailability = vi.fn()
+const listAttachments = vi.fn()
+const refreshAttachmentIndex = vi.fn()
 
 vi.mock('../../../lib/ai-api', () => ({
   getAiSettings: (...args: unknown[]) => getAiSettings(...args),
@@ -63,6 +65,11 @@ vi.mock('../../../lib/tag-undo-api', () => ({
   TagUndoApiError: class extends Error {
     readonly code = 'CLIENT_PROTOCOL_ERROR'
   },
+}))
+
+vi.mock('../../../lib/attachments-api', () => ({
+  listAttachments: (...args: unknown[]) => listAttachments(...args),
+  refreshAttachmentIndex: (...args: unknown[]) => refreshAttachmentIndex(...args),
 }))
 
 vi.mock('../../../composables/useToast', () => ({
@@ -184,6 +191,26 @@ beforeEach(() => {
   getFrontmatterCleanupPreview.mockResolvedValue({ candidates: [], blocked: [] })
   listManagedTags.mockResolvedValue([])
   getUndoAvailability.mockRejectedValue(Object.assign(new Error('undo unavailable'), { code: 'UNDO_UNAVAILABLE' }))
+  listAttachments.mockResolvedValue({
+    items: [], total: 0, offset: 0, limit: 30,
+    summary: {
+      total: 0, knownBytes: 0, unknownByteSizeCount: 0, unknownReferenceCount: 0, complete: true,
+      sources: {
+        'board-asset': { count: 0, knownBytes: 0 },
+        'vault-file': { count: 0, knownBytes: 0 },
+        'board-material': { count: 0, knownBytes: 0 },
+      },
+    },
+    indexStatus: {
+      ready: true, refreshing: false, complete: true, refreshedAt: 1,
+      sources: {
+        'board-asset': { state: 'ready', itemCount: 0 },
+        'vault-file': { state: 'ready', itemCount: 0 },
+        'board-material': { state: 'ready', itemCount: 0 },
+      },
+    },
+  })
+  refreshAttachmentIndex.mockResolvedValue({ indexStatus: { ready: true } })
   cleanDocumentFrontmatter.mockResolvedValue({ changed: [], failed: [] })
   restoreDocumentFrontmatter.mockResolvedValue({ changed: [], failed: [] })
   confirm.mockResolvedValue(true)
@@ -228,6 +255,27 @@ describe('SettingsModal', () => {
     inputValue(keyInput, 'replacement-key')
     await flushPromises()
     expect(document.body.querySelector('.settings-key-status')).toBeNull()
+  })
+
+  it('opens the Attachment Manager from Storage settings and returns without closing Settings', async () => {
+    const wrapper = mountSettings()
+    await flushPromises()
+    const currentUrl = window.location.href
+
+    findButton('存储与附件').click()
+    await flushPromises()
+
+    expect(document.body.querySelector('.settings-modal')?.classList.contains('is-attachment-manager')).toBe(true)
+    expect(document.body.textContent).toContain('附件管理')
+    expect(document.body.textContent).toContain('还没有可管理的附件')
+    expect(listAttachments).toHaveBeenCalledWith(expect.objectContaining({ offset: 0, limit: 30 }))
+    expect(window.location.href).toBe(currentUrl)
+
+    findButton('返回设置').click()
+    await flushPromises()
+    expect(document.body.querySelector('.settings-modal')?.classList.contains('is-attachment-manager')).toBe(false)
+    expect(document.body.querySelector('[aria-current="page"]')?.textContent?.trim()).toBe('AI')
+    expect(wrapper.exists()).toBe(true)
   })
 
   it('does not test automatically and shows a real probe result after clicking Test connection', async () => {

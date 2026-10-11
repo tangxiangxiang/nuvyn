@@ -2742,6 +2742,16 @@ body:has(.ledger-detail-sheet-card) .n-modal-mask {
   backdrop-filter: saturate(145%) blur(18px);
   overflow: hidden;
 }
+.settings-modal.is-attachment-manager {
+  width: min(1480px, calc(100vw - 32px));
+}
+.settings-modal.is-attachment-manager .settings-body {
+  grid-template-columns: minmax(0, 1fr);
+}
+.settings-modal.is-attachment-manager .settings-detail {
+  padding: 22px 26px 24px;
+  overflow: hidden;
+}
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme='light']) .settings-modal {
     --settings-danger: #f87171;
@@ -3325,6 +3335,7 @@ body:has(.ledger-detail-sheet-card) .n-modal-mask {
   }
   .settings-nav-icon { flex-basis: 16px; }
   .settings-detail { padding: 20px 16px 24px; }
+  .settings-modal.is-attachment-manager .settings-detail { padding: 14px 12px 16px; }
 }
 @media (max-width: 480px) {
   .settings-section { gap: 14px; }

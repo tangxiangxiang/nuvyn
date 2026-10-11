@@ -2,6 +2,7 @@ import { Hono } from 'hono'
 import aiRoutes from './ai/routes.js'
 import authRoutes from './auth/routes.js'
 import assetRoutes from './assets/routes.js'
+import attachmentRoutes from './attachments/routes.js'
 import boardRoutes from './board/routes.js'
 import boardFolderRoutes from './board/folderRoutes.js'
 import boardMaterialRoutes from './board/materialRoutes.js'
@@ -48,6 +49,7 @@ app.route('/', linkRoutes)
 app.route('/', markdownResourceRoutes)
 app.route('/api/ai', aiRoutes)
 app.route('/api/assets', assetRoutes)
+app.route('/api/attachments', attachmentRoutes)
 app.route('/api/board', boardRoutes)
 app.route('/api/board-folders', boardFolderRoutes)
 app.route('/api/board-materials', boardMaterialRoutes)

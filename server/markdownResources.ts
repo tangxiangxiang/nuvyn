@@ -20,14 +20,14 @@ export class MarkdownResourceError extends Error {
   }
 }
 
-const SNIPPET_EXTENSIONS = new Set([
+export const MARKDOWN_RESOURCE_SNIPPET_EXTENSIONS = new Set([
   '.ts', '.tsx', '.js', '.jsx', '.mjs', '.cjs', '.vue', '.css', '.scss', '.less',
   '.html', '.xml', '.json', '.yaml', '.yml', '.toml', '.sql', '.py', '.java', '.go',
   '.rs', '.rb', '.php', '.sh', '.bash', '.zsh', '.fish', '.c', '.h', '.cc', '.cpp',
   '.hh', '.hpp', '.cs', '.kt', '.kts', '.swift', '.dart', '.lua', '.r', '.txt',
 ])
 
-const IMAGE_MIME_BY_EXTENSION: Record<string, string> = {
+export const MARKDOWN_RESOURCE_IMAGE_MIME_BY_EXTENSION: Readonly<Record<string, string>> = {
   '.png': 'image/png',
   '.jpg': 'image/jpeg',
   '.jpeg': 'image/jpeg',
@@ -85,8 +85,8 @@ function validateKindAndExtension(kind: unknown, resourcePath: string): Markdown
   const allowed = kind === 'include'
     ? extension === '.md'
     : kind === 'snippet'
-      ? SNIPPET_EXTENSIONS.has(extension)
-      : Object.prototype.hasOwnProperty.call(IMAGE_MIME_BY_EXTENSION, extension)
+      ? MARKDOWN_RESOURCE_SNIPPET_EXTENSIONS.has(extension)
+      : Object.prototype.hasOwnProperty.call(MARKDOWN_RESOURCE_IMAGE_MIME_BY_EXTENSION, extension)
   if (!allowed) throw new MarkdownResourceError('resource-unsupported-type', 415)
   return kind
 }
@@ -146,7 +146,7 @@ export async function readMarkdownResource(
         kind,
         path: resourcePath,
         content: value,
-        contentType: IMAGE_MIME_BY_EXTENSION[extensionOf(resourcePath)] as string,
+        contentType: MARKDOWN_RESOURCE_IMAGE_MIME_BY_EXTENSION[extensionOf(resourcePath)] as string,
       }
     }
     return { kind, path: resourcePath, content: decodeUtf8(value) }
@@ -159,8 +159,8 @@ export async function readMarkdownResource(
 }
 
 export const __testing__ = {
-  SNIPPET_EXTENSIONS,
-  IMAGE_MIME_BY_EXTENSION,
+  SNIPPET_EXTENSIONS: MARKDOWN_RESOURCE_SNIPPET_EXTENSIONS,
+  IMAGE_MIME_BY_EXTENSION: MARKDOWN_RESOURCE_IMAGE_MIME_BY_EXTENSION,
   isBinaryText,
   decodeUtf8,
 }
