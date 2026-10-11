@@ -38,6 +38,7 @@ test('Zen Mode preserves Vault layout and the mounted editor across edit and rea
 
       const vault = page.locator('.vault')
       await expect(vault).toHaveAttribute('data-zen-mode', 'true')
+      await expect(page.locator('.editor-pane .monaco-editor')).toBeVisible()
       await expect(page.locator('.navbar')).toHaveCount(0)
       await expect(page.locator('.activity-bar')).toHaveCount(0)
       await expect(page.locator('.file-tree, .tag-panel, .history-panel')).toHaveCount(0)
@@ -98,15 +99,20 @@ test('Zen Mode preserves Vault layout and the mounted editor across edit and rea
     // Reading mode remains intact when Zen Mode is entered and exited.
     await page.getByTestId('view-toggle').click()
     await expect(page.locator('.reading-pane')).toBeVisible()
+    await page.setViewportSize({ width: 375, height: 800 })
     await page.locator('.reading-pane').click()
     await page.keyboard.press('ControlOrMeta+K')
     await page.keyboard.press('z')
     await expect(page.locator('.reading-pane')).toBeVisible()
     await expect(page.locator('.vault')).toHaveAttribute('data-zen-mode', 'true')
+    await expect(page.locator('.navbar')).toHaveCount(0)
+    await expect(page.locator('.activity-bar, .file-tree, .right-rail-slot, .status-bar-row')).toHaveCount(0)
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth)).toBe(true)
     await page.keyboard.press('ControlOrMeta+K')
     await page.keyboard.press('z')
     await expect(page.locator('.vault')).toHaveAttribute('data-zen-mode', 'false')
     await expect(page.locator('.reading-pane')).toBeVisible()
+    await page.setViewportSize({ width: 1280, height: 900 })
 
     await page.getByTestId('view-toggle').click()
     await expect(page.locator('.editor-pane .monaco-editor')).toBeVisible()
@@ -126,23 +132,43 @@ test('Zen Mode preserves Vault layout and the mounted editor across edit and rea
     await expect(page.locator('.vault')).toHaveAttribute('data-zen-mode', 'false')
     await expect(page.locator('.navbar')).toBeVisible()
 
-    await page.setViewportSize({ width: 600, height: 800 })
-    await page.locator('.editor-pane .monaco-editor .view-lines').click()
-    await page.keyboard.press('ControlOrMeta+K')
-    await page.keyboard.press('z')
-    await expect(page.locator('.vault')).toHaveAttribute('data-zen-mode', 'false')
+    for (const width of [375, 768, 1024]) {
+      await page.setViewportSize({ width, height: 800 })
+      await page.locator('.editor-pane .monaco-editor .view-lines').click()
+      await page.keyboard.press('ControlOrMeta+K')
+      await page.keyboard.press('z')
+      const vault = page.locator('.vault')
+      await expect(vault).toHaveAttribute('data-zen-mode', 'true')
+      await expect(page.locator('.editor-pane .monaco-editor')).toBeVisible()
+      await expect(page.locator('.navbar, .activity-bar, .file-tree, .right-rail-slot, .status-bar-row')).toHaveCount(0)
+      const viewportLayout = await page.evaluate(() => {
+        const main = document.querySelector('main.container')
+        return {
+          width: document.documentElement.scrollWidth,
+          clientWidth: document.documentElement.clientWidth,
+          height: document.documentElement.scrollHeight,
+          clientHeight: document.documentElement.clientHeight,
+          shellHeight: main?.getBoundingClientRect().height ?? 0,
+          viewportHeight: window.innerHeight,
+        }
+      })
+      expect(viewportLayout.width).toBeLessThanOrEqual(viewportLayout.clientWidth)
+      expect(viewportLayout.height).toBeLessThanOrEqual(viewportLayout.clientHeight)
+      expect(Math.abs(viewportLayout.shellHeight - viewportLayout.viewportHeight)).toBeLessThan(2)
+
+      // A viewport resize does not end the temporary Zen state.
+      if (width === 1024) {
+        await page.setViewportSize({ width: 375, height: 800 })
+        await expect(vault).toHaveAttribute('data-zen-mode', 'true')
+      }
+      await page.keyboard.press('Escape')
+      await expect(vault).toHaveAttribute('data-zen-mode', 'false')
+    }
+
     await page.setViewportSize({ width: 1280, height: 900 })
 
-    await page.locator('.editor-pane .monaco-editor .view-lines').click()
-    await page.keyboard.press('ControlOrMeta+K')
-    await page.keyboard.press('z')
-    await expect(page.locator('.vault')).toHaveAttribute('data-zen-mode', 'true')
-    await page.setViewportSize({ width: 600, height: 800 })
-    await expect(page.locator('.vault')).toHaveAttribute('data-zen-mode', 'false')
-    await page.setViewportSize({ width: 1280, height: 900 })
-
-    // The empty Vault home does not enter Zen Mode.
-    await expect(page.locator(`[role="tab"][data-tab-id="${path}"]`)).toHaveAttribute('data-save-status', 'saved')
+    // The tab is clean before close; the empty Vault home does not enter Zen Mode.
+    await expect(page.locator(`[role="tab"][data-tab-id="${path}"]`)).toHaveAttribute('aria-label', /Saved/)
     await page.locator(`[role="tab"][data-tab-id="${path}"] .tab-close`).click()
     await expect(page.locator(`[role="tab"][data-tab-id="${path}"]`)).toHaveCount(0)
     await page.goto('/vault')
@@ -150,6 +176,72 @@ test('Zen Mode preserves Vault layout and the mounted editor across edit and rea
     await page.keyboard.press('ControlOrMeta+K')
     await page.keyboard.press('z')
     await expect(page.locator('.vault')).toHaveAttribute('data-zen-mode', 'false')
+  } finally {
+    for (const createdPath of createdPaths) {
+      const deleted = await request.delete(`/api/posts/${createdPath}`)
+      expect([200, 404]).toContain(deleted.status())
+    }
+  }
+})
+
+test('touch long press on the brand enters Zen Mode after the constellation finishes', async ({ page, request }) => {
+  const path = `inbox/zen-brand-touch-${RUN_ID}`
+  const createdPaths: string[] = []
+
+  try {
+    await createDoc(request, path, '# Touch Zen Mode\n\nThe document remains mounted.\n', createdPaths)
+    await gotoVaultReady(page)
+    await openDoc(page, path)
+    const currentViewportWidth = page.viewportSize()?.width ?? 375
+    const touchViewportWidth = currentViewportWidth > 600 ? 768 : 375
+    await page.setViewportSize({ width: touchViewportWidth, height: 812 })
+
+    const brand = page.locator('.navbar .brand')
+    const originalUrl = page.url()
+    await brand.evaluate((element) => {
+      element.dispatchEvent(new PointerEvent('pointerdown', {
+        bubbles: true,
+        pointerId: 42,
+        pointerType: 'touch',
+        clientX: 24,
+        clientY: 18,
+      }))
+    })
+    await expect(page.locator('.brand-constellation')).toBeVisible({ timeout: 5000 })
+
+    // Releasing after recognition does not stop the animation. The click
+    // synthesized by mobile browsers is consumed rather than routed home.
+    await brand.evaluate((element) => {
+      element.dispatchEvent(new PointerEvent('pointerup', {
+        bubbles: true,
+        pointerId: 42,
+        pointerType: 'touch',
+        clientX: 24,
+        clientY: 18,
+      }))
+      element.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }))
+    })
+    await expect(page.locator('.vault')).toHaveAttribute('data-zen-mode', 'true', { timeout: 7000 })
+    await expect(page.locator('.navbar')).toHaveCount(0)
+    expect(page.url()).toBe(originalUrl)
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth)).toBe(true)
+
+    // Reload is the mobile-safe reset path: Zen Mode is intentionally not
+    // persisted and phones/tablets do not gain a dedicated exit control.
+    await page.reload()
+    await expect(page.locator('.vault')).toHaveAttribute('data-zen-mode', 'false')
+    await expect(page.locator('.navbar .brand')).toBeVisible()
+    await page.emulateMedia({ reducedMotion: 'reduce' })
+    await brand.evaluate((element) => {
+      element.dispatchEvent(new PointerEvent('pointerdown', {
+        bubbles: true,
+        pointerId: 43,
+        pointerType: 'touch',
+        clientX: 24,
+        clientY: 18,
+      }))
+    })
+    await expect(page.locator('.vault')).toHaveAttribute('data-zen-mode', 'true', { timeout: 5000 })
   } finally {
     for (const createdPath of createdPaths) {
       const deleted = await request.delete(`/api/posts/${createdPath}`)

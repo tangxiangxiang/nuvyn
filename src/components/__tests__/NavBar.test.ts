@@ -51,13 +51,54 @@ function makeViewModeApi(initial: VaultViewMode = 'edit') {
   }
 }
 
-function mountNavBar(initial: VaultViewMode = 'edit') {
+function dispatchPointerEvent(
+  target: Element,
+  type: string,
+  values: Record<string, string | number>,
+) {
+  const event = new Event(type, { bubbles: true, cancelable: true })
+  for (const [key, value] of Object.entries(values)) {
+    Object.defineProperty(event, key, { configurable: true, value })
+  }
+  target.dispatchEvent(event)
+}
+
+function installSvgAnimationMock() {
+  const element = document.createElementNS('http://www.w3.org/2000/svg', 'animateMotion')
+  const prototype = Object.getPrototypeOf(element) as object
+  const originalBegin = Object.getOwnPropertyDescriptor(prototype, 'beginElement')
+  const originalEnd = Object.getOwnPropertyDescriptor(prototype, 'endElement')
+  const beginElement = vi.fn()
+  Object.defineProperty(prototype, 'beginElement', { configurable: true, value: beginElement })
+  Object.defineProperty(prototype, 'endElement', { configurable: true, value: vi.fn() })
+
+  return {
+    beginElement,
+    restore() {
+      if (originalBegin) Object.defineProperty(prototype, 'beginElement', originalBegin)
+      else Reflect.deleteProperty(prototype, 'beginElement')
+      if (originalEnd) Object.defineProperty(prototype, 'endElement', originalEnd)
+      else Reflect.deleteProperty(prototype, 'endElement')
+    },
+  }
+}
+
+function mountNavBar(
+  initial: VaultViewMode = 'edit',
+  zenModeBrandEntry?: { canEnter: () => boolean; enter: () => boolean },
+) {
   const api = makeViewModeApi(initial)
+  const provided: Record<symbol, unknown> = { [VaultViewModeKey as symbol]: api }
+  if (zenModeBrandEntry) {
+    provided[AppShellContextKey as symbol] = {
+      settingsRequestTick: ref(0),
+      diaryCalendarVisible: ref(false),
+      zenModeBrandEntry: ref(zenModeBrandEntry),
+    }
+  }
   const wrapper = mount(NavBar, {
     props: { isVault: true },
-    global: {
-      provide: { [VaultViewModeKey as symbol]: api },
-    },
+    global: { provide: provided, stubs: { transition: false } },
   })
   return { wrapper, api }
 }
@@ -560,7 +601,7 @@ describe('NavBar — brand constellation', () => {
     const { wrapper } = mountNavBar()
     const brand = wrapper.find('.brand')
 
-    await brand.trigger('mouseenter')
+    await brand.trigger('pointerenter', { pointerType: 'mouse' })
     vi.advanceTimersByTime(2999)
     await nextTick()
     expect(wrapper.find('.brand-constellation').exists()).toBe(false)
@@ -601,17 +642,17 @@ describe('NavBar — brand constellation', () => {
     const { wrapper } = mountNavBar()
     const brand = wrapper.find('.brand')
 
-    await brand.trigger('mouseenter')
+    await brand.trigger('pointerenter', { pointerType: 'mouse' })
     vi.advanceTimersByTime(3000)
     await nextTick()
-    await brand.trigger('mouseleave')
+    await brand.trigger('pointerleave', { pointerType: 'mouse' })
 
     expect(wrapper.find('.brand-constellation').exists()).toBe(false)
   })
 
   it.each(['Escape', 'blur'])('cleans the body cursor class on %s', async (event) => {
     const { wrapper } = mountNavBar()
-    await wrapper.find('.brand').trigger('mouseenter')
+    await wrapper.find('.brand').trigger('pointerenter', { pointerType: 'mouse' })
     vi.advanceTimersByTime(3000)
     await nextTick()
     expect(document.body.classList.contains('brand-constellation-active')).toBe(true)
@@ -623,7 +664,7 @@ describe('NavBar — brand constellation', () => {
 
   it('cleans the body cursor class when the document becomes hidden', async () => {
     const { wrapper } = mountNavBar()
-    await wrapper.find('.brand').trigger('mouseenter')
+    await wrapper.find('.brand').trigger('pointerenter', { pointerType: 'mouse' })
     vi.advanceTimersByTime(3000)
     await nextTick()
     expect(document.body.classList.contains('brand-constellation-active')).toBe(true)
@@ -654,7 +695,7 @@ describe('NavBar — brand constellation', () => {
     })
     await router.push('/')
     await router.isReady()
-    await wrapper.find('.brand').trigger('mouseenter')
+    await wrapper.find('.brand').trigger('pointerenter', { pointerType: 'mouse' })
     vi.advanceTimersByTime(3000)
     await nextTick()
     expect(document.body.classList.contains('brand-constellation-active')).toBe(true)
@@ -667,10 +708,208 @@ describe('NavBar — brand constellation', () => {
 
   it('cleans the body cursor class on unmount and before the delay fires', async () => {
     const { wrapper } = mountNavBar()
-    await wrapper.find('.brand').trigger('mouseenter')
+    await wrapper.find('.brand').trigger('pointerenter', { pointerType: 'mouse' })
     wrapper.unmount()
     vi.advanceTimersByTime(3000)
     expect(document.body.classList.contains('brand-constellation-active')).toBe(false)
+  })
+
+  it('plays the fixed Nine Virtues sequence and enters only after Clarity has held', async () => {
+    useI18n().setLocale('zh')
+    const smil = installSvgAnimationMock()
+    const enter = vi.fn(() => true)
+    const canEnter = vi.fn(() => true)
+    const { wrapper } = mountNavBar('edit', { canEnter, enter })
+    try {
+      await wrapper.find('.brand').trigger('pointerenter', { pointerType: 'mouse' })
+      vi.advanceTimersByTime(3000)
+      await nextTick()
+      await nextTick()
+
+      const nodes = wrapper.findAll('.brand-network-node')
+      const motions = wrapper.findAll('animateMotion')
+      expect(nodes.map((node) => node.attributes('data-virtue'))).toEqual([
+        'courage', 'honesty', 'reflection', 'humility', 'kindness',
+        'patience', 'restraint', 'focus', 'clarity',
+      ])
+      expect(nodes.map((node) => node.attributes('data-virtue-color'))).toEqual([
+        '#6270AC', '#6977B7', '#7280C2', '#7D89CD', '#8992D6',
+        '#969CE0', '#A5A8E9', '#B3B3F1', '#C4C1FA',
+      ])
+      expect(motions).toHaveLength(9)
+      expect(motions.map((motion) => motion.attributes('dur'))).toEqual(Array(9).fill('780ms'))
+      expect(smil.beginElement).toHaveBeenCalledTimes(1)
+      expect(wrapper.find('.brand-network-virtue').exists()).toBe(false)
+
+      const chineseWords = ['勇气', '诚实', '自省', '谦逊', '善意', '耐心', '克制', '专注', '清明']
+      for (let index = 0; index < chineseWords.length; index += 1) {
+        if (index > 0) {
+          vi.advanceTimersByTime(440)
+          await nextTick()
+          expect(smil.beginElement).toHaveBeenCalled()
+        }
+        motions[index].element.dispatchEvent(new Event('endEvent'))
+        await nextTick()
+        expect(wrapper.findAll('.brand-network-virtue').map((word) => word.text())).toContain(chineseWords[index])
+        expect(nodes[index].classes()).toContain('is-current')
+      }
+
+      expect(smil.beginElement).toHaveBeenCalledTimes(9)
+      const finalWord = wrapper.find('.brand-network-virtue.is-final')
+      expect(finalWord.text()).toBe('清明')
+      expect(enter).not.toHaveBeenCalled()
+      vi.advanceTimersByTime(799)
+      await nextTick()
+      expect(enter).not.toHaveBeenCalled()
+      vi.advanceTimersByTime(1)
+      await nextTick()
+      await vi.advanceTimersByTimeAsync(800)
+      await flushPromises()
+      expect(canEnter).toHaveBeenCalled()
+      expect(wrapper.find('.brand-constellation').exists()).toBe(false)
+      expect(enter).toHaveBeenCalledOnce()
+    } finally {
+      wrapper.unmount()
+      smil.restore()
+      useI18n().setLocale('zh')
+    }
+  })
+
+  it('uses only the active English label for the arriving virtue', async () => {
+    useI18n().setLocale('en')
+    const smil = installSvgAnimationMock()
+    const { wrapper } = mountNavBar('edit', { canEnter: () => true, enter: vi.fn(() => true) })
+    try {
+      await wrapper.find('.brand').trigger('pointerenter', { pointerType: 'mouse' })
+      vi.advanceTimersByTime(3000)
+      await nextTick()
+      await nextTick()
+      wrapper.findAll('animateMotion')[0].element.dispatchEvent(new Event('endEvent'))
+      await nextTick()
+      expect(wrapper.findAll('.brand-network-virtue')).toHaveLength(1)
+      expect(wrapper.find('.brand-network-virtue').text()).toBe('Courage')
+      expect(wrapper.text()).not.toContain('Nine Virtues')
+    } finally {
+      wrapper.unmount()
+      smil.restore()
+      useI18n().setLocale('zh')
+    }
+  })
+
+  it('cancels a prepared entry if the window blurs during the fade', async () => {
+    const smil = installSvgAnimationMock()
+    const enter = vi.fn(() => true)
+    const canEnter = vi.fn(() => true)
+    const { wrapper } = mountNavBar('edit', { canEnter, enter })
+    try {
+      await wrapper.find('.brand').trigger('pointerenter', { pointerType: 'mouse' })
+      vi.advanceTimersByTime(3000)
+      await nextTick()
+      await nextTick()
+      await wrapper.findAll('animateMotion')[0].trigger('endEvent')
+      expect(wrapper.find('.brand-network-virtue').text()).toBe('勇气')
+
+      window.dispatchEvent(new Event('blur'))
+      await nextTick()
+      vi.advanceTimersByTime(600)
+      await flushPromises()
+      expect(enter).not.toHaveBeenCalled()
+      expect(document.body.classList.contains('brand-constellation-active')).toBe(false)
+    } finally {
+      wrapper.unmount()
+      smil.restore()
+    }
+  })
+
+  it('keeps the desktop constellation as decoration when Zen Mode is unavailable', async () => {
+    const enter = vi.fn(() => true)
+    const { wrapper } = mountNavBar('edit', { canEnter: () => false, enter })
+    await wrapper.find('.brand').trigger('pointerenter', { pointerType: 'mouse' })
+    vi.advanceTimersByTime(3000)
+    await nextTick()
+    await wrapper.findAll('.brand-network-node')[8].trigger('animationend', {
+      animationName: 'brand-network-node-in',
+    })
+    expect(wrapper.find('.brand-constellation').exists()).toBe(true)
+    expect(enter).not.toHaveBeenCalled()
+    wrapper.unmount()
+  })
+
+  it('cancels an unfinished touch long press when the finger moves or is cancelled', async () => {
+    const { wrapper } = mountNavBar()
+    const brand = wrapper.find('.brand')
+
+    dispatchPointerEvent(brand.element, 'pointerdown', { pointerType: 'touch', pointerId: 7, clientX: 20, clientY: 30 })
+    dispatchPointerEvent(brand.element, 'pointermove', { pointerType: 'touch', pointerId: 7, clientX: 33, clientY: 30 })
+    vi.advanceTimersByTime(3000)
+    await nextTick()
+    expect(wrapper.find('.brand-constellation').exists()).toBe(false)
+
+    dispatchPointerEvent(brand.element, 'pointerdown', { pointerType: 'touch', pointerId: 8, clientX: 20, clientY: 30 })
+    dispatchPointerEvent(brand.element, 'pointercancel', { pointerType: 'touch', pointerId: 8 })
+    vi.advanceTimersByTime(3000)
+    await nextTick()
+    expect(wrapper.find('.brand-constellation').exists()).toBe(false)
+    wrapper.unmount()
+  })
+
+  it('lets a short touch continue to click and consumes the click after a recognized long press', async () => {
+    const { wrapper } = mountNavBar()
+    const brand = wrapper.find('.brand')
+
+    dispatchPointerEvent(brand.element, 'pointerdown', { pointerType: 'touch', pointerId: 9, clientX: 20, clientY: 30 })
+    vi.advanceTimersByTime(2999)
+    dispatchPointerEvent(brand.element, 'pointerup', { pointerType: 'touch', pointerId: 9 })
+    vi.advanceTimersByTime(1)
+    await nextTick()
+    expect(wrapper.find('.brand-constellation').exists()).toBe(false)
+
+    dispatchPointerEvent(brand.element, 'pointerdown', { pointerType: 'touch', pointerId: 10, clientX: 20, clientY: 30 })
+    vi.advanceTimersByTime(3000)
+    await nextTick()
+    expect(wrapper.find('.brand-constellation').exists()).toBe(true)
+    dispatchPointerEvent(brand.element, 'pointerup', { pointerType: 'touch', pointerId: 10 })
+    const click = new MouseEvent('click', { bubbles: true, cancelable: true })
+    brand.element.dispatchEvent(click)
+    expect(click.defaultPrevented).toBe(true)
+    expect(wrapper.find('.brand-constellation').exists()).toBe(true)
+    wrapper.unmount()
+  })
+
+  it('starts constellation completion without animation events under reduced motion', async () => {
+    const originalDescriptor = Object.getOwnPropertyDescriptor(window, 'matchMedia')
+    const query = {
+      matches: true,
+      media: '(prefers-reduced-motion: reduce)',
+      addEventListener: vi.fn(),
+      removeEventListener: vi.fn(),
+    } as unknown as MediaQueryList
+    Object.defineProperty(window, 'matchMedia', {
+      configurable: true,
+      value: vi.fn(() => query),
+    })
+    const canEnter = vi.fn(() => true)
+    const enter = vi.fn(() => true)
+    const { wrapper } = mountNavBar('edit', { canEnter, enter })
+
+    try {
+      await wrapper.find('.brand').trigger('pointerenter', { pointerType: 'mouse' })
+      vi.advanceTimersByTime(3000)
+      await nextTick()
+      await nextTick()
+      expect(wrapper.find('.brand-network-virtue').text()).toBe('清明')
+      expect(wrapper.find('animateMotion').exists()).toBe(false)
+      vi.advanceTimersByTime(799)
+      await nextTick()
+      expect(wrapper.find('.brand-constellation').exists()).toBe(true)
+      vi.advanceTimersByTime(1)
+      await nextTick()
+      expect(canEnter).toHaveBeenCalled()
+    } finally {
+      wrapper.unmount()
+      if (originalDescriptor) Object.defineProperty(window, 'matchMedia', originalDescriptor)
+      else Reflect.deleteProperty(window, 'matchMedia')
+    }
   })
 })
 

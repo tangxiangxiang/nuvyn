@@ -46,6 +46,7 @@ const diaryBackCommand = ref<(() => void | Promise<void>) | null>(null)
 const diaryAnalysisExportCommand = ref<(() => Promise<void>) | null>(null)
 const ledgerAnalysisExportCommand = ref<(() => Promise<void>) | null>(null)
 const vaultScopeChangeCommand = ref<((scope: 'note' | 'diary') => Promise<boolean>) | null>(null)
+const zenModeBrandEntry = ref<{ canEnter: () => boolean; enter: () => boolean } | null>(null)
 const globalSearchHost = ref<{ show: () => void } | null>(null)
 const boardRecoveryStore = createIndexedDbBoardCheckpointStore()
 
@@ -65,6 +66,7 @@ provide(AppShellContextKey, {
   diaryAnalysisExportCommand,
   ledgerAnalysisExportCommand,
   vaultScopeChangeCommand,
+  zenModeBrandEntry,
   openGlobalSearch: onOpenSearch,
 })
 
@@ -391,6 +393,7 @@ provide(VaultViewModeKey, { mode: viewMode, set: setViewMode, toggle: toggleView
       :class="['container', {
         'full-width': r.meta.fullWidth,
         'auth-page-shell': r.meta.authPage === true,
+        'zen-mode-shell': zenModeOwnsChrome,
       }]"
       :style="{ '--navbar-h': zenModeOwnsChrome ? '0px' : (showNormalChrome ? (isWorkspaceChrome ? '36px' : '56px') : '0px') }"
       :inert="auth.transitionKind.value !== null || undefined"

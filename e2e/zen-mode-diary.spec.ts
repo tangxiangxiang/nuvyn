@@ -31,6 +31,7 @@ test('Zen Mode works on an unlocked Diary document and Diary Back still returns 
     const viewToggleLabel = await viewToggle.getAttribute('aria-label')
     if (/edit|编辑/i.test(viewToggleLabel ?? '')) await viewToggle.click()
     await expect(page.locator('.editor-pane .monaco-editor')).toBeVisible()
+    await page.setViewportSize({ width: 375, height: 812 })
     const vault = page.locator('.vault')
 
     await page.locator('.editor-pane .monaco-editor .view-lines').click()
@@ -38,6 +39,15 @@ test('Zen Mode works on an unlocked Diary document and Diary Back still returns 
     await page.keyboard.press('z')
     await expect(vault).toHaveAttribute('data-zen-mode', 'true')
     await expect(page.locator('.navbar')).toHaveCount(0)
+    await expect(page.locator('.activity-bar, .file-tree, .right-rail-slot, .status-bar-row')).toHaveCount(0)
+    const mobileLayout = await page.evaluate(() => ({
+      scrollWidth: document.documentElement.scrollWidth,
+      clientWidth: document.documentElement.clientWidth,
+      scrollHeight: document.documentElement.scrollHeight,
+      clientHeight: document.documentElement.clientHeight,
+    }))
+    expect(mobileLayout.scrollWidth).toBeLessThanOrEqual(mobileLayout.clientWidth)
+    expect(mobileLayout.scrollHeight).toBeLessThanOrEqual(mobileLayout.clientHeight)
 
     // The existing Diary G → B return remains available from the document surface.
     await vault.focus()

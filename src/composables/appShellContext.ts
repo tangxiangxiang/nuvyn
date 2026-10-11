@@ -26,6 +26,11 @@ export interface AppShellContext {
   readonly ledgerAnalysisExportCommand?: Ref<(() => Promise<void>) | null>
   /** Switch Note/Diary presentation while preserving each scope's document context. */
   readonly vaultScopeChangeCommand?: Ref<((scope: 'note' | 'diary') => Promise<boolean>) | null>
+  /** Vault-owned capability for the decorative brand animation to enter Zen Mode. */
+  readonly zenModeBrandEntry?: Ref<{
+    canEnter: () => boolean
+    enter: () => boolean
+  } | null>
 }
 
 export const AppShellContextKey: InjectionKey<AppShellContext> = Symbol('nuvyn.app-shell')

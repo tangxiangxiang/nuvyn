@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, inject, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { computed, inject, nextTick, onBeforeUnmount, onMounted, ref, watch, type ComponentPublicInstance } from 'vue'
 import { NButton, NIcon } from 'naive-ui'
 import {
   Box,
@@ -60,7 +60,7 @@ const emit = defineEmits<{
 }>()
 
 const { theme, toggle } = useTheme()
-const { t } = useI18n()
+const { locale, t } = useI18n()
 const route = useRoute()
 const router = useRouter()
 const workspaceMobileMediaQuery = typeof window !== 'undefined' && typeof window.matchMedia === 'function'
@@ -329,7 +329,25 @@ function onScopeClick(scope: ScopeKey): void {
 const { leftSidebarCollapsed, leftSidebarVisible, rightRailCollapsed, workspaceRightPanelAvailable, toggleSidePanel, toggleRightRail } = useVaultLayout()
 
 const showBrandConstellation = ref(false)
+const brandVirtueModeActive = ref(false)
+const reducedMotionActive = ref(false)
+const activeBrandVirtueIndex = ref<number | null>(null)
+const launchedBrandVirtueIndices = ref<Set<number>>(new Set())
+const arrivedBrandVirtueIndices = ref<Set<number>>(new Set())
 let brandHoverTimer: ReturnType<typeof setTimeout> | undefined
+let brandClickSuppressTimer: ReturnType<typeof setTimeout> | undefined
+let brandVirtueLaunchTimer: ReturnType<typeof setTimeout> | undefined
+let brandVirtueFinalHoldTimer: ReturnType<typeof setTimeout> | undefined
+let reducedMotionMediaQuery: MediaQueryList | null = null
+let brandConstellationCycle = 0
+let brandVirtueRun = 0
+let brandAnimationFinished = false
+let brandVirtueFinalizing = false
+let touchPointerId: number | null = null
+let touchPointerOrigin: { x: number; y: number } | null = null
+let touchLongPressTriggered = false
+let suppressBrandClick = false
+let pendingBrandZenEntry: (() => boolean) | null = null
 
 const BRAND_NODES = [
   { x: 500, y: 145 },
@@ -343,6 +361,48 @@ const BRAND_NODES = [
   { x: 272, y: 228 },
 ]
 
+const BRAND_VIRTUES = [
+  { key: 'courage', color: '#6270AC' },
+  { key: 'honesty', color: '#6977B7' },
+  { key: 'reflection', color: '#7280C2' },
+  { key: 'humility', color: '#7D89CD' },
+  { key: 'kindness', color: '#8992D6' },
+  { key: 'patience', color: '#969CE0' },
+  { key: 'restraint', color: '#A5A8E9' },
+  { key: 'focus', color: '#B3B3F1' },
+  { key: 'clarity', color: '#C4C1FA' },
+] as const
+
+const BRAND_VIRTUE_PARTICLE_INTERVAL_MS = 440
+const BRAND_VIRTUE_PARTICLE_DURATION_MS = 780
+const BRAND_VIRTUE_FINAL_HOLD_MS = 800
+const BRAND_VIRTUE_WORD_TRANSITION_MS = 180
+
+type BrandParticleMotion = Element & {
+  beginElement?: () => void
+  endElement?: () => void
+}
+
+const brandParticleMotionRefs = new Map<number, {
+  element: BrandParticleMotion
+  listener: EventListener
+}>()
+const brandParticleMotionRefCallbacks = BRAND_NODES.map((_, index) => (
+  (element: Element | ComponentPublicInstance | null) => {
+    setBrandParticleMotionRef(index, element instanceof Element ? element : null)
+  }
+))
+
+const activeBrandVirtueLabel = computed(() => {
+  if (activeBrandVirtueIndex.value === null) return ''
+  const virtue = BRAND_VIRTUES[activeBrandVirtueIndex.value]
+  return virtue ? t(`brand.virtue.${virtue.key}`) : ''
+})
+
+const brandZenEligibility = computed(() => (
+  appShell?.zenModeBrandEntry?.value?.canEnter() ?? false
+))
+
 function clearBrandHoverTimer() {
   if (brandHoverTimer) {
     clearTimeout(brandHoverTimer)
@@ -350,23 +410,334 @@ function clearBrandHoverTimer() {
   }
 }
 
+function clearBrandVirtueTimers() {
+  if (brandVirtueLaunchTimer) clearTimeout(brandVirtueLaunchTimer)
+  if (brandVirtueFinalHoldTimer) clearTimeout(brandVirtueFinalHoldTimer)
+  brandVirtueLaunchTimer = undefined
+  brandVirtueFinalHoldTimer = undefined
+}
+
+function resetBrandVirtueAnimation() {
+  clearBrandVirtueTimers()
+  brandVirtueRun += 1
+  for (const { element } of brandParticleMotionRefs.values()) {
+    try { element.endElement?.() } catch { /* animation can already be inactive */ }
+  }
+  activeBrandVirtueIndex.value = null
+  launchedBrandVirtueIndices.value = new Set()
+  arrivedBrandVirtueIndices.value = new Set()
+  brandVirtueFinalizing = false
+}
+
+function setBrandParticleMotionRef(index: number, element: Element | null) {
+  const previous = brandParticleMotionRefs.get(index)
+  if (previous) {
+    previous.element.removeEventListener('endEvent', previous.listener)
+    brandParticleMotionRefs.delete(index)
+  }
+  if (!element) return
+
+  const motion = element as BrandParticleMotion
+  const run = brandVirtueRun
+  const listener: EventListener = () => onBrandParticleArrival(index, run)
+  motion.addEventListener('endEvent', listener)
+  brandParticleMotionRefs.set(index, { element: motion, listener })
+}
+
 function setBrandCursorHidden(hidden: boolean) {
   document.body.classList.toggle('brand-constellation-active', hidden)
 }
 
-function startBrandConstellation() {
+function suppressNextBrandClick() {
+  suppressBrandClick = true
+  if (brandClickSuppressTimer) clearTimeout(brandClickSuppressTimer)
+  brandClickSuppressTimer = undefined
+}
+
+function showFinalBrandVirtue(run: number) {
+  if (
+    run !== brandVirtueRun
+    || !showBrandConstellation.value
+    || !brandVirtueModeActive.value
+    || brandVirtueFinalizing
+  ) return
+  clearBrandVirtueTimers()
+  brandVirtueRun += 1
+  const finalRun = brandVirtueRun
+  brandVirtueFinalizing = true
+  for (const { element } of brandParticleMotionRefs.values()) {
+    try { element.endElement?.() } catch { /* animation can already be inactive */ }
+  }
+  activeBrandVirtueIndex.value = BRAND_VIRTUES.length - 1
+  arrivedBrandVirtueIndices.value = new Set([BRAND_VIRTUES.length - 1])
+  brandVirtueFinalHoldTimer = setTimeout(() => {
+    brandVirtueFinalHoldTimer = undefined
+    if (finalRun === brandVirtueRun) completeBrandConstellation()
+  }, BRAND_VIRTUE_FINAL_HOLD_MS + (reducedMotionActive.value ? 0 : BRAND_VIRTUE_WORD_TRANSITION_MS))
+}
+
+function onBrandParticleArrival(index: number, run: number) {
+  if (
+    run !== brandVirtueRun
+    || !showBrandConstellation.value
+    || !brandVirtueModeActive.value
+    || brandVirtueFinalizing
+    || !launchedBrandVirtueIndices.value.has(index)
+    || arrivedBrandVirtueIndices.value.has(index)
+  ) return
+
+  arrivedBrandVirtueIndices.value = new Set([...arrivedBrandVirtueIndices.value, index])
+  activeBrandVirtueIndex.value = index
+  if (index !== BRAND_VIRTUES.length - 1) return
+
+  brandVirtueFinalizing = true
+  clearBrandVirtueTimers()
+  brandVirtueFinalHoldTimer = setTimeout(() => {
+    brandVirtueFinalHoldTimer = undefined
+    if (run === brandVirtueRun) completeBrandConstellation()
+  }, BRAND_VIRTUE_FINAL_HOLD_MS + BRAND_VIRTUE_WORD_TRANSITION_MS)
+}
+
+function launchBrandParticle(index: number, run: number) {
+  if (
+    run !== brandVirtueRun
+    || !showBrandConstellation.value
+    || !brandVirtueModeActive.value
+    || brandVirtueFinalizing
+  ) return
+  if (!brandZenEligibility.value) {
+    stopBrandConstellation()
+    return
+  }
+
+  const motion = brandParticleMotionRefs.get(index)?.element
+  if (!motion || typeof motion.beginElement !== 'function') {
+    showFinalBrandVirtue(run)
+    return
+  }
+
+  launchedBrandVirtueIndices.value = new Set([...launchedBrandVirtueIndices.value, index])
+  try {
+    motion.beginElement()
+  } catch {
+    showFinalBrandVirtue(run)
+    return
+  }
+
+  if (index < BRAND_VIRTUES.length - 1) {
+    brandVirtueLaunchTimer = setTimeout(() => {
+      brandVirtueLaunchTimer = undefined
+      launchBrandParticle(index + 1, run)
+    }, BRAND_VIRTUE_PARTICLE_INTERVAL_MS)
+  }
+}
+
+function startBrandVirtueAnimation(run: number) {
+  if (run !== brandVirtueRun || !showBrandConstellation.value || !brandVirtueModeActive.value) return
+  if (!brandZenEligibility.value) {
+    stopBrandConstellation()
+    return
+  }
+
+  if (reducedMotionMediaQuery?.matches) {
+    showFinalBrandVirtue(run)
+    return
+  }
+  launchBrandParticle(0, run)
+}
+
+function expireSuppressedBrandClickAfterPointerUp() {
+  if (!suppressBrandClick) return
+  brandClickSuppressTimer = setTimeout(() => {
+    suppressBrandClick = false
+    brandClickSuppressTimer = undefined
+  }, 1000)
+}
+
+function startBrandConstellation(trigger: 'hover' | 'touch' = 'hover') {
+  if (showBrandConstellation.value || brandHoverTimer) return
   clearBrandHoverTimer()
+  const cycle = ++brandConstellationCycle
   brandHoverTimer = setTimeout(() => {
+    brandHoverTimer = undefined
+    if (cycle !== brandConstellationCycle || showBrandConstellation.value) return
+    resetBrandVirtueAnimation()
+    brandVirtueModeActive.value = brandZenEligibility.value
     showBrandConstellation.value = true
     setBrandCursorHidden(true)
+    if (trigger === 'touch') {
+      touchLongPressTriggered = true
+      suppressNextBrandClick()
+    }
+    const run = brandVirtueRun
+    if (brandVirtueModeActive.value) {
+      void nextTick(() => startBrandVirtueAnimation(run))
+    } else if (reducedMotionActive.value && trigger === 'touch') {
+      void nextTick(completeBrandConstellation)
+    }
   }, 3000)
 }
 
 function stopBrandConstellation() {
   clearBrandHoverTimer()
+  brandConstellationCycle += 1
+  resetBrandVirtueAnimation()
+  brandVirtueModeActive.value = false
+  brandAnimationFinished = false
+  if (!touchLongPressTriggered) {
+    touchPointerId = null
+    touchPointerOrigin = null
+  }
+  pendingBrandZenEntry = null
   showBrandConstellation.value = false
   setBrandCursorHidden(false)
 }
+
+function closeBrandConstellationForZenEntry() {
+  showBrandConstellation.value = false
+  setBrandCursorHidden(false)
+}
+
+function completeBrandConstellation() {
+  if (!showBrandConstellation.value || brandAnimationFinished) return
+  brandAnimationFinished = true
+  clearBrandVirtueTimers()
+
+  const entry = appShell?.zenModeBrandEntry?.value
+  if (entry?.canEnter()) {
+    pendingBrandZenEntry = entry.enter
+    closeBrandConstellationForZenEntry()
+  } else if (touchLongPressTriggered) {
+    // Touch has no hover-leave signal. On unsupported surfaces, let users
+    // see the complete mark once and then restore the unobstructed page.
+    closeBrandConstellationForZenEntry()
+  }
+}
+
+function onBrandNodeAnimationEnd(event: AnimationEvent, index: number) {
+  if (
+    index === BRAND_NODES.length - 1
+    && event.animationName === 'brand-network-node-in'
+  ) {
+    if (brandVirtueModeActive.value) return
+    completeBrandConstellation()
+  }
+}
+
+function onBrandNodeAnimationCancel(event: AnimationEvent) {
+  if (event.animationName !== 'brand-network-node-in' || !showBrandConstellation.value) return
+  if (reducedMotionMediaQuery?.matches) {
+    void nextTick(() => {
+      if (brandVirtueModeActive.value) showFinalBrandVirtue(brandVirtueRun)
+      else completeBrandConstellation()
+    })
+  } else {
+    stopBrandConstellation()
+  }
+}
+
+function onBrandConstellationAfterLeave() {
+  const enter = pendingBrandZenEntry
+  pendingBrandZenEntry = null
+  if (touchPointerId === null) touchLongPressTriggered = false
+  brandAnimationFinished = false
+  brandVirtueModeActive.value = false
+  resetBrandVirtueAnimation()
+  enter?.()
+}
+
+function onBrandPointerEnter(event: PointerEvent) {
+  // Touch browsers may synthesize compatibility hover events after a tap.
+  // Only a real hover-capable pointer can start the desktop gesture.
+  if (event.pointerType === 'mouse' || event.pointerType === 'pen') {
+    startBrandConstellation('hover')
+  }
+}
+
+function onBrandPointerLeave(event: PointerEvent) {
+  if (event.pointerType !== 'touch') stopBrandConstellation()
+}
+
+function onBrandPointerDown(event: PointerEvent) {
+  if (event.pointerType !== 'touch' || showBrandConstellation.value) return
+  clearBrandHoverTimer()
+  touchPointerId = event.pointerId
+  touchPointerOrigin = { x: event.clientX, y: event.clientY }
+  touchLongPressTriggered = false
+  const target = event.currentTarget
+  if (target instanceof HTMLElement && target.setPointerCapture) {
+    try { target.setPointerCapture(event.pointerId) } catch { /* pointer may already be inactive */ }
+  }
+  startBrandConstellation('touch')
+}
+
+function onBrandPointerMove(event: PointerEvent) {
+  if (
+    event.pointerType !== 'touch'
+    || event.pointerId !== touchPointerId
+    || !touchPointerOrigin
+    || !brandHoverTimer
+  ) return
+  if (Math.hypot(event.clientX - touchPointerOrigin.x, event.clientY - touchPointerOrigin.y) > 12) {
+    clearBrandHoverTimer()
+    touchPointerId = null
+    touchPointerOrigin = null
+    touchLongPressTriggered = false
+  }
+}
+
+function onBrandPointerUp(event: PointerEvent) {
+  if (event.pointerId !== touchPointerId) return
+  const wasLongPress = touchLongPressTriggered
+  clearBrandHoverTimer()
+  touchPointerId = null
+  touchPointerOrigin = null
+  touchLongPressTriggered = false
+  if (wasLongPress) expireSuppressedBrandClickAfterPointerUp()
+}
+
+function onBrandPointerCancel(event: PointerEvent) {
+  if (event.pointerId !== touchPointerId) return
+  clearBrandHoverTimer()
+  touchPointerId = null
+  touchPointerOrigin = null
+  touchLongPressTriggered = false
+  suppressBrandClick = false
+  if (brandClickSuppressTimer) clearTimeout(brandClickSuppressTimer)
+  brandClickSuppressTimer = undefined
+}
+
+function onBrandContextMenu(event: MouseEvent) {
+  if (touchPointerId !== null || touchLongPressTriggered) event.preventDefault()
+}
+
+function onBrandClick(event: MouseEvent) {
+  if (suppressBrandClick) {
+    event.preventDefault()
+    event.stopPropagation()
+    suppressBrandClick = false
+    if (brandClickSuppressTimer) clearTimeout(brandClickSuppressTimer)
+    brandClickSuppressTimer = undefined
+    return
+  }
+  void router.push('/')
+}
+
+function onReducedMotionChange(event: MediaQueryListEvent) {
+  reducedMotionActive.value = event.matches
+  if (event.matches && showBrandConstellation.value && !brandAnimationFinished) {
+    void nextTick(() => {
+      if (brandVirtueModeActive.value) showFinalBrandVirtue(brandVirtueRun)
+      else completeBrandConstellation()
+    })
+  }
+}
+
+watch(brandZenEligibility, (canEnter) => {
+  if (showBrandConstellation.value && brandVirtueModeActive.value && !canEnter) {
+    stopBrandConstellation()
+  }
+})
 
 function onWindowBlur() {
   stopBrandConstellation()
@@ -389,6 +760,11 @@ watch(() => route?.fullPath, () => {
 
 onMounted(() => {
   workspaceMobileMediaQuery?.addEventListener('change', onWorkspaceViewportChange)
+  reducedMotionMediaQuery = typeof window.matchMedia === 'function'
+    ? window.matchMedia('(prefers-reduced-motion: reduce)')
+    : null
+  reducedMotionActive.value = reducedMotionMediaQuery?.matches ?? false
+  reducedMotionMediaQuery?.addEventListener('change', onReducedMotionChange)
   window.addEventListener('blur', onWindowBlur)
   window.addEventListener('keydown', onEscape)
   document.addEventListener('visibilitychange', onVisibilityChange)
@@ -398,7 +774,10 @@ onBeforeUnmount(() => {
   analysisExportDisposed = true
   leaveAnalysisScopeChip()
   workspaceMobileMediaQuery?.removeEventListener('change', onWorkspaceViewportChange)
+  reducedMotionMediaQuery?.removeEventListener('change', onReducedMotionChange)
   stopBrandConstellation()
+  if (brandClickSuppressTimer) clearTimeout(brandClickSuppressTimer)
+  suppressBrandClick = false
   window.removeEventListener('blur', onWindowBlur)
   window.removeEventListener('keydown', onEscape)
   document.removeEventListener('visibilitychange', onVisibilityChange)
@@ -419,9 +798,14 @@ onBeforeUnmount(() => {
         :bordered="false"
         class="brand"
         :aria-label="t('nav.home')"
-        @mouseenter="startBrandConstellation"
-        @mouseleave="stopBrandConstellation"
-        @click="router.push('/')"
+        @pointerenter="onBrandPointerEnter"
+        @pointerleave="onBrandPointerLeave"
+        @pointerdown="onBrandPointerDown"
+        @pointermove="onBrandPointerMove"
+        @pointerup="onBrandPointerUp"
+        @pointercancel="onBrandPointerCancel"
+        @contextmenu="onBrandContextMenu"
+        @click="onBrandClick"
       >
         <img class="brand-logo" :src="'/logo-48.png'" :alt="t('nav.logo_alt')" width="24" height="24" />
         <span class="brand-wordmark">Nuvyn</span>
@@ -557,7 +941,7 @@ onBeforeUnmount(() => {
     </div>
   </header>
 
-  <Transition name="brand-constellation">
+  <Transition name="brand-constellation" @after-leave="onBrandConstellationAfterLeave">
     <div v-if="showBrandConstellation" class="brand-constellation" aria-hidden="true">
       <div class="brand-constellation-backdrop" />
       <div class="brand-constellation-stage">
@@ -567,14 +951,47 @@ onBeforeUnmount(() => {
           <g
             v-for="(node, index) in BRAND_NODES"
             :key="`${node.x}-${node.y}`"
-            class="brand-network-node"
-            :style="{ '--node-delay': `${index * 140}ms` }"
+            :class="[
+              'brand-network-node',
+              {
+                'is-virtue-mode': brandVirtueModeActive,
+                'is-current': activeBrandVirtueIndex === index,
+              },
+            ]"
+            :data-virtue="BRAND_VIRTUES[index].key"
+            :data-virtue-color="BRAND_VIRTUES[index].color"
+            :style="{
+              '--node-delay': `${index * 140}ms`,
+              '--brand-virtue-color': BRAND_VIRTUES[index].color,
+            }"
+            @animationend="onBrandNodeAnimationEnd($event, index)"
+            @animationcancel="onBrandNodeAnimationCancel"
           >
             <line class="brand-network-link" :x1="node.x" :y1="node.y" x2="500" y2="500" />
             <circle class="brand-network-dot" :cx="node.x" :cy="node.y" r="34" />
             <circle class="brand-network-dot-core" :cx="node.x" :cy="node.y" r="8" />
-            <circle class="brand-network-particle" cx="0" cy="0" r="8">
+            <circle
+              class="brand-network-particle"
+              :class="{
+                'is-decorative': !brandVirtueModeActive && !reducedMotionActive,
+                'is-launched': brandVirtueModeActive && launchedBrandVirtueIndices.has(index),
+                'is-arrived': arrivedBrandVirtueIndices.has(index),
+              }"
+              :cx="brandVirtueModeActive ? node.x : 0"
+              :cy="brandVirtueModeActive ? node.y : 0"
+              r="8"
+            >
               <animateMotion
+                v-if="brandVirtueModeActive && !reducedMotionActive"
+                :ref="brandParticleMotionRefCallbacks[index]"
+                :dur="`${BRAND_VIRTUE_PARTICLE_DURATION_MS}ms`"
+                begin="indefinite"
+                fill="freeze"
+                repeatCount="1"
+                :path="`M 0 0 L ${500 - node.x} ${500 - node.y}`"
+              />
+              <animateMotion
+                v-else-if="!brandVirtueModeActive && !reducedMotionActive"
                 :begin="`${index * 140}ms`"
                 dur="1.8s"
                 repeatCount="indefinite"
@@ -583,8 +1000,35 @@ onBeforeUnmount(() => {
             </circle>
           </g>
 
-          <circle class="brand-network-core" cx="500" cy="500" r="178" />
-          <image class="brand-network-logo" :href="'/brain.svg'" x="375" y="375" width="250" height="250" preserveAspectRatio="xMidYMid meet" />
+          <circle
+            :class="['brand-network-core', { 'is-virtue-mode': brandVirtueModeActive }]"
+            cx="500"
+            cy="500"
+            r="178"
+          />
+          <Transition name="brand-network-virtue" :duration="BRAND_VIRTUE_WORD_TRANSITION_MS">
+            <text
+              v-if="brandVirtueModeActive && activeBrandVirtueIndex !== null"
+              :key="activeBrandVirtueIndex"
+              class="brand-network-virtue"
+              :class="{ 'is-final': activeBrandVirtueIndex === BRAND_VIRTUES.length - 1 }"
+              x="500"
+              y="500"
+              text-anchor="middle"
+              dominant-baseline="central"
+              :style="{ fontSize: locale === 'zh' ? '108px' : '62px' }"
+            >{{ activeBrandVirtueLabel }}</text>
+          </Transition>
+          <image
+            v-if="!brandVirtueModeActive"
+            class="brand-network-logo"
+            :href="'/brain.svg'"
+            x="375"
+            y="375"
+            width="250"
+            height="250"
+            preserveAspectRatio="xMidYMid meet"
+          />
         </svg>
       </div>
     </div>

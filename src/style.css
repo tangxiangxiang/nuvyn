@@ -515,6 +515,10 @@ hr {
   letter-spacing: 0.2px;
   text-decoration: none;
   cursor: pointer;
+  touch-action: manipulation;
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-touch-callout: none;
 }
 .brand:hover { text-decoration: none; color: var(--accent); }
 .brand-logo {
@@ -567,7 +571,7 @@ body.brand-constellation-active * {
   z-index: 1;
   width: min(78vw, 680px);
   aspect-ratio: 1;
-  filter: drop-shadow(0 22px 60px rgba(79, 70, 229, 0.2));
+  background: radial-gradient(circle, rgba(79, 70, 229, 0.12), rgba(79, 70, 229, 0.04) 48%, transparent 72%);
 }
 .brand-network {
   display: block;
@@ -596,10 +600,25 @@ body.brand-constellation-active * {
   stroke-dasharray: 9 16;
   animation: brand-network-transfer 1.8s linear infinite;
 }
+.brand-network-node.is-virtue-mode .brand-network-link {
+  stroke: color-mix(in srgb, var(--brand-virtue-color) 52%, transparent);
+  animation: none;
+}
 .brand-network-dot {
   fill: color-mix(in srgb, var(--accent) 20%, var(--bg-soft));
   stroke: var(--accent);
   stroke-width: 3;
+}
+.brand-network-node.is-virtue-mode .brand-network-dot {
+  fill: color-mix(in srgb, var(--brand-virtue-color) 24%, var(--bg-soft));
+  stroke: var(--brand-virtue-color);
+}
+.brand-network-node.is-virtue-mode .brand-network-dot-core {
+  fill: var(--brand-virtue-color);
+  filter: drop-shadow(0 0 8px color-mix(in srgb, var(--brand-virtue-color) 80%, transparent));
+}
+.brand-network-node.is-current .brand-network-dot {
+  filter: brightness(1.18);
 }
 .brand-network-dot-core {
   fill: var(--accent);
@@ -607,7 +626,21 @@ body.brand-constellation-active * {
 }
 .brand-network-particle {
   fill: var(--accent-hover);
-  filter: drop-shadow(0 0 8px color-mix(in srgb, var(--accent-hover) 90%, transparent));
+  stroke: color-mix(in srgb, var(--accent-hover) 45%, white);
+  stroke-width: 1.5;
+  opacity: 0;
+  transition: opacity 140ms ease;
+}
+.brand-network-particle.is-decorative,
+.brand-network-particle.is-launched {
+  opacity: 1;
+}
+.brand-network-particle.is-arrived {
+  opacity: 0;
+}
+.brand-network-node.is-virtue-mode .brand-network-particle {
+  fill: var(--brand-virtue-color);
+  stroke: color-mix(in srgb, var(--brand-virtue-color) 45%, white);
 }
 .brand-network-core {
   /* Keep the central workspace opaque so links and particles stay behind it. */
@@ -616,6 +649,18 @@ body.brand-constellation-active * {
   stroke-width: 5;
   filter: drop-shadow(0 0 28px color-mix(in srgb, var(--accent) 35%, transparent));
   animation: brand-network-core-pulse 3.2s ease-in-out infinite;
+}
+.brand-network-core.is-virtue-mode {
+  fill: rgba(10, 15, 28, 0.9);
+}
+.brand-network-virtue {
+  fill: rgba(255, 255, 255, 0.94);
+  font-family: var(--sans, system-ui, sans-serif);
+  font-weight: 600;
+  letter-spacing: 0.015em;
+}
+.brand-network-virtue.is-final {
+  fill: #C4C1FA;
 }
 .brand-network-logo {
   filter: none;
@@ -648,6 +693,14 @@ body.brand-constellation-active * {
 }
 .brand-constellation-enter-active .brand-constellation-stage {
   transition: transform 520ms cubic-bezier(0.2, 0.8, 0.2, 1), opacity 420ms ease;
+  will-change: transform, opacity;
+}
+.brand-constellation-leave-active {
+  transition: opacity 420ms ease;
+}
+.brand-constellation-leave-active .brand-constellation-stage {
+  transition: transform 520ms cubic-bezier(0.2, 0.8, 0.2, 1), opacity 420ms ease;
+  will-change: transform, opacity;
 }
 .brand-constellation-enter-from {
   opacity: 0;
@@ -655,6 +708,27 @@ body.brand-constellation-active * {
 .brand-constellation-enter-from .brand-constellation-stage {
   opacity: 0;
   transform: scale(0.72);
+}
+.brand-constellation-leave-to {
+  opacity: 0;
+}
+.brand-constellation-leave-to .brand-constellation-stage {
+  opacity: 0;
+  transform: scale(0.72);
+}
+.brand-network-virtue-enter-active {
+  transition: opacity 180ms cubic-bezier(0.2, 0.8, 0.2, 1), transform 180ms cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+.brand-network-virtue-leave-active {
+  transition: opacity 180ms cubic-bezier(0.4, 0, 1, 1), transform 180ms cubic-bezier(0.4, 0, 1, 1);
+}
+.brand-network-virtue-enter-from {
+  opacity: 0;
+  transform: translateY(8px);
+}
+.brand-network-virtue-leave-to {
+  opacity: 0;
+  transform: translateY(-8px);
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -667,8 +741,17 @@ body.brand-constellation-active * {
     animation: none;
     opacity: 1;
   }
+  .brand-network-virtue {
+    transition: none;
+    opacity: 1;
+  }
+  .brand-network-particle {
+    transition: none;
+  }
   .brand-constellation-enter-active,
-  .brand-constellation-enter-active .brand-constellation-stage {
+  .brand-constellation-enter-active .brand-constellation-stage,
+  .brand-constellation-leave-active,
+  .brand-constellation-leave-active .brand-constellation-stage {
     transition: none;
   }
 }
@@ -825,6 +908,17 @@ body.brand-constellation-active * {
 main.container {
   padding-top: 32px;
   padding-bottom: 64px;
+}
+main.container.zen-mode-shell {
+  box-sizing: border-box;
+  width: 100%;
+  max-width: none;
+  height: 100vh;
+  height: 100dvh;
+  min-height: 0;
+  margin: 0;
+  padding: 0;
+  overflow: hidden;
 }
 main.container.auth-page-shell {
   padding-top: 0;
@@ -4700,7 +4794,12 @@ body:has(.ledger-detail-sheet-card) .n-modal-mask {
   max-width: 100%;
 }
 .vault.is-zen-mode {
-  height: calc(100vh - var(--navbar-h, 0px));
+  box-sizing: border-box;
+  width: 100%;
+  height: 100%;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
   grid-template-columns: minmax(0, 1fr) !important;
   grid-template-rows: minmax(0, 1fr) !important;
 }
@@ -4710,13 +4809,21 @@ body:has(.ledger-detail-sheet-card) .n-modal-mask {
 .vault.is-zen-mode .editor-pane {
   box-sizing: border-box;
   align-items: center;
-  padding: clamp(24px, 5vh, 56px) 24px 24px;
+  padding:
+    max(env(safe-area-inset-top), clamp(24px, 5vh, 56px))
+    max(24px, env(safe-area-inset-right))
+    max(24px, env(safe-area-inset-bottom))
+    max(24px, env(safe-area-inset-left));
 }
 .vault.is-zen-mode .monaco-host.zen-mode-width {
   width: min(100%, 800px);
 }
 .vault.is-zen-mode .reading-pane {
-  padding-top: clamp(32px, 6vh, 72px);
+  padding:
+    max(env(safe-area-inset-top), clamp(32px, 6vh, 72px))
+    max(24px, env(safe-area-inset-right))
+    max(32px, env(safe-area-inset-bottom))
+    max(24px, env(safe-area-inset-left));
 }
 .vault.is-zen-mode .reading-layout {
   max-width: 800px;

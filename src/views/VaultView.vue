@@ -270,7 +270,7 @@ const { confirm, confirmCancellable } = useConfirm()
 const { locale, t } = useI18n()
 const auth = useAuth()
 const diaryAccess = useDiaryAccessSession()
-const { active: zenModeActive, exit: exitZenMode, toggle: toggleZenMode } = useZenMode()
+const { active: zenModeActive, enter: enterZenMode, exit: exitZenMode, toggle: toggleZenMode } = useZenMode()
 const diaryAccessContext = inject(DiaryAccessContextKey, null)
 const { activeScope, selectScope } = useScopeFilter()
 const noteActivePath = ref<string | null>(null)
@@ -1930,13 +1930,26 @@ const canUseZenMode = computed(() => {
     || tab.loadError
     || specialWorkspaceSurfaceActive.value
     || isDiaryCalendarVisible.value
-    || isMobileDiaryViewport.value
   ) return false
 
   if (isDiaryScope.value) {
     return diaryAccess.isUnlocked.value && classifyDiaryPath(activePath.value) === 'managed'
   }
   return activeScope.value === 'note'
+})
+const zenModeBrandEntry = {
+  canEnter: () => canUseZenMode.value,
+  enter: () => {
+    if (!canUseZenMode.value) return false
+    enterZenMode()
+    return true
+  },
+}
+if (appShell?.zenModeBrandEntry) appShell.zenModeBrandEntry.value = zenModeBrandEntry
+onBeforeUnmount(() => {
+  if (appShell?.zenModeBrandEntry?.value === zenModeBrandEntry) {
+    appShell.zenModeBrandEntry.value = null
+  }
 })
 const zenModeChord = createZenModeChord({
   canToggle: () => canUseZenMode.value,

@@ -63,6 +63,12 @@ Each open document has its own workspace tab and unsaved buffer. Useful shortcut
 | Open command palette | `Ctrl+P` / `Command+P` |
 | Toggle Files panel | `Ctrl+B` / `Command+B` |
 
+## Zen Mode
+
+On an open Note or unlocked Diary document, use `Ctrl/Cmd+K` followed by `Z` to toggle Zen Mode. You can also enter it without a visible control: hover over the Nuvyn Logo for three seconds with a mouse, or long-press the Logo for three seconds on a phone or tablet. After the Logo constellation finishes, the surrounding workspace fades away. A normal tap or click on the Logo still opens the home page.
+
+Press `Escape` or use the keyboard shortcut again to leave Zen Mode. The editor, reading mode, unsaved drafts, and Diary session remain the same; refreshing the page returns to the regular workspace layout.
+
 Edits are marked dirty immediately and are saved after 800 ms without another keystroke. If more typing occurs while a request is in flight, Nuvyn acknowledges that revision and then saves the newer one.
 
 ## External Changes and Conflicts

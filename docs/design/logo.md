@@ -17,13 +17,19 @@ The primary mark is a gradient knowledge crest with concentric circles and conne
 
 ## Expanded constellation
 
-Hovering over the navigation brand for three seconds opens a non-interactive full-screen constellation. Nine outer nodes connect to a centered symbol, with a 140 ms node stagger and inward-moving particles. Leaving the brand, pressing Escape, changing route, hiding the document, or blurring the window closes it and restores the pointer.
+Hovering over the navigation brand for three seconds opens a non-interactive full-screen constellation on desktop. On phones and tablets, a three-second long press on the same Logo area starts the same animation; ordinary taps still navigate home. Touch movement beyond 12 px, lifting before the threshold, or `pointercancel` cancels a pending long press. Once recognized, lifting does not interrupt the animation, and the Logo consumes its generated click so it cannot accidentally navigate home.
+
+On a Vault document eligible for Zen Mode, the constellation becomes the Nine Virtues sequence. Its fixed order is Courage, Honesty, Reflection, Humility, Kindness, Patience, Restraint, Focus, and Clarity. Chinese and English labels follow the active app locale; the title “Nine Virtues” is never shown. The nine positions progress through a restrained blue-violet scale from `#6270AC` to `#C4C1FA`; each node and its particle share that position's color. The final ordering puts Courage at the beginning and Clarity at the end, with Reflection third, as a narrative arc from facing reality to seeing clearly—not a claim that people must cultivate the virtues in a prescribed order.
+
+After the constellation opens, one finite SVG motion particle launches from each node every 360 ms. Each word changes only on that particle's actual `endEvent` at the center; an infinite orbit or line animation never advances the sequence or determines completion. Clarity remains visible for about 800 ms after its entrance fade, then the constellation fades out. Zen Mode starts only after the leave transition and VaultView's final eligibility check. Ineligible pages retain the decorative constellation; reduced-motion mode skips particle travel and briefly presents Clarity before the same safe exit.
+
+Leaving a desktop hover, pressing Escape, changing route, hiding the document, or blurring the window closes a pending constellation and restores the pointer. Touch recognition is scoped to the Logo: normal document scrolling and the rest of the navigation remain unaffected.
 
 The animation is decorative and `aria-hidden`. The brand button itself has an accessible home label and navigates to the application root.
 
 ## Theme and motion
 
-The crest uses its own purple-blue gradient. The expanded center symbol is inverted in dark mode. Under `prefers-reduced-motion: reduce`, orbit, link, and center animations and entry transitions are disabled; the nodes remain visible without their entrance animation.
+The crest uses its own purple-blue gradient. The expanded center symbol is inverted in dark mode. Under `prefers-reduced-motion: reduce`, orbit, link, center, and node entrance animations and entry transitions are disabled; nodes remain visible and an eligible Logo constellation does not wait for an animation event before entering Zen Mode.
 
 ## Change rules
 
