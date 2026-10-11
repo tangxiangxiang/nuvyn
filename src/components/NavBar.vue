@@ -60,7 +60,7 @@ const emit = defineEmits<{
 }>()
 
 const { theme, toggle } = useTheme()
-const { locale, t } = useI18n()
+const { t } = useI18n()
 const route = useRoute()
 const router = useRouter()
 const workspaceMobileMediaQuery = typeof window !== 'undefined' && typeof window.matchMedia === 'function'
@@ -332,18 +332,19 @@ const showBrandConstellation = ref(false)
 const brandVirtueModeActive = ref(false)
 const reducedMotionActive = ref(false)
 const activeBrandVirtueIndex = ref<number | null>(null)
-const launchedBrandVirtueIndices = ref<Set<number>>(new Set())
-const arrivedBrandVirtueIndices = ref<Set<number>>(new Set())
+const brandOnenessActive = ref(false)
+const currentBrandParticleIndex = ref<number | null>(null)
+const brandVirtuePhase = ref<'idle' | 'black' | 'appearing' | 'moving' | 'forming' | 'responding' | 'holding' | 'final' | 'merging' | 'oneness'>('idle')
+const brandCoreState = ref<'hidden' | 'forming' | 'steady' | 'responding' | 'final' | 'oneness'>('hidden')
 let brandHoverTimer: ReturnType<typeof setTimeout> | undefined
 let brandClickSuppressTimer: ReturnType<typeof setTimeout> | undefined
-let brandVirtueLaunchTimer: ReturnType<typeof setTimeout> | undefined
-let brandVirtueFinalHoldTimer: ReturnType<typeof setTimeout> | undefined
-const brandVirtueParticleWatchdogs = new Map<number, ReturnType<typeof setTimeout>>()
+let brandVirtuePhaseTimer: ReturnType<typeof setTimeout> | undefined
+let brandVirtueCoreTimer: ReturnType<typeof setTimeout> | undefined
+let brandVirtueParticleWatchdog: ReturnType<typeof setTimeout> | undefined
 let reducedMotionMediaQuery: MediaQueryList | null = null
 let brandConstellationCycle = 0
 let brandVirtueRun = 0
 let brandAnimationFinished = false
-let brandVirtueFinalizing = false
 let touchPointerId: number | null = null
 let touchPointerOrigin: { x: number; y: number } | null = null
 let touchLongPressTriggered = false
@@ -375,12 +376,28 @@ const BRAND_VIRTUES = [
   { key: 'clarity', color: '#C4C1FA' },
 ] as const
 
-const BRAND_VIRTUE_PARTICLE_INTERVAL_MS = 600
-const BRAND_VIRTUE_PARTICLE_DURATION_MS = 540
+const BRAND_VIRTUE_BLACK_HOLD_MS = 300
+const BRAND_DECORATIVE_APPEAR_MS = 400
+const BRAND_DECORATIVE_HOLD_MS = 1200
+const BRAND_VIRTUE_FIRST_APPEAR_MS = 400
+const BRAND_VIRTUE_APPEAR_MS = 250
+const BRAND_VIRTUE_FIRST_MOTION_MS = 900
+const BRAND_VIRTUE_MOTION_MS = 850
+const BRAND_VIRTUE_CORE_LEAD_MS = 300
+const BRAND_VIRTUE_CORE_FORM_MS = 600
+const BRAND_VIRTUE_FIRST_HOLD_MS = 700
+const BRAND_VIRTUE_RESPONSE_MS = 200
+const BRAND_VIRTUE_HOLD_MS = 600
 const BRAND_VIRTUE_PARTICLE_END_EVENT_GRACE_MS = 180
-const BRAND_VIRTUE_FINAL_HOLD_MS = 800
-const BRAND_VIRTUE_WORD_TRANSITION_MS = 160
-const BRAND_PARTICLE_TARGET_RADIUS = 189
+const BRAND_VIRTUE_FINAL_HOLD_MS = 1200
+const BRAND_ONENESS_MERGE_MS = 600
+const BRAND_ONENESS_HOLD_MS = 1500
+const BRAND_VIRTUE_WORD_ENTER_MS = 180
+const BRAND_VIRTUE_WORD_LEAVE_MS = 120
+const BRAND_VIRTUE_REDUCED_START_HOLD_MS = 450
+const BRAND_VIRTUE_REDUCED_FINAL_HOLD_MS = 800
+const BRAND_VIRTUE_FADE_MS = 500
+const BRAND_PARTICLE_TARGET_RADIUS = 186
 
 type BrandParticleMotion = Element & {
   beginElement?: () => void
@@ -397,18 +414,41 @@ const brandParticleMotionRefCallbacks = BRAND_NODES.map((_, index) => (
   }
 ))
 
-const activeBrandVirtueLabel = computed(() => {
+const activeBrandWordKey = computed(() => {
+  if (brandOnenessActive.value) return 'brand.state.oneness'
   if (activeBrandVirtueIndex.value === null) return ''
   const virtue = BRAND_VIRTUES[activeBrandVirtueIndex.value]
-  return virtue ? t(`brand.virtue.${virtue.key}`) : ''
+  return virtue ? `brand.virtue.${virtue.key}` : ''
 })
 
-function brandParticleMotionPath(node: typeof BRAND_NODES[number]) {
+const currentBrandParticle = computed(() => {
+  const index = currentBrandParticleIndex.value
+  return index === null ? null : {
+    index,
+    node: BRAND_NODES[index]!,
+    virtue: BRAND_VIRTUES[index]!,
+  }
+})
+const brandParticleMotionDuration = computed(() => (
+  currentBrandParticleIndex.value === 0 ? BRAND_VIRTUE_FIRST_MOTION_MS : BRAND_VIRTUE_MOTION_MS
+))
+const brandCoreColor = computed(() => BRAND_VIRTUES[activeBrandVirtueIndex.value ?? 0]!.color)
+const brandConstellationTransitionDuration = computed(() => reducedMotionActive.value ? 0 : {
+  enter: brandVirtueModeActive.value ? 160 : 520,
+  leave: brandVirtueModeActive.value ? BRAND_VIRTUE_FADE_MS : 520,
+})
+
+function brandParticleMotionPath(node: typeof BRAND_NODES[number], index: number) {
   const dx = 500 - node.x
   const dy = 500 - node.y
   const distance = Math.hypot(dx, dy)
-  const travelRatio = 1 - BRAND_PARTICLE_TARGET_RADIUS / distance
+  // Courage creates the core. Later particles dissolve into its visible edge.
+  const travelRatio = index === 0 ? 1 : 1 - BRAND_PARTICLE_TARGET_RADIUS / distance
   return `M 0 0 L ${dx * travelRatio} ${dy * travelRatio}`
+}
+
+function brandParticleTrailPath(node: typeof BRAND_NODES[number], index: number) {
+  return brandParticleMotionPath(node, index).replace('M 0 0', `M ${node.x} ${node.y}`).replace(' L ', ' l ')
 }
 
 const brandZenEligibility = computed(() => (
@@ -423,19 +463,27 @@ function clearBrandHoverTimer() {
 }
 
 function clearBrandVirtueTimers() {
-  if (brandVirtueLaunchTimer) clearTimeout(brandVirtueLaunchTimer)
-  if (brandVirtueFinalHoldTimer) clearTimeout(brandVirtueFinalHoldTimer)
-  for (const timer of brandVirtueParticleWatchdogs.values()) clearTimeout(timer)
-  brandVirtueParticleWatchdogs.clear()
-  brandVirtueLaunchTimer = undefined
-  brandVirtueFinalHoldTimer = undefined
+  if (brandVirtuePhaseTimer) clearTimeout(brandVirtuePhaseTimer)
+  if (brandVirtueCoreTimer) clearTimeout(brandVirtueCoreTimer)
+  if (brandVirtueParticleWatchdog) clearTimeout(brandVirtueParticleWatchdog)
+  brandVirtuePhaseTimer = undefined
+  brandVirtueCoreTimer = undefined
+  brandVirtueParticleWatchdog = undefined
 }
 
-function clearBrandParticleWatchdog(index: number) {
-  const timer = brandVirtueParticleWatchdogs.get(index)
-  if (timer === undefined) return
-  clearTimeout(timer)
-  brandVirtueParticleWatchdogs.delete(index)
+function isBrandVirtueRunActive(run: number) {
+  return run === brandVirtueRun
+    && showBrandConstellation.value
+    && brandVirtueModeActive.value
+    && !brandAnimationFinished
+}
+
+function scheduleBrandVirtuePhase(run: number, delay: number, advance: () => void) {
+  if (brandVirtuePhaseTimer) clearTimeout(brandVirtuePhaseTimer)
+  brandVirtuePhaseTimer = setTimeout(() => {
+    brandVirtuePhaseTimer = undefined
+    if (isBrandVirtueRunActive(run)) advance()
+  }, delay)
 }
 
 function resetBrandVirtueAnimation() {
@@ -445,9 +493,10 @@ function resetBrandVirtueAnimation() {
     try { element.endElement?.() } catch { /* animation can already be inactive */ }
   }
   activeBrandVirtueIndex.value = null
-  launchedBrandVirtueIndices.value = new Set()
-  arrivedBrandVirtueIndices.value = new Set()
-  brandVirtueFinalizing = false
+  brandOnenessActive.value = false
+  currentBrandParticleIndex.value = null
+  brandVirtuePhase.value = 'idle'
+  brandCoreState.value = 'hidden'
 }
 
 function setBrandParticleMotionRef(index: number, element: Element | null) {
@@ -481,57 +530,89 @@ function clearSuppressedBrandClick() {
   brandClickSuppressTimer = undefined
 }
 
-function showFinalBrandVirtue(run: number) {
-  if (
-    run !== brandVirtueRun
-    || !showBrandConstellation.value
-    || !brandVirtueModeActive.value
-    || brandVirtueFinalizing
-  ) return
+function showSimplifiedBrandVirtues(run: number) {
+  if (!isBrandVirtueRunActive(run)) return
   clearBrandVirtueTimers()
   brandVirtueRun += 1
-  const finalRun = brandVirtueRun
-  brandVirtueFinalizing = true
+  const simplifiedRun = brandVirtueRun
   for (const { element } of brandParticleMotionRefs.values()) {
     try { element.endElement?.() } catch { /* animation can already be inactive */ }
   }
-  activeBrandVirtueIndex.value = BRAND_VIRTUES.length - 1
-  arrivedBrandVirtueIndices.value = new Set([BRAND_VIRTUES.length - 1])
-  brandVirtueFinalHoldTimer = setTimeout(() => {
-    brandVirtueFinalHoldTimer = undefined
-    if (finalRun === brandVirtueRun) completeBrandConstellation()
-  }, BRAND_VIRTUE_FINAL_HOLD_MS + (reducedMotionActive.value ? 0 : BRAND_VIRTUE_WORD_TRANSITION_MS))
+  currentBrandParticleIndex.value = null
+  brandCoreState.value = 'steady'
+  brandVirtuePhase.value = 'holding'
+  brandOnenessActive.value = false
+  activeBrandVirtueIndex.value = 0
+  scheduleBrandVirtuePhase(simplifiedRun, BRAND_VIRTUE_REDUCED_START_HOLD_MS, () => {
+    activeBrandVirtueIndex.value = BRAND_VIRTUES.length - 1
+    brandCoreState.value = 'final'
+    brandVirtuePhase.value = 'final'
+    scheduleBrandVirtuePhase(simplifiedRun, BRAND_VIRTUE_REDUCED_FINAL_HOLD_MS, () => showBrandOneness(simplifiedRun))
+  })
+}
+
+function showBrandOneness(run: number) {
+  if (!isBrandVirtueRunActive(run)) return
+  currentBrandParticleIndex.value = null
+  brandCoreState.value = 'oneness'
+  brandVirtuePhase.value = 'merging'
+  const finishMerging = () => {
+    brandOnenessActive.value = true
+    brandVirtuePhase.value = 'oneness'
+    // Hold after both lines have finished their shared crossfade.
+    const wordTransition = reducedMotionActive.value ? 0 : BRAND_VIRTUE_WORD_LEAVE_MS + BRAND_VIRTUE_WORD_ENTER_MS
+    scheduleBrandVirtuePhase(run, wordTransition + BRAND_ONENESS_HOLD_MS, completeBrandConstellation)
+  }
+  if (reducedMotionActive.value) finishMerging()
+  else scheduleBrandVirtuePhase(run, BRAND_ONENESS_MERGE_MS, finishMerging)
+}
+
+function formFirstBrandCore(run: number) {
+  if (!isBrandVirtueRunActive(run) || currentBrandParticleIndex.value !== 0) return
+  brandCoreState.value = 'forming'
 }
 
 function onBrandParticleArrival(index: number, run: number) {
   if (
-    run !== brandVirtueRun
-    || !showBrandConstellation.value
-    || !brandVirtueModeActive.value
-    || brandVirtueFinalizing
-    || !launchedBrandVirtueIndices.value.has(index)
-    || arrivedBrandVirtueIndices.value.has(index)
+    !isBrandVirtueRunActive(run)
+    || currentBrandParticleIndex.value !== index
+    || brandVirtuePhase.value !== 'moving'
   ) return
 
-  arrivedBrandVirtueIndices.value = new Set([...arrivedBrandVirtueIndices.value, index])
-  clearBrandParticleWatchdog(index)
-  if (index !== BRAND_VIRTUES.length - 1) return
+  if (brandVirtueParticleWatchdog) clearTimeout(brandVirtueParticleWatchdog)
+  brandVirtueParticleWatchdog = undefined
+  if (brandVirtueCoreTimer) clearTimeout(brandVirtueCoreTimer)
+  brandVirtueCoreTimer = undefined
+  activeBrandVirtueIndex.value = index
 
-  brandVirtueFinalizing = true
-  clearBrandVirtueTimers()
-  brandVirtueFinalHoldTimer = setTimeout(() => {
-    brandVirtueFinalHoldTimer = undefined
-    if (run === brandVirtueRun) completeBrandConstellation()
-  }, BRAND_VIRTUE_FINAL_HOLD_MS)
+  if (index === 0) {
+    formFirstBrandCore(run)
+    brandVirtuePhase.value = 'forming'
+    scheduleBrandVirtuePhase(run, BRAND_VIRTUE_CORE_FORM_MS, () => {
+      currentBrandParticleIndex.value = null
+      brandCoreState.value = 'steady'
+      brandVirtuePhase.value = 'holding'
+      scheduleBrandVirtuePhase(run, BRAND_VIRTUE_FIRST_HOLD_MS, () => prepareBrandParticle(1, run))
+    })
+    return
+  }
+
+  const final = index === BRAND_VIRTUES.length - 1
+  brandCoreState.value = final ? 'final' : 'responding'
+  brandVirtuePhase.value = 'responding'
+  scheduleBrandVirtuePhase(run, BRAND_VIRTUE_RESPONSE_MS, () => {
+    currentBrandParticleIndex.value = null
+    brandCoreState.value = final ? 'final' : 'steady'
+    brandVirtuePhase.value = final ? 'final' : 'holding'
+    scheduleBrandVirtuePhase(run, final ? BRAND_VIRTUE_FINAL_HOLD_MS : BRAND_VIRTUE_HOLD_MS, () => {
+      if (final) showBrandOneness(run)
+      else prepareBrandParticle(index + 1, run)
+    })
+  })
 }
 
 function launchBrandParticle(index: number, run: number) {
-  if (
-    run !== brandVirtueRun
-    || !showBrandConstellation.value
-    || !brandVirtueModeActive.value
-    || brandVirtueFinalizing
-  ) return
+  if (!isBrandVirtueRunActive(run) || currentBrandParticleIndex.value !== index) return
   if (!brandZenEligibility.value) {
     stopBrandConstellation()
     return
@@ -539,34 +620,43 @@ function launchBrandParticle(index: number, run: number) {
 
   const motion = brandParticleMotionRefs.get(index)?.element
   if (!motion || typeof motion.beginElement !== 'function') {
-    showFinalBrandVirtue(run)
+    showSimplifiedBrandVirtues(run)
     return
   }
 
-  launchedBrandVirtueIndices.value = new Set([...launchedBrandVirtueIndices.value, index])
-  // The particle and its virtue share one sequence beat. Arrival is kept
-  // separate below so only the final particle's completion starts the hold.
-  activeBrandVirtueIndex.value = index
-  // SMIL's endEvent is the normal source of truth. Keep an event-derived,
-  // duration-bounded fallback for browsers that expose beginElement() but
-  // fail to deliver the finite motion's endEvent.
-  brandVirtueParticleWatchdogs.set(index, setTimeout(() => {
-    brandVirtueParticleWatchdogs.delete(index)
+  brandVirtuePhase.value = 'moving'
+  const duration = index === 0 ? BRAND_VIRTUE_FIRST_MOTION_MS : BRAND_VIRTUE_MOTION_MS
+  // The next round is gated by this particle's arrival, never a parallel
+  // word timer. The watchdog only recovers a missing finite SMIL endEvent.
+  brandVirtueParticleWatchdog = setTimeout(() => {
+    brandVirtueParticleWatchdog = undefined
     onBrandParticleArrival(index, run)
-  }, BRAND_VIRTUE_PARTICLE_DURATION_MS + BRAND_VIRTUE_PARTICLE_END_EVENT_GRACE_MS))
+  }, duration + BRAND_VIRTUE_PARTICLE_END_EVENT_GRACE_MS)
+  if (index === 0) {
+    brandVirtueCoreTimer = setTimeout(() => {
+      brandVirtueCoreTimer = undefined
+      formFirstBrandCore(run)
+    }, duration - BRAND_VIRTUE_CORE_LEAD_MS)
+  }
   try {
     motion.beginElement()
   } catch {
-    showFinalBrandVirtue(run)
+    showSimplifiedBrandVirtues(run)
     return
   }
+}
 
-  if (index < BRAND_VIRTUES.length - 1) {
-    brandVirtueLaunchTimer = setTimeout(() => {
-      brandVirtueLaunchTimer = undefined
-      launchBrandParticle(index + 1, run)
-    }, BRAND_VIRTUE_PARTICLE_INTERVAL_MS)
+function prepareBrandParticle(index: number, run: number) {
+  if (!isBrandVirtueRunActive(run)) return
+  if (!brandZenEligibility.value) {
+    stopBrandConstellation()
+    return
   }
+  currentBrandParticleIndex.value = index
+  brandVirtuePhase.value = 'appearing'
+  scheduleBrandVirtuePhase(run, index === 0 ? BRAND_VIRTUE_FIRST_APPEAR_MS : BRAND_VIRTUE_APPEAR_MS, () => {
+    launchBrandParticle(index, run)
+  })
 }
 
 function startBrandVirtueAnimation(run: number) {
@@ -576,11 +666,22 @@ function startBrandVirtueAnimation(run: number) {
     return
   }
 
-  if (reducedMotionMediaQuery?.matches) {
-    showFinalBrandVirtue(run)
-    return
-  }
-  launchBrandParticle(0, run)
+  brandVirtuePhase.value = 'black'
+  scheduleBrandVirtuePhase(run, BRAND_VIRTUE_BLACK_HOLD_MS, () => {
+    if (reducedMotionActive.value) showSimplifiedBrandVirtues(run)
+    else prepareBrandParticle(0, run)
+  })
+}
+
+function startBrandDecoration(run: number) {
+  brandVirtuePhase.value = 'black'
+  brandVirtuePhaseTimer = setTimeout(() => {
+    if (run !== brandVirtueRun || !showBrandConstellation.value) return
+    brandVirtuePhase.value = 'holding'
+    brandCoreState.value = 'steady'
+    brandVirtuePhaseTimer = setTimeout(completeBrandConstellation,
+      (reducedMotionActive.value ? 0 : BRAND_DECORATIVE_APPEAR_MS) + BRAND_DECORATIVE_HOLD_MS)
+  }, BRAND_VIRTUE_BLACK_HOLD_MS)
 }
 
 function expireSuppressedBrandClickAfterPointerUp() {
@@ -601,6 +702,7 @@ function startBrandConstellation(trigger: 'hover' | 'touch' = 'hover') {
     resetBrandVirtueAnimation()
     brandConstellationTrigger = trigger
     brandVirtueModeActive.value = brandZenEligibility.value
+    brandVirtuePhase.value = 'black'
     showBrandConstellation.value = true
     setBrandCursorHidden(true)
     if (trigger === 'touch') {
@@ -610,8 +712,8 @@ function startBrandConstellation(trigger: 'hover' | 'touch' = 'hover') {
     const run = brandVirtueRun
     if (brandVirtueModeActive.value) {
       void nextTick(() => startBrandVirtueAnimation(run))
-    } else if (reducedMotionActive.value && trigger === 'touch') {
-      void nextTick(completeBrandConstellation)
+    } else {
+      void nextTick(() => startBrandDecoration(run))
     }
   }, 3000)
 }
@@ -647,35 +749,13 @@ function completeBrandConstellation() {
   clearBrandVirtueTimers()
 
   const entry = appShell?.zenModeBrandEntry?.value
-  if (entry?.canEnter()) {
+  if (brandVirtueModeActive.value && entry?.canEnter()) {
     pendingBrandZenEntry = entry.enter
     closeBrandConstellationForZenEntry()
-  } else if (brandConstellationTrigger === 'touch') {
-    // Touch has no hover-leave signal. On unsupported surfaces, let users
-    // see the complete mark once and then restore the unobstructed page.
-    closeBrandConstellationForZenEntry()
-  }
-}
-
-function onBrandNodeAnimationEnd(event: AnimationEvent, index: number) {
-  if (
-    index === BRAND_NODES.length - 1
-    && event.animationName === 'brand-network-node-in'
-  ) {
-    if (brandVirtueModeActive.value) return
-    completeBrandConstellation()
-  }
-}
-
-function onBrandNodeAnimationCancel(event: AnimationEvent) {
-  if (event.animationName !== 'brand-network-node-in' || !showBrandConstellation.value) return
-  if (reducedMotionMediaQuery?.matches) {
-    void nextTick(() => {
-      if (brandVirtueModeActive.value) showFinalBrandVirtue(brandVirtueRun)
-      else completeBrandConstellation()
-    })
   } else {
-    stopBrandConstellation()
+    // Decoration has a finite lifetime on every pointer type and never
+    // gains Zen eligibility halfway through its own playback.
+    closeBrandConstellationForZenEntry()
   }
 }
 
@@ -778,7 +858,7 @@ function onReducedMotionChange(event: MediaQueryListEvent) {
   reducedMotionActive.value = event.matches
   if (event.matches && showBrandConstellation.value && !brandAnimationFinished) {
     void nextTick(() => {
-      if (brandVirtueModeActive.value) showFinalBrandVirtue(brandVirtueRun)
+      if (brandVirtueModeActive.value) showSimplifiedBrandVirtues(brandVirtueRun)
       else completeBrandConstellation()
     })
   }
@@ -992,97 +1072,110 @@ onBeforeUnmount(() => {
     </div>
   </header>
 
-  <Transition name="brand-constellation" @after-leave="onBrandConstellationAfterLeave">
-    <div v-if="showBrandConstellation" class="brand-constellation" aria-hidden="true">
+  <Transition name="brand-constellation" :css="!reducedMotionActive" :duration="brandConstellationTransitionDuration" @after-leave="onBrandConstellationAfterLeave">
+    <div v-if="showBrandConstellation" class="brand-constellation" :class="{ 'is-virtue-mode': brandVirtueModeActive }" aria-hidden="true">
       <div class="brand-constellation-backdrop" />
       <div class="brand-constellation-stage">
-        <svg class="brand-network" viewBox="0 0 1000 1000" focusable="false">
-          <circle class="brand-network-halo" cx="500" cy="500" r="205" />
-
-          <g
-            v-for="(node, index) in BRAND_NODES"
-            :key="`${node.x}-${node.y}`"
-            :class="[
-              'brand-network-node',
-              {
-                'is-virtue-mode': brandVirtueModeActive,
-                'is-current': activeBrandVirtueIndex === index,
-              },
-            ]"
-            :data-virtue="BRAND_VIRTUES[index].key"
-            :data-virtue-color="BRAND_VIRTUES[index].color"
-            :style="{
-              '--node-delay': `${index * 140}ms`,
-              '--brand-virtue-color': BRAND_VIRTUES[index].color,
-            }"
-            @animationend="onBrandNodeAnimationEnd($event, index)"
-            @animationcancel="onBrandNodeAnimationCancel"
-          >
-            <line class="brand-network-link" :x1="node.x" :y1="node.y" x2="500" y2="500" />
-            <circle class="brand-network-dot" :cx="node.x" :cy="node.y" r="34" />
-            <circle class="brand-network-dot-core" :cx="node.x" :cy="node.y" r="8" />
-            <circle
-              class="brand-network-particle"
-              :class="{
-                'is-decorative': !brandVirtueModeActive && !reducedMotionActive,
-                'is-launched': brandVirtueModeActive && launchedBrandVirtueIndices.has(index),
-                'is-arrived': arrivedBrandVirtueIndices.has(index),
-              }"
-              :cx="brandVirtueModeActive ? node.x : 0"
-              :cy="brandVirtueModeActive ? node.y : 0"
-              r="8"
-            >
-              <animateMotion
-                v-if="brandVirtueModeActive && !reducedMotionActive"
-                :ref="brandParticleMotionRefCallbacks[index]"
-                :dur="`${BRAND_VIRTUE_PARTICLE_DURATION_MS}ms`"
-                calcMode="spline"
-                keyTimes="0;1"
-                keySplines="0.2 0.8 0.2 1"
-                begin="indefinite"
-                fill="freeze"
-                repeatCount="1"
-                :path="brandParticleMotionPath(node)"
-              />
-              <animateMotion
-                v-else-if="!brandVirtueModeActive && !reducedMotionActive"
-                :begin="`${index * 140}ms`"
-                dur="1.8s"
-                repeatCount="indefinite"
-                :path="`M ${node.x} ${node.y} L 500 500`"
-              />
-            </circle>
-          </g>
-
+        <svg
+          v-if="brandVirtueModeActive"
+          class="brand-journey"
+          :data-phase="brandVirtuePhase"
+          :style="{ '--brand-core-color': brandCoreColor }"
+          viewBox="0 0 1000 1000"
+          focusable="false"
+        >
+          <defs>
+            <filter id="brand-point-glow-inner" x="-100%" y="-100%" width="300%" height="300%">
+              <feGaussianBlur stdDeviation="3" />
+            </filter>
+            <filter id="brand-point-glow-outer" x="-100%" y="-100%" width="300%" height="300%">
+              <feGaussianBlur stdDeviation="7" />
+            </filter>
+          </defs>
           <circle
-            :class="['brand-network-core', { 'is-virtue-mode': brandVirtueModeActive }]"
+            class="brand-journey-core"
+            :class="`is-${brandCoreState}`"
+            :style="{ '--brand-core-form-ms': `${BRAND_VIRTUE_CORE_LEAD_MS + BRAND_VIRTUE_CORE_FORM_MS}ms` }"
             cx="500"
             cy="500"
             r="178"
           />
-          <Transition name="brand-network-virtue" :duration="BRAND_VIRTUE_WORD_TRANSITION_MS">
-            <text
-              v-if="brandVirtueModeActive && activeBrandVirtueIndex !== null"
-              :key="activeBrandVirtueIndex"
+          <g v-if="activeBrandVirtueIndex !== null && brandCoreState !== 'forming'" class="brand-journey-rim" :class="{ 'is-unified': brandCoreState === 'oneness' }">
+            <circle
+              v-for="(virtue, index) in BRAND_VIRTUES"
+              :key="virtue.key"
+              cx="500" cy="500" r="178"
+              pathLength="900"
+              :stroke="virtue.color"
+              stroke-dasharray="100 800"
+              :stroke-dashoffset="-index * 100"
+              :style="{ opacity: activeBrandVirtueIndex !== null && index <= activeBrandVirtueIndex ? 1 : 0 }"
+            />
+          </g>
+          <g
+            v-if="currentBrandParticle"
+            :key="currentBrandParticle.index"
+            class="brand-journey-round"
+            :data-virtue="currentBrandParticle.virtue.key"
+            :data-virtue-color="currentBrandParticle.virtue.color"
+            :style="{
+              '--brand-virtue-color': currentBrandParticle.virtue.color,
+              '--brand-point-appear-ms': `${currentBrandParticle.index === 0 ? BRAND_VIRTUE_FIRST_APPEAR_MS : BRAND_VIRTUE_APPEAR_MS}ms`,
+            }"
+          >
+            <path
+              class="brand-journey-trail"
+              :class="{ 'is-moving': brandVirtuePhase === 'moving' }"
+              :d="brandParticleTrailPath(currentBrandParticle.node, currentBrandParticle.index)"
+            />
+            <g
+              class="brand-journey-flight"
+              :class="`is-${brandVirtuePhase}`"
+              :style="{ '--brand-flight-ms': `${brandParticleMotionDuration}ms` }"
+            >
+              <g class="brand-journey-glow">
+                <circle class="brand-journey-glow-outer" :cx="currentBrandParticle.node.x" :cy="currentBrandParticle.node.y" r="18" filter="url(#brand-point-glow-outer)" />
+                <circle class="brand-journey-glow-inner" :cx="currentBrandParticle.node.x" :cy="currentBrandParticle.node.y" r="11" filter="url(#brand-point-glow-inner)" />
+              </g>
+              <circle class="brand-journey-point" :class="`is-${brandVirtuePhase}`" :cx="currentBrandParticle.node.x" :cy="currentBrandParticle.node.y" r="8" />
+              <animateMotion
+                v-if="!reducedMotionActive"
+                :ref="brandParticleMotionRefCallbacks[currentBrandParticle.index]"
+                :dur="`${brandParticleMotionDuration}ms`"
+                calcMode="spline"
+                keyTimes="0;1"
+                keySplines="0.45 0 0.35 1"
+                begin="indefinite"
+                fill="freeze"
+                repeatCount="1"
+                :path="brandParticleMotionPath(currentBrandParticle.node, currentBrandParticle.index)"
+              />
+            </g>
+          </g>
+          <Transition
+            name="brand-network-virtue"
+            :mode="reducedMotionActive ? undefined : 'out-in'"
+            :css="!reducedMotionActive"
+            :duration="reducedMotionActive ? 0 : { enter: BRAND_VIRTUE_WORD_ENTER_MS, leave: BRAND_VIRTUE_WORD_LEAVE_MS }"
+          >
+            <g
+              v-if="activeBrandWordKey"
+              :key="activeBrandWordKey"
               class="brand-network-virtue"
-              :class="{ 'is-final': activeBrandVirtueIndex === BRAND_VIRTUES.length - 1 }"
-              x="500"
-              y="500"
+              :data-word="activeBrandWordKey"
+              :class="{ 'is-final': activeBrandVirtueIndex === BRAND_VIRTUES.length - 1, 'is-oneness': brandOnenessActive }"
               text-anchor="middle"
-              dominant-baseline="central"
-              :style="{ fontSize: locale === 'zh' ? '108px' : '62px' }"
-            >{{ activeBrandVirtueLabel }}</text>
+            >
+              <text class="brand-network-virtue-primary" x="500" y="480" dominant-baseline="central">{{ t(activeBrandWordKey, {}, 'zh') }}</text>
+              <text class="brand-network-virtue-subtitle" x="500" y="550" dominant-baseline="central">{{ t(activeBrandWordKey, {}, 'en') }}</text>
+            </g>
           </Transition>
-          <image
-            v-if="!brandVirtueModeActive"
-            class="brand-network-logo"
-            :href="'/brain.svg'"
-            x="375"
-            y="375"
-            width="250"
-            height="250"
-            preserveAspectRatio="xMidYMid meet"
-          />
+        </svg>
+        <svg v-else class="brand-decoration" :data-phase="brandVirtuePhase" viewBox="0 0 1000 1000" focusable="false">
+          <g v-if="brandCoreState !== 'hidden'" class="brand-decoration-mark">
+            <circle class="brand-decoration-core" cx="500" cy="500" r="178" />
+            <circle class="brand-decoration-point" cx="500" cy="500" r="6" />
+          </g>
         </svg>
       </div>
     </div>

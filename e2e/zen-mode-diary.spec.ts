@@ -1,9 +1,12 @@
 import { expect, goBackFromDiaryDocument, test } from './fixtures/diary'
 import { CALENDAR_TEST_DATE, CALENDAR_TEST_TIME_ZONE } from './helpers/calendar-clock'
+import { observeBrandJourney, readBrandJourneyProbe } from './helpers/brand-journey'
 
 test.use({ timezoneId: CALENDAR_TEST_TIME_ZONE, trace: 'off', screenshot: 'only-on-failure' })
 
 test('Zen Mode works on an unlocked Diary document and Diary Back still returns to Calendar', async ({ page, request }) => {
+  // Include the full 19.2s Logo journey and the Diary lifecycle assertions.
+  test.setTimeout(45_000)
   const path = `diary/${CALENDAR_TEST_DATE}`
   const prior = await request.get(`/api/posts/${path}`)
   if (prior.status() !== 404) {
@@ -40,6 +43,7 @@ test('Zen Mode works on an unlocked Diary document and Diary Back still returns 
 
     const brand = page.locator('.navbar .brand')
     const originalUrl = page.url()
+    await observeBrandJourney(page)
     await brand.evaluate((element) => {
       element.dispatchEvent(new PointerEvent('pointerdown', {
         bubbles: true,
@@ -50,7 +54,7 @@ test('Zen Mode works on an unlocked Diary document and Diary Back still returns 
       }))
     })
     await expect(page.locator('.brand-constellation')).toBeVisible({ timeout: 5000 })
-    await expect(page.locator('.brand-network-virtue')).toHaveText(/Courage|勇气/, { timeout: 1000 })
+    expect((await readBrandJourneyProbe(page)).blackFrame).toEqual({ points: 0, words: 0, coreOpacity: '0' })
     await brand.evaluate((element) => {
       element.dispatchEvent(new PointerEvent('pointerup', {
         bubbles: true,
@@ -61,7 +65,10 @@ test('Zen Mode works on an unlocked Diary document and Diary Back still returns 
       }))
       element.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }))
     })
-    await expect(vault).toHaveAttribute('data-zen-mode', 'true', { timeout: 8500 })
+    await expect(page.locator('.brand-network-virtue')).toHaveText(/Courage|勇气/, { timeout: 2000 })
+    // The closing Oneness merge and hold add 2.4s to the nine arrivals.
+    await expect(vault).toHaveAttribute('data-zen-mode', 'true', { timeout: 23_000 })
+    expect((await readBrandJourneyProbe(page, true)).maxWords).toBe(1)
     expect(page.url()).toBe(originalUrl)
     expect(await page.evaluate(() => (
       (window as Window & { __zenModeDiaryEditorNode?: Element }).__zenModeDiaryEditorNode

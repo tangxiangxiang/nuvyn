@@ -545,8 +545,7 @@ hr {
 .navbar.is-workspace .brand-logo { width: 24px; height: 24px; }
 .navbar.is-workspace .brand-wordmark { font-size: 0.9rem; }
 
-/* Brand constellation — a delayed, non-interactive knowledge-network
-   animation that expands from the small navbar mark. */
+/* Brand entry — a finite, quiet journey from darkness to Oneness. */
 .brand-constellation {
   position: fixed;
   inset: 0;
@@ -562,131 +561,161 @@ body.brand-constellation-active * {
 .brand-constellation-backdrop {
   position: absolute;
   inset: 0;
-  background: rgba(10, 15, 28, 0.74);
-  -webkit-backdrop-filter: blur(8px);
-  backdrop-filter: blur(8px);
+  background: #050609;
 }
 .brand-constellation-stage {
   position: relative;
   z-index: 1;
-  width: min(78vw, 680px);
+  width: min(92vw, 84vh, 700px);
+  width: min(92vw, 84dvh, 700px);
   aspect-ratio: 1;
-  background: radial-gradient(circle, rgba(79, 70, 229, 0.12), rgba(79, 70, 229, 0.04) 48%, transparent 72%);
+  background: none;
 }
-.brand-network {
+.brand-decoration {
   display: block;
   width: 100%;
   height: 100%;
   overflow: visible;
 }
-.brand-network-halo {
-  fill: none;
-  stroke: color-mix(in srgb, var(--accent) 30%, transparent);
+.brand-constellation.is-virtue-mode .brand-constellation-backdrop {
+  background: #050609;
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
+}
+.brand-constellation.is-virtue-mode .brand-constellation-stage {
+  width: min(92vw, 84vh, 700px);
+  width: min(92vw, 84dvh, 700px);
+  background: none;
+}
+.brand-journey {
+  display: block;
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+}
+.brand-journey-core {
+  fill: #080b14;
+  stroke: var(--brand-core-color);
   stroke-width: 2;
-  stroke-dasharray: 2 18;
-  animation: brand-network-orbit 18s linear infinite;
+  stroke-opacity: 0.72;
   transform-origin: 500px 500px;
+  transition: stroke 200ms ease, filter 200ms ease;
+  filter: drop-shadow(0 0 10px color-mix(in srgb, var(--brand-core-color) 18%, transparent));
 }
-.brand-network-node {
+.brand-journey-core.is-hidden {
   opacity: 0;
-  transform-box: fill-box;
-  transform-origin: center;
-  animation: brand-network-node-in 560ms cubic-bezier(0.2, 0.8, 0.2, 1) var(--node-delay) forwards;
 }
-.brand-network-link {
+.brand-journey-core.is-forming {
+  animation: brand-journey-core-form var(--brand-core-form-ms) cubic-bezier(0.2, 0.7, 0.3, 1) both;
+}
+.brand-journey-core.is-responding {
+  animation: brand-journey-core-response 200ms ease both;
+}
+.brand-journey-core.is-final {
+  stroke-opacity: 0.58;
+}
+.brand-journey-core.is-oneness {
+  stroke: #C4C1FA;
+  stroke-opacity: 0.48;
+  transform: scale(0.985);
+  filter: drop-shadow(0 0 14px rgb(196 193 250 / 0.2));
+  transition: stroke 600ms ease, stroke-opacity 600ms ease, transform 600ms ease, filter 600ms ease;
+}
+.brand-journey-rim {
   fill: none;
-  stroke: color-mix(in srgb, var(--accent) 46%, transparent);
-  stroke-width: 3;
-  stroke-dasharray: 9 16;
-  animation: brand-network-transfer 1.8s linear infinite;
+  stroke-width: 2;
+  opacity: 0.55;
+  transition: opacity 600ms ease;
+  pointer-events: none;
 }
-.brand-network-node.is-virtue-mode .brand-network-link {
-  stroke: color-mix(in srgb, var(--brand-virtue-color) 52%, transparent);
-  animation: none;
+.brand-journey-rim circle {
+  transition: opacity 200ms ease;
 }
-.brand-network-dot {
-  fill: color-mix(in srgb, var(--accent) 20%, var(--bg-soft));
-  stroke: var(--accent);
-  stroke-width: 3;
+.brand-journey-rim.is-unified {
+  opacity: 0;
 }
-.brand-network-node.is-virtue-mode .brand-network-dot {
-  fill: color-mix(in srgb, var(--brand-virtue-color) 24%, var(--bg-soft));
+.brand-journey-trail {
+  fill: none;
   stroke: var(--brand-virtue-color);
-}
-.brand-network-node.is-virtue-mode .brand-network-dot-core {
-  fill: var(--brand-virtue-color);
-  filter: drop-shadow(0 0 8px color-mix(in srgb, var(--brand-virtue-color) 80%, transparent));
-}
-.brand-network-node.is-current .brand-network-dot {
-  filter: brightness(1.18);
-}
-.brand-network-dot-core {
-  fill: var(--accent);
-  filter: drop-shadow(0 0 10px color-mix(in srgb, var(--accent) 80%, transparent));
-}
-.brand-network-particle {
-  fill: var(--accent-hover);
-  stroke: color-mix(in srgb, var(--accent-hover) 45%, white);
-  stroke-width: 1.5;
+  stroke-width: 1;
   opacity: 0;
-  transition: opacity 140ms ease;
+  transition: opacity 200ms ease;
 }
-.brand-network-particle.is-decorative,
-.brand-network-particle.is-launched {
-  opacity: 1;
+.brand-journey-trail.is-moving {
+  opacity: 0.12;
 }
-.brand-network-particle.is-arrived {
+.brand-journey-point {
+  fill: var(--brand-virtue-color);
+  transition: opacity 200ms ease, r 200ms ease;
+}
+.brand-journey-flight.is-appearing {
+  animation: brand-journey-point-in var(--brand-point-appear-ms) ease both;
+}
+.brand-journey-flight {
+  transition: opacity 200ms ease;
+}
+.brand-journey-flight.is-forming,
+.brand-journey-flight.is-responding {
   opacity: 0;
 }
-.brand-network-node.is-virtue-mode .brand-network-particle {
+.brand-journey-glow {
   fill: var(--brand-virtue-color);
-  stroke: color-mix(in srgb, var(--brand-virtue-color) 45%, white);
+  opacity: 0.4;
 }
-.brand-network-core {
-  /* Keep the central workspace opaque so links and particles stay behind it. */
-  fill: var(--bg-soft);
-  stroke: var(--accent);
-  stroke-width: 5;
-  filter: drop-shadow(0 0 28px color-mix(in srgb, var(--accent) 35%, transparent));
-  animation: brand-network-core-pulse 3.2s ease-in-out infinite;
+.brand-journey-glow-inner { opacity: 0.22; }
+.brand-journey-glow-outer { opacity: 0.12; }
+.brand-journey-flight.is-moving .brand-journey-glow {
+  animation: brand-journey-glow-flight var(--brand-flight-ms) ease both;
 }
-.brand-network-core.is-virtue-mode {
-  fill: rgba(10, 15, 28, 0.9);
+@keyframes brand-journey-glow-flight {
+  0% { opacity: 0.6; }
+  65% { opacity: 0.72; }
+  100% { opacity: 1; }
+}
+.brand-decoration-mark {
+  animation: brand-journey-point-in 400ms ease both;
+}
+.brand-decoration-core {
+  fill: #080b14;
+  stroke: #969ce0;
+  stroke-width: 2;
+  stroke-opacity: 0.5;
+  filter: drop-shadow(0 0 12px rgb(150 156 224 / 0.15));
+}
+.brand-decoration-point {
+  fill: #969ce0;
+  opacity: 0.65;
+}
+.brand-journey-point.is-forming,
+.brand-journey-point.is-responding {
+  opacity: 0;
+  r: 3px;
+}
+@keyframes brand-journey-point-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+@keyframes brand-journey-core-form {
+  from { opacity: 0; transform: scale(0.05); }
+  to { opacity: 1; transform: scale(1); }
+}
+@keyframes brand-journey-core-response {
+  0%, 100% { stroke-opacity: 0.72; }
+  45% { stroke-opacity: 1; }
 }
 .brand-network-virtue {
   fill: rgba(255, 255, 255, 0.94);
   font-family: var(--sans, system-ui, sans-serif);
-  font-weight: 600;
+  font-weight: 500;
   letter-spacing: 0.015em;
 }
-.brand-network-virtue.is-final {
-  fill: #C4C1FA;
+.brand-network-virtue-primary {
+  font-size: 82px;
 }
-.brand-network-logo {
-  filter: none;
-}
-:root[data-theme='dark'] .brand-network-logo {
-  filter: brightness(0) invert(1);
-}
-@media (prefers-color-scheme: dark) {
-  :root:not([data-theme='light']) .brand-network-logo {
-    filter: brightness(0) invert(1);
-  }
-}
-
-@keyframes brand-network-node-in {
-  from { opacity: 0; transform: scale(0.45); }
-  to { opacity: 1; transform: scale(1); }
-}
-@keyframes brand-network-transfer {
-  to { stroke-dashoffset: -50; }
-}
-@keyframes brand-network-orbit {
-  to { transform: rotate(360deg); }
-}
-@keyframes brand-network-core-pulse {
-  0%, 100% { opacity: 1; }
-  50% { opacity: 1; }
+.brand-network-virtue-subtitle {
+  font-size: 32px;
+  font-weight: 400;
+  fill: #aaa8c3;
 }
 .brand-constellation-enter-active {
   transition: opacity 420ms ease;
@@ -707,20 +736,29 @@ body.brand-constellation-active * {
 }
 .brand-constellation-enter-from .brand-constellation-stage {
   opacity: 0;
-  transform: scale(0.72);
 }
 .brand-constellation-leave-to {
   opacity: 0;
 }
 .brand-constellation-leave-to .brand-constellation-stage {
   opacity: 0;
-  transform: scale(0.72);
+}
+.brand-constellation.is-virtue-mode.brand-constellation-enter-active,
+.brand-constellation.is-virtue-mode.brand-constellation-enter-active .brand-constellation-stage {
+  transition: opacity 160ms ease;
+}
+.brand-constellation.is-virtue-mode.brand-constellation-leave-active,
+.brand-constellation.is-virtue-mode.brand-constellation-leave-active .brand-constellation-stage {
+  transition: opacity 500ms ease;
+}
+.brand-constellation.is-virtue-mode .brand-constellation-stage {
+  transform: none;
 }
 .brand-network-virtue-enter-active {
-  transition: opacity 160ms ease;
+  transition: opacity 180ms ease;
 }
 .brand-network-virtue-leave-active {
-  transition: opacity 160ms ease;
+  transition: opacity 120ms ease;
 }
 .brand-network-virtue-enter-from {
   opacity: 0;
@@ -730,26 +768,31 @@ body.brand-constellation-active * {
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .brand-network-halo,
-  .brand-network-link,
-  .brand-network-core {
+  .brand-journey-core,
+  .brand-journey-core.is-oneness,
+  .brand-journey-rim,
+  .brand-journey-rim circle,
+  .brand-journey-flight,
+  .brand-journey-glow,
+  .brand-decoration-mark,
+  .brand-journey-point {
     animation: none;
-  }
-  .brand-network-node {
-    animation: none;
-    opacity: 1;
+    transition: none;
   }
   .brand-network-virtue {
     transition: none;
     opacity: 1;
   }
-  .brand-network-particle {
-    transition: none;
-  }
   .brand-constellation-enter-active,
   .brand-constellation-enter-active .brand-constellation-stage,
   .brand-constellation-leave-active,
   .brand-constellation-leave-active .brand-constellation-stage {
+    transition: none;
+  }
+  .brand-constellation.is-virtue-mode.brand-constellation-enter-active,
+  .brand-constellation.is-virtue-mode.brand-constellation-enter-active .brand-constellation-stage,
+  .brand-constellation.is-virtue-mode.brand-constellation-leave-active,
+  .brand-constellation.is-virtue-mode.brand-constellation-leave-active .brand-constellation-stage {
     transition: none;
   }
 }

@@ -1,5 +1,6 @@
 import { expect, test } from './fixtures/auth'
 import { createDoc, gotoVaultReady, openDoc, setEditorContent } from './helpers/edit-program'
+import { observeBrandJourney, readBrandJourneyProbe } from './helpers/brand-journey'
 
 const RUN_ID = String(Date.now())
 
@@ -184,7 +185,60 @@ test('Zen Mode preserves Vault layout and the mounted editor across edit and rea
   }
 })
 
+test('decorative constellation uses a geometric core without an image in light and dark themes', async ({ page }) => {
+  await gotoVaultReady(page)
+  const brand = page.locator('.navbar .brand')
+  await brand.hover()
+  await expect(page.locator('.brand-constellation')).toBeVisible({ timeout: 5000 })
+
+  const mark = page.locator('.brand-decoration-mark')
+  await expect(mark).toBeVisible()
+  await expect(mark.locator('.brand-decoration-core')).toBeVisible()
+  await expect(mark.locator('.brand-decoration-point')).toBeVisible()
+  await expect(page.locator('.brand-network-node, .brand-network-link')).toHaveCount(0)
+  await expect(page.locator('image[href="/brain.svg"]')).toHaveCount(0)
+  await expect(page.locator('.brand-network-virtue')).toHaveCount(0)
+  await expect(page.locator('.vault')).toHaveAttribute('data-zen-mode', 'false')
+
+  for (const theme of ['light', 'dark'] as const) {
+    await page.locator('html').evaluate((element, value) => {
+      element.setAttribute('data-theme', value)
+    }, theme)
+    const colors = await mark.evaluate((element) => {
+      const orbit = element.querySelector('.brand-decoration-core')!
+      const point = element.querySelector('.brand-decoration-point')!
+      return {
+        stroke: getComputedStyle(orbit).stroke,
+        fill: getComputedStyle(point).fill,
+      }
+    })
+    expect(colors.stroke).not.toBe('none')
+    expect(colors.fill).not.toBe('none')
+    expect(colors.fill).not.toBe('rgba(0, 0, 0, 0)')
+  }
+
+  await expect(page.locator('.brand-constellation')).toHaveCount(0)
+  await page.mouse.move(900, 700)
+
+  const originalUrl = page.url()
+  await brand.evaluate((element) => {
+    element.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, pointerType: 'touch', pointerId: 41 }))
+  })
+  await expect(page.locator('.brand-constellation')).toBeVisible({ timeout: 5000 })
+  await brand.evaluate((element) => {
+    element.dispatchEvent(new PointerEvent('pointerup', { bubbles: true, pointerType: 'touch', pointerId: 41 }))
+    element.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }))
+  })
+  await expect(page.locator('.brand-constellation')).toHaveCount(0)
+  expect(page.url()).toBe(originalUrl)
+  expect(await page.locator('body').evaluate((element) => element.classList.contains('brand-constellation-active'))).toBe(false)
+  await expect(page.locator('.vault')).toHaveAttribute('data-zen-mode', 'false')
+})
+
 test('touch long press on the brand enters Zen Mode after the constellation finishes', async ({ page, request }) => {
+  // The deliberate slow journey lasts 21.6s, in addition to the 3s gesture
+  // and the existing document/reload assertions below.
+  test.setTimeout(45_000)
   const path = `inbox/zen-brand-touch-${RUN_ID}`
   const createdPaths: string[] = []
 
@@ -202,6 +256,7 @@ test('touch long press on the brand enters Zen Mode after the constellation fini
       Object.defineProperty(window, '__zenModeEditorNode', { value: element, configurable: true })
     })
     const originalUrl = page.url()
+    await observeBrandJourney(page)
     await brand.evaluate((element) => {
       element.dispatchEvent(new PointerEvent('pointerdown', {
         bubbles: true,
@@ -212,7 +267,7 @@ test('touch long press on the brand enters Zen Mode after the constellation fini
       }))
     })
     await expect(page.locator('.brand-constellation')).toBeVisible({ timeout: 5000 })
-    await expect(page.locator('.brand-network-virtue')).toHaveText(/Courage|勇气/, { timeout: 1000 })
+    expect((await readBrandJourneyProbe(page)).blackFrame).toEqual({ points: 0, words: 0, coreOpacity: '0' })
 
     // Releasing after recognition does not stop the animation. The click
     // synthesized by mobile browsers is consumed rather than routed home.
@@ -226,7 +281,36 @@ test('touch long press on the brand enters Zen Mode after the constellation fini
       }))
       element.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }))
     })
-    await expect(page.locator('.vault')).toHaveAttribute('data-zen-mode', 'true', { timeout: 8500 })
+    const firstRound = page.locator('.brand-journey-round[data-virtue="courage"]')
+    await expect(firstRound).toBeVisible()
+    await expect(page.locator('.brand-journey-point')).toHaveCount(1)
+    await expect(page.locator('.brand-journey-point')).toHaveClass(/is-moving/)
+    await expect(page.locator('.brand-network-virtue')).toHaveCount(0)
+    expect(await firstRound.evaluate((element) => getComputedStyle(element).transform)).toBe('none')
+    await expect(page.locator('.brand-journey-glow circle')).toHaveCount(2)
+    expect(await page.locator('.brand-journey-glow').evaluate((element) => {
+      const animation = element.getAnimations()[0]
+      return animation?.effect?.getComputedTiming().duration
+    })).toBe(900)
+    await expect(page.locator('.brand-network-virtue')).toHaveText(/Courage|勇气/, { timeout: 1000 })
+    await expect(page.locator('.brand-journey-core')).toHaveClass(/is-forming/)
+    await expect(page.locator('.brand-journey-round[data-virtue="honesty"]')).toBeVisible()
+    await expect(page.locator('.brand-network-virtue')).toHaveText(/Courage|勇气/)
+    await expect(page.locator('.brand-network-virtue')).toHaveText(/Honesty|诚实/)
+    await expect(page.locator('.brand-network-virtue')).toHaveText(/Clarity|清明/, { timeout: 15_000 })
+    await expect(page.locator('.brand-journey-core')).toHaveClass(/is-final/)
+    await expect(page.locator('.vault')).toHaveAttribute('data-zen-mode', 'false')
+    await expect(page.locator('.brand-network-virtue-primary')).toHaveText('归一')
+    await expect(page.locator('.brand-network-virtue-subtitle')).toHaveText('Oneness')
+    await expect(page.locator('.brand-network-virtue')).not.toHaveClass(/enter-active/)
+    await expect(page.locator('.brand-journey-point')).toHaveCount(0)
+    await expect(page.locator('.vault')).toHaveAttribute('data-zen-mode', 'false')
+    await expect(page.locator('.vault')).toHaveAttribute('data-zen-mode', 'true')
+    const probe = await readBrandJourneyProbe(page, true)
+    expect(probe.maxWords).toBe(1)
+    const virtues = ['courage', 'honesty', 'reflection', 'humility', 'kindness', 'patience', 'restraint', 'focus', 'clarity']
+    expect(probe.rounds).toEqual(virtues)
+    expect(probe.words).toEqual([...virtues.map((key) => `brand.virtue.${key}`), 'brand.state.oneness'])
     await expect(page.locator('.navbar')).toHaveCount(0)
     expect(page.url()).toBe(originalUrl)
     expect(await page.evaluate(() => (
@@ -240,6 +324,7 @@ test('touch long press on the brand enters Zen Mode after the constellation fini
     await page.reload()
     await expect(page.locator('.vault')).toHaveAttribute('data-zen-mode', 'false')
     await expect(page.locator('.navbar .brand')).toBeVisible()
+    await page.setViewportSize({ width: 375, height: 812 })
     await page.emulateMedia({ reducedMotion: 'reduce' })
     await brand.evaluate((element) => {
       element.dispatchEvent(new PointerEvent('pointerdown', {
@@ -250,7 +335,10 @@ test('touch long press on the brand enters Zen Mode after the constellation fini
         clientY: 18,
       }))
     })
-    await expect(page.locator('.vault')).toHaveAttribute('data-zen-mode', 'true', { timeout: 5000 })
+    await expect(page.locator('.brand-constellation')).toBeVisible({ timeout: 5000 })
+    // Reduced motion still holds Courage (450ms), Clarity (800ms), and
+    // Oneness (1500ms); observe after recognition, not from pointerdown.
+    await expect(page.locator('.vault')).toHaveAttribute('data-zen-mode', 'true', { timeout: 3500 })
   } finally {
     for (const createdPath of createdPaths) {
       const deleted = await request.delete(`/api/posts/${createdPath}`)

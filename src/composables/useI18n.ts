@@ -34,6 +34,7 @@ const STRINGS: Strings = {
   'brand.virtue.restraint': { zh: '克制', en: 'Restraint' },
   'brand.virtue.focus': { zh: '专注', en: 'Focus' },
   'brand.virtue.clarity': { zh: '清明', en: 'Clarity' },
+  'brand.state.oneness': { zh: '归一', en: 'Oneness' },
   'nav.scope_label': { zh: '范围过滤', en: 'Scope filter' },
   'nav.scope_active': { zh: '当前范围：{scope}', en: 'Current scope: {scope}' },
   'nav.scope_only': { zh: '只看 {scope}', en: 'Show only {scope}' },
@@ -1161,10 +1162,10 @@ function detectLocale(): Locale {
 const _locale = ref<Locale>(detectLocale())
 
 export function useI18n() {
-  function t(key: string, params: Record<string, string | number> = {}): string {
+  function t(key: string, params: Record<string, string | number> = {}, locale: Locale = _locale.value): string {
     const entry = STRINGS[key]
     if (!entry) return key
-    const value = entry[_locale.value] ?? entry.zh ?? key
+    const value = entry[locale] ?? entry.zh ?? key
     return value.replace(/\{([a-zA-Z0-9_]+)\}/g, (match, name: string) => (
       Object.prototype.hasOwnProperty.call(params, name) ? String(params[name]) : match
     ))

@@ -74,4 +74,17 @@ describe('useI18n', () => {
     _('en')
     expect(locale.value).toBe('en')
   })
+
+  it('looks up a bilingual pair without changing the application locale', () => {
+    const { t, locale, setLocale } = useI18n()
+    for (const language of ['zh', 'en'] as const) {
+      setLocale(language)
+      expect(t('brand.virtue.courage', {}, 'zh')).toBe('勇气')
+      expect(t('brand.virtue.courage', {}, 'en')).toBe('Courage')
+      expect(t('brand.state.oneness', {}, 'zh')).toBe('归一')
+      expect(t('brand.state.oneness', {}, 'en')).toBe('Oneness')
+      expect(locale.value).toBe(language)
+    }
+    setLocale('zh')
+  })
 })
