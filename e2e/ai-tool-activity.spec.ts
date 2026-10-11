@@ -10,6 +10,7 @@ test('successful reads collapse together while errors and mutations stay visible
     const calls = [
       { id: 'read', name: 'read_file', path: source, content: 'Read result', error: false },
       { id: 'list', name: 'list_files', path: 'inbox', content: 'Listed result', error: false },
+      { id: 'empty', name: 'read_file', path: `${source}-empty`, content: '', error: false },
       { id: 'failed', name: 'read_file', path: 'inbox/missing', content: 'Read access failed', error: true },
       { id: 'write', name: 'patch_file', path: source, content: 'Patch operation result', error: false },
     ]
@@ -26,7 +27,9 @@ test('successful reads collapse together while errors and mutations stay visible
     await openAiRail(page)
     await sendAi(page, 'Review this note')
     const activity = page.locator('.ai-tool-activity')
-    await expect(activity.locator('summary')).toHaveText('Documents viewed: 1 · Directory lookups completed: 1')
+    await expect(activity.locator('summary')).toHaveText('Documents viewed: 2 · Directory lookups completed: 1')
+    await expect(activity.locator('.ai-tool-pill-pending')).toHaveCount(0)
+    await expect(activity.locator('details .ai-tool-pill-ok')).toHaveCount(3)
     await expect(activity.locator('details .ai-tool-card').first()).not.toBeVisible()
     await expect(activity.getByText('Read access failed', { exact: true })).toBeVisible()
     await expect(activity.getByText('Patch operation result', { exact: true })).toBeVisible()

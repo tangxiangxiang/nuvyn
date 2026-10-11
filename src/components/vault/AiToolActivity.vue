@@ -2,7 +2,7 @@
 import { computed } from 'vue'
 import { NIcon } from 'naive-ui'
 import { ChevronRight } from '@vicons/tabler'
-import type { ToolCallRecord } from '../../lib/ai-api'
+import { toolCallStatus, type ToolCallRecord } from '../../lib/ai-api'
 import { useI18n } from '../../composables/useI18n'
 import AiToolCallCard from './AiToolCallCard.vue'
 
@@ -11,7 +11,7 @@ const { t } = useI18n()
 // Only known read-only tools with a successful result can be tucked away.
 // Unknown tools, mutations, failures and in-flight actions remain visible.
 function isQuiet(call: ToolCallRecord): boolean {
-  return ['read_file', 'list_files'].includes(call.name) && !call.result.is_error && !!call.result.content
+  return ['read_file', 'list_files'].includes(call.name) && toolCallStatus(call) === 'success'
 }
 const quietCalls = computed(() => props.calls.filter(isQuiet))
 const visibleCalls = computed(() => props.calls.filter(call => !isQuiet(call)))

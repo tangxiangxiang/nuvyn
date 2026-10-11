@@ -368,7 +368,7 @@ function createAiHistory(publishChange: (event: FileChangeEvent) => void): AiHis
         id: event.id,
         name: event.name,
         input: event.input,
-        result: { content: '', is_error: false },
+        result: { content: '', is_error: false, pending: true },
       }
       optimisticAssistant.blocks.toolCalls.push(tc)
       messages.value = messages.value.map((m) =>

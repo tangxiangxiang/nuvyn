@@ -6,6 +6,7 @@ import { describe, it, expect, beforeEach, vi } from 'vitest'
 import { defineComponent, h, type Ref } from 'vue'
 import { mount } from '@vue/test-utils'
 import { useAiHistory, __resetForTesting, type AiHistory } from '../useAiHistory'
+import { toolCallStatus, type ToolCallRecord } from '../../../lib/ai-api'
 
 interface Harness {
   activeSession: Ref<{ id: number; title: string; createdAt: number; updatedAt: number } | null>
@@ -225,7 +226,7 @@ describe('sendAndStream', () => {
     void p1
   })
 
-  it('accumulates tool_use / tool_result into the assistant blocks and forwards file_changed to the bus', async () => {
+  it('tracks pending then empty successful results from SSE and forwards file_changed to the bus', async () => {
     const { streamChat } = await import('../../../lib/ai-api')
     // Reset the mockImplementationOnce queue from previous tests
     // (the "busy" test leaves a hanging implementation) and re-set
@@ -241,7 +242,9 @@ describe('sendAndStream', () => {
       yield { type: 'user', id: 7 }
       yield { type: 'token', text: '我先看下文件 ' }
       yield { type: 'tool_use', id: 'toolu_01', name: 'read_file', input: { path: 'a' } }
-      yield { type: 'tool_result', tool_use_id: 'toolu_01', content: 'file body', is_error: false }
+      expect(toolCallStatus(h.messages.value[1].blocks!.toolCalls[0] as ToolCallRecord)).toBe('pending')
+      yield { type: 'tool_result', tool_use_id: 'toolu_01', content: '', is_error: false }
+      expect(toolCallStatus(h.messages.value[1].blocks!.toolCalls[0] as ToolCallRecord)).toBe('success')
       yield { type: 'file_changed', path: 'a', kind: 'write', newMtime: 1, newRaw: 'file body' }
       yield { type: 'token', text: '改好了' }
       yield { type: 'done', userId: 7, assistantId: 8 }
@@ -266,7 +269,7 @@ describe('sendAndStream', () => {
       id: 'toolu_01',
       name: 'read_file',
       input: { path: 'a' },
-      result: { content: 'file body', is_error: false },
+      result: { content: '', is_error: false },
     })
     expect(bus.value).toHaveLength(1)
     expect(bus.value[0]).toMatchObject({ path: 'a', kind: 'write', newMtime: 1, newRaw: 'file body', seq: 1 })

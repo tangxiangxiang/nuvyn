@@ -162,7 +162,7 @@ describe('GET /api/ai/sessions/:id/messages', () => {
     expect(r.status).toBe(404)
   })
 
-  it('rehydrates a persisted tool envelope into content+blocks, hiding the raw envelope string', async () => {
+  it.each([1, 2])('rehydrates v%s envelopes including empty completed results without changing storage', async version => {
     // Regression: a tool-using assistant turn is stored as a JSON
     // envelope in the `content` column. Without rehydration the API
     // would return that raw string and the panel would render JSON
@@ -171,11 +171,12 @@ describe('GET /api/ai/sessions/:id/messages', () => {
     // here matches what the client sees during a live turn.
     const created = (await (await call('POST', '/sessions')).json()) as { id: number }
     const envelope = JSON.stringify({
-      v: 1,
+      v: version,
       text: 'I read the file.',
-      rounds: [[{ type: 'text', text: 'I read the file.' }]],
+      rounds: version === 1 ? [[{ type: 'text', text: 'I read the file.' }]] : [{ text: 'I read the file.', toolCalls: [] }],
       toolCalls: [
         { id: 't1', name: 'read_file', input: { path: 'foo' }, result: { content: '...', is_error: false } },
+        { id: 't2', name: 'read_file', input: { path: 'empty' }, result: { content: '', is_error: false } },
       ],
     })
     // Insert directly to simulate the chat orchestrator's write
@@ -196,11 +197,13 @@ describe('GET /api/ai/sessions/:id/messages', () => {
       text: 'I read the file.',
       toolCalls: [
         { id: 't1', name: 'read_file', input: { path: 'foo' }, result: { content: '...', is_error: false } },
+        { id: 't2', name: 'read_file', input: { path: 'empty' }, result: { content: '', is_error: false } },
       ],
     })
     // The `rounds` field is server-internal and must not leak
     // through the API response.
     expect((list[0].blocks as any).rounds).toBeUndefined()
+    expect(testDbRef.value!.prepare('SELECT content FROM messages WHERE session_id = ?').get(created.id)).toEqual({ content: envelope })
   })
 
   it('leaves a plain assistant message without a blocks field', async () => {

@@ -12,13 +12,14 @@ import {
   Pencil,
   Trash,
 } from '@vicons/tabler'
-import type { ToolCallRecord } from '../../lib/ai-api'
+import { toolCallStatus, type ToolCallRecord } from '../../lib/ai-api'
 import { useI18n } from '../../composables/useI18n'
 
 const props = defineProps<{ call: ToolCallRecord }>()
 const { t } = useI18n()
 
 const expanded = ref(false)
+const status = computed(() => toolCallStatus(props.call))
 const collapsible = computed(() => !props.call.result.is_error && ['read_file', 'list_files'].includes(props.call.name))
 
 const TOOL_ICONS: Record<string, Component> = {
@@ -36,9 +37,9 @@ const icon = computed(() => TOOL_ICONS[props.call.name] ?? FileText)
 // Status pill glyph. The pill is icon-only on the screen; the
 // aria-label carries the text meaning for screen readers.
 const statusPill = computed<{ icon: Component; label: string; className: string }>(() => {
-  if (props.call.result.is_error) return { icon: CircleX, label: 'error', className: 'ai-tool-pill-error' }
-  if (props.call.result.content) return { icon: CircleCheck, label: 'ok', className: 'ai-tool-pill-ok' }
-  return { icon: Loader, label: 'pending', className: 'ai-tool-pill-pending' }
+  if (status.value === 'error') return { icon: CircleX, label: t('ai.tool_error'), className: 'ai-tool-pill-error' }
+  if (status.value === 'success') return { icon: CircleCheck, label: t('ai.tool_success'), className: 'ai-tool-pill-ok' }
+  return { icon: Loader, label: t('ai.activity_running'), className: 'ai-tool-pill-pending' }
 })
 
 function stringInput(key: string): string {
@@ -63,8 +64,7 @@ function countResultItems(content: string): number | null {
 
 function formatChars(content: string): string {
   const n = content.length
-  if (n >= 1000) return `${(n / 1000).toFixed(n >= 10_000 ? 0 : 1)}k chars`
-  return `${n} chars`
+  return t('ai.tool_chars', { count: n >= 1000 ? `${(n / 1000).toFixed(n >= 10_000 ? 0 : 1)}k` : n })
 }
 
 const summary = computed(() => {
@@ -72,15 +72,15 @@ const summary = computed(() => {
   const newPath = stringInput('new_path')
   const scope = stringInput('scope')
   const target = props.call.name === 'rename_file' && newPath
-    ? `${path || 'file'} -> ${newPath}`
+    ? `${path || t('ai.tool_file')} -> ${newPath}`
     : path || scope || ''
   const content = props.call.result.content
-  const result = props.call.result.is_error
-    ? 'error'
-    : !content
+  const result = status.value === 'error'
+    ? t('ai.tool_error')
+    : status.value === 'pending'
       ? t(props.call.name === 'read_file' ? 'ai.activity_reading' : props.call.name === 'list_files' ? 'ai.activity_listing' : 'ai.activity_running')
       : props.call.name === 'list_files'
-        ? `${countResultItems(content) ?? 0} items`
+        ? t('ai.tool_items', { count: countResultItems(content) ?? 0 })
         : formatChars(content)
   return [target, result].filter(Boolean).join(' · ')
 })
@@ -106,7 +106,7 @@ const visibleContent = computed(() => {
         class="ai-tool-toggle"
         :aria-expanded="expanded"
         @click="expanded = !expanded"
-      >{{ expanded ? '收起' : '展开' }}</NButton>
+      >{{ t(expanded ? 'ai.tool_collapse' : 'ai.tool_expand') }}</NButton>
       <span
         class="ai-tool-pill"
         :class="statusPill.className"

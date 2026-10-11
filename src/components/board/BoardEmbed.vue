@@ -28,6 +28,7 @@ const statusText = computed(() => {
 })
 
 let generation = 0
+let imageGeneration = 0
 let disposed = false
 let loadedUpdatedAt: number | null = null
 let controller: AbortController | null = null
@@ -51,6 +52,7 @@ async function loadPreview(): Promise<void> {
   const current = ++generation
   controller?.abort()
   metadataController?.abort()
+  metadataController = null
   const request = new AbortController()
   controller = request
   state.value = 'pending'
@@ -62,6 +64,7 @@ async function loadPreview(): Promise<void> {
     loadedUpdatedAt = preview.metadata.updatedAt
     revision.value = preview.revision
     outcome.value = preview.image ? 'image' : 'empty'
+    imageGeneration = current
     replaceImage(preview.image ? URL.createObjectURL(preview.image) : '')
     // The image's load event settles a non-empty preview for PDF export.
     if (!preview.image) state.value = 'ready'
@@ -91,11 +94,11 @@ async function refresh(): Promise<void> {
 }
 
 function onImageLoad(event: Event): void {
-  if ((event.target as HTMLImageElement).getAttribute('src') === imageUrl.value) state.value = 'ready'
+  if (!disposed && imageGeneration === generation && (event.target as HTMLImageElement).getAttribute('src') === imageUrl.value) state.value = 'ready'
 }
 
 function onImageError(event: Event): void {
-  if ((event.target as HTMLImageElement).getAttribute('src') === imageUrl.value) showError(new Error('Image unavailable'))
+  if (!disposed && imageGeneration === generation && (event.target as HTMLImageElement).getAttribute('src') === imageUrl.value) showError(new Error('Image unavailable'))
 }
 
 watch(() => props.boardId, () => {

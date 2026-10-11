@@ -112,9 +112,9 @@ editor's menu. Paste the copied Markdown on its own line in a Note:
 ```
 
 Reading and preview modes display a crisp SVG image of the saved Board. Click
-the image or its caption to return to the Board editor. The reference uses a
-stable Board ID, so renaming the Board does not break it; the caption displays
-its current title. Saving a Board updates the embed when you return to the
+the image to return to the Board editor. The reference uses a
+stable Board ID, so renaming the Board does not break it; the image's alternative
+text uses its current title. Saving a Board updates the embed when you return to the
 Note. Visible Notes also check for changes every 15 seconds while the browser
 tab is active. Only the saved server version is shown, not recovery drafts.
 

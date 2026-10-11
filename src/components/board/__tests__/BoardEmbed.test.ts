@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 import { flushPromises, mount, type VueWrapper } from '@vue/test-utils'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { defineComponent, h } from 'vue'
 import BoardEmbed from '../BoardEmbed.vue'
 import { useI18n } from '../../../composables/useI18n'
 import { BoardApiError, getBoardMetadata } from '../../../features/board/api'
@@ -18,6 +19,13 @@ const nextId = '8a1c2544-dad0-4f20-a593-7bbc59882922'
 const createObjectURL = vi.fn(() => 'blob:board-preview')
 const revokeObjectURL = vi.fn()
 let wrapper: VueWrapper | undefined
+
+function deferred<T>() {
+  let resolve!: (value: T) => void
+  let reject!: (error: unknown) => void
+  const promise = new Promise<T>((done, fail) => { resolve = done; reject = fail })
+  return { promise, resolve, reject }
+}
 
 function preview(updatedAt = 2, image: Blob | null = new Blob(['<svg />'], { type: 'image/svg+xml' })): BoardPreview {
   return {
@@ -51,6 +59,131 @@ afterEach(() => {
 })
 
 describe('Board embeds', () => {
+  it('loads multiple embeds once and does not re-export unchanged scenes on polling', async () => {
+    wrapper = mount(defineComponent({ setup: () => () => h('article', [
+      h(BoardEmbed, { boardId: id }), h(BoardEmbed, { boardId: nextId }),
+    ]) }))
+    await flushPromises()
+    for (const img of wrapper.findAll('img')) await img.trigger('load')
+    expect(loadBoardPreview).toHaveBeenCalledTimes(2)
+    await vi.advanceTimersByTimeAsync(30_000)
+    expect(getBoardMetadata).toHaveBeenCalledTimes(4)
+    expect(loadBoardPreview).toHaveBeenCalledTimes(2)
+    wrapper.unmount()
+    wrapper = undefined
+    expect(revokeObjectURL).toHaveBeenCalledTimes(2)
+    expect(vi.getTimerCount()).toBe(0)
+  })
+  it('clears a previous image immediately and fences consecutive delayed Board switches', async () => {
+    createObjectURL.mockReturnValueOnce('blob:first').mockReturnValueOnce('blob:last')
+    wrapper = mount(BoardEmbed, { props: { boardId: id } })
+    await flushPromises()
+    await wrapper.get('img').trigger('load')
+    const middle = deferred<BoardPreview>()
+    const last = deferred<BoardPreview>()
+    vi.mocked(loadBoardPreview).mockReturnValueOnce(middle.promise).mockReturnValueOnce(last.promise)
+    await wrapper.setProps({ boardId: nextId })
+    expect(wrapper.find('img').exists()).toBe(false)
+    expect(revokeObjectURL).toHaveBeenCalledWith('blob:first')
+    const middleSignal = vi.mocked(loadBoardPreview).mock.calls[1]![1]!
+    await wrapper.setProps({ boardId: id })
+    expect(middleSignal.aborted).toBe(true)
+    last.resolve(preview(8))
+    await flushPromises()
+    middle.resolve({ ...preview(7), metadata: { ...preview(7).metadata, title: 'Obsolete' } })
+    await flushPromises()
+    expect(wrapper.get('img').attributes('alt')).toBe('Saved diagram')
+    expect(wrapper.get('img').attributes('src')).toBe('blob:last')
+    expect(wrapper.attributes('data-board-revision')).toBe('8')
+    expect(createObjectURL).toHaveBeenCalledTimes(2)
+  })
+
+  it('keeps the old image during same-Board refresh but ignores its late image events', async () => {
+    wrapper = mount(BoardEmbed, { props: { boardId: id } })
+    await flushPromises()
+    await wrapper.get('img').trigger('load')
+    const pending = deferred<BoardPreview>()
+    vi.mocked(loadBoardPreview).mockReturnValueOnce(pending.promise)
+    boardMetadataSource.upsert(preview(3).metadata)
+    await flushPromises()
+    expect(wrapper.find('img').exists()).toBe(true)
+    await wrapper.get('img').trigger('load')
+    await wrapper.get('img').trigger('error')
+    expect(wrapper.attributes('data-board-state')).toBe('pending')
+    pending.reject(new Error('Offline'))
+    await flushPromises()
+    expect(wrapper.find('img').exists()).toBe(false)
+    expect(wrapper.attributes('data-board-state')).toBe('error')
+    await wrapper.get('.board-embed-retry').trigger('click')
+    await flushPromises()
+    await wrapper.get('img').trigger('load')
+    expect(wrapper.attributes('data-board-state')).toBe('ready')
+  })
+
+  it('recovers from an SVG image load failure by rendering a new URL', async () => {
+    createObjectURL.mockReturnValueOnce('blob:broken').mockReturnValueOnce('blob:recovered')
+    wrapper = mount(BoardEmbed, { props: { boardId: id } })
+    await flushPromises()
+    await wrapper.get('img').trigger('error')
+    expect(revokeObjectURL).toHaveBeenCalledWith('blob:broken')
+    expect(wrapper.text()).toContain('Reload')
+    await wrapper.get('button').trigger('click')
+    await flushPromises()
+    await wrapper.get('img').trigger('load')
+    expect(wrapper.attributes('data-board-state')).toBe('ready')
+    expect(wrapper.get('img').attributes('src')).toBe('blob:recovered')
+  })
+
+  it('does not allocate URLs for responses arriving after unmount', async () => {
+    const pending = deferred<BoardPreview>()
+    vi.mocked(loadBoardPreview).mockReturnValueOnce(pending.promise)
+    wrapper = mount(BoardEmbed, { props: { boardId: id } })
+    const signal = vi.mocked(loadBoardPreview).mock.calls[0]![1]!
+    wrapper.unmount()
+    wrapper = undefined
+    pending.resolve(preview())
+    await flushPromises()
+    expect(signal.aborted).toBe(true)
+    expect(createObjectURL).not.toHaveBeenCalled()
+    expect(vi.getTimerCount()).toBe(0)
+  })
+
+  it('a cancelled metadata request cannot block polling for a newly selected Board', async () => {
+    wrapper = mount(BoardEmbed, { props: { boardId: id } })
+    await flushPromises()
+    await wrapper.get('img').trigger('load')
+    const pending = deferred<BoardPreview['metadata']>()
+    vi.mocked(getBoardMetadata).mockReturnValueOnce(pending.promise)
+    window.dispatchEvent(new Event('focus'))
+    await flushPromises()
+    const signal = vi.mocked(getBoardMetadata).mock.calls[0]![1]!
+    await wrapper.setProps({ boardId: nextId })
+    await flushPromises()
+    await wrapper.get('img').trigger('load')
+    expect(signal.aborted).toBe(true)
+    await vi.advanceTimersByTimeAsync(15_000)
+    expect(getBoardMetadata).toHaveBeenCalledTimes(2)
+    pending.reject(new BoardApiError('Gone', 404))
+    await flushPromises()
+    expect(wrapper.find('img').exists()).toBe(true)
+    expect(wrapper.attributes('data-board-state')).toBe('ready')
+  })
+
+  it.each([new Error('Network disconnected'), new BoardApiError('Server error', 500)])('clears inaccessible previews and allows retry: %s', async error => {
+    wrapper = mount(BoardEmbed, { props: { boardId: id } })
+    await flushPromises()
+    await wrapper.get('img').trigger('load')
+    vi.mocked(getBoardMetadata).mockRejectedValueOnce(error)
+    window.dispatchEvent(new Event('focus'))
+    await flushPromises()
+    expect(wrapper.attributes('data-board-state')).toBe('error')
+    expect(wrapper.find('img').exists()).toBe(false)
+    await wrapper.get('button').trigger('click')
+    await flushPromises()
+    await wrapper.get('img').trigger('load')
+    expect(wrapper.attributes('data-board-state')).toBe('ready')
+  })
+
   it('shows a linked SVG image and settles only when the image loads', async () => {
     wrapper = mount(BoardEmbed, { props: { boardId: id, label: 'Old title' } })
     await flushPromises()

@@ -49,7 +49,14 @@ export interface ToolCallRecord {
   id: string
   name: string
   input: Record<string, unknown>
-  result: { content: string; is_error: boolean }
+  // Only optimistic tool_use records are pending. Persisted results (including
+  // legacy empty results) are complete; tool_result replaces this placeholder.
+  result: { content: string; is_error: boolean; pending?: boolean }
+}
+
+export function toolCallStatus(call: ToolCallRecord): 'pending' | 'success' | 'error' {
+  if (call.result.is_error) return 'error'
+  return call.result.pending ? 'pending' : 'success'
 }
 
 export interface ActiveSession {
