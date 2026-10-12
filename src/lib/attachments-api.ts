@@ -4,6 +4,10 @@ import type {
   AttachmentIndexStatus,
   AttachmentListQuery,
   AttachmentPage,
+  AttachmentReferenceIndexStatus,
+  AttachmentReferencePage,
+  AttachmentCleanupPreview,
+  AttachmentResourceKey,
 } from '../../shared/attachmentProtocol'
 
 function queryString(query: AttachmentListQuery): string {
@@ -18,16 +22,51 @@ function queryString(query: AttachmentListQuery): string {
   return value ? `?${value}` : ''
 }
 
-export async function listAttachments(query: AttachmentListQuery = {}): Promise<AttachmentPage> {
-  return jsonOrThrow<AttachmentPage>(await authFetch(`/api/attachments${queryString(query)}`))
+export async function listAttachments(query: AttachmentListQuery = {}, signal?: AbortSignal): Promise<AttachmentPage> {
+  return jsonOrThrow<AttachmentPage>(await authFetch(`/api/attachments${queryString(query)}`, { signal }))
 }
 
-export async function getAttachmentIndexStatus(): Promise<AttachmentIndexStatus> {
-  return jsonOrThrow<AttachmentIndexStatus>(await authFetch('/api/attachments/index-status'))
+export async function getAttachmentIndexStatus(signal?: AbortSignal): Promise<AttachmentIndexStatus> {
+  return jsonOrThrow<AttachmentIndexStatus>(await authFetch('/api/attachments/index-status', { signal }))
 }
 
-export async function refreshAttachmentIndex(): Promise<{
+export async function refreshAttachmentIndex(signal?: AbortSignal): Promise<{
   indexStatus: AttachmentIndexStatus
 }> {
-  return jsonOrThrow(await authFetch('/api/attachments/refresh', { method: 'POST' }))
+  return jsonOrThrow(await authFetch('/api/attachments/refresh', { method: 'POST', signal }))
+}
+
+export async function getAttachmentReferenceIndexStatus(signal?: AbortSignal): Promise<AttachmentReferenceIndexStatus> {
+  return jsonOrThrow<AttachmentReferenceIndexStatus>(await authFetch('/api/attachments/references/status', { signal }))
+}
+
+export async function refreshAttachmentReferences(signal?: AbortSignal): Promise<AttachmentReferenceIndexStatus> {
+  return jsonOrThrow<AttachmentReferenceIndexStatus>(await authFetch('/api/attachments/references/refresh', {
+    method: 'POST',
+    signal,
+  }))
+}
+
+export async function queryAttachmentReferences(
+  resource: AttachmentResourceKey,
+  options: { offset?: number; limit?: number; signal?: AbortSignal } = {},
+): Promise<AttachmentReferencePage> {
+  return jsonOrThrow<AttachmentReferencePage>(await authFetch('/api/attachments/references/query', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ resource, offset: options.offset, limit: options.limit }),
+    signal: options.signal,
+  }))
+}
+
+export async function previewAttachmentCleanup(
+  resource: AttachmentResourceKey,
+  signal?: AbortSignal,
+): Promise<AttachmentCleanupPreview> {
+  return jsonOrThrow<AttachmentCleanupPreview>(await authFetch('/api/attachments/cleanup-preview', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ resource }),
+    signal,
+  }))
 }

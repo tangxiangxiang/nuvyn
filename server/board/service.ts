@@ -12,6 +12,7 @@ import { assertAssetId } from '../assets/validation.js'
 import type { AssetServiceDependencies } from '../assets/types.js'
 import { BoardError } from './errors.js'
 import { createBoardRepository, type BoardRepository } from './repository.js'
+import { notifyAttachmentReferencesChanged } from '../attachmentReferenceEvents.js'
 import {
   assertBoardId,
   assertBoardFolderId,
@@ -77,6 +78,7 @@ export class BoardService {
       throw new BoardError('BOARD_STORAGE_ERROR', 500, 'Board timestamp is not a safe millisecond value')
     }
     this.repository.createBoard(id, title, now, folderId)
+    notifyAttachmentReferencesChanged()
     const board = this.repository.getBoard(id)
     if (!board) throw new BoardError('BOARD_STORAGE_ERROR', 500, 'Board disappeared after creation')
     return board
@@ -186,6 +188,7 @@ export class BoardService {
     const id = assertBoardId(boardId)
     const candidateAssetIds = this.repository.deleteBoard(id)
     if (!candidateAssetIds) throw new BoardError('BOARD_NOT_FOUND', 404, 'Board was not found')
+    notifyAttachmentReferencesChanged()
     const cleanupFailures = await this.cleanupAssetIds(candidateAssetIds)
     return { deleted: true, cleanupFailures }
   }

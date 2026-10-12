@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, provide, ref, watch, watchEffect } from 'vue'
+import { computed, nextTick, provide, ref, watch, watchEffect } from 'vue'
 import { NButton } from 'naive-ui'
 import { useRoute, useRouter } from 'vue-router'
 import NavBar from './components/NavBar.vue'
@@ -29,6 +29,7 @@ import { workspaceKindForPath, type ChromeStyle, type WorkspaceKind } from './li
 import { createLedgerAnalysisExportCommand } from './features/ledger/ledgerAnalysisExport'
 import { createIndexedDbBoardCheckpointStore } from './features/board/checkpointStore'
 import { NUVYN_BROWSER_STORAGE_KEYS, readStorageKey, writeStorageKey } from './technicalNamespace'
+import type { AttachmentReference } from '../shared/attachmentProtocol'
 
 const route = useRoute()
 const router = useRouter()
@@ -54,6 +55,18 @@ const boardRecoveryStore = createIndexedDbBoardCheckpointStore()
 function requestSettings(): void {
   settingsRequestTick.value += 1
   if (route.path === '/ledger' || route.path.startsWith('/ledger/')) ledgerSettingsOpen.value = true
+}
+
+function navigateToAttachmentReference(reference: AttachmentReference): void {
+  ledgerSettingsOpen.value = false
+  void nextTick(() => {
+    if (reference.owner.kind === 'note') {
+      const path = reference.sourcePath ?? reference.owner.id
+      void router.push({ name: 'vault-doc', params: { pathMatch: path.split('/') } })
+      return
+    }
+    void router.push({ name: 'board-editor', params: { boardId: reference.owner.id } })
+  })
 }
 
 function onOpenSearch(): void {
@@ -366,6 +379,7 @@ provide(VaultViewModeKey, { mode: viewMode, set: setViewMode, toggle: toggleView
     v-if="isLedgerRoute"
     :open="ledgerSettingsOpen"
     @close="ledgerSettingsOpen = false"
+    @navigate-reference="navigateToAttachmentReference"
   />
   <section
     v-if="!showRoutedContent"

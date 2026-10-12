@@ -40,6 +40,7 @@ import SettingsLedgerAccountIconsSection from './SettingsLedgerAccountIconsSecti
 import SettingsLedgerCategoriesSection from './SettingsLedgerCategoriesSection.vue'
 import SettingsDiaryMoodIconsSection from './SettingsDiaryMoodIconsSection.vue'
 import SettingsAttachmentManagerSection from './SettingsAttachmentManagerSection.vue'
+import type { AttachmentReference } from '../../../shared/attachmentProtocol'
 
 const props = withDefaults(defineProps<{
   open: boolean
@@ -48,7 +49,10 @@ const props = withDefaults(defineProps<{
 }>(), {
   activeSectionCanLeave: true,
 })
-const emit = defineEmits<{ close: [] }>()
+const emit = defineEmits<{
+  close: []
+  navigateReference: [reference: AttachmentReference]
+}>()
 
 const toast = useToast()
 const aiHistory = useAiHistory()
@@ -482,6 +486,7 @@ onBeforeUnmount(() => {
             <SettingsAttachmentManagerSection
               v-if="active === 'storage-attachments'"
               @back="active = 'ai'"
+              @navigate-reference="emit('navigateReference', $event)"
             />
             <SettingsAiSection
               v-else-if="active === 'ai'"

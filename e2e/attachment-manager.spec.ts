@@ -7,15 +7,22 @@ test('Attachment Manager lists real sources, filters, refreshes, and preserves t
   const runId = randomUUID()
   const notePath = `inbox/attachment-manager-note-${runId}`
   const assetId = randomUUID()
+  const boardTitle = `Attachment reference board ${runId.slice(0, 8)}`
+  const consumerNotePath = `inbox/attachment-reference-consumer-${runId}`
   const materialName = `Attachment Manager Material ${runId.slice(0, 8)}`
   const initialFileName = `attachment-manager-initial-${runId.slice(0, 8)}.txt`
   const refreshedFileName = `attachment-manager-refreshed-${runId.slice(0, 8)}.txt`
+  const diagramFileName = `attachment-manager-diagram-${runId.slice(0, 8)}.png`
   const vaultRoot = process.env.NUVYN_DRAFT_E2E_VAULT
   if (!vaultRoot) throw new Error('NUVYN_DRAFT_E2E_VAULT is required for Attachment Manager E2E')
   const initialFilePath = path.join(vaultRoot, 'inbox', initialFileName)
   const refreshedFilePath = path.join(vaultRoot, 'inbox', refreshedFileName)
+  const diagramFilePath = path.join(vaultRoot, 'inbox', diagramFileName)
   let materialId: string | null = null
+  let boardId: string | null = null
+  let boardCreated = false
   let noteCreated = false
+  let consumerNoteCreated = false
   let assetCreated = false
 
   try {
@@ -23,6 +30,19 @@ test('Attachment Manager lists real sources, filters, refreshes, and preserves t
     expect(note.status(), await note.text()).toBe(201)
     noteCreated = true
     await fs.writeFile(initialFilePath, 'catalog fixture')
+    await fs.writeFile(diagramFilePath, Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x00]))
+
+    const consumer = await request.post('/api/posts', { data: { path: consumerNotePath, title: 'Attachment reference consumer' } })
+    expect(consumer.status(), await consumer.text()).toBe(201)
+    consumerNoteCreated = true
+    const consumerInitial = await (await request.get(`/api/posts/${consumerNotePath}`)).json() as { raw: string }
+    const consumerSave = await request.put(`/api/posts/${consumerNotePath}`, {
+      data: {
+        baseRaw: consumerInitial.raw,
+        raw: `${consumerInitial.raw}\n\n![Diagram](./${diagramFileName})`,
+      },
+    })
+    expect(consumerSave.ok(), await consumerSave.text()).toBe(true)
 
     const asset = await request.put(`/api/assets/${assetId}`, {
       headers: { 'Content-Type': 'image/png' },
@@ -30,6 +50,37 @@ test('Attachment Manager lists real sources, filters, refreshes, and preserves t
     })
     expect(asset.status(), await asset.text()).toBe(200)
     assetCreated = true
+
+    const boardResponse = await request.post('/api/board', { data: { title: boardTitle } })
+    expect(boardResponse.status(), await boardResponse.text()).toBe(201)
+    boardId = (await boardResponse.json() as { metadata: { id: string } }).metadata.id
+    boardCreated = true
+    const scene = await request.put(`/api/board/${boardId}/scene`, {
+      data: {
+        engine: 'excalidraw',
+        sceneVersion: 1,
+        expectedRevision: 0,
+        scene: {
+          engineData: {
+            elements: [{ id: 'attachment-manager-image', type: 'image', fileId: 'attachment-manager-image-file', isDeleted: false }],
+            fileMap: { 'attachment-manager-image-file': assetId },
+          },
+          persistentAppState: {},
+          assetRefs: [assetId],
+        },
+      },
+    })
+    expect(scene.status(), await scene.text()).toBe(200)
+    const thumbnail = await request.put(`/api/board/${boardId}/thumbnail`, { data: { assetId } })
+    expect(thumbnail.status(), await thumbnail.text()).toBe(200)
+    const consumerAfterImage = await (await request.get(`/api/posts/${consumerNotePath}`)).json() as { raw: string }
+    const consumerBoardSave = await request.put(`/api/posts/${consumerNotePath}`, {
+      data: {
+        baseRaw: consumerAfterImage.raw,
+        raw: `${consumerAfterImage.raw}\n![Board](board:${boardId})`,
+      },
+    })
+    expect(consumerBoardSave.ok(), await consumerBoardSave.text()).toBe(true)
 
     const material = await request.post('/api/board-materials', {
       data: {
@@ -74,6 +125,16 @@ test('Attachment Manager lists real sources, filters, refreshes, and preserves t
     await expect(settings.locator('.attachment-resource-row')).toHaveCount(1)
     await settings.locator('.attachment-resource-row').click()
     await expect(settings.locator('.attachment-detail-panel')).toContainText(assetId)
+    await expect(settings.locator('.attachment-reference-row')).toHaveCount(3)
+    const boardSceneReference = settings.locator('.attachment-reference-row').filter({ hasText: /画布资源|canvas asset/ })
+    const boardThumbnailReference = settings.locator('.attachment-reference-row').filter({ hasText: /缩略图|thumbnail/ })
+    await expect(boardSceneReference).toHaveCount(1)
+    await expect(boardSceneReference).toContainText(boardTitle)
+    await expect(boardThumbnailReference).toHaveCount(1)
+    await expect(boardThumbnailReference).toContainText(boardTitle)
+    const embeddedNote = settings.locator('.attachment-reference-row').filter({ hasText: 'Attachment reference consumer' })
+    await expect(embeddedNote).toContainText(/Board 嵌入|Board embed/)
+    await expect(embeddedNote).toContainText(/间接使用|indirect/)
 
     await settings.getByRole('button', { name: /返回设置|Back to settings/ }).click()
     await expect(settings.locator('.settings-nav')).toBeVisible()
@@ -85,15 +146,39 @@ test('Attachment Manager lists real sources, filters, refreshes, and preserves t
         === document.querySelector('.editor-pane .monaco-editor')
     ))).toBe(true)
     expect(page.url()).toBe(initialUrl)
+
+    // Reopen the manager and verify the real Note → local image relationship,
+    // its read-only risk report, and navigation through the existing SPA route.
+    await page.locator('[data-testid="account-button"]').click()
+    await page.locator('[data-testid="account-settings"]').click()
+    await page.locator('.settings-modal').getByRole('button', { name: /存储与附件|Storage & attachments/ }).click()
+    await expect(settings.locator('#attachment-manager-title')).toBeVisible()
+    await settings.locator('.attachment-toolbar input').fill(diagramFileName)
+    await expect(settings.locator('.attachment-resource-row')).toHaveCount(1)
+    await settings.locator('.attachment-resource-row').click()
+    const referenceRow = settings.locator('.attachment-reference-row').filter({ hasText: 'Attachment reference consumer' })
+    await expect(referenceRow).toBeVisible()
+    await expect(referenceRow).toContainText(/直接|direct/)
+    await settings.getByRole('button', { name: /检查引用风险|Check reference risk/ }).click()
+    const riskReport = settings.locator('.attachment-risk-result')
+    await expect(riskReport).toContainText(/引用|use/i)
+    await expect(riskReport).toContainText(/历史版本未检查|Git history was not checked/)
+    await referenceRow.click()
+    await expect(settings).toHaveCount(0)
+    await expect(page).toHaveURL(new RegExp(`/vault/${consumerNotePath}$`))
+    await expect(page.locator('.editor-pane .monaco-editor').first()).toBeVisible()
   } finally {
+    if (boardCreated && boardId) await request.delete(`/api/board/${boardId}`).catch(() => {})
     if (materialId) {
       await request.post(`/api/board-materials/${materialId}/archive`).catch(() => {})
       await request.delete(`/api/board-materials/${materialId}`).catch(() => {})
     }
     if (assetCreated) await request.delete(`/api/assets/${assetId}/unreferenced`).catch(() => {})
+    if (consumerNoteCreated) await request.delete(`/api/posts/${consumerNotePath}`).catch(() => {})
     if (noteCreated) await request.delete(`/api/posts/${notePath}`).catch(() => {})
     await fs.rm(initialFilePath, { force: true })
     await fs.rm(refreshedFilePath, { force: true })
+    await fs.rm(diagramFilePath, { force: true })
     await request.post('/api/attachments/refresh').catch(() => {})
   }
 })
@@ -192,7 +277,9 @@ test('Attachment Manager remains reachable in desktop, tablet, and short mobile 
       const details = settings.locator('.attachment-detail-panel')
       await details.scrollIntoViewIfNeeded()
       await expect(details).toContainText(filenames[34]!)
-      const detailReachable = await details.evaluate((element) => {
+      const detailHeading = details.locator('.attachment-detail-heading')
+      await detailHeading.scrollIntoViewIfNeeded()
+      const detailReachable = await detailHeading.evaluate((element) => {
         const rect = element.getBoundingClientRect()
         return rect.top >= 0 && rect.bottom <= window.innerHeight
       })

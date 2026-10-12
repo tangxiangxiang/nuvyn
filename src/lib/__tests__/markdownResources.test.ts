@@ -51,6 +51,36 @@ describe('Markdown resource logical resolution and expansion', () => {
     expect(parseResourceRanges('-1')).toBeNull()
   })
 
+  it('reports successful resource directives and failures with their real source and include chain', async () => {
+    const resolver = resolverFor({
+      'docs/part.md': '<<< ../examples/demo.ts',
+      'examples/demo.ts': 'export const demo = true',
+    })
+    const references: Array<{ kind: string; sourcePath?: string; resourcePath: string; line: number; includeChain: string[] }> = []
+    const issues: Array<{ sourcePath?: string; line: number; kind?: string; resourcePath?: string }> = []
+    await expandMarkdownResources([
+      '<!--@include: ./part.md-->',
+      '<!--@include: ./missing.md-->',
+      '```md',
+      '<<< @/ignored.ts',
+      '```',
+    ].join('\n'), {
+      md: new MarkdownIt({ html: true }),
+      sourcePath: 'docs/index.md',
+      resourceResolver: resolver,
+      onResourceReference: (event) => references.push(event),
+      onError: (issue) => issues.push(issue),
+    })
+
+    expect(references).toEqual([
+      { kind: 'include', sourcePath: 'docs/index.md', resourcePath: 'docs/part.md', line: 1, includeChain: [] },
+      { kind: 'snippet', sourcePath: 'docs/part.md', resourcePath: 'examples/demo.ts', line: 1, includeChain: ['docs/part.md'] },
+    ])
+    expect(issues).toEqual([
+      { sourcePath: 'docs/index.md', line: 2, kind: 'include', resourcePath: 'docs/missing.md' },
+    ])
+  })
+
   it('applies single-line, closed, mixed, and open-ended ranges to final output', async () => {
     const source = ['line1', 'line2', 'line3', 'line4', 'line5', 'line6'].join('\n')
     const resolver = resolverFor({ 'examples/part.md': source, 'examples/demo.ts': source })

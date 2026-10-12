@@ -33,6 +33,10 @@ interface CatalogSnapshot {
   refreshedAt: number
 }
 
+export interface AttachmentCatalogReferenceProjection {
+  get(resourceKey: string): Pick<ManagedAttachment, 'referenceStatus' | 'referenceCount' | 'ownerCount'> | undefined
+}
+
 const SOURCES: readonly AttachmentSource[] = ['board-asset', 'vault-file', 'board-material']
 const TYPE_VALUES: readonly AttachmentResourceType[] = ['image', 'file', 'material']
 
@@ -160,16 +164,18 @@ export class AttachmentCatalog {
     return promise
   }
 
-  async getSummary(): Promise<AttachmentSummary> {
-    await this.ensureReady()
-    return this.summarize(this.requireSnapshot())
-  }
-
-  async list(query: AttachmentListQuery): Promise<AttachmentPage> {
+  async getSummary(projection?: AttachmentCatalogReferenceProjection): Promise<AttachmentSummary> {
     await this.ensureReady()
     const snapshot = this.requireSnapshot()
+    return this.summarize(snapshot, this.projectResources(snapshot.resources, projection))
+  }
+
+  async list(query: AttachmentListQuery, projection?: AttachmentCatalogReferenceProjection): Promise<AttachmentPage> {
+    await this.ensureReady()
+    const snapshot = this.requireSnapshot()
+    const resources = this.projectResources(snapshot.resources, projection)
     const search = query.search?.trim().toLocaleLowerCase() ?? ''
-    const filtered = snapshot.resources.filter((resource) => {
+    const filtered = resources.filter((resource) => {
       if (query.type && resource.type !== query.type) return false
       if (query.source && resource.source !== query.source) return false
       if (query.referenceStatus && resource.referenceStatus !== query.referenceStatus) return false
@@ -187,17 +193,33 @@ export class AttachmentCatalog {
       total: filtered.length,
       offset,
       limit,
-      summary: this.summarize(snapshot),
+      summary: this.summarize(snapshot, resources),
       indexStatus: status,
     }
   }
 
-  private summarize(snapshot: CatalogSnapshot): AttachmentSummary {
+  async hasResourceKey(resourceKey: string): Promise<boolean> {
+    await this.ensureReady()
+    return this.requireSnapshot().resources.some((resource) => stableKey(resource) === resourceKey)
+  }
+
+  private projectResources(
+    resources: readonly ManagedAttachment[],
+    projection?: AttachmentCatalogReferenceProjection,
+  ): ManagedAttachment[] {
+    if (!projection) return [...resources]
+    return resources.map((resource) => {
+      const value = projection.get(stableKey(resource))
+      return value ? { ...resource, ...value } : resource
+    })
+  }
+
+  private summarize(snapshot: CatalogSnapshot, resources = snapshot.resources): AttachmentSummary {
     const sources = Object.fromEntries(SOURCES.map((source) => [source, { count: 0, knownBytes: 0 }])) as AttachmentSummary['sources']
     let knownBytes = 0
     let unknownByteSizeCount = 0
     let unknownReferenceCount = 0
-    for (const resource of snapshot.resources) {
+    for (const resource of resources) {
       const source = sources[resource.source]
       source.count += 1
       if (resource.byteSize === null) unknownByteSizeCount += 1

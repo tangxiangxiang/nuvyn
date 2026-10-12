@@ -1,5 +1,4 @@
 import type MarkdownIt from 'markdown-it'
-import { authFetchForPath } from './diary-request'
 import { findMarkdownInlineSourceOwnership } from './markdownInlineSource'
 import { isManagedDiaryPath } from '../../shared/diaryProtocol'
 
@@ -88,6 +87,23 @@ export interface ExpandedMarkdown {
   sourcePathByLine: Array<string | undefined>
   /** One source line number per flattened Markdown line. */
   sourceLineByLine: Array<number | undefined>
+  /** Include chain for each flattened line, excluding the root document. */
+  viaPathsByLine: string[][]
+}
+
+export interface MarkdownResourceExpansionEvent {
+  kind: 'snippet' | 'include'
+  sourcePath?: string
+  resourcePath: string
+  line: number
+  includeChain: string[]
+}
+
+export interface MarkdownResourceExpansionIssue {
+  sourcePath?: string
+  line: number
+  kind?: 'snippet' | 'include'
+  resourcePath?: string
 }
 
 function byteLength(value: string): number {
@@ -512,6 +528,8 @@ interface ExpansionContext {
   stack: Set<string>
   budgetUsed: number
   emittedLineCount: number
+  onResourceReference?: (event: MarkdownResourceExpansionEvent) => void
+  onError?: (issue: MarkdownResourceExpansionIssue) => void
 }
 
 function throwIfAborted(signal?: AbortSignal): void {
@@ -550,10 +568,11 @@ async function readTextResource(
 
 function addLines(
   context: ExpansionContext,
-  target: Array<{ text: string; sourcePath?: string; sourceLine?: number }>,
+  target: Array<{ text: string; sourcePath?: string; sourceLine?: number; includeChain: string[] }>,
   text: string,
   sourcePath: string | undefined,
   sourceLineStart: number,
+  includeChain: string[],
 ): void {
   const lines = text.replace(/\r\n?/gu, '\n').split('\n')
   let nextBudget = context.budgetUsed
@@ -573,6 +592,7 @@ function addLines(
     text: line,
     ...(sourcePath ? { sourcePath } : {}),
     sourceLine: sourceLineStart + index,
+    includeChain,
   }))
 }
 
@@ -581,12 +601,13 @@ async function expandSource(
   sourcePath: string | undefined,
   depth: number,
   context: ExpansionContext,
-): Promise<Array<{ text: string; sourcePath?: string; sourceLine?: number }>> {
+  includeChain: string[],
+): Promise<Array<{ text: string; sourcePath?: string; sourceLine?: number; includeChain: string[] }>> {
   throwIfAborted(context.signal)
   const normalized = source.replace(/\r\n?/gu, '\n')
   const lines = normalized.split('\n')
   const { opaqueLines, singleLineHtmlBlocks, codeSpanDirectiveLines } = collectOpaqueLines(context.md, normalized)
-  const output: Array<{ text: string; sourcePath?: string; sourceLine?: number }> = []
+  const output: Array<{ text: string; sourcePath?: string; sourceLine?: number; includeChain: string[] }> = []
 
   for (let index = 0; index < lines.length; index += 1) {
     throwIfAborted(context.signal)
@@ -595,27 +616,30 @@ async function expandSource(
     // directive parsing. A standalone-looking slice owned by code_inline is
     // literal source, never a resource read or a local error placeholder.
     if (codeSpanDirectiveLines.has(index)) {
-      addLines(context, output, line, sourcePath, index + 1)
+      addLines(context, output, line, sourcePath, index + 1, includeChain)
       continue
     }
     const directive = parseMarkdownResourceDirective(line)
     if (!isDirectiveLineAllowed(index, directive, opaqueLines, singleLineHtmlBlocks)) {
       if (!directive && looksLikeResourceDirective(line) && !opaqueLines.has(index)) {
-        addLines(context, output, placeholder(), sourcePath, index + 1)
+        try { context.onError?.({ sourcePath, line: index + 1 }) } catch { /* diagnostics must not alter rendering */ }
+        addLines(context, output, placeholder(), sourcePath, index + 1, includeChain)
         continue
       }
-      addLines(context, output, line, sourcePath, index + 1)
+      addLines(context, output, line, sourcePath, index + 1, includeChain)
       continue
     }
 
     const beforeBudget = context.budgetUsed
     const beforeEmittedLineCount = context.emittedLineCount
+    let resolvedPath: string | undefined
     try {
       const current = directive as ResourceDirective
       const resourcePath = resolveLogicalResourceReference(sourcePath, current.pathReference)
       if (!resourcePath || !isAllowedResourcePath(current.kind, resourcePath)) {
         throw new MarkdownResourceError('resource-path-rejected')
       }
+      resolvedPath = resourcePath
       if (current.kind === 'include' && depth + 1 > MAX_INCLUDE_DEPTH) {
         throw new MarkdownResourceError('include-depth-limit')
       }
@@ -635,12 +659,22 @@ async function expandSource(
         throw new MarkdownResourceError('resource-size-limit')
       }
 
+      try {
+        context.onResourceReference?.({
+          kind: current.kind,
+          sourcePath,
+          resourcePath,
+          line: index + 1,
+          includeChain,
+        })
+      } catch { /* diagnostics must not alter rendering */ }
+
       if (current.kind === 'snippet') {
-        addLines(context, output, buildSnippetFence(selected, resourcePath, current), resourcePath, index + 1)
+        addLines(context, output, buildSnippetFence(selected, resourcePath, current), resourcePath, index + 1, includeChain)
       } else {
         context.stack.add(resourcePath)
         try {
-          const included = await expandSource(selected, resourcePath, depth + 1, context)
+          const included = await expandSource(selected, resourcePath, depth + 1, context, [...includeChain, resourcePath])
           output.push(...included)
         } finally {
           context.stack.delete(resourcePath)
@@ -648,9 +682,17 @@ async function expandSource(
       }
     } catch (error) {
       if (isAbortError(error)) throw error
+      try {
+        context.onError?.({
+          sourcePath,
+          line: index + 1,
+          kind: directive?.kind,
+          ...(resolvedPath ? { resourcePath: resolvedPath } : {}),
+        })
+      } catch { /* diagnostics must not alter rendering */ }
       context.budgetUsed = beforeBudget
       context.emittedLineCount = beforeEmittedLineCount
-      addLines(context, output, placeholder(), sourcePath, index + 1)
+      addLines(context, output, placeholder(), sourcePath, index + 1, includeChain)
     }
   }
   return output
@@ -663,6 +705,8 @@ export async function expandMarkdownResources(
     sourcePath?: string
     resourceResolver?: MarkdownResourceResolver
     signal?: AbortSignal
+    onResourceReference?: (event: MarkdownResourceExpansionEvent) => void
+    onError?: (issue: MarkdownResourceExpansionIssue) => void
   },
 ): Promise<ExpandedMarkdown> {
   const sourcePath = options.sourcePath ? normalizeSourceIdentity(options.sourcePath) ?? undefined : undefined
@@ -674,8 +718,10 @@ export async function expandMarkdownResources(
     stack: new Set(sourcePath ? [sourcePath] : []),
     budgetUsed: 0,
     emittedLineCount: 0,
+    onResourceReference: options.onResourceReference,
+    onError: options.onError,
   }
-  const lines = await expandSource(markdown, sourcePath, 0, context)
+  const lines = await expandSource(markdown, sourcePath, 0, context, [])
   const expandedMarkdown = lines.map(({ text }) => text).join('\n')
   const actualBytes = byteLength(expandedMarkdown)
   if (actualBytes !== context.budgetUsed || actualBytes > MAX_EXPANDED_MARKDOWN_BYTES) {
@@ -685,38 +731,8 @@ export async function expandMarkdownResources(
     markdown: expandedMarkdown,
     sourcePathByLine: lines.map(({ sourcePath: path }) => path),
     sourceLineByLine: lines.map(({ sourceLine }) => sourceLine),
+    viaPathsByLine: lines.map(({ includeChain }) => includeChain),
   }
-}
-
-async function readJsonError(response: Response): Promise<never> {
-  const body = await response.json().catch(() => null) as { code?: unknown } | null
-  const code = typeof body?.code === 'string' ? body.code : 'resource-unavailable'
-  throw new MarkdownResourceError(code)
-}
-
-export const authenticatedMarkdownResourceResolver: MarkdownResourceResolver = {
-  async read(request): Promise<MarkdownResourceReadResult> {
-    const query = new URLSearchParams({ kind: request.kind, path: request.path })
-    if (request.sourcePath && isManagedDiaryPath(request.sourcePath.replace(/\.md$/, ''))) {
-      query.set('source', request.sourcePath.replace(/\.md$/, ''))
-    }
-    // A managed Diary source authorizes the resource expansion through the
-    // existing Diary capability even when the included/snippet resource is an
-    // ordinary path. Selecting auth by resource path alone would omit that
-    // capability and incorrectly fail every unlocked cross-file resource.
-    const response = await authFetchForPath(request.sourcePath ?? request.path, `/api/markdown-resources?${query.toString()}`, {
-      method: 'GET',
-      credentials: 'same-origin',
-      signal: request.signal,
-    })
-    if (!response.ok) return readJsonError(response)
-    if (request.kind === 'image') {
-      return { kind: request.kind, path: request.path, content: new Uint8Array(await response.arrayBuffer()) }
-    }
-    const body = await response.json().catch(() => null) as { content?: unknown } | null
-    if (typeof body?.content !== 'string') throw new MarkdownResourceError('resource-invalid-response')
-    return { kind: request.kind, path: request.path, content: body.content }
-  },
 }
 
 export const __testing__ = {

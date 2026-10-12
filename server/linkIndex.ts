@@ -27,6 +27,7 @@ import { CONTENT_DIR, filePathFor } from './paths.js'
 import { resolveWikiTarget } from '../shared/linkResolve.js'
 import { getDb } from './db.js'
 import { classifyDiaryPath, isManagedDiaryPath } from '../shared/diaryProtocol.js'
+import { notifyAttachmentReferencesChanged } from './attachmentReferenceEvents.js'
 
 /** Raised when a body-scanning index build is requested without access to a
  * managed Diary body. */
@@ -301,6 +302,7 @@ export class LinkIndex {
     else this.references.delete(path)
     if (isNew) this.recomputeAllSources()
     else this.recomputeSource(path)
+    notifyAttachmentReferencesChanged()
   }
 
   /** Remove a file from the index and re-project every retained reference
@@ -309,6 +311,7 @@ export class LinkIndex {
   applyDelete(path: string): void {
     this.removePathState(path)
     this.recomputeAllSources()
+    notifyAttachmentReferencesChanged()
   }
 
   /** Rename: change membership, parse the supplied new source at its new
@@ -320,12 +323,14 @@ export class LinkIndex {
       : titleFromRaw(newPath, newRaw))
     this.setReferencesFromRaw(newPath, newRaw)
     this.recomputeAllSources()
+    notifyAttachmentReferencesChanged()
   }
 
   /** Cascade delete for a folder subtree. */
   applyFolderDelete(paths: string[]): void {
     for (const p of paths) this.removePathState(p)
     this.recomputeAllSources()
+    if (paths.length > 0) notifyAttachmentReferencesChanged()
   }
 
   /** Cascade rename: remove old memberships, install all new paths and
@@ -341,6 +346,7 @@ export class LinkIndex {
       this.setReferencesFromRaw(newPath, newRaw)
     }
     this.recomputeAllSources()
+    if (oldToNew.length > 0) notifyAttachmentReferencesChanged()
   }
 
   private registerPathWithoutRecompute(path: string, title = nameFromPath(path)): void {

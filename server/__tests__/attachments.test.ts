@@ -6,8 +6,9 @@ import path from 'node:path'
 import app from '../index.js'
 import { __setDbForTesting } from '../db.js'
 import { CONTENT_DIR, setContentDir } from '../paths.js'
-import { __setAttachmentCatalogForTesting } from '../attachments/routes.js'
+import { __setAttachmentCatalogForTesting, __setAttachmentReferenceIndexForRoutesTesting } from '../attachments/routes.js'
 import { AttachmentCatalog, type AttachmentCatalogAdapter } from '../attachments/catalog.js'
+import { AttachmentReferenceIndex } from '../attachments/references.js'
 import type { AttachmentSource } from '../../shared/attachmentProtocol.js'
 import {
   authenticatedRequest,
@@ -32,6 +33,7 @@ beforeEach(async () => {
 
 afterEach(async () => {
   __setAttachmentCatalogForTesting(null)
+  __setAttachmentReferenceIndexForRoutesTesting(null)
   closeAuthTestContext(auth)
   if (db.open) db.close()
   setContentDir(originalContentDir)
@@ -44,10 +46,65 @@ describe('Attachment Manager API', () => {
     const summary = await app.fetch(new Request('http://localhost/api/attachments/summary'))
     const status = await app.fetch(new Request('http://localhost/api/attachments/index-status'))
     const refresh = await app.fetch(new Request('http://localhost/api/attachments/refresh', { method: 'POST' }))
-    expect([list.status, summary.status, status.status, refresh.status]).toEqual([401, 401, 401, 401])
+    const referenceStatus = await app.fetch(new Request('http://localhost/api/attachments/references/status'))
+    const referenceQuery = await app.fetch(new Request('http://localhost/api/attachments/references/query', { method: 'POST' }))
+    const cleanupPreview = await app.fetch(new Request('http://localhost/api/attachments/cleanup-preview', { method: 'POST' }))
+    expect([list.status, summary.status, status.status, refresh.status, referenceStatus.status, referenceQuery.status, cleanupPreview.status])
+      .toEqual([401, 401, 401, 401, 401, 401, 401])
 
     const allowed = await app.fetch(authenticatedRequest(auth, '/api/attachments/index-status'))
     expect(allowed.status).toBe(200)
+  })
+
+  it('returns authenticated reference pages and a read-only risk preflight for a real Vault file', async () => {
+    const imagePath = path.join(root, 'inbox', 'diagram.png')
+    await fs.writeFile(imagePath, Buffer.from([1, 2, 3]))
+    await fs.writeFile(path.join(root, 'inbox', 'using-note.md'), '# Using note\n\n![Diagram](./diagram.png)')
+    const index = new AttachmentReferenceIndex(db, { root: () => root })
+    __setAttachmentReferenceIndexForRoutesTesting(index)
+
+    const resource = { kind: 'vault-file', path: 'inbox/diagram.png' }
+    const query = await app.fetch(authenticatedRequest(auth, '/api/attachments/references/query', {
+      method: 'POST',
+      origin: auth.runtime.config.publicOrigin,
+      body: { resource, offset: 0, limit: 10 },
+    }))
+    expect(query.status).toBe(200)
+    expect(await query.json()).toMatchObject({
+      resource,
+      referenceCount: 1,
+      ownerCount: 1,
+      currentFinding: 'in-use',
+      references: [{ owner: { kind: 'note', id: 'inbox/using-note' }, kind: 'note-image', relation: 'direct' }],
+    })
+
+    const preview = await app.fetch(authenticatedRequest(auth, '/api/attachments/cleanup-preview', {
+      method: 'POST',
+      origin: auth.runtime.config.publicOrigin,
+      body: { resource },
+    }))
+    expect(preview.status).toBe(200)
+    expect(await preview.json()).toMatchObject({
+      currentFinding: 'in-use',
+      deletionAllowed: false,
+      riskReasons: expect.arrayContaining([
+        'historical-versions-not-checked',
+        'draft-recovery-not-checked',
+        'protected-diary-restricted',
+      ]),
+    })
+    expect((await fs.readFile(imagePath)).byteLength).toBe(3)
+    expect(db.prepare('SELECT COUNT(*) AS count FROM assets').get()).toEqual({ count: 0 })
+  })
+
+  it('rejects arbitrary paths and malformed resource keys without exposing filesystem details', async () => {
+    const response = await app.fetch(authenticatedRequest(auth, '/api/attachments/references/query', {
+      method: 'POST',
+      origin: auth.runtime.config.publicOrigin,
+      body: { resource: { kind: 'vault-file', path: '../../etc/passwd' } },
+    }))
+    expect(response.status).toBe(400)
+    expect(await response.json()).toMatchObject({ code: 'ATTACHMENT_RESOURCE_INVALID' })
   })
 
   it('merges real sources, filters and paginates while keeping unknown references conservative', async () => {

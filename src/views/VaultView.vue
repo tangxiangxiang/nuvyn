@@ -1444,6 +1444,17 @@ function openLinkedDocument(path: string, anchor?: string): void {
   void vaultContext.editor.openLink(path, anchor)
 }
 
+function navigateToAttachmentReference(reference: import('../../shared/attachmentProtocol').AttachmentReference): void {
+  settingsOpen.value = false
+  void nextTick(() => {
+    if (reference.owner.kind === 'note') {
+      openLinkedDocument(reference.sourcePath ?? reference.owner.id)
+      return
+    }
+    void router.push({ name: 'board-editor', params: { boardId: reference.owner.id } })
+  })
+}
+
 function openEditorLink(target: { path: string; anchor?: string }): void {
   openLinkedDocument(target.path, target.anchor)
 }
@@ -3049,6 +3060,7 @@ watch(isReadMode, async (reading) => {
       :open="settingsOpen"
       :active-section-can-leave="tagManagementCanLeave"
       @close="settingsOpen = false"
+      @navigate-reference="navigateToAttachmentReference"
     >
       <template #tags>
         <TagManagementPanel

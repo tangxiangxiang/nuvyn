@@ -5,18 +5,30 @@ import { ArrowLeft, File, Photo, Refresh, Shape, Copy } from '@vicons/tabler'
 import { useI18n } from '../../composables/useI18n'
 import { useToast } from '../../composables/useToast'
 import { copyTextToClipboard } from './workspaceTabActions'
-import { listAttachments, refreshAttachmentIndex } from '../../lib/attachments-api'
+import {
+  listAttachments,
+  previewAttachmentCleanup,
+  queryAttachmentReferences,
+  refreshAttachmentIndex,
+  refreshAttachmentReferences,
+} from '../../lib/attachments-api'
 import type {
+  AttachmentCleanupPreview,
   AttachmentIndexStatus,
   AttachmentListQuery,
   AttachmentPage,
   AttachmentReferenceStatus,
+  AttachmentReferencePage,
+  AttachmentReference,
   AttachmentResourceType,
   AttachmentSource,
   ManagedAttachment,
 } from '../../../shared/attachmentProtocol'
 
-const emit = defineEmits<{ back: [] }>()
+const emit = defineEmits<{
+  back: []
+  navigateReference: [reference: AttachmentReference]
+}>()
 const { t } = useI18n()
 const toast = useToast()
 const page = ref<AttachmentPage | null>(null)
@@ -24,6 +36,13 @@ const loading = ref(false)
 const refreshing = ref(false)
 const loadError = ref<'query' | 'after-refresh' | null>(null)
 const refreshError = ref(false)
+const referenceRefreshError = ref(false)
+const references = ref<AttachmentReferencePage | null>(null)
+const referencesLoading = ref(false)
+const referencesError = ref(false)
+const riskPreview = ref<AttachmentCleanupPreview | null>(null)
+const previewLoading = ref(false)
+const previewError = ref(false)
 const pageQueryKey = ref<string | null>(null)
 const search = ref('')
 const typeFilter = ref<AttachmentResourceType | 'all'>('all')
@@ -33,6 +52,10 @@ const offset = ref(0)
 const selectedKey = ref('')
 const pageSize = 30
 let loadSequence = 0
+let referenceSequence = 0
+let previewSequence = 0
+let referenceController: AbortController | null = null
+let previewController: AbortController | null = null
 let searchTimer: ReturnType<typeof setTimeout> | undefined
 
 const currentQueryKey = computed(() => JSON.stringify(query()))
@@ -146,15 +169,90 @@ async function refresh(): Promise<void> {
   if (refreshing.value) return
   refreshing.value = true
   refreshError.value = false
-  try {
-    await refreshAttachmentIndex()
-  } catch {
-    refreshError.value = true
-    refreshing.value = false
-    return
+  referenceRefreshError.value = false
+  const [catalogResult, referenceResult] = await Promise.allSettled([
+    refreshAttachmentIndex(),
+    refreshAttachmentReferences(),
+  ])
+  if (catalogResult.status === 'rejected') refreshError.value = true
+  if (referenceResult.status === 'rejected') referenceRefreshError.value = true
+  if (catalogResult.status === 'fulfilled') await loadPage('after-refresh')
+  if (referenceResult.status === 'fulfilled') {
+    references.value = null
+    if (selected.value) void loadReferences(selected.value)
   }
-  await loadPage('after-refresh')
   refreshing.value = false
+}
+
+function loadReferences(item: ManagedAttachment, offset = 0): void {
+  referenceController?.abort()
+  const controller = new AbortController()
+  referenceController = controller
+  const sequence = ++referenceSequence
+  referencesLoading.value = true
+  referencesError.value = false
+  references.value = offset === 0 ? null : references.value
+  riskPreview.value = null
+  previewError.value = false
+  void queryAttachmentReferences(item.key, { offset, limit: 30, signal: controller.signal }).then((result) => {
+    if (sequence !== referenceSequence || controller.signal.aborted) return
+    references.value = offset === 0 || !references.value
+      ? result
+      : { ...result, references: [...references.value.references, ...result.references] }
+    if (offset === 0) void loadPage()
+  }).catch(() => {
+    if (sequence === referenceSequence && !controller.signal.aborted) referencesError.value = true
+  }).finally(() => {
+    if (sequence === referenceSequence) referencesLoading.value = false
+  })
+}
+
+function loadMoreReferences(): void {
+  if (!selected.value || !references.value?.nextOffset || referencesLoading.value) return
+  loadReferences(selected.value, references.value.nextOffset)
+}
+
+function retryReferences(): void {
+  if (selected.value) loadReferences(selected.value)
+}
+
+function runRiskPreview(): void {
+  if (!selected.value) return
+  previewController?.abort()
+  const controller = new AbortController()
+  previewController = controller
+  const sequence = ++previewSequence
+  previewLoading.value = true
+  previewError.value = false
+  riskPreview.value = null
+  void previewAttachmentCleanup(selected.value.key, controller.signal).then((result) => {
+    if (sequence === previewSequence && !controller.signal.aborted) riskPreview.value = result
+  }).catch(() => {
+    if (sequence === previewSequence && !controller.signal.aborted) previewError.value = true
+  }).finally(() => {
+    if (sequence === previewSequence) previewLoading.value = false
+  })
+}
+
+function referenceKindLabel(reference: AttachmentReference): string {
+  return t(`attachments.reference_kind.${reference.kind}`)
+}
+
+function referenceOwnerLabel(reference: AttachmentReference): string {
+  return t(reference.owner.kind === 'note' ? 'attachments.owner.note' : 'attachments.owner.board')
+}
+
+function referenceViaLabel(reference: AttachmentReference): string {
+  const via = reference.via?.map((item) => item.title || item.id).filter(Boolean) ?? []
+  return via.length ? t('attachments.reference_via', { path: via.join(' → ') }) : ''
+}
+
+function riskLevelLabel(preview: AttachmentCleanupPreview): string {
+  return t(`attachments.risk.${preview.riskLevel}`)
+}
+
+function riskReasonLabel(reason: AttachmentCleanupPreview['riskReasons'][number]): string {
+  return t(`attachments.risk_reason.${reason}`)
 }
 
 function scheduleFilterLoad(): void {
@@ -201,9 +299,22 @@ const referenceOptions = computed(() => [
 ])
 
 watch([search, typeFilter, sourceFilter, referenceFilter], scheduleFilterLoad)
+watch(selectedKey, (key) => {
+  referenceController?.abort()
+  previewController?.abort()
+  references.value = null
+  riskPreview.value = null
+  referencesError.value = false
+  previewError.value = false
+  if (key && selected.value) loadReferences(selected.value)
+})
 onMounted(() => { void loadPage() })
 onBeforeUnmount(() => {
   loadSequence += 1
+  referenceSequence += 1
+  previewSequence += 1
+  referenceController?.abort()
+  previewController?.abort()
   if (searchTimer) clearTimeout(searchTimer)
 })
 </script>
@@ -251,6 +362,10 @@ onBeforeUnmount(() => {
 
     <div v-if="refreshError" class="attachment-request-message is-error" role="alert">
       <span>{{ t('attachments.refresh_failed') }}</span>
+      <NButton attr-type="button" size="small" class="btn" :loading="refreshing" @click="refresh">{{ t('attachments.retry') }}</NButton>
+    </div>
+    <div v-if="referenceRefreshError" class="attachment-request-message is-error" role="alert">
+      <span>{{ t('attachments.reference_refresh_failed') }}</span>
       <NButton attr-type="button" size="small" class="btn" :loading="refreshing" @click="refresh">{{ t('attachments.retry') }}</NButton>
     </div>
     <div v-if="loadError && page" class="attachment-request-message is-error" role="alert">
@@ -332,6 +447,71 @@ onBeforeUnmount(() => {
             <template #icon><NIcon aria-hidden="true"><Copy /></NIcon></template>
             {{ t('attachments.copy_identity') }}
           </NButton>
+          <section class="attachment-reference-section" :aria-label="t('attachments.references.title')">
+            <header class="attachment-reference-heading">
+              <h5>{{ t('attachments.references.title') }}</h5>
+              <span v-if="references">{{ t('attachments.references.count', { count: references.referenceCount, owners: references.ownerCount }) }}</span>
+            </header>
+            <div v-if="referencesLoading && !references" class="attachment-reference-state" role="status">
+              <NSpin size="small" /><span>{{ t('attachments.references.loading') }}</span>
+            </div>
+            <div v-else-if="referencesError" class="attachment-reference-state is-error" role="alert">
+              <span>{{ t('attachments.references.failed') }}</span>
+              <NButton attr-type="button" size="tiny" quaternary @click="retryReferences">{{ t('attachments.retry') }}</NButton>
+            </div>
+            <div v-else-if="references && references.referenceCount === 0" class="attachment-reference-state">
+              {{ t(references.currentFinding === 'unknown' ? 'attachments.references.unknown' : 'attachments.references.empty') }}
+            </div>
+            <div v-else-if="references" class="attachment-reference-list">
+              <button
+                v-for="(reference, index) in references.references"
+                :key="`${reference.owner.kind}:${reference.owner.id}:${reference.kind}:${reference.sourcePath ?? ''}:${reference.line ?? index}`"
+                type="button"
+                class="attachment-reference-row"
+                :disabled="!reference.navigable"
+                :title="reference.owner.title ?? reference.owner.id"
+                @click="emit('navigateReference', reference)"
+              >
+                <NIcon class="attachment-reference-icon" aria-hidden="true"><component :is="reference.owner.kind === 'note' ? File : Shape" /></NIcon>
+                <span class="attachment-reference-main">
+                  <strong>{{ reference.owner.title || reference.owner.id }}</strong>
+                  <small>{{ referenceOwnerLabel(reference) }} · {{ referenceKindLabel(reference) }} · {{ t(`attachments.relation.${reference.relation}`) }}</small>
+                  <small v-if="referenceViaLabel(reference)" class="attachment-reference-via">{{ referenceViaLabel(reference) }}</small>
+                </span>
+                <span v-if="reference.navigable" class="attachment-reference-arrow" aria-hidden="true">→</span>
+              </button>
+              <NButton
+                v-if="references.nextOffset !== null"
+                attr-type="button"
+                size="small"
+                quaternary
+                class="attachment-reference-more"
+                :loading="referencesLoading"
+                @click="loadMoreReferences"
+              >{{ t('attachments.references.more') }}</NButton>
+            </div>
+            <p v-if="references" class="attachment-reference-coverage">
+              {{ t('attachments.references.coverage') }} ·
+              {{ t(references.coverage.currentNotes === 'complete'
+                ? 'attachments.coverage.complete'
+                : references.coverage.currentNotes === 'partial'
+                  ? 'attachments.coverage.partial'
+                  : 'attachments.coverage.unknown') }}
+              <span v-if="references.coverage.protectedDiary === 'restricted'"> · {{ t('attachments.coverage.diary_restricted') }}</span>
+            </p>
+            <NButton attr-type="button" size="small" class="btn attachment-risk-button" :loading="previewLoading" @click="runRiskPreview">
+              {{ t('attachments.risk.check') }}
+            </NButton>
+            <div v-if="previewError" class="attachment-risk-result is-error" role="alert">{{ t('attachments.risk.failed') }}</div>
+            <div v-else-if="riskPreview" class="attachment-risk-result" role="status">
+              <strong>{{ riskLevelLabel(riskPreview) }}</strong>
+              <p>{{ t(`attachments.finding.${riskPreview.currentFinding}`) }}</p>
+              <ul>
+                <li v-for="reason in riskPreview.riskReasons" :key="reason">{{ riskReasonLabel(reason) }}</li>
+              </ul>
+              <small>{{ t('attachments.risk.no_delete') }}</small>
+            </div>
+          </section>
         </template>
         <NEmpty v-else :description="t('attachments.select_item')" />
       </aside>
@@ -376,7 +556,7 @@ onBeforeUnmount(() => {
 .attachment-state { flex-direction: column; }
 .attachment-state p { margin: 0; }
 .attachment-state.attachment-error { color: var(--settings-danger); }
-.attachment-detail-panel { padding: 18px; gap: 16px; }
+.attachment-detail-panel { padding: 18px; gap: 16px; overflow-y: auto; overscroll-behavior: contain; }
 .attachment-detail-heading { min-width: 0; display: flex; align-items: flex-start; gap: 12px; }
 .attachment-detail-heading > .n-icon { flex: 0 0 auto; margin-top: 2px; color: var(--settings-accent); font-size: 22px; }
 .attachment-detail-heading h4 { margin: 0; overflow-wrap: anywhere; font-size: 1rem; font-weight: 600; }
@@ -387,6 +567,30 @@ onBeforeUnmount(() => {
 .attachment-detail-list dd { min-width: 0; margin: 0; overflow-wrap: anywhere; color: var(--settings-text); text-align: right; }
 .attachment-identity-row dd { font-family: var(--font-mono, ui-monospace, monospace); font-size: .76rem; }
 .attachment-copy { align-self: flex-start; }
+.attachment-reference-section { display: flex; flex-direction: column; gap: 9px; min-height: 0; border-top: 1px solid var(--settings-border); padding-top: 12px; }
+.attachment-reference-heading { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; }
+.attachment-reference-heading h5 { margin: 0; color: var(--settings-text); font-size: .88rem; font-weight: 600; }
+.attachment-reference-heading > span, .attachment-reference-coverage { color: var(--settings-muted); font-size: .72rem; }
+.attachment-reference-state { min-height: 42px; display: flex; align-items: center; justify-content: center; gap: 8px; color: var(--settings-muted); font-size: .8rem; text-align: center; }
+.attachment-reference-state.is-error, .attachment-risk-result.is-error { color: var(--settings-danger); }
+.attachment-reference-list { display: flex; flex-direction: column; gap: 5px; }
+.attachment-reference-row { width: 100%; min-width: 0; display: flex; align-items: center; gap: 8px; padding: 8px; border: 1px solid var(--settings-border); border-radius: 7px; background: transparent; color: var(--settings-text); text-align: left; cursor: pointer; }
+.attachment-reference-row:hover:not(:disabled) { background: color-mix(in srgb, var(--settings-accent) 9%, transparent); }
+.attachment-reference-row:disabled { cursor: default; }
+.attachment-reference-icon { flex: 0 0 auto; color: var(--settings-muted); }
+.attachment-reference-main { min-width: 0; flex: 1 1 auto; display: flex; flex-direction: column; gap: 3px; }
+.attachment-reference-main strong, .attachment-reference-main small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.attachment-reference-main strong { font-size: .8rem; font-weight: 550; }
+.attachment-reference-main small { color: var(--settings-muted); font-size: .7rem; }
+.attachment-reference-main .attachment-reference-via { color: var(--settings-accent); }
+.attachment-reference-arrow { flex: 0 0 auto; color: var(--settings-accent); }
+.attachment-reference-more { align-self: center; }
+.attachment-reference-coverage { margin: 0; }
+.attachment-risk-button { align-self: flex-start; }
+.attachment-risk-result { padding: 9px 10px; border: 1px solid var(--settings-border); border-radius: 7px; color: var(--settings-text); font-size: .76rem; }
+.attachment-risk-result p { margin: 5px 0; }
+.attachment-risk-result ul { display: flex; flex-direction: column; gap: 3px; margin: 6px 0; padding-left: 18px; color: var(--settings-muted); }
+.attachment-risk-result small { color: var(--settings-muted); }
 .attachment-reference-note { flex: 0 0 auto; margin: 0; color: var(--settings-muted); font-size: .76rem; }
 @media (max-width: 900px) {
   .attachment-summary { grid-template-columns: repeat(2, minmax(0, 1fr)); }
@@ -408,6 +612,7 @@ onBeforeUnmount(() => {
   .attachment-toolbar { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 7px; }
   .attachment-toolbar :deep(.n-input) { grid-column: 1 / -1; }
   .attachment-resource-row { gap: 8px; padding-inline: 9px; }
-  .attachment-resource-meta :deep(.n-tag) { max-width: 92px; }
+  .attachment-resource-meta :deep(.n-tag) { min-width: 0; max-width: 92px; overflow: hidden; }
+  .attachment-resource-meta :deep(.n-tag__content) { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 }
 </style>

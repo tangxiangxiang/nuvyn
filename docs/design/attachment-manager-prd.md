@@ -3,7 +3,7 @@
 **产品：** Nuvyn\
 **模块：** Attachment Manager\
 **版本：** V1.0\
-**状态：** DRAFT — Phase 1 已实现；V1 后续阶段待评审\
+**状态：** DRAFT — Phase 1 与 Phase 2 的只读能力已实现；完整 V1 仍待评审\
 **优先级：** P1\
 **日期：** 2026-10-12
 
@@ -17,7 +17,11 @@ Phase 1 now provides a read-only catalog for Board Assets, visible Vault attachm
 - The Vault adapter uses a bounded in-memory snapshot, reads file metadata only, skips Markdown documents, hidden and temporary entries, symlinks, and the entire managed `diary/` subtree.
 - Board Asset references use the existing `asset_references` table. A zero count is displayed as unknown, not as proof of an unused or deletable resource. Vault file and Board Material references also remain unknown.
 - Settings includes a wide Attachment Manager surface with a real list, summary, filters, pagination, metadata details, and copyable logical identity. There are no upload, delete, move, or rename controls.
-- Rich previews, complete Note/Board reference analysis, secure cleanup checks, uploads, insertion, and cross-module reuse remain future work; they are not represented as Phase 1 features.
++ Rich previews, uploads, insertion, audited cleanup, and cross-module reuse remain future work; they are not represented as completed capabilities.
+
+Phase 2 adds a rebuildable, bounded in-memory reference projection for current non-Diary Notes and live Board Asset relations. It understands the existing Markdown image, snippet, Include, and `board:<id>` semantics, distinguishes direct from Include/Board-mediated use, and exposes authenticated paginated reference queries plus a read-only cleanup-risk preflight. Reference navigation uses the existing Note and Board routes. No cleanup permission or mutation endpoint is provided.
+
+Coverage remains intentionally incomplete: protected Diary bodies are never scanned; Git history, browser drafts, unsaved editor buffers, Board checkpoints, and changes made externally after a scan are not verified. Board Material usage remains unknown. A zero current-reference result is therefore not a deletion-safety conclusion. The reference projection is lazy and does not block Phase 1 catalog loading.
 
 The PRD remains marked DRAFT because the broader V1 product scope includes later-phase capabilities that have not been implemented or reviewed yet.
 

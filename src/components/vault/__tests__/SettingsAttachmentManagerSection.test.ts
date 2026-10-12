@@ -3,10 +3,18 @@ import { flushPromises, mount, type VueWrapper } from '@vue/test-utils'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { useI18n } from '../../../composables/useI18n'
 import SettingsAttachmentManagerSection from '../SettingsAttachmentManagerSection.vue'
-import type { AttachmentPage, ManagedAttachment } from '../../../../shared/attachmentProtocol'
+import type {
+  AttachmentCleanupPreview,
+  AttachmentPage,
+  AttachmentReferencePage,
+  ManagedAttachment,
+} from '../../../../shared/attachmentProtocol'
 
 const listAttachments = vi.fn()
 const refreshAttachmentIndex = vi.fn()
+const refreshAttachmentReferences = vi.fn()
+const queryAttachmentReferences = vi.fn()
+const previewAttachmentCleanup = vi.fn()
 const toastSuccess = vi.fn()
 const toastError = vi.fn()
 const wrappers: VueWrapper[] = []
@@ -14,6 +22,9 @@ const wrappers: VueWrapper[] = []
 vi.mock('../../../lib/attachments-api', () => ({
   listAttachments: (...args: unknown[]) => listAttachments(...args),
   refreshAttachmentIndex: (...args: unknown[]) => refreshAttachmentIndex(...args),
+  refreshAttachmentReferences: (...args: unknown[]) => refreshAttachmentReferences(...args),
+  queryAttachmentReferences: (...args: unknown[]) => queryAttachmentReferences(...args),
+  previewAttachmentCleanup: (...args: unknown[]) => previewAttachmentCleanup(...args),
 }))
 
 vi.mock('../../../composables/useToast', () => ({
@@ -57,6 +68,43 @@ function page(items: ManagedAttachment[]): AttachmentPage {
   }
 }
 
+function referencePage(references: AttachmentReferencePage['references'] = []): AttachmentReferencePage {
+  return {
+    resource: { kind: 'vault-file', path: 'inbox/assets/diagram.png' },
+    references,
+    referenceCount: references.length,
+    ownerCount: new Set(references.map((reference) => `${reference.owner.kind}:${reference.owner.id}`)).size,
+    offset: 0,
+    limit: 30,
+    nextOffset: null,
+    currentFinding: references.length > 0 ? 'in-use' : 'no-current-reference',
+    coverage: {
+      currentNotes: 'complete',
+      boardReferences: 'complete',
+      historicalVersions: 'not-checked',
+      unsavedDrafts: 'not-checked',
+      protectedDiary: 'restricted',
+      boardCheckpoints: 'not-checked',
+      externalChanges: 'not-checked',
+    },
+    snapshotId: 'test-snapshot',
+    checkedAt: 100,
+  }
+}
+
+const riskPreview: AttachmentCleanupPreview = {
+  resource: { kind: 'vault-file', path: 'inbox/assets/diagram.png' },
+  currentFinding: 'no-current-reference',
+  riskLevel: 'review-required',
+  referenceCount: 0,
+  ownerCount: 0,
+  coverage: referencePage().coverage,
+  riskReasons: ['historical-versions-not-checked', 'draft-recovery-not-checked', 'protected-diary-restricted'],
+  deletionAllowed: false,
+  snapshotId: 'test-snapshot',
+  checkedAt: 100,
+}
+
 const vaultFile: ManagedAttachment = {
   key: { kind: 'vault-file', path: 'inbox/assets/diagram.png' },
   source: 'vault-file',
@@ -97,6 +145,9 @@ beforeEach(() => {
   vi.clearAllMocks()
   listAttachments.mockResolvedValue(page([vaultFile, asset]))
   refreshAttachmentIndex.mockResolvedValue({ indexStatus: { ready: true } })
+  refreshAttachmentReferences.mockResolvedValue(referencePage())
+  queryAttachmentReferences.mockResolvedValue(referencePage())
+  previewAttachmentCleanup.mockResolvedValue(riskPreview)
 })
 
 afterEach(() => {
@@ -129,6 +180,62 @@ describe('SettingsAttachmentManagerSection', () => {
     expect(document.body.textContent).toContain('inbox/assets/diagram.png')
     expect(document.body.textContent).toContain('待确认')
     expect(document.body.querySelector('.attachment-copy')).not.toBeNull()
+    expect(document.body.textContent).toContain('引用位置')
+  })
+
+  it('shows direct and indirect reference rows, navigates through the host, and keeps risk preflight read-only', async () => {
+    const reference = {
+      owner: { kind: 'note' as const, id: 'inbox/using-note', title: 'Using note' },
+      kind: 'note-image' as const,
+      relation: 'indirect' as const,
+      sourcePath: 'inbox/shared-note',
+      line: 5,
+      via: [{ kind: 'include' as const, id: 'inbox/shared-note', title: 'Shared note' }],
+      target: { kind: 'vault-file' as const, id: 'inbox/assets/diagram.png' },
+      navigable: true,
+    }
+    queryAttachmentReferences.mockResolvedValueOnce(referencePage([reference]))
+    const wrapper = mountManager()
+    await flushPromises()
+    const row = Array.from(document.body.querySelectorAll<HTMLButtonElement>('.attachment-resource-row'))
+      .find((button) => button.textContent?.includes('diagram.png'))!
+    row.click()
+    await flushPromises()
+
+    expect(document.body.textContent).toContain('Using note')
+    expect(document.body.textContent).toContain('经由 Shared note')
+    const referenceButton = document.body.querySelector<HTMLButtonElement>('.attachment-reference-row')!
+    referenceButton.click()
+    expect(wrapper.emitted('navigateReference')?.[0]).toEqual([reference])
+
+    await wrapper.get('.attachment-risk-button').trigger('click')
+    await flushPromises()
+    expect(document.body.textContent).toContain('此预检仅供参考')
+    expect(previewAttachmentCleanup).toHaveBeenCalledTimes(1)
+    expect(Array.from(document.body.querySelectorAll('button')).some((button) => /删除|Delete/.test(button.textContent ?? ''))).toBe(false)
+  })
+
+  it('discards a late reference response after selection changes', async () => {
+    const late = deferred<AttachmentReferencePage>()
+    queryAttachmentReferences.mockImplementationOnce(() => late.promise)
+    const wrapper = mountManager()
+    await flushPromises()
+    const rows = Array.from(document.body.querySelectorAll<HTMLButtonElement>('.attachment-resource-row'))
+    rows[0]?.click()
+    await flushPromises()
+    rows[1]?.click()
+    await flushPromises()
+
+    late.resolve(referencePage([{
+      owner: { kind: 'note', id: 'inbox/stale', title: 'Stale reference' },
+      kind: 'note-image',
+      relation: 'direct',
+      sourcePath: 'inbox/stale',
+      target: { kind: 'vault-file', id: 'inbox/assets/diagram.png' },
+      navigable: true,
+    }]))
+    await flushPromises()
+    expect(wrapper.text()).not.toContain('Stale reference')
   })
 
   it('sends the search filter to the server', async () => {

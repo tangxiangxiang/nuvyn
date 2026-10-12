@@ -28,8 +28,8 @@ import {
 } from './shiki'
 import { parseFenceMeta, type FenceMeta } from './fenceMeta'
 import { parseBoardReference } from './boardReferences'
+import { authenticatedMarkdownResourceResolver } from './authenticatedMarkdownResourceResolver'
 import {
-  authenticatedMarkdownResourceResolver,
   expandMarkdownResources,
   markdownResourceImageUrl,
   type MarkdownResourceResolver,
