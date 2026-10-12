@@ -29,6 +29,7 @@ import {
   verifySafePathResolution,
 } from '../paths.js'
 import { onAttachmentReferencesChanged } from '../attachmentReferenceEvents.js'
+import { ApiRequestError } from '../apiErrors.js'
 
 export const MAX_REFERENCE_SCAN_NOTES = 20_000
 export const MAX_REFERENCE_SCAN_DIRECTORIES = 5_000
@@ -298,6 +299,7 @@ export class AttachmentReferenceIndex {
   private activePromise: Promise<void> | null = null
   private activeController: AbortController | null = null
   private generation = 0
+  private lastRefreshFailed = false
   private readonly db: DatabaseT
   private readonly options: Required<BuildOptions>
   private readonly markdown: MarkdownIt
@@ -323,7 +325,7 @@ export class AttachmentReferenceIndex {
     const snapshot = this.snapshot
     if (!snapshot) {
       return {
-        state: this.activePromise ? 'building' : 'pending',
+        state: this.activePromise ? 'building' : this.lastRefreshFailed ? 'failed' : 'pending',
         complete: null,
         noteCount: 0,
         refreshedAt: null,
@@ -332,13 +334,18 @@ export class AttachmentReferenceIndex {
       }
     }
     const boardHealthy = this.hasCompleteBoardReferences()
+    const stale = this.isSnapshotStale()
     return {
-      state: snapshot.coverage === 'unknown' ? 'failed' : snapshot.coverage === 'complete' && boardHealthy ? 'ready' : 'partial',
-      complete: snapshot.coverage === 'complete' && boardHealthy,
+      state: stale
+        ? 'stale'
+        : snapshot.coverage === 'unknown' ? 'failed' : snapshot.coverage === 'complete' && boardHealthy ? 'ready' : 'partial',
+      complete: !stale && snapshot.coverage === 'complete' && boardHealthy,
       noteCount: snapshot.noteCount,
       refreshedAt: snapshot.refreshedAt,
       snapshotId: snapshot.snapshotId,
-      coverage: coverageFor(snapshot.coverage, boardHealthy ? 'complete' : 'unknown'),
+      coverage: stale
+        ? coverageFor('unknown', 'unknown')
+        : coverageFor(snapshot.coverage, boardHealthy ? 'complete' : 'unknown'),
     }
   }
 
@@ -348,6 +355,7 @@ export class AttachmentReferenceIndex {
     this.activeController = null
     this.activePromise = null
     this.snapshot = null
+    this.lastRefreshFailed = false
   }
 
   async ensureReady(): Promise<void> {
@@ -383,21 +391,18 @@ export class AttachmentReferenceIndex {
     const controller = new AbortController()
     this.activeController = controller
     const promise = this.buildSnapshot(controller.signal).then((snapshot) => {
-      if (generation === this.generation) this.snapshot = snapshot
-    }).catch((error) => {
-      if (generation !== this.generation || controller.signal.aborted) return
-      const now = this.options.now()
-      this.snapshot = {
-        referencesByResource: new Map(),
-        boardEmbedsByBoard: new Map(),
-        titles: new Map(),
-        fingerprints: new Map(),
-        noteCount: 0,
-        coverage: 'unknown',
-        refreshedAt: now,
-        snapshotId: `attachment-refs-${generation}-${now}`,
+      if (generation === this.generation) {
+        this.snapshot = snapshot
+        this.lastRefreshFailed = false
       }
-      void error
+    }).catch(() => {
+      if (generation !== this.generation || controller.signal.aborted) return
+      this.lastRefreshFailed = true
+      throw new ApiRequestError(
+        'ATTACHMENT_REFERENCES_UNAVAILABLE',
+        503,
+        'Attachment reference scan failed.',
+      )
     }).finally(() => {
       if (generation === this.generation) {
         this.activePromise = null
@@ -415,10 +420,13 @@ export class AttachmentReferenceIndex {
   ): Promise<AttachmentReferencePage> {
     await this.ensureReady()
     const snapshot = this.requireSnapshot()
+    const stale = this.isSnapshotStale()
     const boardQuery = resource.kind === 'asset'
       ? this.queryBoardAssetReferences(resource.id)
       : { references: [], complete: this.hasCompleteBoardReferences() }
-    const coverage = coverageFor(snapshot.coverage, boardQuery.complete ? 'complete' : 'partial')
+    const coverage = stale
+      ? coverageFor('unknown', 'unknown')
+      : coverageFor(snapshot.coverage, boardQuery.complete ? 'complete' : 'partial')
     const references = this.referencesFor(snapshot, resource, boardQuery.references)
       .sort((left, right) => (
         (left.owner.title ?? left.owner.id).localeCompare(right.owner.title ?? right.owner.id)
@@ -441,9 +449,10 @@ export class AttachmentReferenceIndex {
       limit: safeLimit,
       nextOffset: safeOffset + page.length < references.length ? safeOffset + page.length : null,
       currentFinding,
+      stale,
       coverage,
       snapshotId: snapshot.snapshotId,
-      checkedAt: this.options.now(),
+      checkedAt: stale ? snapshot.refreshedAt : this.options.now(),
     }
   }
 
@@ -474,6 +483,7 @@ export class AttachmentReferenceIndex {
       riskLevel,
       referenceCount: page.referenceCount,
       ownerCount: page.ownerCount,
+      stale: page.stale,
       coverage: page.coverage,
       riskReasons,
       deletionAllowed: false,
@@ -484,7 +494,12 @@ export class AttachmentReferenceIndex {
 
   getCatalogProjection(): { get(resourceKey: string): AttachmentReferenceProjection | undefined } | null {
     const snapshot = this.snapshot
-    if (!snapshot) return null
+    if (!snapshot && !this.activePromise && !this.lastRefreshFailed) return null
+    if (!snapshot || this.isSnapshotStale()) {
+      return {
+        get: () => ({ referenceStatus: 'unknown', referenceCount: 0, ownerCount: 0 }),
+      }
+    }
     const directBoardCounts = new Map<string, { references: number; owners: Set<string> }>()
     const embeddedBoardsByAsset = new Map<string, Set<string>>()
     let boardComplete = true
@@ -599,10 +614,15 @@ export class AttachmentReferenceIndex {
     references: readonly AttachmentReference[],
     coverage: AttachmentReferenceCoverage,
   ): AttachmentReferencePage['currentFinding'] {
+    if (this.isSnapshotStale()) return 'unknown'
     if (references.length > 0) return 'in-use'
     if (resource.kind === 'board-material') return 'unknown'
     if (coverage.currentNotes !== 'complete' || coverage.boardReferences !== 'complete') return 'unknown'
     return 'no-current-reference'
+  }
+
+  private isSnapshotStale(): boolean {
+    return this.activePromise !== null || this.lastRefreshFailed
   }
 
   private referencesFor(

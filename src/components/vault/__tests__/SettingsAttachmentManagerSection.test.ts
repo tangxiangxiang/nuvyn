@@ -78,6 +78,7 @@ function referencePage(references: AttachmentReferencePage['references'] = []): 
     limit: 30,
     nextOffset: null,
     currentFinding: references.length > 0 ? 'in-use' : 'no-current-reference',
+    stale: false,
     coverage: {
       currentNotes: 'complete',
       boardReferences: 'complete',
@@ -98,6 +99,7 @@ const riskPreview: AttachmentCleanupPreview = {
   riskLevel: 'review-required',
   referenceCount: 0,
   ownerCount: 0,
+  stale: false,
   coverage: referencePage().coverage,
   riskReasons: ['historical-versions-not-checked', 'draft-recovery-not-checked', 'protected-diary-restricted'],
   deletionAllowed: false,
@@ -206,13 +208,94 @@ describe('SettingsAttachmentManagerSection', () => {
     expect(document.body.textContent).toContain('经由 Shared note')
     const referenceButton = document.body.querySelector<HTMLButtonElement>('.attachment-reference-row')!
     referenceButton.click()
-    expect(wrapper.emitted('navigateReference')?.[0]).toEqual([reference])
+    expect(wrapper.emitted('navigateReference')?.[0]).toEqual([reference, 'owner'])
+    const sourceButton = wrapper.get('.attachment-reference-source')
+    expect(sourceButton.text()).toContain('查看引用源：Shared note')
+    await sourceButton.trigger('click')
+    expect(wrapper.emitted('navigateReference')?.[1]).toEqual([reference, 'source'])
 
     await wrapper.get('.attachment-risk-button').trigger('click')
     await flushPromises()
     expect(document.body.textContent).toContain('此预检仅供参考')
     expect(previewAttachmentCleanup).toHaveBeenCalledTimes(1)
     expect(Array.from(document.body.querySelectorAll('button')).some((button) => /删除|Delete/.test(button.textContent ?? ''))).toBe(false)
+  })
+
+  it('keeps last successful reference rows visible and marks them stale when refresh fails, then clears stale state after retry', async () => {
+    const reference = {
+      owner: { kind: 'note' as const, id: 'inbox/using-note', title: 'Using note' },
+      kind: 'note-image' as const,
+      relation: 'direct' as const,
+      sourcePath: 'inbox/using-note',
+      target: { kind: 'vault-file' as const, id: 'inbox/assets/diagram.png' },
+      navigable: true,
+    }
+    queryAttachmentReferences.mockResolvedValue(referencePage([reference]))
+    const wrapper = mountManager()
+    await flushPromises()
+    const resourceRow = Array.from(document.body.querySelectorAll<HTMLButtonElement>('.attachment-resource-row'))
+      .find((button) => button.textContent?.includes('diagram.png'))!
+    resourceRow.click()
+    await flushPromises()
+    expect(wrapper.findAll('.attachment-reference-row')).toHaveLength(1)
+
+    refreshAttachmentReferences.mockRejectedValueOnce(new Error('reference scan offline'))
+    await wrapper.get('.attachment-refresh').trigger('click')
+    await flushPromises()
+
+    expect(wrapper.findAll('.attachment-reference-row')).toHaveLength(1)
+    expect(wrapper.find('.attachment-reference-stale').text()).toContain('上次成功分析')
+    expect(wrapper.get('.attachment-request-message[role="alert"]').text()).toContain('引用索引刷新失败')
+
+    refreshAttachmentReferences.mockResolvedValueOnce(referencePage())
+    await wrapper.get('.attachment-request-message[role="alert"] button').trigger('click')
+    await flushPromises()
+    expect(wrapper.find('.attachment-reference-stale').exists()).toBe(false)
+    expect(wrapper.find('.attachment-request-message[role="alert"]').exists()).toBe(false)
+    expect(wrapper.findAll('.attachment-reference-row')).toHaveLength(1)
+  })
+
+  it('keeps a Note owner as the primary target for Note-to-Board asset relationships', async () => {
+    queryAttachmentReferences.mockResolvedValueOnce(referencePage([{
+      owner: { kind: 'note', id: 'inbox/using-note', title: 'Using note' },
+      kind: 'board-embed',
+      relation: 'indirect',
+      sourcePath: 'inbox/using-note.md',
+      via: [{ kind: 'board', id: 'board-id', title: 'Architecture Board' }],
+      target: { kind: 'vault-file', id: 'inbox/assets/diagram.png' },
+      navigable: true,
+    }]))
+    const wrapper = mountManager()
+    await flushPromises()
+    const resourceRow = Array.from(document.body.querySelectorAll<HTMLButtonElement>('.attachment-resource-row'))
+      .find((button) => button.textContent?.includes('diagram.png'))!
+    resourceRow.click()
+    await flushPromises()
+
+    expect(wrapper.findAll('.attachment-reference-row')).toHaveLength(1)
+    expect(wrapper.find('.attachment-reference-source').exists()).toBe(false)
+    await wrapper.get('.attachment-reference-row').trigger('click')
+    expect(wrapper.emitted('navigateReference')?.[0]).toEqual([expect.objectContaining({ owner: expect.objectContaining({ id: 'inbox/using-note' }) }), 'owner'])
+  })
+
+  it('hides source navigation unless the source is confirmed in the navigable dependency chain', async () => {
+    queryAttachmentReferences.mockResolvedValueOnce(referencePage([{
+      owner: { kind: 'note', id: 'inbox/using-note', title: 'Using note' },
+      kind: 'note-image',
+      relation: 'indirect',
+      sourcePath: 'inbox/unconfirmed-source',
+      target: { kind: 'vault-file', id: 'inbox/assets/diagram.png' },
+      navigable: true,
+    }]))
+    const wrapper = mountManager()
+    await flushPromises()
+    const resourceRow = Array.from(document.body.querySelectorAll<HTMLButtonElement>('.attachment-resource-row'))
+      .find((button) => button.textContent?.includes('diagram.png'))!
+    resourceRow.click()
+    await flushPromises()
+
+    expect(wrapper.find('.attachment-reference-row').exists()).toBe(true)
+    expect(wrapper.find('.attachment-reference-source').exists()).toBe(false)
   })
 
   it('discards a late reference response after selection changes', async () => {

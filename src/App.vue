@@ -57,11 +57,13 @@ function requestSettings(): void {
   if (route.path === '/ledger' || route.path.startsWith('/ledger/')) ledgerSettingsOpen.value = true
 }
 
-function navigateToAttachmentReference(reference: AttachmentReference): void {
+function navigateToAttachmentReference(reference: AttachmentReference, destination: 'owner' | 'source' = 'owner'): void {
   ledgerSettingsOpen.value = false
   void nextTick(() => {
     if (reference.owner.kind === 'note') {
-      const path = reference.sourcePath ?? reference.owner.id
+      const path = destination === 'source' && reference.sourcePath && reference.navigable
+        ? reference.sourcePath.replace(/\.md$/iu, '')
+        : reference.owner.id
       void router.push({ name: 'vault-doc', params: { pathMatch: path.split('/') } })
       return
     }

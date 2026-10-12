@@ -354,6 +354,8 @@ const STRINGS: Strings = {
   'attachments.references.count': { zh: '{count} 条关系 · {owners} 个对象', en: '{count} relationships · {owners} owners' },
   'attachments.references.loading': { zh: '正在分析当前 Note 与 Board 引用…', en: 'Analyzing current Note and Board references…' },
   'attachments.references.failed': { zh: '引用分析暂时不可用。', en: 'Reference analysis is temporarily unavailable.' },
+  'attachments.references.stale': { zh: '当前显示的是上次成功分析的结果，尚未通过最新扫描确认。', en: 'Showing the last successful analysis; it has not been confirmed by the latest scan.' },
+  'attachments.references.view_source': { zh: '查看引用源：{source}', en: 'View source: {source}' },
   'attachments.references.unknown': { zh: '没有找到可确认的引用，但分析范围不完整。', en: 'No references were confirmed, but analysis coverage is incomplete.' },
   'attachments.references.empty': { zh: '当前已检查范围内没有发现引用。历史、草稿和受保护内容仍未检查。', en: 'No references were found in the checked current scope. History, drafts, and protected content were not checked.' },
   'attachments.references.more': { zh: '加载更多引用', en: 'Load more references' },

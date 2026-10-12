@@ -2,7 +2,7 @@ import Database from 'better-sqlite3'
 import { promises as fs } from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
-import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { applyMigrations } from '../db.js'
 import { CONTENT_DIR, setContentDir } from '../paths.js'
 import { AttachmentReferenceIndex } from './references.js'
@@ -32,6 +32,16 @@ async function writeNote(notePath: string, content: string): Promise<void> {
   const filePath = path.join(root, ...notePath.split('/')) + '.md'
   await fs.mkdir(path.dirname(filePath), { recursive: true })
   await fs.writeFile(filePath, content)
+}
+
+function deferred<T>() {
+  let resolve!: (value: T) => void
+  let reject!: (reason?: unknown) => void
+  const promise = new Promise<T>((resolvePromise, rejectPromise) => {
+    resolve = resolvePromise
+    reject = rejectPromise
+  })
+  return { promise, resolve, reject }
 }
 
 beforeEach(async () => {
@@ -194,6 +204,131 @@ describe('Attachment reference index', () => {
       protectedDiary: 'restricted',
       boardCheckpoints: 'not-checked',
     })
+  })
+
+  it('retains the last good snapshot as stale after a failed refresh, reports unknown risk, and recovers on retry', async () => {
+    await fs.mkdir(path.join(root, 'inbox', 'assets'), { recursive: true })
+    await fs.writeFile(path.join(root, 'inbox', 'assets', 'diagram.png'), Buffer.from([1, 2, 3]))
+    await writeNote('inbox/diagram-note', '![Diagram](./assets/diagram.png)')
+    let fail = false
+    let now = 100
+    const index = new AttachmentReferenceIndex(db, {
+      root: () => {
+        if (fail) throw new Error('/private/vault/path must not escape')
+        return root
+      },
+      now: () => now,
+    })
+    const resource = { kind: 'vault-file' as const, path: 'inbox/assets/diagram.png' }
+
+    await index.refresh()
+    const lastGoodPage = await index.query(resource)
+    expect(lastGoodPage).toMatchObject({ stale: false, currentFinding: 'in-use', checkedAt: 100 })
+    const lastGoodStatus = index.getStatus()
+
+    fail = true
+    now = 200
+    await expect(index.refresh(true)).rejects.toThrow('Attachment reference scan failed')
+
+    expect(index.getStatus()).toMatchObject({
+      state: 'stale',
+      complete: false,
+      refreshedAt: lastGoodStatus.refreshedAt,
+      snapshotId: lastGoodStatus.snapshotId,
+      coverage: { currentNotes: 'unknown', boardReferences: 'unknown' },
+    })
+    const stalePage = await index.query(resource)
+    expect(stalePage).toMatchObject({
+      stale: true,
+      currentFinding: 'unknown',
+      referenceCount: 1,
+      snapshotId: lastGoodStatus.snapshotId,
+      checkedAt: lastGoodPage.checkedAt,
+      coverage: { currentNotes: 'unknown', boardReferences: 'unknown' },
+    })
+    expect(index.getCatalogProjection()?.get('vault-file:inbox/assets/diagram.png')).toEqual({
+      referenceStatus: 'unknown',
+      referenceCount: 0,
+      ownerCount: 0,
+    })
+    const preview = await index.preview(resource)
+    expect(preview).toMatchObject({
+      stale: true,
+      currentFinding: 'unknown',
+      riskLevel: 'unverified',
+      deletionAllowed: false,
+      snapshotId: lastGoodStatus.snapshotId,
+    })
+    expect(preview.riskReasons).toContain('current-scan-incomplete')
+
+    fail = false
+    now = 300
+    await index.refresh(true)
+    expect(index.getStatus()).toMatchObject({ state: 'ready', refreshedAt: 300, coverage: { currentNotes: 'complete' } })
+    expect(await index.query(resource)).toMatchObject({ stale: false, currentFinding: 'in-use', checkedAt: 300 })
+  })
+
+  it('keeps an initial build failure retryable without publishing an empty snapshot', async () => {
+    let fail = true
+    const index = new AttachmentReferenceIndex(db, {
+      root: () => {
+        if (fail) throw new Error('temporary scan failure')
+        return root
+      },
+    })
+
+    await expect(index.refresh()).rejects.toMatchObject({ code: 'ATTACHMENT_REFERENCES_UNAVAILABLE', status: 503 })
+    expect(index.getStatus()).toMatchObject({
+      state: 'failed',
+      complete: null,
+      noteCount: 0,
+      refreshedAt: null,
+      snapshotId: null,
+    })
+
+    fail = false
+    await index.refresh()
+    expect(index.getStatus()).toMatchObject({ state: 'ready', complete: true })
+  })
+
+  it('does not let consecutive superseded scans overwrite or clear the newest scan state', async () => {
+    const index = new AttachmentReferenceIndex(db)
+    const first = deferred<unknown>()
+    const second = deferred<unknown>()
+    const third = deferred<unknown>()
+    const buildSnapshot = vi.spyOn(index as unknown as {
+      buildSnapshot: (signal: AbortSignal) => Promise<unknown>
+    }, 'buildSnapshot')
+      .mockImplementationOnce(() => first.promise)
+      .mockImplementationOnce(() => second.promise)
+      .mockImplementationOnce(() => third.promise)
+    const makeSnapshot = (snapshotId: string) => ({
+      referencesByResource: new Map(),
+      boardEmbedsByBoard: new Map(),
+      titles: new Map(),
+      fingerprints: new Map(),
+      noteCount: 2,
+      coverage: 'complete',
+      refreshedAt: 300,
+      snapshotId,
+    })
+
+    const obsoleteRefresh = index.refresh()
+    const waitingRead = index.ensureReady()
+    const supersededRefresh = index.refresh(true)
+    const currentRefresh = index.refresh(true)
+    first.reject(new Error('obsolete scan failure'))
+    await obsoleteRefresh
+    expect(index.getStatus().state).toBe('building')
+    second.reject(new Error('superseded scan failure'))
+    await supersededRefresh
+    expect(index.getStatus().state).toBe('building')
+    third.resolve(makeSnapshot('new-snapshot'))
+    await currentRefresh
+    await waitingRead
+
+    expect(index.getStatus()).toMatchObject({ state: 'ready', snapshotId: 'new-snapshot', noteCount: 2 })
+    expect(buildSnapshot).toHaveBeenCalledTimes(3)
   })
 
   it('excludes encrypted Diary content and bounds the derived snapshot at the 1k and 10k Note scale', async () => {

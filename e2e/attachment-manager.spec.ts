@@ -9,6 +9,7 @@ test('Attachment Manager lists real sources, filters, refreshes, and preserves t
   const assetId = randomUUID()
   const boardTitle = `Attachment reference board ${runId.slice(0, 8)}`
   const consumerNotePath = `inbox/attachment-reference-consumer-${runId}`
+  const sourceNotePath = `inbox/attachment-reference-source-${runId}`
   const materialName = `Attachment Manager Material ${runId.slice(0, 8)}`
   const initialFileName = `attachment-manager-initial-${runId.slice(0, 8)}.txt`
   const refreshedFileName = `attachment-manager-refreshed-${runId.slice(0, 8)}.txt`
@@ -23,6 +24,7 @@ test('Attachment Manager lists real sources, filters, refreshes, and preserves t
   let boardCreated = false
   let noteCreated = false
   let consumerNoteCreated = false
+  let sourceNoteCreated = false
   let assetCreated = false
 
   try {
@@ -35,11 +37,22 @@ test('Attachment Manager lists real sources, filters, refreshes, and preserves t
     const consumer = await request.post('/api/posts', { data: { path: consumerNotePath, title: 'Attachment reference consumer' } })
     expect(consumer.status(), await consumer.text()).toBe(201)
     consumerNoteCreated = true
+    const source = await request.post('/api/posts', { data: { path: sourceNotePath, title: 'Attachment reference source' } })
+    expect(source.status(), await source.text()).toBe(201)
+    sourceNoteCreated = true
+    const sourceInitial = await (await request.get(`/api/posts/${sourceNotePath}`)).json() as { raw: string }
+    const sourceSave = await request.put(`/api/posts/${sourceNotePath}`, {
+      data: {
+        baseRaw: sourceInitial.raw,
+        raw: `${sourceInitial.raw}\n\n![Diagram](./${diagramFileName})`,
+      },
+    })
+    expect(sourceSave.ok(), await sourceSave.text()).toBe(true)
     const consumerInitial = await (await request.get(`/api/posts/${consumerNotePath}`)).json() as { raw: string }
     const consumerSave = await request.put(`/api/posts/${consumerNotePath}`, {
       data: {
         baseRaw: consumerInitial.raw,
-        raw: `${consumerInitial.raw}\n\n![Diagram](./${diagramFileName})`,
+        raw: `${consumerInitial.raw}\n\n<!--@include: ./attachment-reference-source-${runId}.md-->`,
       },
     })
     expect(consumerSave.ok(), await consumerSave.text()).toBe(true)
@@ -112,7 +125,7 @@ test('Attachment Manager lists real sources, filters, refreshes, and preserves t
 
     await settings.locator('.attachment-resource-row').filter({ hasText: initialFileName }).click()
     await expect(settings.locator('.attachment-detail-panel')).toContainText(`inbox/${initialFileName}`)
-    await expect(settings.locator('.attachment-detail-panel')).toContainText(/待确认|Unknown/)
+    await expect(settings.locator('.attachment-detail-panel')).toContainText(/未发现引用|No references found/)
     await expect(settings.getByRole('button', { name: /复制 ID \/ 路径|Copy ID \/ path/ })).toBeVisible()
 
     // The catalog is a snapshot: a subsequent on-disk file appears after the
@@ -158,12 +171,27 @@ test('Attachment Manager lists real sources, filters, refreshes, and preserves t
     await settings.locator('.attachment-resource-row').click()
     const referenceRow = settings.locator('.attachment-reference-row').filter({ hasText: 'Attachment reference consumer' })
     await expect(referenceRow).toBeVisible()
-    await expect(referenceRow).toContainText(/直接|direct/)
+    await expect(referenceRow).toContainText(/间接|indirect/)
+    const sourceLink = settings.locator('.attachment-reference-source').filter({ hasText: 'Attachment reference source' })
+    await expect(sourceLink).toBeVisible()
     await settings.getByRole('button', { name: /检查引用风险|Check reference risk/ }).click()
     const riskReport = settings.locator('.attachment-risk-result')
     await expect(riskReport).toContainText(/引用|use/i)
     await expect(riskReport).toContainText(/历史版本未检查|Git history was not checked/)
-    await referenceRow.click()
+    await sourceLink.click()
+    await expect(settings).toHaveCount(0)
+    await expect(page).toHaveURL(new RegExp(`/vault/${sourceNotePath}$`))
+    await expect(page.locator('.editor-pane .monaco-editor').first()).toBeVisible()
+
+    await page.locator('[data-testid="account-button"]').click()
+    await page.locator('[data-testid="account-settings"]').click()
+    await page.locator('.settings-modal').getByRole('button', { name: /存储与附件|Storage & attachments/ }).click()
+    await expect(settings.locator('#attachment-manager-title')).toBeVisible()
+    await settings.locator('.attachment-toolbar input').fill(diagramFileName)
+    await expect(settings.locator('.attachment-resource-row')).toHaveCount(1)
+    await settings.locator('.attachment-resource-row').click()
+    const ownerReference = settings.locator('.attachment-reference-row').filter({ hasText: 'Attachment reference consumer' })
+    await ownerReference.click()
     await expect(settings).toHaveCount(0)
     await expect(page).toHaveURL(new RegExp(`/vault/${consumerNotePath}$`))
     await expect(page.locator('.editor-pane .monaco-editor').first()).toBeVisible()
@@ -175,6 +203,7 @@ test('Attachment Manager lists real sources, filters, refreshes, and preserves t
     }
     if (assetCreated) await request.delete(`/api/assets/${assetId}/unreferenced`).catch(() => {})
     if (consumerNoteCreated) await request.delete(`/api/posts/${consumerNotePath}`).catch(() => {})
+    if (sourceNoteCreated) await request.delete(`/api/posts/${sourceNotePath}`).catch(() => {})
     if (noteCreated) await request.delete(`/api/posts/${notePath}`).catch(() => {})
     await fs.rm(initialFilePath, { force: true })
     await fs.rm(refreshedFilePath, { force: true })

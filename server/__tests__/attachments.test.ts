@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import Database from 'better-sqlite3'
 import { promises as fs } from 'node:fs'
 import os from 'node:os'
@@ -95,6 +95,89 @@ describe('Attachment Manager API', () => {
     })
     expect((await fs.readFile(imagePath)).byteLength).toBe(3)
     expect(db.prepare('SELECT COUNT(*) AS count FROM assets').get()).toEqual({ count: 0 })
+  })
+
+  it('reports an initial reference-index failure and allows an explicit retry', async () => {
+    const index = new AttachmentReferenceIndex(db, { root: () => root })
+    vi.spyOn(index as unknown as {
+      buildSnapshot: (signal: AbortSignal) => Promise<unknown>
+    }, 'buildSnapshot').mockRejectedValueOnce(new Error('/private/vault/path must not escape'))
+    __setAttachmentReferenceIndexForRoutesTesting(index)
+
+    const failure = await app.fetch(authenticatedRequest(auth, '/api/attachments/references/refresh', {
+      method: 'POST', origin: auth.runtime.config.publicOrigin,
+    }))
+    expect(failure.status).toBe(503)
+    expect(await failure.json()).toMatchObject({ code: 'ATTACHMENT_REFERENCES_UNAVAILABLE' })
+    expect(JSON.stringify(await (await app.fetch(authenticatedRequest(auth, '/api/attachments/references/status'))).json()))
+      .toContain('failed')
+
+    const retry = await app.fetch(authenticatedRequest(auth, '/api/attachments/references/refresh', {
+      method: 'POST', origin: auth.runtime.config.publicOrigin,
+    }))
+    expect(retry.status).toBe(200)
+    expect(await retry.json()).toMatchObject({ state: 'ready', complete: true })
+  })
+
+  it('keeps failed-refresh previews and catalog projections conservative until a successful retry', async () => {
+    const imagePath = path.join(root, 'inbox', 'unreferenced.png')
+    await fs.writeFile(imagePath, Buffer.from([1, 2, 3]))
+    const index = new AttachmentReferenceIndex(db, { root: () => root })
+    __setAttachmentReferenceIndexForRoutesTesting(index)
+    const resource = { kind: 'vault-file', path: 'inbox/unreferenced.png' }
+    const request = (url: string, options: Parameters<typeof authenticatedRequest>[2] = {}) => app.fetch(
+      authenticatedRequest(auth, url, { origin: auth.runtime.config.publicOrigin, ...options }),
+    )
+
+    const firstRefresh = await request('/api/attachments/references/refresh', { method: 'POST' })
+    expect(firstRefresh.status).toBe(200)
+    const lastGood = await firstRefresh.json() as { refreshedAt: number; snapshotId: string }
+    const initialQuery = await request('/api/attachments/references/query', { method: 'POST', body: { resource } })
+    expect(await initialQuery.json()).toMatchObject({ stale: false, currentFinding: 'no-current-reference' })
+
+    vi.spyOn(index as unknown as {
+      buildSnapshot: (signal: AbortSignal) => Promise<unknown>
+    }, 'buildSnapshot').mockRejectedValueOnce(new Error('/private/vault/path must not escape'))
+    const failedRefresh = await request('/api/attachments/references/refresh', { method: 'POST' })
+    expect(failedRefresh.status).toBe(503)
+    const failureBody = await failedRefresh.json()
+    expect(JSON.stringify(failureBody)).not.toContain('/private/vault/path')
+
+    const staleStatusResponse = await request('/api/attachments/references/status')
+    const staleStatus = await staleStatusResponse.json()
+    expect(staleStatus).toMatchObject({
+      state: 'stale',
+      complete: false,
+      refreshedAt: lastGood.refreshedAt,
+      snapshotId: lastGood.snapshotId,
+    })
+    const staleQuery = await request('/api/attachments/references/query', { method: 'POST', body: { resource } })
+    expect(await staleQuery.json()).toMatchObject({
+      stale: true,
+      currentFinding: 'unknown',
+      referenceCount: 0,
+      checkedAt: lastGood.refreshedAt,
+      snapshotId: lastGood.snapshotId,
+      coverage: { currentNotes: 'unknown', boardReferences: 'unknown' },
+    })
+    const stalePreview = await request('/api/attachments/cleanup-preview', { method: 'POST', body: { resource } })
+    expect(await stalePreview.json()).toMatchObject({
+      stale: true,
+      currentFinding: 'unknown',
+      riskLevel: 'unverified',
+      deletionAllowed: false,
+      snapshotId: lastGood.snapshotId,
+    })
+    const catalog = await request('/api/attachments?source=vault-file&search=unreferenced.png')
+    expect(await catalog.json()).toMatchObject({
+      items: [{ key: resource, referenceStatus: 'unknown', referenceCount: 0, ownerCount: 0 }],
+    })
+
+    const retry = await request('/api/attachments/references/refresh', { method: 'POST' })
+    expect(retry.status).toBe(200)
+    expect(await retry.json()).toMatchObject({ state: 'ready', snapshotId: expect.not.stringMatching(lastGood.snapshotId) })
+    const freshQuery = await request('/api/attachments/references/query', { method: 'POST', body: { resource } })
+    expect(await freshQuery.json()).toMatchObject({ stale: false, currentFinding: 'no-current-reference' })
   })
 
   it('rejects arbitrary paths and malformed resource keys without exposing filesystem details', async () => {

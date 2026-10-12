@@ -25,7 +25,8 @@ This plan separates the unified catalog foundation from later reference analysis
 - Report direct and indirect Markdown image, snippet, Include-chain, Board Embed, Board Scene, and Board Thumbnail relationships with counts, source identity, and bounded pagination.
 - Resolve Note → Board → Asset as a derived relationship only; keep `asset_references` authoritative for Board scene and thumbnail ownership.
 - Expose authenticated reference status, refresh, query, and read-only cleanup-preview APIs. No deletion authorization or mutation is returned.
-- Add reference detail and navigation via the existing Note and Board lifecycle. Keep catalog list/search non-blocking while the reference projection is pending.
+- Add reference detail and navigation via the existing Note and Board lifecycle. The primary row opens its displayed owner; an indirect Note reference may separately open its actual source Note. Keep catalog list/search non-blocking while the reference projection is pending.
+- A failed reference refresh returns an API error and preserves the last successful snapshot only as explicitly stale evidence. Stale or unavailable reference data projects as unknown and cleanup preflight remains unverified; a successful retry replaces the snapshot.
 - Coverage is intentionally partial: Diary is restricted; Git history, browser drafts, unsaved editor buffers, Board checkpoints, and external changes after scanning are not checked. Board Material usage remains unknown. A zero current-reference result never authorizes deletion.
 
 ## Phase 3 — Upload and cross-module reuse

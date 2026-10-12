@@ -196,7 +196,7 @@ export function createAttachmentRoutes(
 
   routes.get('/references/status', (c) => {
     const index = resolveIndex()
-    if (index.getStatus().state === 'pending') void index.refresh()
+    if (index.getStatus().state === 'pending') void index.refresh().catch(() => {})
     c.header('Cache-Control', 'no-store')
     return c.json(index.getStatus())
   })

@@ -27,7 +27,7 @@ import type {
 
 const emit = defineEmits<{
   back: []
-  navigateReference: [reference: AttachmentReference]
+  navigateReference: [reference: AttachmentReference, destination: 'owner' | 'source']
 }>()
 const { t } = useI18n()
 const toast = useToast()
@@ -67,6 +67,20 @@ const isInitialFailure = computed(() => loadError.value !== null && !page.value)
 const hasNextPage = computed(() => Boolean(page.value && page.value.offset + page.value.limit < page.value.total))
 const rangeStart = computed(() => page.value?.total ? page.value.offset + 1 : 0)
 const rangeEnd = computed(() => Math.min((page.value?.offset ?? 0) + (page.value?.limit ?? pageSize), page.value?.total ?? 0))
+
+function markReferencesStale(): void {
+  if (!references.value) return
+  references.value = {
+    ...references.value,
+    currentFinding: 'unknown',
+    stale: true,
+    coverage: {
+      ...references.value.coverage,
+      currentNotes: 'unknown',
+      boardReferences: 'unknown',
+    },
+  }
+}
 
 function resourceKey(item: ManagedAttachment): string {
   switch (item.key.kind) {
@@ -170,12 +184,16 @@ async function refresh(): Promise<void> {
   refreshing.value = true
   refreshError.value = false
   referenceRefreshError.value = false
+  markReferencesStale()
   const [catalogResult, referenceResult] = await Promise.allSettled([
     refreshAttachmentIndex(),
     refreshAttachmentReferences(),
   ])
   if (catalogResult.status === 'rejected') refreshError.value = true
-  if (referenceResult.status === 'rejected') referenceRefreshError.value = true
+  if (referenceResult.status === 'rejected') {
+    referenceRefreshError.value = true
+    markReferencesStale()
+  }
   if (catalogResult.status === 'fulfilled') await loadPage('after-refresh')
   if (referenceResult.status === 'fulfilled') {
     references.value = null
@@ -191,7 +209,6 @@ function loadReferences(item: ManagedAttachment, offset = 0): void {
   const sequence = ++referenceSequence
   referencesLoading.value = true
   referencesError.value = false
-  references.value = offset === 0 ? null : references.value
   riskPreview.value = null
   previewError.value = false
   void queryAttachmentReferences(item.key, { offset, limit: 30, signal: controller.signal }).then((result) => {
@@ -201,7 +218,10 @@ function loadReferences(item: ManagedAttachment, offset = 0): void {
       : { ...result, references: [...references.value.references, ...result.references] }
     if (offset === 0) void loadPage()
   }).catch(() => {
-    if (sequence === referenceSequence && !controller.signal.aborted) referencesError.value = true
+    if (sequence === referenceSequence && !controller.signal.aborted) {
+      referencesError.value = true
+      markReferencesStale()
+    }
   }).finally(() => {
     if (sequence === referenceSequence) referencesLoading.value = false
   })
@@ -245,6 +265,17 @@ function referenceOwnerLabel(reference: AttachmentReference): string {
 function referenceViaLabel(reference: AttachmentReference): string {
   const via = reference.via?.map((item) => item.title || item.id).filter(Boolean) ?? []
   return via.length ? t('attachments.reference_via', { path: via.join(' → ') }) : ''
+}
+
+function referenceSourceLabel(reference: AttachmentReference): string {
+  if (reference.owner.kind !== 'note' || !reference.navigable || !reference.sourcePath) return ''
+  const sourcePath = reference.sourcePath.replace(/\.md$/iu, '')
+  if (sourcePath === reference.owner.id.replace(/\.md$/iu, '')) return ''
+  const source = reference.via?.find((item) => item.kind === 'include'
+    && item.id.replace(/\.md$/iu, '') === sourcePath)
+  if (!source) return ''
+  const sourceTitle = source.title
+  return sourceTitle || sourcePath.split('/').at(-1) || sourcePath
 }
 
 function riskLevelLabel(preview: AttachmentCleanupPreview): string {
@@ -455,31 +486,48 @@ onBeforeUnmount(() => {
             <div v-if="referencesLoading && !references" class="attachment-reference-state" role="status">
               <NSpin size="small" /><span>{{ t('attachments.references.loading') }}</span>
             </div>
-            <div v-else-if="referencesError" class="attachment-reference-state is-error" role="alert">
+            <div v-else-if="referencesError && !references" class="attachment-reference-state is-error" role="alert">
               <span>{{ t('attachments.references.failed') }}</span>
               <NButton attr-type="button" size="tiny" quaternary @click="retryReferences">{{ t('attachments.retry') }}</NButton>
             </div>
-            <div v-else-if="references && references.referenceCount === 0" class="attachment-reference-state">
+            <div v-if="referencesError && references" class="attachment-reference-state is-error" role="status">
+              <span>{{ t('attachments.references.failed') }}</span>
+              <NButton attr-type="button" size="tiny" quaternary @click="retryReferences">{{ t('attachments.retry') }}</NButton>
+            </div>
+            <div v-if="references?.stale" class="attachment-reference-stale" role="status">
+              {{ t('attachments.references.stale') }}
+            </div>
+            <div v-if="references && references.referenceCount === 0" class="attachment-reference-state">
               {{ t(references.currentFinding === 'unknown' ? 'attachments.references.unknown' : 'attachments.references.empty') }}
             </div>
-            <div v-else-if="references" class="attachment-reference-list">
-              <button
+            <div v-if="references && references.referenceCount > 0" class="attachment-reference-list">
+              <div
                 v-for="(reference, index) in references.references"
                 :key="`${reference.owner.kind}:${reference.owner.id}:${reference.kind}:${reference.sourcePath ?? ''}:${reference.line ?? index}`"
-                type="button"
-                class="attachment-reference-row"
-                :disabled="!reference.navigable"
-                :title="reference.owner.title ?? reference.owner.id"
-                @click="emit('navigateReference', reference)"
+                class="attachment-reference-item"
               >
-                <NIcon class="attachment-reference-icon" aria-hidden="true"><component :is="reference.owner.kind === 'note' ? File : Shape" /></NIcon>
-                <span class="attachment-reference-main">
-                  <strong>{{ reference.owner.title || reference.owner.id }}</strong>
-                  <small>{{ referenceOwnerLabel(reference) }} · {{ referenceKindLabel(reference) }} · {{ t(`attachments.relation.${reference.relation}`) }}</small>
-                  <small v-if="referenceViaLabel(reference)" class="attachment-reference-via">{{ referenceViaLabel(reference) }}</small>
-                </span>
-                <span v-if="reference.navigable" class="attachment-reference-arrow" aria-hidden="true">→</span>
-              </button>
+                <button
+                  type="button"
+                  class="attachment-reference-row"
+                  :disabled="!reference.navigable"
+                  :title="reference.owner.title ?? reference.owner.id"
+                  @click="emit('navigateReference', reference, 'owner')"
+                >
+                  <NIcon class="attachment-reference-icon" aria-hidden="true"><component :is="reference.owner.kind === 'note' ? File : Shape" /></NIcon>
+                  <span class="attachment-reference-main">
+                    <strong>{{ reference.owner.title || reference.owner.id }}</strong>
+                    <small>{{ referenceOwnerLabel(reference) }} · {{ referenceKindLabel(reference) }} · {{ t(`attachments.relation.${reference.relation}`) }}</small>
+                    <small v-if="referenceViaLabel(reference)" class="attachment-reference-via">{{ referenceViaLabel(reference) }}</small>
+                  </span>
+                  <span v-if="reference.navigable" class="attachment-reference-arrow" aria-hidden="true">→</span>
+                </button>
+                <button
+                  v-if="referenceSourceLabel(reference)"
+                  type="button"
+                  class="attachment-reference-source"
+                  @click="emit('navigateReference', reference, 'source')"
+                >{{ t('attachments.references.view_source', { source: referenceSourceLabel(reference) }) }}</button>
+              </div>
               <NButton
                 v-if="references.nextOffset !== null"
                 attr-type="button"
@@ -574,6 +622,7 @@ onBeforeUnmount(() => {
 .attachment-reference-state { min-height: 42px; display: flex; align-items: center; justify-content: center; gap: 8px; color: var(--settings-muted); font-size: .8rem; text-align: center; }
 .attachment-reference-state.is-error, .attachment-risk-result.is-error { color: var(--settings-danger); }
 .attachment-reference-list { display: flex; flex-direction: column; gap: 5px; }
+.attachment-reference-item { display: flex; flex-direction: column; gap: 3px; }
 .attachment-reference-row { width: 100%; min-width: 0; display: flex; align-items: center; gap: 8px; padding: 8px; border: 1px solid var(--settings-border); border-radius: 7px; background: transparent; color: var(--settings-text); text-align: left; cursor: pointer; }
 .attachment-reference-row:hover:not(:disabled) { background: color-mix(in srgb, var(--settings-accent) 9%, transparent); }
 .attachment-reference-row:disabled { cursor: default; }
@@ -583,6 +632,9 @@ onBeforeUnmount(() => {
 .attachment-reference-main strong { font-size: .8rem; font-weight: 550; }
 .attachment-reference-main small { color: var(--settings-muted); font-size: .7rem; }
 .attachment-reference-main .attachment-reference-via { color: var(--settings-accent); }
+.attachment-reference-source { align-self: flex-start; padding: 1px 6px; border: 0; background: transparent; color: var(--settings-accent); font-size: .7rem; cursor: pointer; }
+.attachment-reference-source:hover { text-decoration: underline; }
+.attachment-reference-stale { padding: 7px 9px; border-radius: 6px; background: color-mix(in srgb, var(--settings-warning) 9%, transparent); color: var(--settings-warning); font-size: .74rem; }
 .attachment-reference-arrow { flex: 0 0 auto; color: var(--settings-accent); }
 .attachment-reference-more { align-self: center; }
 .attachment-reference-coverage { margin: 0; }

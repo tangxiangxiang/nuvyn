@@ -59,7 +59,7 @@ export interface AttachmentReferenceCoverage {
 }
 
 export interface AttachmentReferenceIndexStatus {
-  state: 'pending' | 'building' | 'ready' | 'partial' | 'failed'
+  state: 'pending' | 'building' | 'ready' | 'partial' | 'stale' | 'failed'
   complete: boolean | null
   noteCount: number
   refreshedAt: number | null
@@ -82,6 +82,8 @@ export interface AttachmentReferencePage {
   limit: number
   nextOffset: number | null
   currentFinding: 'in-use' | 'no-current-reference' | 'unknown'
+  /** True when this is a retained last-good snapshot that has not been revalidated. */
+  stale: boolean
   coverage: AttachmentReferenceCoverage
   snapshotId: string | null
   checkedAt: number
@@ -93,6 +95,7 @@ export interface AttachmentCleanupPreview {
   riskLevel: 'known-use' | 'review-required' | 'unverified'
   referenceCount: number
   ownerCount: number
+  stale: boolean
   coverage: AttachmentReferenceCoverage
   riskReasons: Array<
     | 'current-references-found'

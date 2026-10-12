@@ -1444,11 +1444,17 @@ function openLinkedDocument(path: string, anchor?: string): void {
   void vaultContext.editor.openLink(path, anchor)
 }
 
-function navigateToAttachmentReference(reference: import('../../shared/attachmentProtocol').AttachmentReference): void {
+function navigateToAttachmentReference(
+  reference: import('../../shared/attachmentProtocol').AttachmentReference,
+  destination: 'owner' | 'source' = 'owner',
+): void {
   settingsOpen.value = false
   void nextTick(() => {
     if (reference.owner.kind === 'note') {
-      openLinkedDocument(reference.sourcePath ?? reference.owner.id)
+      const path = destination === 'source' && reference.sourcePath && reference.navigable
+        ? reference.sourcePath.replace(/\.md$/iu, '')
+        : reference.owner.id
+      openLinkedDocument(path)
       return
     }
     void router.push({ name: 'board-editor', params: { boardId: reference.owner.id } })

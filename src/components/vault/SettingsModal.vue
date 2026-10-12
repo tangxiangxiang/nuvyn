@@ -51,7 +51,7 @@ const props = withDefaults(defineProps<{
 })
 const emit = defineEmits<{
   close: []
-  navigateReference: [reference: AttachmentReference]
+  navigateReference: [reference: AttachmentReference, destination: 'owner' | 'source']
 }>()
 
 const toast = useToast()
@@ -486,7 +486,7 @@ onBeforeUnmount(() => {
             <SettingsAttachmentManagerSection
               v-if="active === 'storage-attachments'"
               @back="active = 'ai'"
-              @navigate-reference="emit('navigateReference', $event)"
+              @navigate-reference="(reference, destination) => emit('navigateReference', reference, destination)"
             />
             <SettingsAiSection
               v-else-if="active === 'ai'"
