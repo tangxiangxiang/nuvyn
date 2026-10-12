@@ -35,10 +35,12 @@ function requestHasBody(request: Request): boolean {
 }
 
 function requiresJsonBody(method: string, path: string): boolean {
-  // Asset uploads are the one authenticated mutation that intentionally
-  // carries a binary body. Keep the exception exact; every other body-bearing
-  // mutation remains subject to the existing JSON content-type boundary.
-  return !(method === 'PUT' && /^\/api\/assets\/[^/]+$/.test(path))
+  // These exact authenticated upload endpoints intentionally carry binary or
+  // multipart bodies. Every other body-bearing mutation stays JSON-only.
+  return !(
+    (method === 'PUT' && /^\/api\/assets\/[^/]+$/.test(path))
+    || (method === 'POST' && path === '/api/note/images')
+  )
 }
 
 /**
@@ -101,6 +103,11 @@ export const authBoundary: MiddlewareHandler = async (c, next) => {
   if (isUnsafeMethod(method)) {
     const csrf = checkCsrfHeaders(c.req.raw.headers, method, runtime.config)
     if (!csrf.ok) return jsonError(c, 403, csrf.message, csrf.code)
+
+    if (method === 'POST' && c.req.path === '/api/note/images'
+      && c.req.raw.headers.get('origin') !== runtime.config.publicOrigin) {
+      return jsonError(c, 403, 'Request origin is required.', 'csrf-origin-mismatch')
+    }
 
     // A body-bearing mutation must be JSON. Wire-level framing headers are
     // inspected without consuming the stream, so streaming handlers remain

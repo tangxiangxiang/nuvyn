@@ -4436,6 +4436,24 @@ body:has(.ledger-detail-sheet-card) .n-modal-mask {
   border-left: 1px solid var(--vs-border);
   background: var(--vs-tabs-bg, var(--vs-bg-3));
 }
+.note-image-file-input {
+  position: fixed;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  clip-path: inset(50%);
+}
+.monaco-host.is-image-drag-over {
+  outline: 2px solid color-mix(in srgb, var(--vs-accent, #6270ac) 45%, transparent);
+  outline-offset: -3px;
+}
+.toast-action-content {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
 .tabs {
   display: flex;
   flex: 1 1 auto;

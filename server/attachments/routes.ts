@@ -57,6 +57,12 @@ export function __setAttachmentCatalogForTesting(catalog: AttachmentCatalog | nu
   if (catalog === null) defaultCatalog = null
 }
 
+/** Discard only the cached default Vault scan so a newly uploaded image is
+ * included in the next Attachment Manager read. Test overrides remain intact. */
+export function invalidateDefaultAttachmentCatalog(): void {
+  defaultCatalog = null
+}
+
 export function __setAttachmentReferenceIndexForRoutesTesting(index: AttachmentReferenceIndex | null): void {
   referenceIndexOverride = index
 }

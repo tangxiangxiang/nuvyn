@@ -1,6 +1,8 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { mount } from '@vue/test-utils'
+import { flushPromises, mount } from '@vue/test-utils'
+
+const imageMocks = vi.hoisted(() => ({ uploadNoteImage: vi.fn() }))
 
 const mocks = vi.hoisted(() => {
   const changeListeners: Array<(event?: { changes: Array<{ range: { startLineNumber: number } }> }) => void> = []
@@ -11,6 +13,8 @@ const mocks = vi.hoisted(() => {
   const scrollListeners: Array<(event: { scrollTopChanged: boolean; scrollLeftChanged: boolean }) => void> = []
   const mouseDownListeners: Array<(event: any) => void> = []
   const completionProviders: Array<any> = []
+  const decorations = new Map<string, any>()
+  let nextDecorationId = 0
   const createEditor = vi.fn()
   const chord = vi.fn(() => 123456)
   const model = {
@@ -18,7 +22,19 @@ const mocks = vi.hoisted(() => {
     value: '',
     getValue: vi.fn(() => model.value),
     setValue: vi.fn((value: string) => { model.value = value; changeListeners.forEach((fn) => fn()) }),
-    getValueInRange: vi.fn(() => model.value),
+    getValueInRange: vi.fn((range?: { startLineNumber: number; startColumn: number; endLineNumber: number; endColumn: number }) => {
+      if (!range || range.startLineNumber !== 1 || range.endLineNumber !== 1) return model.value
+      return model.value.slice(range.startColumn - 1, range.endColumn - 1)
+    }),
+    deltaDecorations: vi.fn((oldIds: string[], newDecorations: Array<{ range: any }>) => {
+      oldIds.forEach((id) => decorations.delete(id))
+      return newDecorations.map(({ range }) => {
+        const id = `tracked-${++nextDecorationId}`
+        decorations.set(id, range)
+        return id
+      })
+    }),
+    getDecorationRange: vi.fn((id: string) => decorations.get(id) ?? null),
     getLineContent: vi.fn(() => ''),
     getLineCount: vi.fn(() => Math.max(1, model.value.split('\n').length)),
     getLineMaxColumn: vi.fn(() => 1),
@@ -54,11 +70,24 @@ const mocks = vi.hoisted(() => {
     setScrollTop: vi.fn(),
     revealLineInCenter: vi.fn(),
     getVisibleRanges: vi.fn(() => [{ startLineNumber: 1, endLineNumber: 20 }]),
+    getModel: vi.fn(() => model),
+    getPosition: vi.fn(() => ({ lineNumber: 1, column: 1 })),
+    getTargetAtClientPoint: vi.fn(() => ({ position: { lineNumber: 1, column: 1 } })),
+    hasTextFocus: vi.fn(() => true),
+    pushUndoStop: vi.fn(() => true),
     addCommand: vi.fn(() => 'remember-link-command'),
     addAction: vi.fn(() => ({ dispose: vi.fn() })),
     createContextKey: vi.fn((_key: string, defaultValue: boolean) => ({ set: vi.fn(), get: vi.fn(() => defaultValue) })),
     getSelection: vi.fn(() => null),
-    executeEdits: vi.fn(),
+    executeEdits: vi.fn((_source: string, edits: Array<{ range: any; text: string }>) => {
+      const edit = edits[0]
+      if (!edit || edit.range.startLineNumber !== 1 || edit.range.endLineNumber !== 1) return false
+      const start = edit.range.startColumn - 1
+      const end = edit.range.endColumn - 1
+      model.value = `${model.value.slice(0, start)}${edit.text}${model.value.slice(end)}`
+      changeListeners.forEach((fn) => fn({ changes: [{ range: { startLineNumber: 1 } }] }))
+      return true
+    }),
     setModel: vi.fn(),
     setSelection: vi.fn(),
     revealRangeInCenterIfOutsideViewport: vi.fn(),
@@ -75,6 +104,7 @@ const mocks = vi.hoisted(() => {
     scrollListeners,
     mouseDownListeners,
     completionProviders,
+    decorations,
     createEditor,
     chord,
     model,
@@ -94,6 +124,7 @@ vi.mock('monaco-editor/esm/vs/editor/editor.api.js', () => ({
     createModel: vi.fn((value: string) => { mocks.model.value = value; return mocks.model }),
     create: vi.fn(() => { mocks.createEditor(); return mocks.editor }),
     setModelMarkers: vi.fn(),
+    TrackedRangeStickiness: { NeverGrowsWhenTypingAtEdges: 1 },
   },
   languages: {
     CompletionItemKind: { Reference: 1, Keyword: 2, Snippet: 3 },
@@ -117,6 +148,10 @@ vi.mock('monaco-editor/esm/vs/editor/editor.api.js', () => ({
       this.endLineNumber = endLineNumber
       this.endColumn = endColumn
     }
+
+    isEmpty() {
+      return this.startLineNumber === this.endLineNumber && this.startColumn === this.endColumn
+    }
   },
   Selection: class Selection {
     public selectionStartLineNumber: number
@@ -135,6 +170,11 @@ vi.mock('monaco-editor/esm/vs/editor/editor.api.js', () => ({
       this.positionLineNumber = positionLineNumber
       this.positionColumn = positionColumn
     }
+
+    isEmpty() {
+      return this.selectionStartLineNumber === this.positionLineNumber
+        && this.selectionStartColumn === this.positionColumn
+    }
   },
   KeyCode: { Enter: 3, Tab: 2, KeyB: 31, KeyE: 33, KeyF: 36, KeyI: 38, KeyK: 40, KeyZ: 56, Escape: 9, Backquote: 85 },
   KeyMod: { Shift: 1024, CtrlCmd: 2048, chord: mocks.chord },
@@ -143,10 +183,15 @@ vi.mock('monaco-editor/esm/vs/editor/editor.api.js', () => ({
 vi.mock('monaco-editor/esm/vs/basic-languages/markdown/markdown.contribution.js', () => ({}))
 vi.mock('monaco-editor/esm/vs/editor/editor.worker?worker', () => ({ default: class WorkerStub {} }))
 vi.mock('../../../lib/api', () => ({ getPost: mocks.getPost }))
+vi.mock('../../../lib/noteImages', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../../../lib/noteImages')>()
+  return { ...actual, uploadNoteImage: imageMocks.uploadNoteImage }
+})
 
 import EditorPane from '../EditorPane.vue'
 import { resetMarkdownModelsForTesting } from '../monacoModels'
 import { parseDoc } from '../../../lib/frontmatter'
+import { useToast } from '../../../composables/useToast'
 
 describe('Monaco EditorPane', () => {
   function registeredActions() {
@@ -193,13 +238,23 @@ describe('Monaco EditorPane', () => {
     mocks.mouseDownListeners.length = 0
     vi.clearAllMocks()
     mocks.model.getValueInRange.mockReset()
-    mocks.model.getValueInRange.mockImplementation(() => mocks.model.value)
+    mocks.model.getValueInRange.mockImplementation((range?: { startLineNumber: number; startColumn: number; endLineNumber: number; endColumn: number }) => {
+      if (!range || range.startLineNumber !== 1 || range.endLineNumber !== 1) return mocks.model.value
+      return mocks.model.value.slice(range.startColumn - 1, range.endColumn - 1)
+    })
     mocks.model.getLineContent.mockReset()
     mocks.model.getLineContent.mockImplementation(() => '')
     mocks.model.getLineMaxColumn.mockReset()
     mocks.model.getLineMaxColumn.mockImplementation(() => 1)
     mocks.model.value = ''
     mocks.editor.getSelection.mockReturnValue(null)
+    mocks.editor.getPosition.mockReturnValue({ lineNumber: 1, column: 1 })
+    mocks.editor.hasTextFocus.mockReturnValue(true)
+    mocks.editor.getModel.mockReturnValue(mocks.model)
+    mocks.decorations.clear()
+    imageMocks.uploadNoteImage.mockReset()
+    const { toasts, dismiss } = useToast()
+    toasts.value.forEach((toast) => dismiss(toast.id))
     mocks.model.getLineContent.mockReturnValue('')
     mocks.model.findMatches.mockReset()
     mocks.model.findMatches.mockReturnValue([])
@@ -213,6 +268,156 @@ describe('Monaco EditorPane', () => {
 
   afterEach(() => {
     vi.useRealTimers()
+  })
+
+  function imageFile(name = 'diagram.png'): File {
+    return new File([new Uint8Array([137, 80, 78, 71, 13, 10, 26, 10, 0])], name, { type: 'image/png' })
+  }
+
+  function cursorSelection(column: number, endColumn = column) {
+    return {
+      startLineNumber: 1,
+      startColumn: column,
+      endLineNumber: 1,
+      endColumn,
+      isEmpty: () => column === endColumn,
+    }
+  }
+
+  function pasteImage(file: File, values: Record<string, string> = {}): ClipboardEvent {
+    const event = new Event('paste', { bubbles: true, cancelable: true })
+    const clipboardData = {
+      files: [file],
+      items: [{ kind: 'file', getAsFile: () => file }],
+      getData: (type: string) => values[type] ?? '',
+    }
+    Object.defineProperty(event, 'clipboardData', { value: clipboardData })
+    return event as ClipboardEvent
+  }
+
+  function uploadedImage(file: File) {
+    return {
+      id: '550e8400-e29b-41d4-a716-446655440000',
+      path: 'attachments/images/550e8400-e29b-41d4-a716-446655440000.png',
+      markdownUrl: '@/attachments/images/550e8400-e29b-41d4-a716-446655440000.png',
+      mimeType: 'image/png' as const,
+      byteSize: file.size,
+    }
+  }
+
+  it('keeps normal text and URL-to-Markdown-link paste behavior ahead of clipboard images', () => {
+    const wrapper = mount(EditorPane, { props: { modelValue: 'label', path: 'inbox/test', allowImageInsertion: true } })
+    mocks.model.value = 'label'
+    mocks.editor.getSelection.mockReturnValue(cursorSelection(1, 6) as any)
+    const textPaste = pasteImage(imageFile(), { 'text/plain': 'copied web text', 'text/html': '<p>copied web text</p>' })
+    wrapper.element.dispatchEvent(textPaste)
+    expect(textPaste.defaultPrevented).toBe(false)
+    expect(imageMocks.uploadNoteImage).not.toHaveBeenCalled()
+
+    const urlPaste = new Event('paste', { bubbles: true, cancelable: true })
+    Object.defineProperty(urlPaste, 'clipboardData', {
+      value: { files: [], items: [], getData: (type: string) => type === 'text/plain' ? 'https://example.com' : '' },
+    })
+    wrapper.element.dispatchEvent(urlPaste)
+    expect(urlPaste.defaultPrevented).toBe(true)
+    expect(mocks.editor.executeEdits).toHaveBeenCalledWith(
+      'markdown-link-paste',
+      [expect.objectContaining({ text: '[label](https://example.com)' })],
+    )
+    expect(imageMocks.uploadNoteImage).not.toHaveBeenCalled()
+    wrapper.unmount()
+  })
+
+  it('does not intercept image paste when Monaco does not have text focus', () => {
+    const wrapper = mount(EditorPane, { props: { modelValue: 'unchanged', path: 'inbox/test', allowImageInsertion: true } })
+    mocks.model.value = 'unchanged'
+    mocks.editor.hasTextFocus.mockReturnValueOnce(false)
+    const event = pasteImage(imageFile())
+
+    wrapper.element.dispatchEvent(event)
+
+    expect(event.defaultPrevented).toBe(false)
+    expect(imageMocks.uploadNoteImage).not.toHaveBeenCalled()
+    wrapper.unmount()
+  })
+
+  it('uploads a pasted image and inserts at its captured cursor after typing continues', async () => {
+    const file = imageFile()
+    let resolveUpload!: (result: ReturnType<typeof uploadedImage>) => void
+    imageMocks.uploadNoteImage.mockReturnValue(new Promise((resolve) => { resolveUpload = resolve }))
+    const wrapper = mount(EditorPane, { props: { modelValue: 'abcd', path: 'inbox/test', allowImageInsertion: true } })
+    mocks.model.value = 'abcd'
+    mocks.editor.getSelection.mockReturnValue(cursorSelection(2) as any)
+
+    const event = pasteImage(file)
+    wrapper.element.dispatchEvent(event)
+    expect(event.defaultPrevented).toBe(true)
+    expect(imageMocks.uploadNoteImage).toHaveBeenCalledWith(file)
+    expect(useToast().toasts.value.some((toast) => toast.type === 'info')).toBe(true)
+
+    mocks.model.value = 'abcd!'
+    mocks.changeListeners.forEach((listener) => listener({ changes: [{ range: { startLineNumber: 1 } }] }))
+    resolveUpload(uploadedImage(file))
+    await flushPromises()
+    expect(useToast().toasts.value.some((toast) => toast.type === 'info')).toBe(false)
+    expect(mocks.editor.executeEdits).toHaveBeenCalledOnce()
+    expect(mocks.editor.executeEdits.mock.calls[0]?.[1][0]?.range.startColumn).toBe(2)
+    expect(mocks.model.value).toBe('a![diagram](@/attachments/images/550e8400-e29b-41d4-a716-446655440000.png)bcd!')
+    expect(mocks.editor.pushUndoStop).toHaveBeenCalledTimes(2)
+    wrapper.unmount()
+  })
+
+  it('inserts dropped images at the pointer position without intercepting ordinary drops', async () => {
+    const file = imageFile()
+    imageMocks.uploadNoteImage.mockResolvedValue(uploadedImage(file))
+    const wrapper = mount(EditorPane, { props: { modelValue: 'abcd', path: 'inbox/test', allowImageInsertion: true } })
+    mocks.model.value = 'abcd'
+    mocks.editor.getTargetAtClientPoint.mockReturnValue({ position: { lineNumber: 1, column: 3 } } as any)
+    const event = new Event('drop', { bubbles: true, cancelable: true })
+    Object.defineProperties(event, {
+      dataTransfer: { value: { files: [file], items: [] } },
+      clientX: { value: 10 },
+      clientY: { value: 12 },
+    })
+    wrapper.element.dispatchEvent(event)
+    await flushPromises()
+    expect(event.defaultPrevented).toBe(true)
+    expect(mocks.editor.executeEdits.mock.calls[0]?.[1][0]?.range.startColumn).toBe(3)
+
+    const ordinaryDrop = new Event('drop', { bubbles: true, cancelable: true })
+    Object.defineProperty(ordinaryDrop, 'dataTransfer', { value: { files: [], items: [] } })
+    wrapper.element.dispatchEvent(ordinaryDrop)
+    expect(ordinaryDrop.defaultPrevented).toBe(false)
+    wrapper.unmount()
+  })
+
+  it('exposes the image picker and leaves the document unchanged when it is cancelled', async () => {
+    const wrapper = mount(EditorPane, { props: { modelValue: 'unchanged', path: 'inbox/test', allowImageInsertion: true } })
+    const input = document.body.querySelector<HTMLInputElement>('.note-image-file-input')!
+    const click = vi.spyOn(input, 'click')
+    ;(wrapper.vm as any).chooseImage()
+    expect(click).toHaveBeenCalledOnce()
+    input.dispatchEvent(new Event('cancel'))
+    await flushPromises()
+    expect(mocks.editor.executeEdits).not.toHaveBeenCalled()
+    expect(mocks.model.value).toBe('unchanged')
+    wrapper.unmount()
+  })
+
+  it('offers a copy fallback instead of inserting after the selected text changed', async () => {
+    const file = imageFile()
+    imageMocks.uploadNoteImage.mockResolvedValue(uploadedImage(file))
+    const wrapper = mount(EditorPane, { props: { modelValue: 'replace me', path: 'inbox/test', allowImageInsertion: true } })
+    mocks.model.value = 'replace me'
+    mocks.editor.getSelection.mockReturnValue(cursorSelection(1, 11) as any)
+    wrapper.element.dispatchEvent(pasteImage(file))
+    mocks.model.value = 'changed text'
+    await flushPromises()
+    expect(mocks.editor.executeEdits).not.toHaveBeenCalled()
+    const toast = useToast().toasts.value.find((item) => item.action)
+    expect(toast?.message).toBeTruthy()
+    expect(toast?.action?.label).toBeTruthy()
+    wrapper.unmount()
   })
 
   it('reveals Monaco scrollbars while scrolling and hides them after 900ms idle', () => {

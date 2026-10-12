@@ -1,10 +1,11 @@
 import path from 'node:path'
 import { TextDecoder } from 'node:util'
+import { NOTE_IMAGE_UPLOAD_MAX_BYTES } from '../shared/noteImageProtocol.js'
 import { CONTENT_DIR, readSafeRelativeFile, SafePathResourceLimitError } from './paths.js'
 
 export const MAX_SNIPPET_BYTES = 256 * 1024
 export const MAX_INCLUDE_BYTES = 512 * 1024
-export const MAX_IMAGE_BYTES = 4 * 1024 * 1024
+export const MAX_IMAGE_BYTES = NOTE_IMAGE_UPLOAD_MAX_BYTES
 
 export type MarkdownResourceKind = 'snippet' | 'include' | 'image'
 

@@ -885,7 +885,8 @@ describe('D7.3 Native Diary mood context removal', () => {
     expect(source).not.toContain('updateNativeDiaryMood')
     expect(source).not.toContain('clearNativeDiaryMood')
     expect(source).not.toContain('diaryMoodContextRef')
-    expect(source).toContain(':context-actions-visible="false"')
+    expect(source).toContain(':context-actions-visible="canInsertNoteImage"')
+    expect(source).toMatch(/const canInsertNoteImage = computed\(\(\) => Boolean\([\s\S]*?activeScope\.value === 'note'/)
 
     expect(tabs).not.toContain('DiaryMood')
     expect(tabs).not.toContain('classifyDiaryPath')

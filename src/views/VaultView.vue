@@ -11,6 +11,7 @@ import { NUVYN_BROWSER_STORAGE_KEYS } from '../technicalNamespace'
 import { isNuvynShortcutBlocked } from '../lib/keyboard'
 import { useConfirm } from '../composables/useConfirm'
 import { useI18n } from '../composables/useI18n'
+import { NButton } from 'naive-ui'
 import { useAuth, type WorkspaceAuthTransitionAdapter } from '../composables/useAuth'
 import { useEditorTabs } from '../composables/vault/useEditorTabs'
 import { pathToUrl } from '../composables/vault/editor-tabs/tabState'
@@ -177,6 +178,7 @@ import {
 // actually mounts an editor, keeping navigation/read-only startup lean.
 const EditorPane = defineAsyncComponent(() => import('../components/vault/EditorPane.vue'))
 const editorPaneRef = ref<{
+  chooseImage(): void
   revealText(text: string): boolean
   revealAnchor(anchor: string, isCurrent?: () => boolean): boolean | Promise<boolean>
 } | null>(null)
@@ -1903,6 +1905,16 @@ const specialWorkspaceSurfaceActive = computed(() => Boolean(
   || activeWorkingTreeDiff.value
   || activeDraftRecovery.value
 ))
+const canInsertNoteImage = computed(() => Boolean(
+  route.meta.workspaceKind === 'vault'
+  && activeScope.value === 'note'
+  && activePath.value
+  && activeTab.value?.path === activePath.value
+  && !activeTab.value.loading
+  && !activeTab.value.loadError
+  && !isReadMode.value
+  && !specialWorkspaceSurfaceActive.value
+))
 const isManagedDiaryDocumentActive = computed(() => (
   isDiaryScope.value && classifyDiaryPath(activePath.value ?? '') === 'managed'
 ))
@@ -3169,14 +3181,25 @@ watch(isReadMode, async (reading) => {
         ref="editorTabsRef"
         :tabs="workspaceTabs"
         :active-path="activeWorkspaceTabId"
-        :context-actions-visible="false"
+        :context-actions-visible="canInsertNoteImage"
         @select="selectWorkspaceTab"
         @close="closeWorkspaceTab"
         @close-many="closeManyWorkspaceTabs"
         @copy-path="copyWorkspaceTabPath"
         @reveal-in-tree="revealWorkspaceTabInTree"
         @reorder="reorderWorkspaceTabs"
-      />
+      >
+        <template #context-actions>
+          <NButton
+            attr-type="button"
+            size="small"
+            text
+            :bordered="false"
+            :title="t('editor.insert_image')"
+            @click="editorPaneRef?.chooseImage()"
+          >{{ t('editor.insert_image') }}</NButton>
+        </template>
+      </EditorTabs>
 
       <!-- Calendar Home is the only Diary-owned surface. The subtree stays
            mounted for the whole Diary scope while native Vault documents use
@@ -3224,6 +3247,7 @@ watch(isReadMode, async (reading) => {
             :focus-width="effectiveEditorFocusWidth"
             :zen-mode-available="canUseZenMode"
             :zen-mode="zenModeActive"
+            :allow-image-insertion="canInsertNoteImage"
             :link-targets="editorLinkTargets"
             @update:model-value="(val: string) => onEditorChange(activeTab!.path, val)"
             @open-link="openEditorLink"

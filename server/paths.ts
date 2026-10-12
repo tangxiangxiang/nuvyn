@@ -246,7 +246,10 @@ export async function readSafeRelativeFile(
     if (maxBytes === undefined) {
       value = encoding ? await handle.readFile({ encoding }) : await handle.readFile()
     } else {
-      const buffer = Buffer.allocUnsafe(maxBytes + 1)
+      // Keep bounded reads proportional to the file's known size. A large
+      // per-resource cap must not allocate its full limit for every small
+      // image (or snippet) loaded concurrently.
+      const buffer = Buffer.allocUnsafe(Math.min(maxBytes, before.size) + 1)
       const { bytesRead } = await handle.read(buffer, 0, buffer.length, 0)
       if (bytesRead > maxBytes) throw new SafePathResourceLimitError(relativePath, maxBytes)
       value = encoding ? buffer.subarray(0, bytesRead).toString(encoding) : buffer.subarray(0, bytesRead)
@@ -259,8 +262,10 @@ export async function readSafeRelativeFile(
       afterPath.isSymbolicLink()
       || afterHandle.dev !== before.dev
       || afterHandle.ino !== before.ino
+      || afterHandle.size !== before.size
       || afterPath.dev !== before.dev
       || afterPath.ino !== before.ino
+      || afterPath.size !== before.size
     ) {
       throw new Error(`path changed while reading: ${relativePath}`)
     }

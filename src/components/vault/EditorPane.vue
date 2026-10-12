@@ -10,6 +10,9 @@ import { getPost } from '../../lib/api'
 import { parseDoc } from '../../lib/frontmatter'
 import { findMarkdownHeadingSourceLine } from '../../composables/vault/useMarkdownRender'
 import { useEditorPreferences } from '../../composables/vault/useEditorPreferences'
+import { useI18n } from '../../composables/useI18n'
+import { useToast } from '../../composables/useToast'
+import { isPotentialNoteImage, markdownImageReference, NoteImageError, uploadNoteImage } from '../../lib/noteImages'
 import {
   indentMarkdownLine,
   getEmojiCompletionContext,
@@ -45,9 +48,12 @@ const props = defineProps<{
   focusWidth?: boolean
   zenModeAvailable?: boolean
   zenMode?: boolean
+  allowImageInsertion?: boolean
   linkTargets?: EditorLinkTarget[]
 }>()
 const preferences = useEditorPreferences()
+const { t } = useI18n()
+const toast = useToast()
 const isLargeDocument = computed(() => props.modelValue.length >= 500_000)
 const emit = defineEmits<{
   'update:modelValue': [value: string]
@@ -66,6 +72,30 @@ let suppressChange = false
 let themeObserver: MutationObserver | null = null
 let decorationIds: string[] = []
 let pasteHandler: ((event: ClipboardEvent) => void) | null = null
+let imageInput: HTMLInputElement | null = null
+let mounted = false
+let imageEditorGeneration = 0
+let imageBatchSequence = 0
+let nextImageBatchToInsert = 1
+let filePickerIntent: ImageInsertionIntent | null = null
+type ImageInsertionIntent = {
+  sequence: number
+  model: monaco.editor.ITextModel
+  editor: monaco.editor.IStandaloneCodeEditor
+  path: string
+  generation: number
+  decorationId: string
+  replacesSelection: boolean
+  selectedText: string
+}
+type ImageUploadBatch = {
+  intent: ImageInsertionIntent
+  completed: boolean
+  references: string[]
+  errors: unknown[]
+  statusToastId: number
+}
+const imageUploadBatches = new Map<number, ImageUploadBatch>()
 let rememberLinkCommand: string | null = null
 let composing = false
 let zenToggleAction: { dispose: () => void } | null = null
@@ -102,6 +132,247 @@ function recentLinks(): string[] {
 function recordRecentLink(path: string) {
   const links = recentLinks().filter((item) => item !== path)
   writeStorageKey(RECENT_LINKS_KEY, JSON.stringify([path, ...links].slice(0, 20)))
+}
+
+function createImageInsertionIntent(rangeOverride?: monaco.Range): ImageInsertionIntent | null {
+  if (!mounted || !editor || !model || model.isDisposed()) return null
+  const selection = rangeOverride ?? editor.getSelection()
+  const position = editor.getPosition()
+  const range = selection ?? (position
+    ? new monaco.Range(position.lineNumber, position.column, position.lineNumber, position.column)
+    : null)
+  if (!range) return null
+
+  const replacesSelection = selection !== null && !selection.isEmpty()
+  const decorationId = model.deltaDecorations([], [{
+    range,
+    options: {
+      stickiness: monaco.editor.TrackedRangeStickiness.NeverGrowsWhenTypingAtEdges,
+    },
+  }])[0]
+  if (!decorationId) return null
+  return {
+    sequence: 0,
+    model,
+    editor,
+    path: props.path,
+    generation: imageEditorGeneration,
+    decorationId,
+    replacesSelection,
+    selectedText: replacesSelection ? model.getValueInRange(range) : '',
+  }
+}
+
+function releaseImageInsertionIntent(intent: ImageInsertionIntent): void {
+  if (intent.model.isDisposed()) return
+  try { intent.model.deltaDecorations([intent.decorationId], []) } catch { /* Model may have been released. */ }
+}
+
+function imageUploadErrorMessage(error: unknown): string {
+  if (!(error instanceof NoteImageError)) return t('editor.image_upload_failed')
+  const messages: Record<NoteImageError['code'], string> = {
+    unsupported: t('editor.image_unsupported'),
+    'too-large': t('editor.image_too_large'),
+    invalid: t('editor.image_invalid'),
+    busy: t('editor.image_upload_busy'),
+    network: t('editor.image_network_error'),
+    unauthorized: t('auth.session_expired'),
+    storage: t('editor.image_storage_error'),
+    unknown: t('editor.image_upload_failed'),
+  }
+  return messages[error.code]
+}
+
+async function copyImageMarkdown(markdown: string): Promise<void> {
+  try {
+    if (!navigator.clipboard?.writeText) throw new Error('clipboard unavailable')
+    await navigator.clipboard.writeText(markdown)
+  } catch {
+    const textarea = document.createElement('textarea')
+    textarea.value = markdown
+    textarea.setAttribute('readonly', '')
+    textarea.style.position = 'fixed'
+    textarea.style.opacity = '0'
+    document.body.append(textarea)
+    textarea.select()
+    const copied = document.execCommand('copy')
+    textarea.remove()
+    if (!copied) {
+      toast.error(t('vault.copy_failed'))
+      return
+    }
+  }
+  toast.success(t('editor.image_markdown_copied'))
+}
+
+function offerImageMarkdownFallback(references: string[]): void {
+  const markdown = references.join('\n')
+  toast.action(
+    t('editor.image_saved_not_inserted'),
+    t('editor.copy_markdown'),
+    () => copyImageMarkdown(markdown),
+    12_000,
+  )
+}
+
+function canInsertImageAt(intent: ImageInsertionIntent): monaco.Range | null {
+  if (!mounted
+    || intent.generation !== imageEditorGeneration
+    || intent.editor !== editor
+    || intent.model !== model
+    || intent.path !== props.path
+    || intent.model.isDisposed()
+    || intent.editor.getModel() !== intent.model) return null
+  const range = intent.model.getDecorationRange(intent.decorationId)
+  if (!range) return null
+  if (intent.replacesSelection && intent.model.getValueInRange(range) !== intent.selectedText) return null
+  return range
+}
+
+function flushImageUploadBatches(): void {
+  while (true) {
+    const batch = imageUploadBatches.get(nextImageBatchToInsert)
+    if (!batch || !batch.completed) return
+    imageUploadBatches.delete(nextImageBatchToInsert)
+    nextImageBatchToInsert += 1
+
+    if (batch.references.length > 0) {
+      const range = canInsertImageAt(batch.intent)
+      let inserted = false
+      if (range) {
+        try {
+          batch.intent.editor.pushUndoStop()
+          inserted = batch.intent.editor.executeEdits('nuvyn.insert-note-image', [{
+            range,
+            text: batch.references.join('\n'),
+          }]) !== false
+          batch.intent.editor.pushUndoStop()
+        } catch {
+          inserted = false
+        }
+      }
+      if (!inserted) offerImageMarkdownFallback(batch.references)
+    }
+
+    releaseImageInsertionIntent(batch.intent)
+    if (batch.errors.length > 0) {
+      const message = imageUploadErrorMessage(batch.errors[0])
+      toast.error(batch.errors.length > 1
+        ? t('editor.image_upload_some_failed', { count: batch.errors.length })
+        : message)
+    }
+  }
+}
+
+function uploadImagesAtIntent(files: File[], capturedIntent: ImageInsertionIntent): void {
+  const images = files.filter(isPotentialNoteImage)
+  if (images.length === 0) {
+    releaseImageInsertionIntent(capturedIntent)
+    toast.error(t('editor.image_unsupported'))
+    return
+  }
+  const intent = { ...capturedIntent, sequence: ++imageBatchSequence }
+  const statusToastId = toast.info(t('editor.image_uploading', { count: images.length }), 0)
+  const batch: ImageUploadBatch = { intent, completed: false, references: [], errors: [], statusToastId }
+  imageUploadBatches.set(intent.sequence, batch)
+
+  void Promise.all(images.map(async (file) => {
+    try {
+      const uploaded = await uploadNoteImage(file)
+      return markdownImageReference(file.name, uploaded.markdownUrl)
+    } catch (error) {
+      batch.errors.push(error)
+      return null
+    }
+  })).then((references) => {
+    batch.references = references.filter((reference): reference is string => reference !== null)
+    batch.completed = true
+    toast.dismiss(batch.statusToastId)
+    flushImageUploadBatches()
+  })
+}
+
+function chooseImage(): void {
+  if (props.allowImageInsertion === false) return
+  const intent = createImageInsertionIntent()
+  if (!intent || !imageInput) return
+  filePickerIntent = intent
+  imageInput.value = ''
+  imageInput.click()
+}
+
+function onImageInputChange(): void {
+  const intent = filePickerIntent
+  filePickerIntent = null
+  const files = Array.from(imageInput?.files ?? [])
+  if (intent && files.length > 0) uploadImagesAtIntent(files, intent)
+  else if (intent) releaseImageInsertionIntent(intent)
+}
+
+function onImageInputCancel(): void {
+  if (filePickerIntent) releaseImageInsertionIntent(filePickerIntent)
+  filePickerIntent = null
+}
+
+function filesFromTransfer(transfer: DataTransfer | null): File[] {
+  if (!transfer) return []
+  const files = Array.from(transfer.files)
+  if (files.length > 0) return files.filter(isPotentialNoteImage)
+  return Array.from(transfer.items)
+    .filter((item) => item.kind === 'file')
+    .map((item) => item.getAsFile())
+    .filter((file): file is File => file !== null && isPotentialNoteImage(file))
+}
+
+function onImageDragEnter(event: DragEvent): void {
+  if (props.allowImageInsertion === false) return
+  if (filesFromTransfer(event.dataTransfer).length === 0) return
+  event.preventDefault()
+  host.value?.classList.add('is-image-drag-over')
+}
+
+function onImageDragOver(event: DragEvent): void {
+  if (props.allowImageInsertion === false) return
+  if (filesFromTransfer(event.dataTransfer).length === 0) return
+  event.preventDefault()
+  if (event.dataTransfer) event.dataTransfer.dropEffect = 'copy'
+  host.value?.classList.add('is-image-drag-over')
+}
+
+function onImageDragLeave(event: DragEvent): void {
+  if (event.relatedTarget instanceof Node && host.value?.contains(event.relatedTarget)) return
+  host.value?.classList.remove('is-image-drag-over')
+}
+
+function onImageDrop(event: DragEvent): void {
+  if (props.allowImageInsertion === false) return
+  const files = filesFromTransfer(event.dataTransfer)
+  if (files.length === 0) return
+  event.preventDefault()
+  event.stopPropagation()
+  host.value?.classList.remove('is-image-drag-over')
+  const target = editor?.getTargetAtClientPoint(event.clientX, event.clientY)
+  const position = target?.position
+  const range = position
+    ? new monaco.Range(position.lineNumber, position.column, position.lineNumber, position.column)
+    : undefined
+  const intent = createImageInsertionIntent(range)
+  if (intent) uploadImagesAtIntent(files, intent)
+}
+
+function clipboardHasMeaningfulHtml(html: string): boolean {
+  if (!html.trim()) return false
+  const parsed = new DOMParser().parseFromString(html, 'text/html')
+  return Boolean(parsed.body.textContent?.trim() || parsed.body.querySelector('a[href], video, audio, table, canvas, svg'))
+}
+
+function clipboardImageFiles(clipboard: DataTransfer): File[] {
+  const files = Array.from(clipboard.files)
+  if (files.length > 0) return files.filter(isPotentialNoteImage)
+  return Array.from(clipboard.items)
+    .filter((item) => item.kind === 'file')
+    .map((item) => item.getAsFile())
+    .filter((file): file is File => file !== null && isPotentialNoteImage(file))
 }
 
 const monacoGlobal = globalThis as typeof globalThis & {
@@ -570,7 +841,21 @@ const hoverProvider: monaco.languages.HoverProvider = {
 
 onMounted(() => {
   if (!host.value) return
+  mounted = true
+  imageEditorGeneration += 1
+  imageInput = document.createElement('input')
+  imageInput.className = 'note-image-file-input'
+  imageInput.type = 'file'
+  imageInput.accept = 'image/png,image/jpeg,image/webp,image/gif,image/avif'
+  imageInput.multiple = true
+  imageInput.addEventListener('change', onImageInputChange)
+  imageInput.addEventListener('cancel', onImageInputCancel)
+  document.body.append(imageInput)
   host.value.addEventListener('pointerdown', onHostPointerDown)
+  host.value.addEventListener('dragenter', onImageDragEnter)
+  host.value.addEventListener('dragover', onImageDragOver)
+  host.value.addEventListener('dragleave', onImageDragLeave)
+  host.value.addEventListener('drop', onImageDrop)
   model = acquireMarkdownModel(props.path, props.modelValue)
   fenceStateCache.reset()
   bindMarkdownProviderContext(model, { completion: completionProvider, hover: hoverProvider })
@@ -689,6 +974,15 @@ onMounted(() => {
     },
   })
   editor.addAction({
+    id: 'nuvyn.insert-note-image',
+    label: t('editor.insert_image'),
+    contextMenuGroupId: '1_modification',
+    contextMenuOrder: 3,
+    run() {
+      chooseImage()
+    },
+  })
+  editor.addAction({
     id: 'nuvyn.toggle-view-mode',
     label: 'Toggle Edit / Reading Mode',
     keybindings: [monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyE],
@@ -794,13 +1088,33 @@ onMounted(() => {
   pasteHandler = (event) => {
     if (!editor || !model) return
     const selection = editor.getSelection()
-    if (!selection || selection.isEmpty()) return
-    const label = model.getValueInRange(selection)
-    const replacement = markdownLinkFromPaste(label, event.clipboardData?.getData('text/plain') ?? '')
-    if (!replacement) return
+    const clipboard = event.clipboardData
+    if (!clipboard || editor.hasTextFocus() === false) return
+
+    if (selection && !selection.isEmpty()) {
+      const label = model.getValueInRange(selection)
+      const replacement = markdownLinkFromPaste(label, clipboard.getData('text/plain') ?? '')
+      if (replacement) {
+        event.preventDefault()
+        event.stopImmediatePropagation()
+        editor.executeEdits('markdown-link-paste', [{ range: selection, text: replacement }])
+        return
+      }
+    }
+
+    // Text-bearing clipboard payloads take precedence over a companion image
+    // file (common when copying a web selection). HTML containing only an
+    // actual local image file is still eligible; remote image URLs are never fetched.
+    const plainText = clipboard.getData('text/plain') ?? ''
+    const html = clipboard.getData('text/html') ?? ''
+    if (props.allowImageInsertion === false || plainText.trim() || clipboardHasMeaningfulHtml(html)) return
+    const files = clipboardImageFiles(clipboard)
+    if (files.length === 0) return
+    const intent = createImageInsertionIntent()
+    if (!intent) return
     event.preventDefault()
     event.stopImmediatePropagation()
-    editor.executeEdits('markdown-link-paste', [{ range: selection, text: replacement }])
+    uploadImagesAtIntent(files, intent)
   }
   host.value.addEventListener('paste', pasteHandler, true)
   editor.onDidBlurEditorWidget(() => saveViewState())
@@ -817,6 +1131,7 @@ watch(() => props.modelValue, (value) => {
 
 watch(() => props.path, (nextPath, previousPath) => {
   if (!editor) return
+  imageEditorGeneration += 1
   saveViewState(previousPath)
   if (model) unbindMarkdownProviderContext(model)
   model = acquireMarkdownModel(nextPath, props.modelValue)
@@ -854,11 +1169,25 @@ watch(() => props.linkTargets, () => {
 })
 
 onBeforeUnmount(() => {
+  mounted = false
+  imageEditorGeneration += 1
+  if (filePickerIntent) releaseImageInsertionIntent(filePickerIntent)
+  filePickerIntent = null
+  imageInput?.removeEventListener('change', onImageInputChange)
+  imageInput?.removeEventListener('cancel', onImageInputCancel)
+  imageInput?.remove()
+  imageInput = null
+  for (const batch of imageUploadBatches.values()) releaseImageInsertionIntent(batch.intent)
   saveViewState()
   themeObserver?.disconnect()
   if (decorationTimer) clearTimeout(decorationTimer)
   clearScrollbarHideTimer()
   host.value?.removeEventListener('pointerdown', onHostPointerDown)
+  host.value?.removeEventListener('dragenter', onImageDragEnter)
+  host.value?.removeEventListener('dragover', onImageDragOver)
+  host.value?.removeEventListener('dragleave', onImageDragLeave)
+  host.value?.removeEventListener('drop', onImageDrop)
+  host.value?.classList.remove('is-image-drag-over')
   if (scrollbarPointerId !== null) {
     scrollbarPointerId = null
     window.removeEventListener('pointerup', onScrollbarPointerEnd)
@@ -910,6 +1239,7 @@ async function revealAnchor(anchor: string, isCurrent: () => boolean = () => tru
 
 defineExpose({
   focus: () => editor?.focus(),
+  chooseImage,
   revealText,
   revealAnchor,
 })

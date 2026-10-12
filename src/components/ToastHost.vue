@@ -1,6 +1,6 @@
 <script setup lang="ts">
-import { onBeforeUnmount, watch } from 'vue'
-import { useMessage, type MessageReactive } from 'naive-ui'
+import { h, onBeforeUnmount, watch } from 'vue'
+import { NButton, useMessage, type MessageReactive } from 'naive-ui'
 import { useToast } from '../composables/useToast'
 
 const { toasts, dismiss } = useToast()
@@ -18,6 +18,22 @@ function syncMessages(): void {
       // independent timer without changing the public useToast contract.
       duration: 0,
       closable: true,
+      ...(toast.action ? {
+        render: (props) => h('div', { class: 'toast-action-content' }, [
+          h('span', { class: 'toast-action-message' }, props.content),
+          h(NButton, {
+            attrType: 'button',
+            size: 'tiny',
+            text: true,
+            type: 'primary',
+            onClick: () => {
+              const action = toast.action
+              dismiss(toast.id)
+              if (action) void action.run()
+            },
+          }, () => toast.action?.label),
+        ]),
+      } : {}),
       onClose: () => dismiss(toast.id),
     })
     handles.set(toast.id, handle)

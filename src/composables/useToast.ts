@@ -5,6 +5,7 @@ export interface Toast {
   type: 'info' | 'success' | 'error'
   message: string
   ttl: number
+  action?: { label: string; run: () => void | Promise<void> }
 }
 
 const toasts = ref<Toast[]>([])
@@ -23,6 +24,12 @@ export function useToast() {
     }
     return id
   }
+  function pushAction(message: string, label: string, run: () => void | Promise<void>, ttl = 8000): number {
+    const id = nextId++
+    toasts.value = [...toasts.value, { id, type: 'info', message, ttl, action: { label, run } }]
+    if (ttl > 0) window.setTimeout(() => dismiss(id), ttl)
+    return id
+  }
   function dismiss(id: number) {
     toasts.value = toasts.value.filter((t) => t.id !== id)
   }
@@ -31,6 +38,7 @@ export function useToast() {
     info: (m: string, ttl?: number) => push(m, 'info', ttl),
     success: (m: string, ttl?: number) => push(m, 'success', ttl),
     error: (m: string, ttl?: number) => push(m, 'error', ttl ?? 4000),
+    action: pushAction,
     dismiss,
   }
 }
