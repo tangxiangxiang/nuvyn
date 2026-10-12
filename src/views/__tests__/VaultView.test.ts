@@ -715,6 +715,19 @@ describe('VaultView D3.2 Diary surface wiring', () => {
     expect(presentationWatch).not.toContain('activePanel.value =')
   })
 
+  it('limits Note image insertion to the active editable Note surface', () => {
+    const source = readFileSync(fileURLToPath(new URL('../VaultView.vue', import.meta.url)), 'utf8')
+    const gate = source.match(/const canInsertNoteImage = computed\(\(\) => Boolean\([\s\S]*?\n\)\)/u)?.[0]
+
+    expect(gate).toBeDefined()
+    expect(gate).toContain("route.meta.workspaceKind === 'vault'")
+    expect(gate).toContain("activeScope.value === 'note'")
+    expect(gate).toContain('activeTab.value?.path === activePath.value')
+    expect(gate).toContain('!isReadMode.value')
+    expect(gate).toContain('!specialWorkspaceSurfaceActive.value')
+    expect(source).toContain(':allow-image-insertion="canInsertNoteImage"')
+  })
+
   it('routes D3.2 date intent to the D4 lifecycle owner', () => {
     const source = readFileSync(fileURLToPath(new URL('../VaultView.vue', import.meta.url)), 'utf8')
     const branch = source.match(

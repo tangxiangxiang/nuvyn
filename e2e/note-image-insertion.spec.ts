@@ -56,6 +56,37 @@ async function dispatchImageDrop(page: import('@playwright/test').Page, name: st
   }, { name, base64: PNG_BASE64, x: bounds!.x + 90, y: bounds!.y + 18 })
 }
 
+async function dispatchNativeEditContextImagePaste(
+  page: import('@playwright/test').Page,
+  name = '',
+): Promise<{ defaultPrevented: boolean; types: string[]; targetClass: string }> {
+  return page.locator('.editor-pane .monaco-editor').first().evaluate((editor, input) => {
+    const bytes = Uint8Array.from(atob(input.base64), (character) => character.charCodeAt(0))
+    const file = new File([bytes], input.name, { type: 'image/png' })
+    const clipboard = new DataTransfer()
+    clipboard.items.add(file)
+
+    let target = editor.querySelector<HTMLElement>('.native-edit-context')
+    if (!target) {
+      target = document.createElement('div')
+      target.className = 'native-edit-context'
+      target.tabIndex = 0
+      editor.querySelector('.overflow-guard')?.append(target)
+    }
+    if (!target) throw new Error('Monaco input target was not available')
+    target.focus()
+
+    const paste = new Event('paste', { bubbles: true, cancelable: true, composed: true })
+    Object.defineProperty(paste, 'clipboardData', { value: clipboard })
+    target.dispatchEvent(paste)
+    return {
+      defaultPrevented: paste.defaultPrevented,
+      types: Array.from(clipboard.types),
+      targetClass: target.className,
+    }
+  }, { base64: PNG_BASE64, name })
+}
+
 async function waitForSavedRaw(
   request: import('@playwright/test').APIRequestContext,
   notePath: string,
@@ -183,6 +214,47 @@ test('drops local image files without replacing Note text', async ({ page, reque
   }
 })
 
+test('pastes a system-style Files PNG from Monaco native-edit-context into the active Note', async ({ page, request }) => {
+  const runId = randomUUID()
+  const notePath = `inbox/note-image-paste-${runId}`
+  const createdPaths: string[] = []
+  let uploadedPath = ''
+  const vaultRoot = process.env.NUVYN_DRAFT_E2E_VAULT
+  if (!vaultRoot) throw new Error('NUVYN_DRAFT_E2E_VAULT is required for Note image E2E')
+
+  try {
+    await createDoc(request, notePath, '# Native paste target\n\nKeep this sentence.\n', createdPaths)
+    await gotoVaultReady(page)
+    await openDoc(page, notePath)
+    const editor = page.locator('.editor-pane .monaco-editor').first()
+    await editor.locator('.view-lines').click({ position: { x: 35, y: 12 } })
+    await page.keyboard.press('Control+End')
+
+    const responsePromise = page.waitForResponse((response) => (
+      new URL(response.url()).pathname === '/api/note/images' && response.request().method() === 'POST'
+    ), { timeout: 5_000 })
+    const clipboardEvent = await dispatchNativeEditContextImagePaste(page)
+    expect(clipboardEvent.types).toEqual(['Files'])
+    expect(clipboardEvent.targetClass).toContain('native-edit-context')
+    expect(clipboardEvent.defaultPrevented).toBe(true)
+
+    const response = await responsePromise
+    expect(response.status(), await response.text()).toBe(201)
+    await expect(editor.locator('.view-lines')).toContainText('![Image](@/attachments/images/')
+    const insertedRaw = await waitForSavedRaw(request, notePath, '![Image](@/attachments/images/')
+    const uploadedImagePath = imagePathFromMarkdown(insertedRaw)
+    uploadedPath = uploadedImagePath
+    expect(insertedRaw).toContain('Keep this sentence.')
+  } finally {
+    for (const createdPath of createdPaths) await request.delete(`/api/posts/${createdPath}`).catch(() => {})
+    if (uploadedPath.startsWith('attachments/images/')) {
+      await fs.rm(path.join(vaultRoot, ...uploadedPath.split('/')), { force: true })
+    }
+    await request.post('/api/attachments/refresh').catch(() => {})
+    await request.post('/api/attachments/references/refresh').catch(() => {})
+  }
+})
+
 test('does not insert an in-flight upload into a different Note after switching tabs', async ({ page, request }) => {
   const runId = randomUUID()
   const firstPath = `inbox/note-image-switch-a-${runId}`
@@ -213,10 +285,8 @@ test('does not insert an in-flight upload into a different Note after switching 
     const responsePromise = page.waitForResponse((item) => (
       new URL(item.url()).pathname === '/api/note/images' && item.request().method() === 'POST'
     ))
-    const fileChooserPromise = page.waitForEvent('filechooser')
-    await page.getByRole('button', { name: /插入图片|Insert image/ }).click()
-    const fileChooser = await fileChooserPromise
-    await fileChooser.setFiles({ name: 'Switch Diagram.png', mimeType: 'image/png', buffer: PNG })
+    const clipboardEvent = await dispatchNativeEditContextImagePaste(page, 'Switch Diagram.png')
+    expect(clipboardEvent.defaultPrevented).toBe(true)
     await expect.poll(() => uploadRequestSeen).toBe(true)
     await openDoc(page, secondPath)
     releaseUpload()

@@ -4,6 +4,7 @@ import * as monaco from 'monaco-editor/esm/vs/editor/editor.api.js'
 import 'monaco-editor/esm/vs/basic-languages/markdown/markdown.contribution.js'
 import EditorWorker from 'monaco-editor/esm/vs/editor/editor.worker?worker'
 import { acquireMarkdownModel } from './monacoModels'
+import { registerEditorPasteHandler } from './editorPasteRegistry'
 import { bindMarkdownProviderContext, unbindMarkdownProviderContext } from './monacoMarkdownProviders'
 import { resolveWikiTarget } from '../../../shared/linkResolve'
 import { getPost } from '../../lib/api'
@@ -72,6 +73,7 @@ let suppressChange = false
 let themeObserver: MutationObserver | null = null
 let decorationIds: string[] = []
 let pasteHandler: ((event: ClipboardEvent) => void) | null = null
+let unregisterImagePasteHandler: (() => void) | null = null
 let imageInput: HTMLInputElement | null = null
 let mounted = false
 let imageEditorGeneration = 0
@@ -293,7 +295,7 @@ function uploadImagesAtIntent(files: File[], capturedIntent: ImageInsertionInten
 }
 
 function chooseImage(): void {
-  if (props.allowImageInsertion === false) return
+  if (props.allowImageInsertion !== true) return
   const intent = createImageInsertionIntent()
   if (!intent || !imageInput) return
   filePickerIntent = intent
@@ -325,14 +327,14 @@ function filesFromTransfer(transfer: DataTransfer | null): File[] {
 }
 
 function onImageDragEnter(event: DragEvent): void {
-  if (props.allowImageInsertion === false) return
+  if (props.allowImageInsertion !== true) return
   if (filesFromTransfer(event.dataTransfer).length === 0) return
   event.preventDefault()
   host.value?.classList.add('is-image-drag-over')
 }
 
 function onImageDragOver(event: DragEvent): void {
-  if (props.allowImageInsertion === false) return
+  if (props.allowImageInsertion !== true) return
   if (filesFromTransfer(event.dataTransfer).length === 0) return
   event.preventDefault()
   if (event.dataTransfer) event.dataTransfer.dropEffect = 'copy'
@@ -345,7 +347,7 @@ function onImageDragLeave(event: DragEvent): void {
 }
 
 function onImageDrop(event: DragEvent): void {
-  if (props.allowImageInsertion === false) return
+  if (props.allowImageInsertion !== true) return
   const files = filesFromTransfer(event.dataTransfer)
   if (files.length === 0) return
   event.preventDefault()
@@ -367,12 +369,96 @@ function clipboardHasMeaningfulHtml(html: string): boolean {
 }
 
 function clipboardImageFiles(clipboard: DataTransfer): File[] {
-  const files = Array.from(clipboard.files)
-  if (files.length > 0) return files.filter(isPotentialNoteImage)
+  const files = Array.from(clipboard.files).filter(isPotentialNoteImage)
+  if (files.length > 0) return files
   return Array.from(clipboard.items)
     .filter((item) => item.kind === 'file')
     .map((item) => item.getAsFile())
     .filter((file): file is File => file !== null && isPotentialNoteImage(file))
+}
+
+function clipboardTextOnlyLabelsImages(text: string, files: File[]): boolean {
+  const lines = text.trim().split(/\r?\n/u).map((line) => line.trim()).filter(Boolean)
+  if (lines.length === 0) return true
+  const labels = new Set(files.flatMap((file) => {
+    const name = file.name.trim()
+    if (!name) return []
+    return [name, name.replace(/\.[^.]*$/u, '')]
+  }).map((label) => label.toLocaleLowerCase()))
+  return lines.every((line) => labels.has(line.toLocaleLowerCase()))
+}
+
+function isPasteFromFocusedEditor(event: ClipboardEvent): boolean {
+  if (!mounted || !host.value || !editor || !model || model.isDisposed()) return false
+  if (editor.getModel() !== model) return false
+
+  const editorNode = editor.getDomNode()
+  if (!editorNode || !host.value.contains(editorNode)) return false
+  const path = event.composedPath()
+  if (!path.includes(host.value) || !path.includes(editorNode)) return false
+
+  const activeElement = host.value.ownerDocument.activeElement
+  if (!activeElement || !editorNode.contains(activeElement) || !path.includes(activeElement)) return false
+  const isNativeEditContext = activeElement.classList.contains('native-edit-context')
+  const isMonacoTextArea = activeElement instanceof HTMLTextAreaElement
+    && activeElement.classList.contains('inputarea')
+  if (!isNativeEditContext && !isMonacoTextArea) return false
+
+  // Safari's EditContext is a focused DOM input target, but Monaco can report
+  // hasTextFocus() as false while handling its native paste event.
+  return isNativeEditContext || editor.hasTextFocus()
+}
+
+function onMarkdownLinkPaste(event: ClipboardEvent): void {
+  if (!isPasteFromFocusedEditor(event) || !editor || !model) return
+  const selection = editor.getSelection()
+  const clipboard = event.clipboardData
+  if (!selection || selection.isEmpty() || !clipboard) return
+
+  const label = model.getValueInRange(selection)
+  const replacement = markdownLinkFromPaste(label, clipboard.getData('text/plain') ?? '')
+  if (!replacement) return
+  event.preventDefault()
+  event.stopImmediatePropagation()
+  editor.executeEdits('markdown-link-paste', [{ range: selection, text: replacement }])
+}
+
+function onNoteImagePaste(event: ClipboardEvent): void {
+  if (props.allowImageInsertion !== true || !isPasteFromFocusedEditor(event) || !editor || !model) return
+  const clipboard = event.clipboardData
+  if (!clipboard) return
+
+  const selection = editor.getSelection()
+  if (selection && !selection.isEmpty()) {
+    const label = model.getValueInRange(selection)
+    if (markdownLinkFromPaste(label, clipboard.getData('text/plain') ?? '')) return
+  }
+
+  // Preserve meaningful copied text and rich content. Image-only HTML or a
+  // plain-text filename accompanying a local image file is auxiliary data;
+  // the image bytes remain the only source used for upload.
+  const plainText = clipboard.getData('text/plain') ?? ''
+  const html = clipboard.getData('text/html') ?? ''
+  const files = clipboardImageFiles(clipboard)
+  if (files.length === 0
+    || !clipboardTextOnlyLabelsImages(plainText, files)
+    || clipboardHasMeaningfulHtml(html)) return
+
+  const intent = createImageInsertionIntent()
+  if (!intent) return
+  event.preventDefault()
+  event.stopPropagation()
+  uploadImagesAtIntent(files, intent)
+}
+
+function syncImagePasteHandler(): void {
+  if (!mounted || !host.value) return
+  if (props.allowImageInsertion === true) {
+    unregisterImagePasteHandler ??= registerEditorPasteHandler(host.value, onNoteImagePaste)
+    return
+  }
+  unregisterImagePasteHandler?.()
+  unregisterImagePasteHandler = null
 }
 
 const monacoGlobal = globalThis as typeof globalThis & {
@@ -1085,38 +1171,9 @@ onMounted(() => {
     recordRecentLink(path)
     emit('open-link', { path, ...(targetRef.anchor ? { anchor: targetRef.anchor } : {}) })
   })
-  pasteHandler = (event) => {
-    if (!editor || !model) return
-    const selection = editor.getSelection()
-    const clipboard = event.clipboardData
-    if (!clipboard || editor.hasTextFocus() === false) return
-
-    if (selection && !selection.isEmpty()) {
-      const label = model.getValueInRange(selection)
-      const replacement = markdownLinkFromPaste(label, clipboard.getData('text/plain') ?? '')
-      if (replacement) {
-        event.preventDefault()
-        event.stopImmediatePropagation()
-        editor.executeEdits('markdown-link-paste', [{ range: selection, text: replacement }])
-        return
-      }
-    }
-
-    // Text-bearing clipboard payloads take precedence over a companion image
-    // file (common when copying a web selection). HTML containing only an
-    // actual local image file is still eligible; remote image URLs are never fetched.
-    const plainText = clipboard.getData('text/plain') ?? ''
-    const html = clipboard.getData('text/html') ?? ''
-    if (props.allowImageInsertion === false || plainText.trim() || clipboardHasMeaningfulHtml(html)) return
-    const files = clipboardImageFiles(clipboard)
-    if (files.length === 0) return
-    const intent = createImageInsertionIntent()
-    if (!intent) return
-    event.preventDefault()
-    event.stopImmediatePropagation()
-    uploadImagesAtIntent(files, intent)
-  }
+  pasteHandler = onMarkdownLinkPaste
   host.value.addEventListener('paste', pasteHandler, true)
+  syncImagePasteHandler()
   editor.onDidBlurEditorWidget(() => saveViewState())
   themeObserver = new MutationObserver(() => monaco.editor.setTheme(activeTheme()))
   themeObserver.observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme'] })
@@ -1128,6 +1185,8 @@ watch(() => props.modelValue, (value) => {
   model.setValue(value)
   suppressChange = false
 })
+
+watch(() => props.allowImageInsertion, syncImagePasteHandler)
 
 watch(() => props.path, (nextPath, previousPath) => {
   if (!editor) return
@@ -1197,6 +1256,8 @@ onBeforeUnmount(() => {
   }
   host.value?.classList.remove('is-scrollbar-visible')
   if (pasteHandler && host.value) host.value.removeEventListener('paste', pasteHandler, true)
+  unregisterImagePasteHandler?.()
+  unregisterImagePasteHandler = null
   resetFocusWidthChord()
   zenOverlayObserver?.disconnect()
   zenOverlayObserver = null

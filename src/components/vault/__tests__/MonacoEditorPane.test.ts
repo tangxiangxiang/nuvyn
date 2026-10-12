@@ -71,6 +71,7 @@ const mocks = vi.hoisted(() => {
     revealLineInCenter: vi.fn(),
     getVisibleRanges: vi.fn(() => [{ startLineNumber: 1, endLineNumber: 20 }]),
     getModel: vi.fn(() => model),
+    getDomNode: vi.fn(() => mocks.editorNode),
     getPosition: vi.fn(() => ({ lineNumber: 1, column: 1 })),
     getTargetAtClientPoint: vi.fn(() => ({ position: { lineNumber: 1, column: 1 } })),
     hasTextFocus: vi.fn(() => true),
@@ -107,6 +108,7 @@ const mocks = vi.hoisted(() => {
     decorations,
     createEditor,
     chord,
+    editorNode: null as HTMLDivElement | null,
     model,
     editor,
     defineTheme: vi.fn(),
@@ -122,7 +124,22 @@ vi.mock('monaco-editor/esm/vs/editor/editor.api.js', () => ({
     defineTheme: mocks.defineTheme,
     setTheme: mocks.setTheme,
     createModel: vi.fn((value: string) => { mocks.model.value = value; return mocks.model }),
-    create: vi.fn(() => { mocks.createEditor(); return mocks.editor }),
+    create: vi.fn((host?: HTMLElement) => {
+      mocks.createEditor()
+      if (host) {
+        const root = document.createElement('div')
+        root.className = 'monaco-editor'
+        const overflowGuard = document.createElement('div')
+        overflowGuard.className = 'overflow-guard'
+        const input = document.createElement('textarea')
+        input.className = 'inputarea'
+        overflowGuard.append(input)
+        root.append(overflowGuard)
+        host.append(root)
+        mocks.editorNode = root
+      }
+      return mocks.editor
+    }),
     setModelMarkers: vi.fn(),
     TrackedRangeStickiness: { NeverGrowsWhenTypingAtEdges: 1 },
   },
@@ -236,6 +253,7 @@ describe('Monaco EditorPane', () => {
     mocks.keyDownListeners.length = 0
     mocks.scrollListeners.length = 0
     mocks.mouseDownListeners.length = 0
+    mocks.editorNode = null
     vi.clearAllMocks()
     mocks.model.getValueInRange.mockReset()
     mocks.model.getValueInRange.mockImplementation((range?: { startLineNumber: number; startColumn: number; endLineNumber: number; endColumn: number }) => {
@@ -268,6 +286,7 @@ describe('Monaco EditorPane', () => {
 
   afterEach(() => {
     vi.useRealTimers()
+    document.body.replaceChildren()
   })
 
   function imageFile(name = 'diagram.png'): File {
@@ -284,15 +303,42 @@ describe('Monaco EditorPane', () => {
     }
   }
 
-  function pasteImage(file: File, values: Record<string, string> = {}): ClipboardEvent {
+  function pasteImage(
+    file: File,
+    values: Record<string, string> = {},
+    types = ['Files'],
+    files = [file],
+  ): ClipboardEvent {
     const event = new Event('paste', { bubbles: true, cancelable: true })
     const clipboardData = {
-      files: [file],
+      files,
       items: [{ kind: 'file', getAsFile: () => file }],
+      types,
       getData: (type: string) => values[type] ?? '',
     }
     Object.defineProperty(event, 'clipboardData', { value: clipboardData })
     return event as ClipboardEvent
+  }
+
+  function dispatchEditorPaste(
+    wrapper: { element: Element },
+    event: Event,
+    targetKind: 'textarea' | 'native-edit-context' = 'textarea',
+  ): void {
+    const mountRoot = wrapper.element.parentElement
+    if (mountRoot && !mountRoot.isConnected) document.body.append(mountRoot)
+    const editorNode = (wrapper.element as HTMLElement).querySelector<HTMLElement>('.monaco-editor')!
+    let target: HTMLElement
+    if (targetKind === 'native-edit-context') {
+      target = document.createElement('div')
+      target.className = 'native-edit-context'
+      target.tabIndex = 0
+      editorNode.querySelector('.overflow-guard')!.append(target)
+    } else {
+      target = editorNode.querySelector<HTMLElement>('textarea.inputarea')!
+    }
+    target.focus()
+    target.dispatchEvent(event)
   }
 
   function uploadedImage(file: File) {
@@ -310,7 +356,7 @@ describe('Monaco EditorPane', () => {
     mocks.model.value = 'label'
     mocks.editor.getSelection.mockReturnValue(cursorSelection(1, 6) as any)
     const textPaste = pasteImage(imageFile(), { 'text/plain': 'copied web text', 'text/html': '<p>copied web text</p>' })
-    wrapper.element.dispatchEvent(textPaste)
+    dispatchEditorPaste(wrapper, textPaste)
     expect(textPaste.defaultPrevented).toBe(false)
     expect(imageMocks.uploadNoteImage).not.toHaveBeenCalled()
 
@@ -318,7 +364,7 @@ describe('Monaco EditorPane', () => {
     Object.defineProperty(urlPaste, 'clipboardData', {
       value: { files: [], items: [], getData: (type: string) => type === 'text/plain' ? 'https://example.com' : '' },
     })
-    wrapper.element.dispatchEvent(urlPaste)
+    dispatchEditorPaste(wrapper, urlPaste)
     expect(urlPaste.defaultPrevented).toBe(true)
     expect(mocks.editor.executeEdits).toHaveBeenCalledWith(
       'markdown-link-paste',
@@ -334,11 +380,108 @@ describe('Monaco EditorPane', () => {
     mocks.editor.hasTextFocus.mockReturnValueOnce(false)
     const event = pasteImage(imageFile())
 
-    wrapper.element.dispatchEvent(event)
+    dispatchEditorPaste(wrapper, event)
 
     expect(event.defaultPrevented).toBe(false)
     expect(imageMocks.uploadNoteImage).not.toHaveBeenCalled()
     wrapper.unmount()
+  })
+
+  it('accepts a focused Safari native-edit-context paste even when Monaco reports no text focus', () => {
+    const file = imageFile()
+    const wrapper = mount(EditorPane, { props: { modelValue: 'unchanged', path: 'inbox/test', allowImageInsertion: true } })
+    mocks.model.value = 'unchanged'
+    mocks.editor.hasTextFocus.mockReturnValue(false)
+    const event = pasteImage(file)
+
+    dispatchEditorPaste(wrapper, event, 'native-edit-context')
+
+    expect(event.defaultPrevented).toBe(true)
+    expect(imageMocks.uploadNoteImage).toHaveBeenCalledWith(file)
+    wrapper.unmount()
+  })
+
+  it('uploads a local image when clipboard HTML and plain text only label that file', () => {
+    const file = imageFile('diagram.png')
+    const wrapper = mount(EditorPane, { props: { modelValue: 'unchanged', path: 'inbox/test', allowImageInsertion: true } })
+    mocks.model.value = 'unchanged'
+    const event = pasteImage(file, {
+      'text/plain': 'diagram.png',
+      'text/html': '<div><img src="https://example.com/diagram.png" alt="diagram"></div>',
+    })
+
+    dispatchEditorPaste(wrapper, event, 'native-edit-context')
+
+    expect(event.defaultPrevented).toBe(true)
+    expect(imageMocks.uploadNoteImage).toHaveBeenCalledWith(file)
+    wrapper.unmount()
+  })
+
+  it('reads image files from clipboard items when the files list is empty', () => {
+    const file = imageFile()
+    const wrapper = mount(EditorPane, { props: { modelValue: 'unchanged', path: 'inbox/test', allowImageInsertion: true } })
+    const event = pasteImage(file, {}, ['Files'], [])
+
+    dispatchEditorPaste(wrapper, event, 'native-edit-context')
+
+    expect(event.defaultPrevented).toBe(true)
+    expect(imageMocks.uploadNoteImage).toHaveBeenCalledWith(file)
+    wrapper.unmount()
+  })
+
+  it('does not upload images when the active workspace disallows Note image insertion', () => {
+    const file = imageFile()
+    const wrapper = mount(EditorPane, { props: { modelValue: 'unchanged', path: 'diary/2026-10-13', allowImageInsertion: false } })
+    const event = pasteImage(file)
+
+    dispatchEditorPaste(wrapper, event, 'native-edit-context')
+
+    expect(event.defaultPrevented).toBe(false)
+    expect(imageMocks.uploadNoteImage).not.toHaveBeenCalled()
+    wrapper.unmount()
+  })
+
+  it('does not handle clipboard images from outside this Note editor or after unmount', () => {
+    const file = imageFile()
+    const wrapper = mount(EditorPane, { props: { modelValue: 'unchanged', path: 'inbox/test', allowImageInsertion: true } })
+    const outsideInput = document.createElement('textarea')
+    document.body.append(outsideInput)
+    outsideInput.focus()
+    const outsideEvent = pasteImage(file)
+    outsideInput.dispatchEvent(outsideEvent)
+    expect(outsideEvent.defaultPrevented).toBe(false)
+    expect(imageMocks.uploadNoteImage).not.toHaveBeenCalled()
+
+    const editorNode = (wrapper.element as HTMLElement).querySelector<HTMLElement>('.monaco-editor')!
+    const nativeTarget = document.createElement('div')
+    nativeTarget.className = 'native-edit-context'
+    nativeTarget.tabIndex = 0
+    editorNode.querySelector('.overflow-guard')!.append(nativeTarget)
+    nativeTarget.focus()
+    wrapper.unmount()
+    const afterUnmountEvent = pasteImage(file)
+    nativeTarget.dispatchEvent(afterUnmountEvent)
+    expect(afterUnmountEvent.defaultPrevented).toBe(false)
+    expect(imageMocks.uploadNoteImage).not.toHaveBeenCalled()
+    outsideInput.remove()
+  })
+
+  it('shares one document paste delegate and removes it after the last editor unmounts', () => {
+    const addListener = vi.spyOn(document, 'addEventListener')
+    const removeListener = vi.spyOn(document, 'removeEventListener')
+    const first = mount(EditorPane, { props: { modelValue: 'one', path: 'inbox/one', allowImageInsertion: true } })
+    const second = mount(EditorPane, { props: { modelValue: 'two', path: 'inbox/two', allowImageInsertion: true } })
+    const pasteAdds = () => addListener.mock.calls.filter(([type]) => type === 'paste')
+    const pasteRemoves = () => removeListener.mock.calls.filter(([type]) => type === 'paste')
+    expect(pasteAdds()).toHaveLength(1)
+    expect(pasteRemoves()).toHaveLength(0)
+
+    first.unmount()
+    expect(pasteRemoves()).toHaveLength(0)
+    second.unmount()
+    expect(pasteRemoves()).toHaveLength(1)
+    addListener.mockRestore()
+    removeListener.mockRestore()
   })
 
   it('uploads a pasted image and inserts at its captured cursor after typing continues', async () => {
@@ -350,7 +493,7 @@ describe('Monaco EditorPane', () => {
     mocks.editor.getSelection.mockReturnValue(cursorSelection(2) as any)
 
     const event = pasteImage(file)
-    wrapper.element.dispatchEvent(event)
+    dispatchEditorPaste(wrapper, event)
     expect(event.defaultPrevented).toBe(true)
     expect(imageMocks.uploadNoteImage).toHaveBeenCalledWith(file)
     expect(useToast().toasts.value.some((toast) => toast.type === 'info')).toBe(true)
@@ -410,7 +553,7 @@ describe('Monaco EditorPane', () => {
     const wrapper = mount(EditorPane, { props: { modelValue: 'replace me', path: 'inbox/test', allowImageInsertion: true } })
     mocks.model.value = 'replace me'
     mocks.editor.getSelection.mockReturnValue(cursorSelection(1, 11) as any)
-    wrapper.element.dispatchEvent(pasteImage(file))
+    dispatchEditorPaste(wrapper, pasteImage(file))
     mocks.model.value = 'changed text'
     await flushPromises()
     expect(mocks.editor.executeEdits).not.toHaveBeenCalled()
