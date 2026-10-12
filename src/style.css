@@ -3255,6 +3255,12 @@ body:has(.ledger-detail-sheet-card) .n-modal-mask {
   .settings-nav { padding: 16px 12px; }
   .settings-detail { padding: 28px 30px 32px; }
 }
+@media (max-width: 900px) {
+  .settings-modal.is-attachment-manager .settings-detail {
+    overflow-x: hidden;
+    overflow-y: auto;
+  }
+}
 @media (max-width: 700px) {
   .settings-body { grid-template-columns: 196px minmax(0, 1fr); }
   .settings-detail { padding: 24px 22px 28px; }
@@ -3306,6 +3312,9 @@ body:has(.ledger-detail-sheet-card) .n-modal-mask {
   .settings-body {
     grid-template-columns: minmax(0, 1fr);
     grid-template-rows: auto minmax(0, 1fr);
+  }
+  .settings-modal.is-attachment-manager .settings-body {
+    grid-template-rows: minmax(0, 1fr);
   }
   .settings-nav {
     display: grid;

@@ -97,3 +97,156 @@ test('Attachment Manager lists real sources, filters, refreshes, and preserves t
     await request.post('/api/attachments/refresh').catch(() => {})
   }
 })
+
+test('Attachment Manager remains reachable in desktop, tablet, and short mobile viewports', async ({ page, request }) => {
+  const runId = randomUUID()
+  const notePath = `inbox/attachment-layout-${runId}`
+  const filenames = Array.from({ length: 35 }, (_, index) => `attachment-layout-${runId.slice(0, 8)}-${String(index + 1).padStart(2, '0')}.txt`)
+  const vaultRoot = process.env.NUVYN_DRAFT_E2E_VAULT
+  if (!vaultRoot) throw new Error('NUVYN_DRAFT_E2E_VAULT is required for Attachment Manager E2E')
+  const absolutePaths = filenames.map((filename) => path.join(vaultRoot, 'inbox', filename))
+  let noteCreated = false
+
+  try {
+    const note = await request.post('/api/posts', { data: { path: notePath, title: 'Attachment manager responsive layout' } })
+    expect(note.status(), await note.text()).toBe(201)
+    noteCreated = true
+    await fs.mkdir(path.join(vaultRoot, 'inbox'), { recursive: true })
+    await Promise.all(absolutePaths.map((filePath) => fs.writeFile(filePath, 'layout fixture')))
+    const refreshed = await request.post('/api/attachments/refresh')
+    expect(refreshed.status(), await refreshed.text()).toBe(200)
+
+    await page.setViewportSize({ width: 1440, height: 900 })
+    await page.goto(`/vault/${notePath}`)
+    await expect(page.locator('.editor-pane .monaco-editor').first()).toBeVisible()
+    await page.locator('[data-testid="account-button"]').click()
+    await page.locator('[data-testid="account-settings"]').click()
+    const settings = page.locator('.settings-modal')
+    await settings.getByRole('button', { name: /存储与附件|Storage & attachments/ }).click()
+    await expect(settings.locator('.attachment-resource-row')).toHaveCount(30)
+
+    for (const viewport of [
+      { width: 1440, height: 900, label: 'desktop' },
+      { width: 768, height: 1024, label: 'tablet' },
+      { width: 390, height: 844, label: 'mobile' },
+      { width: 375, height: 667, label: 'short mobile' },
+      { width: 375, height: 600, label: 'very short mobile' },
+    ]) {
+      await settings.getByRole('button', { name: /关闭|Close/ }).click()
+      await expect(settings).toHaveCount(0)
+      await page.setViewportSize({ width: viewport.width, height: viewport.height })
+      const baselineDocumentOverflow = await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth)
+      await page.locator('[data-testid="account-button"]').click()
+      await page.locator('[data-testid="account-settings"]').click()
+      await page.locator('.settings-modal').getByRole('button', { name: /存储与附件|Storage & attachments/ }).click()
+      await expect(settings.locator('.attachment-resource-row')).toHaveCount(30)
+      const detailScroller = settings.locator('.settings-detail')
+      await detailScroller.evaluate((element) => { element.scrollTop = 0 })
+
+      const topContentVisible = await settings.evaluate((dialog) => {
+        const withinViewport = (selector: string) => {
+          const element = dialog.querySelector(selector)
+          if (!element) return false
+          const rect = element.getBoundingClientRect()
+          const bounds = dialog.getBoundingClientRect()
+          return rect.top >= Math.max(0, bounds.top)
+            && rect.bottom <= Math.min(window.innerHeight, bounds.bottom)
+            && rect.left >= Math.max(0, bounds.left)
+            && rect.right <= Math.min(window.innerWidth, bounds.right)
+        }
+        return ['#attachment-manager-title', '.attachment-back', '.attachment-refresh', '.attachment-summary', '.attachment-toolbar']
+          .every(withinViewport)
+      })
+      expect(topContentVisible, `${viewport.label}: title, back, refresh, summary and filters fit in the viewport`).toBe(true)
+
+      if (viewport.width === 375 && viewport.height === 600) {
+        const searchInput = settings.locator('.attachment-toolbar input')
+        await searchInput.fill(filenames[0]!)
+        await expect(settings.locator('.attachment-resource-row')).toHaveCount(1)
+        await searchInput.fill('')
+        await expect(settings.locator('.attachment-resource-row')).toHaveCount(30)
+        await settings.locator('.attachment-toolbar .n-select').first().click()
+        const fileTypeOption = page.getByText(/^(?:文件|File)$/)
+        await expect(fileTypeOption).toBeVisible()
+        await fileTypeOption.click()
+        await expect(settings.locator('.attachment-resource-row')).toHaveCount(30)
+      }
+
+      const lastRow = settings.locator('.attachment-resource-row').last()
+      await lastRow.scrollIntoViewIfNeeded()
+      await expect(lastRow).toBeVisible()
+      const lastRowReachable = await lastRow.evaluate((element) => {
+        const rect = element.getBoundingClientRect()
+        return rect.top >= 0 && rect.bottom <= window.innerHeight
+      })
+      expect(lastRowReachable, `${viewport.label}: last item on the current page can be brought into view`).toBe(true)
+
+      const nextPage = settings.getByRole('button', { name: /下一页附件|Next attachment page/ })
+      await expect(nextPage).toBeEnabled()
+      await nextPage.scrollIntoViewIfNeeded()
+      await nextPage.click()
+      await expect(settings.locator('.attachment-resource-row')).toHaveCount(5)
+      const finalItem = settings.locator('.attachment-resource-row').last()
+      await finalItem.scrollIntoViewIfNeeded()
+      await finalItem.click()
+      const details = settings.locator('.attachment-detail-panel')
+      await details.scrollIntoViewIfNeeded()
+      await expect(details).toContainText(filenames[34]!)
+      const detailReachable = await details.evaluate((element) => {
+        const rect = element.getBoundingClientRect()
+        return rect.top >= 0 && rect.bottom <= window.innerHeight
+      })
+      expect(detailReachable, `${viewport.label}: selected resource details can be brought into view`).toBe(true)
+
+      const note = settings.locator('.attachment-reference-note')
+      await note.scrollIntoViewIfNeeded()
+      const noteReachable = await note.evaluate((element) => {
+        const rect = element.getBoundingClientRect()
+        return rect.top >= 0 && rect.bottom <= window.innerHeight
+      })
+      expect(noteReachable, `${viewport.label}: reference guidance can be brought into view`).toBe(true)
+
+      const layout = await settings.evaluate((dialog) => {
+        const detail = dialog.querySelector<HTMLElement>('.settings-detail')!
+        const content = dialog.querySelector<HTMLElement>('.attachment-manager-content')!
+        const list = dialog.querySelector<HTMLElement>('.attachment-resource-list')!
+        return {
+          dialogOverflowX: dialog.scrollWidth - dialog.clientWidth,
+          detailOverflowX: detail.scrollWidth - detail.clientWidth,
+          viewportOverflowX: document.documentElement.scrollWidth - window.innerWidth,
+          detailOverflowY: getComputedStyle(detail).overflowY,
+          contentOverflowY: getComputedStyle(content).overflowY,
+          listOverflowY: getComputedStyle(list).overflowY,
+          contentIsInternallyScrollable: content.scrollHeight > content.clientHeight + 1,
+          listIsInternallyScrollable: list.scrollHeight > list.clientHeight + 1,
+          overflowingElements: Array.from(document.querySelectorAll<HTMLElement>('*'))
+            .filter((element) => {
+              const rect = element.getBoundingClientRect()
+              return rect.width > 0 && (rect.left < -1 || rect.right > window.innerWidth + 1)
+            })
+            .slice(0, 8)
+            .map((element) => ({ tag: element.tagName, id: element.id, className: element.className.toString().slice(0, 80), right: Math.round(element.getBoundingClientRect().right) })),
+        }
+      })
+      expect(layout.dialogOverflowX, `${viewport.label}: no horizontal dialog overflow`).toBeLessThanOrEqual(1)
+      expect(layout.detailOverflowX, `${viewport.label}: no horizontal settings content overflow`).toBeLessThanOrEqual(1)
+      expect(layout.viewportOverflowX, `${viewport.label}: manager does not add horizontal overflow beyond the closed-workspace baseline (${baselineDocumentOverflow}px); ${JSON.stringify(layout.overflowingElements)}`).toBeLessThanOrEqual(baselineDocumentOverflow + 1)
+      if (viewport.width <= 900) {
+        expect(layout.detailOverflowY, `${viewport.label}: settings detail owns vertical scrolling`).toBe('auto')
+        expect(layout.contentOverflowY, `${viewport.label}: no nested manager scroll region`).toBe('visible')
+        expect(layout.listOverflowY, `${viewport.label}: list flows with the page`).toBe('visible')
+        expect(layout.contentIsInternallyScrollable, `${viewport.label}: no nested content scroll`).toBe(false)
+        expect(layout.listIsInternallyScrollable, `${viewport.label}: no nested list scroll`).toBe(false)
+      }
+
+      const previousPage = settings.getByRole('button', { name: /上一页附件|Previous attachment page/ })
+      await previousPage.scrollIntoViewIfNeeded()
+      await previousPage.click()
+      await expect(settings.locator('.attachment-resource-row')).toHaveCount(30)
+    }
+  } finally {
+    if (noteCreated) await request.delete(`/api/posts/${notePath}`).catch(() => {})
+    await Promise.all(absolutePaths.map((filePath) => fs.rm(filePath, { force: true })))
+    await request.post('/api/attachments/refresh').catch(() => {})
+  }
+})

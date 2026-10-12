@@ -80,14 +80,20 @@ export class AttachmentCatalog {
       ready: snapshot !== null,
       refreshing: this.activePromise !== null,
       complete: snapshot?.complete ?? null,
-      refreshedAt: snapshot?.refreshedAt || null,
+      refreshedAt: snapshot?.refreshedAt ?? null,
       sources: snapshot ? structuredClone(snapshot.sources) : pendingSources(),
     }
   }
 
   async ensureReady(): Promise<void> {
-    if (this.snapshot) return
-    await this.refresh()
+    while (!this.snapshot) {
+      // An explicit refresh can supersede the initial scan while a reader is
+      // waiting for it. The superseded promise resolves without publishing;
+      // keep waiting for the current generation instead of returning with a
+      // null snapshot.
+      const active = this.activePromise ?? this.refresh()
+      await active
+    }
   }
 
   /**
@@ -110,6 +116,13 @@ export class AttachmentCatalog {
     const promise = (async () => {
       const results = await Promise.allSettled(adapters.map((adapter) => adapter.scan(controller.signal)))
       if (generation !== this.generation) return
+
+      // Preserve the last usable snapshot when every source is unavailable.
+      // The rejected refresh is surfaced by the API/UI; an initial read still
+      // fails because no snapshot exists yet.
+      if (results.every((result) => result.status === 'rejected')) {
+        throw new Error('All attachment catalog sources are unavailable')
+      }
 
       const resources: ManagedAttachment[] = []
       const sources = pendingSources()
@@ -149,12 +162,12 @@ export class AttachmentCatalog {
 
   async getSummary(): Promise<AttachmentSummary> {
     await this.ensureReady()
-    return this.summarize(this.snapshot!)
+    return this.summarize(this.requireSnapshot())
   }
 
   async list(query: AttachmentListQuery): Promise<AttachmentPage> {
     await this.ensureReady()
-    const snapshot = this.snapshot!
+    const snapshot = this.requireSnapshot()
     const search = query.search?.trim().toLocaleLowerCase() ?? ''
     const filtered = snapshot.resources.filter((resource) => {
       if (query.type && resource.type !== query.type) return false
@@ -202,6 +215,11 @@ export class AttachmentCatalog {
       sources,
       complete: snapshot.complete,
     }
+  }
+
+  private requireSnapshot(): CatalogSnapshot {
+    if (!this.snapshot) throw new Error('Attachment catalog is not ready')
+    return this.snapshot
   }
 }
 

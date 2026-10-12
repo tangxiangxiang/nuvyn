@@ -7,6 +7,8 @@ import app from '../index.js'
 import { __setDbForTesting } from '../db.js'
 import { CONTENT_DIR, setContentDir } from '../paths.js'
 import { __setAttachmentCatalogForTesting } from '../attachments/routes.js'
+import { AttachmentCatalog, type AttachmentCatalogAdapter } from '../attachments/catalog.js'
+import type { AttachmentSource } from '../../shared/attachmentProtocol.js'
 import {
   authenticatedRequest,
   closeAuthTestContext,
@@ -126,5 +128,25 @@ describe('Attachment Manager API', () => {
       expect(response.status).toBe(400)
       expect(await response.json()).toMatchObject({ code: 'ATTACHMENT_QUERY_INVALID' })
     }
+  })
+
+  it('reports a total source failure from explicit refresh instead of claiming success', async () => {
+    const unavailable = (source: AttachmentSource): AttachmentCatalogAdapter => ({
+      source,
+      scan: async () => { throw new Error('offline') },
+    })
+    __setAttachmentCatalogForTesting(new AttachmentCatalog({
+      boardAssets: unavailable('board-asset'),
+      vaultFiles: unavailable('vault-file'),
+      boardMaterials: unavailable('board-material'),
+    }))
+
+    const refresh = await app.fetch(authenticatedRequest(auth, '/api/attachments/refresh', {
+      method: 'POST', origin: auth.runtime.config.publicOrigin,
+    }))
+    expect(refresh.status).toBe(500)
+    expect(await refresh.json()).toMatchObject({ code: 'ATTACHMENT_CATALOG_UNAVAILABLE' })
+    const status = await app.fetch(authenticatedRequest(auth, '/api/attachments/index-status'))
+    expect(await status.json()).toMatchObject({ ready: false, refreshing: false, complete: null, refreshedAt: null })
   })
 })

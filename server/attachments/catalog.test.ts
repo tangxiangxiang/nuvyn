@@ -9,7 +9,7 @@ import { AttachmentCatalog, type AttachmentCatalogAdapters, type AttachmentCatal
 import { listBoardAssetCatalog } from './adapters/boardAssets.js'
 import { listBoardMaterialCatalog } from './adapters/boardMaterials.js'
 import { scanVaultAttachments } from './adapters/vaultFiles.js'
-import type { ManagedAttachment } from '../../shared/attachmentProtocol.js'
+import type { AttachmentSource, ManagedAttachment } from '../../shared/attachmentProtocol.js'
 
 const originalContentDir = CONTENT_DIR
 let root = ''
@@ -33,6 +33,16 @@ function adapters(overrides: Partial<AttachmentCatalogAdapters> = {}): Attachmen
     boardMaterials: fixedAdapter('board-material', []),
     ...overrides,
   }
+}
+
+function deferred<T>() {
+  let resolve!: (value: T) => void
+  let reject!: (reason?: unknown) => void
+  const promise = new Promise<T>((resolvePromise, rejectPromise) => {
+    resolve = resolvePromise
+    reject = rejectPromise
+  })
+  return { promise, resolve, reject }
 }
 
 beforeEach(async () => {
@@ -168,6 +178,128 @@ describe('AttachmentCatalog', () => {
     expect(catalog.getIndexStatus().sources['board-asset']).toEqual({
       state: 'failed', itemCount: 0, errorCode: 'source-unavailable',
     })
+  })
+
+  it('deduplicates concurrent initial readers onto one scan and publishes a usable snapshot', async () => {
+    const scanResult = deferred<{ items: ManagedAttachment[]; complete: boolean }>()
+    const scan = vi.fn(() => scanResult.promise)
+    const item = asset('44444444-4444-4444-8444-444444444444')
+    const catalog = new AttachmentCatalog(adapters({
+      boardAssets: { source: 'board-asset', scan },
+    }))
+
+    const listPromise = catalog.list({ source: 'board-asset' })
+    const summaryPromise = catalog.getSummary()
+    expect(scan).toHaveBeenCalledTimes(1)
+
+    scanResult.resolve({ items: [item], complete: true })
+    const [listed, summary] = await Promise.all([listPromise, summaryPromise])
+    expect(listed.items).toEqual([item])
+    expect(summary.total).toBe(1)
+    expect(catalog.getIndexStatus()).toMatchObject({ ready: true, refreshing: false, complete: true })
+  })
+
+  it('keeps initial readers waiting when a forced refresh supersedes the initial scan', async () => {
+    const scans = [deferred<{ items: ManagedAttachment[]; complete: boolean }>(), deferred<{ items: ManagedAttachment[]; complete: boolean }>()]
+    let scanIndex = 0
+    const scan = vi.fn(() => scans[scanIndex++]!.promise)
+    const oldItem = asset('55555555-5555-4555-8555-555555555555')
+    const newItem = asset('66666666-6666-4666-8666-666666666666')
+    const catalog = new AttachmentCatalog(adapters({ boardAssets: { source: 'board-asset', scan } }))
+
+    let readerSettled = false
+    const reader = catalog.list({ source: 'board-asset' }).then((result) => {
+      readerSettled = true
+      return result
+    })
+    await vi.waitFor(() => expect(scan).toHaveBeenCalledTimes(1))
+    const forcedRefresh = catalog.refresh(true)
+    await vi.waitFor(() => expect(scan).toHaveBeenCalledTimes(2))
+
+    scans[0]!.resolve({ items: [oldItem], complete: true })
+    await Promise.resolve()
+    await Promise.resolve()
+    expect(readerSettled).toBe(false)
+    expect(catalog.getIndexStatus()).toMatchObject({ ready: false, refreshing: true })
+
+    scans[1]!.resolve({ items: [newItem], complete: true })
+    await forcedRefresh
+    expect((await reader).items).toEqual([newItem])
+  })
+
+  it('waits for the latest of consecutive forced refreshes without publishing canceled scans', async () => {
+    const scans = [
+      deferred<{ items: ManagedAttachment[]; complete: boolean }>(),
+      deferred<{ items: ManagedAttachment[]; complete: boolean }>(),
+      deferred<{ items: ManagedAttachment[]; complete: boolean }>(),
+    ]
+    let scanIndex = 0
+    const scan = vi.fn(() => scans[scanIndex++]!.promise)
+    const items = [
+      asset('77777777-7777-4777-8777-777777777777'),
+      asset('88888888-8888-4888-8888-888888888888'),
+      asset('99999999-9999-4999-8999-999999999999'),
+    ]
+    const catalog = new AttachmentCatalog(adapters({ boardAssets: { source: 'board-asset', scan } }))
+    const reader = catalog.list({ source: 'board-asset' })
+    await vi.waitFor(() => expect(scan).toHaveBeenCalledTimes(1))
+    const second = catalog.refresh(true)
+    await vi.waitFor(() => expect(scan).toHaveBeenCalledTimes(2))
+    const third = catalog.refresh(true)
+    await vi.waitFor(() => expect(scan).toHaveBeenCalledTimes(3))
+
+    scans[0]!.resolve({ items: [items[0]!], complete: true })
+    scans[1]!.resolve({ items: [items[1]!], complete: true })
+    await second
+    expect(catalog.getIndexStatus()).toMatchObject({ ready: false, refreshing: true })
+    scans[2]!.resolve({ items: [items[2]!], complete: true })
+
+    await third
+    expect((await reader).items).toEqual([items[2]])
+    expect(catalog.getIndexStatus()).toMatchObject({ ready: true, refreshing: false, complete: true })
+  })
+
+  it('preserves the last usable snapshot when a forced refresh loses every source', async () => {
+    let fail = false
+    const makeAdapter = (source: AttachmentSource, items: ManagedAttachment[]): AttachmentCatalogAdapter => ({
+      source,
+      scan: async () => {
+        if (fail) throw new Error('source unavailable')
+        return { items, complete: true }
+      },
+    })
+    const item = asset('aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa')
+    const catalog = new AttachmentCatalog({
+      boardAssets: makeAdapter('board-asset', [item]),
+      vaultFiles: makeAdapter('vault-file', []),
+      boardMaterials: makeAdapter('board-material', []),
+    }, () => 123)
+    await catalog.list({})
+    fail = true
+
+    await expect(catalog.refresh(true)).rejects.toThrow('All attachment catalog sources are unavailable')
+    expect(catalog.getIndexStatus()).toMatchObject({
+      ready: true,
+      refreshing: false,
+      complete: true,
+      refreshedAt: 123,
+    })
+    expect((await catalog.list({})).items).toEqual([item])
+  })
+
+  it('fails initial reads instead of marking an unavailable catalog ready', async () => {
+    const unavailable = (source: AttachmentSource): AttachmentCatalogAdapter => ({
+      source,
+      scan: async () => { throw new Error('offline') },
+    })
+    const catalog = new AttachmentCatalog({
+      boardAssets: unavailable('board-asset'),
+      vaultFiles: unavailable('vault-file'),
+      boardMaterials: unavailable('board-material'),
+    })
+
+    await expect(catalog.list({})).rejects.toThrow('All attachment catalog sources are unavailable')
+    expect(catalog.getIndexStatus()).toMatchObject({ ready: false, refreshing: false, complete: null, refreshedAt: null })
   })
 
   it('prevents an older explicit refresh from replacing a newer generation', async () => {

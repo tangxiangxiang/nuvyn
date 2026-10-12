@@ -22,7 +22,9 @@ const toast = useToast()
 const page = ref<AttachmentPage | null>(null)
 const loading = ref(false)
 const refreshing = ref(false)
-const error = ref(false)
+const loadError = ref<'query' | 'after-refresh' | null>(null)
+const refreshError = ref(false)
+const pageQueryKey = ref<string | null>(null)
 const search = ref('')
 const typeFilter = ref<AttachmentResourceType | 'all'>('all')
 const sourceFilter = ref<AttachmentSource | 'all'>('all')
@@ -33,13 +35,15 @@ const pageSize = 30
 let loadSequence = 0
 let searchTimer: ReturnType<typeof setTimeout> | undefined
 
+const currentQueryKey = computed(() => JSON.stringify(query()))
+const isPageQueryStale = computed(() => Boolean(page.value && pageQueryKey.value !== currentQueryKey.value))
 const selected = computed(() => page.value?.items.find((item) => resourceKey(item) === selectedKey.value) ?? null)
 const hasSourceFailure = computed(() => Object.values(page.value?.indexStatus.sources ?? {}).some((source) => source.state === 'failed'))
 const allSourcesFailed = computed(() => Object.values(page.value?.indexStatus.sources ?? {}).every((source) => source.state === 'failed'))
-const isInitialFailure = computed(() => error.value && !page.value)
-const hasNextPage = computed(() => Boolean(page.value && offset.value + pageSize < page.value.total))
-const rangeStart = computed(() => page.value?.total ? offset.value + 1 : 0)
-const rangeEnd = computed(() => Math.min(offset.value + pageSize, page.value?.total ?? 0))
+const isInitialFailure = computed(() => loadError.value !== null && !page.value)
+const hasNextPage = computed(() => Boolean(page.value && page.value.offset + page.value.limit < page.value.total))
+const rangeStart = computed(() => page.value?.total ? page.value.offset + 1 : 0)
+const rangeEnd = computed(() => Math.min((page.value?.offset ?? 0) + (page.value?.limit ?? pageSize), page.value?.total ?? 0))
 
 function resourceKey(item: ManagedAttachment): string {
   switch (item.key.kind) {
@@ -116,19 +120,23 @@ function query(): AttachmentListQuery {
   }
 }
 
-async function loadPage(): Promise<void> {
+async function loadPage(failureContext: 'query' | 'after-refresh' = 'query'): Promise<boolean> {
   const current = ++loadSequence
+  const requestedQuery = query()
   loading.value = true
-  error.value = false
+  loadError.value = null
   try {
-    const next = await listAttachments(query())
-    if (current !== loadSequence) return
+    const next = await listAttachments(requestedQuery)
+    if (current !== loadSequence) return false
     page.value = next
+    pageQueryKey.value = JSON.stringify(requestedQuery)
     if (selectedKey.value && !next.items.some((item) => resourceKey(item) === selectedKey.value)) {
       selectedKey.value = ''
     }
+    return true
   } catch {
-    if (current === loadSequence) error.value = true
+    if (current === loadSequence) loadError.value = failureContext
+    return false
   } finally {
     if (current === loadSequence) loading.value = false
   }
@@ -137,19 +145,25 @@ async function loadPage(): Promise<void> {
 async function refresh(): Promise<void> {
   if (refreshing.value) return
   refreshing.value = true
-  error.value = false
+  refreshError.value = false
   try {
     await refreshAttachmentIndex()
-    await loadPage()
   } catch {
-    error.value = true
-  } finally {
+    refreshError.value = true
     refreshing.value = false
+    return
   }
+  await loadPage('after-refresh')
+  refreshing.value = false
 }
 
 function scheduleFilterLoad(): void {
   offset.value = 0
+  // Invalidate an in-flight response as soon as the controls change, rather
+  // than letting it briefly masquerade as the result for the new filters.
+  loadSequence += 1
+  loading.value = false
+  loadError.value = null
   if (searchTimer) clearTimeout(searchTimer)
   searchTimer = setTimeout(() => { void loadPage() }, 180)
 }
@@ -195,7 +209,7 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <section class="settings-section attachment-manager" aria-labelledby="attachment-manager-title" :aria-busy="loading || refreshing">
+  <section class="settings-section attachment-manager" aria-labelledby="attachment-manager-title" :aria-busy="loading || refreshing || isPageQueryStale">
     <header class="settings-section-header attachment-manager-header">
       <div class="attachment-manager-heading">
         <NButton attr-type="button" size="small" quaternary class="attachment-back" @click="emit('back')">
@@ -223,9 +237,9 @@ onBeforeUnmount(() => {
 
     <div class="attachment-toolbar" role="search">
       <NInput v-model:value="search" clearable :placeholder="t('attachments.search_placeholder')" :aria-label="t('attachments.search')" />
-      <NSelect v-model:value="typeFilter" :options="typeOptions" :aria-label="t('attachments.filter.type')" />
-      <NSelect v-model:value="sourceFilter" :options="sourceOptions" :aria-label="t('attachments.filter.source')" />
-      <NSelect v-model:value="referenceFilter" :options="referenceOptions" :aria-label="t('attachments.filter.reference')" />
+      <NSelect v-model:value="typeFilter" :options="typeOptions" :to="false" :aria-label="t('attachments.filter.type')" />
+      <NSelect v-model:value="sourceFilter" :options="sourceOptions" :to="false" :aria-label="t('attachments.filter.source')" />
+      <NSelect v-model:value="referenceFilter" :options="referenceOptions" :to="false" :aria-label="t('attachments.filter.reference')" />
     </div>
 
     <div v-if="hasSourceFailure" class="attachment-warning" role="status">
@@ -235,21 +249,34 @@ onBeforeUnmount(() => {
       </span>
     </div>
 
+    <div v-if="refreshError" class="attachment-request-message is-error" role="alert">
+      <span>{{ t('attachments.refresh_failed') }}</span>
+      <NButton attr-type="button" size="small" class="btn" :loading="refreshing" @click="refresh">{{ t('attachments.retry') }}</NButton>
+    </div>
+    <div v-if="loadError && page" class="attachment-request-message is-error" role="alert">
+      <span>{{ t(loadError === 'after-refresh' ? 'attachments.refresh_list_failed' : 'attachments.previous_results_error') }}</span>
+      <NButton attr-type="button" size="small" class="btn" :loading="loading" @click="loadPage()">{{ t('attachments.retry') }}</NButton>
+    </div>
+    <div v-else-if="(loading || isPageQueryStale) && page" class="attachment-request-message" role="status">
+      <span>{{ t(isPageQueryStale ? 'attachments.filters_loading_previous' : 'attachments.updating_previous') }}</span>
+    </div>
+
     <div class="attachment-manager-content">
       <div class="attachment-list-panel" :aria-busy="loading">
         <div v-if="loading && !page" class="attachment-state"><NSpin size="small" /><span>{{ t('attachments.loading') }}</span></div>
         <div v-else-if="isInitialFailure" class="attachment-state attachment-error" role="alert">
-          <p>{{ t('attachments.load_failed') }}</p>
-          <NButton attr-type="button" size="small" class="btn" @click="loadPage">{{ t('attachments.retry') }}</NButton>
+          <p>{{ t(loadError === 'after-refresh' ? 'attachments.refresh_list_failed' : 'attachments.load_failed') }}</p>
+          <NButton attr-type="button" size="small" class="btn" @click="loadPage()">{{ t('attachments.retry') }}</NButton>
         </div>
+        <div v-else-if="page && page.total === 0 && isPageQueryStale" class="attachment-empty" aria-hidden="true"></div>
         <div v-else-if="page && page.total === 0 && !hasSourceFailure" class="attachment-empty">
           <NEmpty :description="search || typeFilter !== 'all' || sourceFilter !== 'all' || referenceFilter !== 'all' ? t('attachments.no_matches') : t('attachments.empty')" />
         </div>
-        <div v-else-if="page && page.total === 0 && allSourcesFailed" class="attachment-state attachment-error" role="alert">
+        <div v-else-if="page && page.total === 0 && !isPageQueryStale && allSourcesFailed" class="attachment-state attachment-error" role="alert">
           <p>{{ t('attachments.no_sources_available') }}</p>
           <NButton attr-type="button" size="small" class="btn" :loading="refreshing" @click="refresh">{{ t('attachments.retry') }}</NButton>
         </div>
-        <div v-else-if="page && page.total === 0 && hasSourceFailure" class="attachment-state" role="status">
+        <div v-else-if="page && page.total === 0 && !isPageQueryStale && hasSourceFailure" class="attachment-state" role="status">
           <p>{{ t('attachments.no_items_partial') }}</p>
           <NButton attr-type="button" size="small" class="btn" :loading="refreshing" @click="refresh">{{ t('attachments.retry') }}</NButton>
         </div>
@@ -279,8 +306,8 @@ onBeforeUnmount(() => {
         <footer v-if="page && page.total > 0" class="attachment-pagination">
           <span>{{ t('attachments.range', { start: rangeStart, end: rangeEnd, total: page.total }) }}</span>
           <div>
-            <NButton attr-type="button" size="tiny" quaternary :disabled="offset === 0 || loading" :aria-label="t('attachments.previous_page')" @click="selectPage(offset - pageSize)">{{ t('attachments.previous') }}</NButton>
-            <NButton attr-type="button" size="tiny" quaternary :disabled="!hasNextPage || loading" :aria-label="t('attachments.next_page')" @click="selectPage(offset + pageSize)">{{ t('attachments.next') }}</NButton>
+            <NButton attr-type="button" size="tiny" quaternary :disabled="page.offset === 0 || loading || isPageQueryStale || Boolean(loadError)" :aria-label="t('attachments.previous_page')" @click="selectPage(page.offset - pageSize)">{{ t('attachments.previous') }}</NButton>
+            <NButton attr-type="button" size="tiny" quaternary :disabled="!hasNextPage || loading || isPageQueryStale || Boolean(loadError)" :aria-label="t('attachments.next_page')" @click="selectPage(page.offset + pageSize)">{{ t('attachments.next') }}</NButton>
           </div>
         </footer>
       </div>
@@ -329,6 +356,8 @@ onBeforeUnmount(() => {
 .attachment-index-status strong.is-incomplete { color: var(--settings-warning); }
 .attachment-toolbar { display: grid; grid-template-columns: minmax(180px, 1.8fr) repeat(3, minmax(130px, 1fr)); gap: 10px; }
 .attachment-warning { display: flex; flex-wrap: wrap; gap: 4px 10px; padding: 9px 12px; border: 1px solid color-mix(in srgb, var(--settings-warning) 36%, transparent); border-radius: 8px; color: var(--settings-warning); font-size: .82rem; }
+.attachment-request-message { min-width: 0; display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 8px 12px; padding: 9px 12px; border: 1px solid var(--settings-border); border-radius: 8px; color: var(--settings-muted); font-size: .82rem; }
+.attachment-request-message.is-error { border-color: color-mix(in srgb, var(--settings-danger) 36%, transparent); color: var(--settings-danger); }
 .attachment-manager-content { flex: 1 1 auto; min-height: 220px; display: grid; grid-template-columns: minmax(0, 1.45fr) minmax(270px, .8fr); gap: 14px; overflow: hidden; }
 .attachment-list-panel, .attachment-detail-panel { min-width: 0; min-height: 0; display: flex; flex-direction: column; border: 1px solid var(--settings-border); border-radius: 9px; background: var(--settings-card); overflow: hidden; }
 .attachment-resource-list { flex: 1 1 auto; min-height: 0; overflow-y: auto; overscroll-behavior: contain; }
@@ -363,7 +392,10 @@ onBeforeUnmount(() => {
   .attachment-summary { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .attachment-toolbar { grid-template-columns: minmax(0, 1fr) repeat(2, minmax(0, 1fr)); }
   .attachment-toolbar :deep(.n-input) { grid-column: 1 / -1; }
-  .attachment-manager-content { grid-template-columns: minmax(0, 1fr); grid-template-rows: minmax(220px, 1fr) auto; overflow-y: auto; }
+  .attachment-manager { height: auto; min-height: 100%; }
+  .attachment-manager-content { flex: 0 0 auto; min-height: 0; grid-template-columns: minmax(0, 1fr); grid-template-rows: auto auto; overflow: visible; }
+  .attachment-list-panel, .attachment-detail-panel { overflow: visible; }
+  .attachment-resource-list { flex: 0 0 auto; overflow: visible; }
   .attachment-detail-panel { min-height: 180px; }
 }
 @media (max-width: 520px) {
