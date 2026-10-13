@@ -777,7 +777,11 @@ test('ordinary Note does not expose the native Diary mood context', async ({ pag
     await expect(page.locator(`[role="tab"][data-tab-id="${path}"]`)).toHaveAttribute('aria-selected', 'true')
     await expect(page.getByTestId('diary-native-mood-context')).toHaveCount(0)
     await expect(page.getByTestId('diary-mood-picker')).toHaveCount(0)
-    await expect(page.locator('.editor-tabs-context-actions')).toHaveCount(0)
+    const contextActions = page.locator('.editor-tabs-context-actions')
+    await expect(contextActions).toHaveCount(1)
+    await expect(
+      contextActions.getByRole('button', { name: /插入图片|Insert image/i }),
+    ).toBeVisible()
   } finally {
     await deletePost(request, path)
   }
