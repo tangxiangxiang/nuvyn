@@ -9,6 +9,7 @@ const CONTAINER_DEFINITIONS = {
   warning: { title: 'Warning', tag: 'div' },
   danger: { title: 'Danger', tag: 'div' },
   details: { title: 'Details', tag: 'details' },
+  'image-row': { tag: 'div', className: 'nuvyn-image-row' },
 } as const
 
 export type MarkdownContainerType = keyof typeof CONTAINER_DEFINITIONS
@@ -69,10 +70,11 @@ function parseOpening(state: StateBlock, line: number): ContainerOpening | null 
   // container instead of remaining ordinary Markdown.
   if (!/^[ \t]/.test(rawRest)) return null
   const rest = rawRest.trimStart()
-  const match = /^([a-z]+)(?:[ \t]+(.*?))?[ \t]*$/.exec(rest)
+  const match = /^([a-z]+(?:-[a-z]+)*)(?:[ \t]+(.*?))?[ \t]*$/.exec(rest)
   if (!match || !isSupportedType(match[1])) return null
 
   const type = match[1]
+  if (type === 'image-row' && match[2]?.trim()) return null
   let title = match[2]?.trim() ?? ''
   let open = false
 
@@ -83,12 +85,28 @@ function parseOpening(state: StateBlock, line: number): ContainerOpening | null 
     open = true
   }
 
+  const defaultTitle = type === 'image-row' ? '' : CONTAINER_DEFINITIONS[type].title
+
   return {
     markerLength,
     type,
-    title: title || CONTAINER_DEFINITIONS[type].title,
+    title: title || defaultTitle,
     open,
   }
+}
+
+function isImageRowBody(state: StateBlock, startLine: number, endLine: number): boolean {
+  let imageCount = 0
+  for (let line = startLine; line < endLine; line += 1) {
+    if (state.isEmpty(line)) continue
+    if (state.sCount[line] - state.blkIndent >= 4) return false
+    const source = state.src.slice(getLineStart(state, line), getLineEnd(state, line)).trim()
+    const tokens: Parameters<typeof state.md.inline.parse>[3] = []
+    state.md.inline.parse(source, state.md, state.env, tokens)
+    if (tokens.length !== 1 || tokens[0]?.type !== 'image') return false
+    imageCount += 1
+  }
+  return imageCount >= 2
 }
 
 function parseClosing(state: StateBlock, line: number): ContainerClosing | null {
@@ -408,11 +426,18 @@ function nuvynContainerRule(
 
   const closeLine = findClosingLine(state, startLine + 1, endLine, opening.markerLength)
   if (closeLine === -1) return false
+  if (opening.type === 'image-row' && !isImageRowBody(state, startLine + 1, closeLine)) return false
   if (silent) return true
 
   const definition = CONTAINER_DEFINITIONS[opening.type]
   const openToken = state.push('nuvyn_container_open', definition.tag, 1)
-  openToken.attrSet('class', `markdown-container markdown-container-${opening.type}`)
+  openToken.attrSet('class', 'className' in definition
+    ? definition.className
+    : `markdown-container markdown-container-${opening.type}`)
+  const imageRowProvenance = (state.env as { imageRowProvenance?: unknown } | undefined)?.imageRowProvenance
+  if (opening.type === 'image-row' && typeof imageRowProvenance === 'string') {
+    openToken.attrSet('data-nuvyn-image-row-provenance', imageRowProvenance)
+  }
   if (opening.type === 'details' && opening.open) openToken.attrSet('open', 'open')
   openToken.map = [startLine, closeLine + 1]
   openToken.meta = {
@@ -421,13 +446,15 @@ function nuvynContainerRule(
     open: opening.open,
   }
 
-  const titleTag = opening.type === 'details' ? 'summary' : 'div'
-  const titleOpen = state.push('nuvyn_container_title_open', titleTag, 1)
-  titleOpen.attrSet('class', 'markdown-container-title')
-  titleOpen.map = [startLine, startLine + 1]
-  pushInlineTitle(state, opening.title, startLine)
-  const titleClose = state.push('nuvyn_container_title_close', titleTag, -1)
-  titleClose.map = [startLine, startLine + 1]
+  if (opening.type !== 'image-row') {
+    const titleTag = opening.type === 'details' ? 'summary' : 'div'
+    const titleOpen = state.push('nuvyn_container_title_open', titleTag, 1)
+    titleOpen.attrSet('class', 'markdown-container-title')
+    titleOpen.map = [startLine, startLine + 1]
+    pushInlineTitle(state, opening.title, startLine)
+    const titleClose = state.push('nuvyn_container_title_close', titleTag, -1)
+    titleClose.map = [startLine, startLine + 1]
+  }
 
   // Reuse MarkdownIt's current block state and rules for the body. This is
   // what keeps headings, callouts, math, WikiLinks, Shiki fences, Mermaid,

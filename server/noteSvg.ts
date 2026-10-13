@@ -24,11 +24,13 @@ const ALLOWED_ELEMENTS = new Set([
 ])
 
 const CHILDREN: Readonly<Record<string, ReadonlySet<string>>> = {
-  svg: new Set(['defs', 'g', 'path', 'rect', 'circle', 'ellipse', 'line', 'polyline', 'polygon', 'text', 'image', 'use', 'title', 'desc', 'metadata']),
+  // Excalidraw emits an inert, empty top-level mask in otherwise valid SVG exports.
+  // Accept the definition shape without treating it as rendered document content.
+  svg: new Set(['defs', 'g', 'path', 'rect', 'circle', 'ellipse', 'line', 'polyline', 'polygon', 'text', 'image', 'use', 'mask', 'title', 'desc', 'metadata']),
   defs: new Set(['clipPath', 'linearGradient', 'radialGradient', 'style', 'symbol', 'mask', 'g', 'path', 'rect', 'circle', 'ellipse', 'line', 'polyline', 'polygon']),
   g: new Set(['g', 'path', 'rect', 'circle', 'ellipse', 'line', 'polyline', 'polygon', 'text', 'image', 'use']),
   clipPath: new Set(['g', 'path', 'rect', 'circle', 'ellipse', 'line', 'polyline', 'polygon']),
-  symbol: new Set(['g', 'path', 'rect', 'circle', 'ellipse', 'line', 'polyline', 'polygon', 'text', 'image']),
+  symbol: new Set(['g', 'path', 'rect', 'circle', 'ellipse', 'line', 'polyline', 'polygon', 'text', 'image', 'use']),
   mask: new Set(['g', 'path', 'rect', 'circle', 'ellipse', 'line', 'polyline', 'polygon']),
   linearGradient: new Set(['stop']),
   radialGradient: new Set(['stop']),
@@ -107,6 +109,10 @@ export class NoteSvgValidationError extends Error {
 
 interface SvgFrame {
   tag: string
+  id?: string
+  inDefinition: boolean
+  hasDrawing: boolean
+  symbolUses: string[]
   styleText?: string[]
   styleTextLength?: number
 }
@@ -118,6 +124,68 @@ interface InternalReference {
 
 function invalid(): never {
   throw new NoteSvgValidationError('invalid')
+}
+
+function isPositiveSvgLength(value: string | undefined): boolean {
+  if (!value || !/^[+]?(?:\d+(?:\.\d*)?|\.\d+)(?:e[+-]?\d+)?(?:px|pt|pc|em|rem|ex|%|cm|mm|in)?$/iu.test(value.trim())) return false
+  return Number.parseFloat(value) > 0
+}
+
+function parseSvgLength(value: string | undefined): number | null {
+  if (value === undefined || !/^[+-]?(?:\d+(?:\.\d*)?|\.\d+)(?:e[+-]?\d+)?(?:px|pt|pc|em|rem|ex|%|cm|mm|in)?$/iu.test(value.trim())) return null
+  const parsed = Number.parseFloat(value)
+  return Number.isFinite(parsed) ? parsed : null
+}
+
+function isPotentialDrawingElement(tag: string, attributes: ReadonlyMap<string, string>): boolean {
+  switch (tag) {
+    case 'path': return Boolean(attributes.get('d')?.trim())
+    case 'rect': return isPositiveSvgLength(attributes.get('width')) && isPositiveSvgLength(attributes.get('height'))
+    case 'circle': return isPositiveSvgLength(attributes.get('r'))
+    case 'ellipse': return isPositiveSvgLength(attributes.get('rx')) && isPositiveSvgLength(attributes.get('ry'))
+    case 'line': {
+      const coordinates = ['x1', 'y1', 'x2', 'y2'].map((name) => parseSvgLength(attributes.get(name) ?? '0'))
+      return coordinates.every((coordinate) => coordinate !== null)
+        && (coordinates[0] !== coordinates[2] || coordinates[1] !== coordinates[3])
+    }
+    case 'polyline':
+    case 'polygon': return Boolean(attributes.get('points')?.trim())
+    case 'image': return attributes.has('href')
+      && isPositiveSvgLength(attributes.get('width'))
+      && isPositiveSvgLength(attributes.get('height'))
+    default: return false
+  }
+}
+
+function resolveRenderableSymbols(symbols: ReadonlyMap<string, Pick<SvgFrame, 'hasDrawing' | 'symbolUses'>>): Map<string, boolean> {
+  const remainingDependencies = new Map<string, number>()
+  const dependents = new Map<string, string[]>()
+  for (const [id, symbol] of symbols) remainingDependencies.set(id, symbol.symbolUses.length)
+  for (const [id, symbol] of symbols) {
+    for (const dependency of symbol.symbolUses) {
+      const parents = dependents.get(dependency) ?? []
+      parents.push(id)
+      dependents.set(dependency, parents)
+    }
+  }
+
+  const ready = [...symbols.keys()].filter((id) => remainingDependencies.get(id) === 0)
+  const renderable = new Map<string, boolean>()
+  while (ready.length > 0) {
+    const id = ready.pop()!
+    const symbol = symbols.get(id)!
+    renderable.set(id, symbol.hasDrawing || symbol.symbolUses.some((dependency) => renderable.get(dependency) === true))
+    for (const parent of dependents.get(id) ?? []) {
+      const remaining = (remainingDependencies.get(parent) ?? 0) - 1
+      remainingDependencies.set(parent, remaining)
+      if (remaining === 0) ready.push(parent)
+    }
+  }
+
+  // A cyclic <use> graph can make SVG renderers recurse indefinitely. Fail
+  // closed even when a cycle is currently unreachable from the document root.
+  if (renderable.size !== symbols.size) invalid()
+  return renderable
 }
 
 function tooLarge(): never {
@@ -170,10 +238,40 @@ function validateEmbeddedImageDataUri(value: string, embeddedImageBytes: { total
 }
 
 function validateFontFamily(value: string): string {
-  const family = value.trim()
-  const name = String.raw`(?:"[^"\r\n]{1,64}"|'[^'\r\n]{1,64}'|[\p{L}\p{N}_-]{1,64})`
-  if (!new RegExp(`^${name}(?:\\s*,\\s*${name})*$`, 'u').test(family)) invalid()
-  return family
+  const families: string[] = []
+  let start = 0
+  let quote = ''
+  for (let index = 0; index < value.length; index += 1) {
+    const character = value[index] ?? ''
+    if (character === '\\' || /[\u0000-\u001f\u007f]/u.test(character)) invalid()
+    if (quote) {
+      if (character === quote) quote = ''
+    } else if (character === '"' || character === "'") {
+      quote = character
+    } else if (character === ',') {
+      families.push(value.slice(start, index).trim())
+      start = index + 1
+    }
+  }
+  if (quote) invalid()
+  families.push(value.slice(start).trim())
+  if (families.length === 0 || families.length > 16) invalid()
+
+  const unquotedName = /^(?:[\p{L}_-][\p{L}\p{N}_-]*)(?:\s+[\p{L}_-][\p{L}\p{N}_-]*)*$/u
+  for (const family of families) {
+    const quoteCharacter = family.startsWith('"') && family.endsWith('"')
+      ? '"'
+      : family.startsWith("'") && family.endsWith("'")
+        ? "'"
+        : ''
+    if (quoteCharacter) {
+      if (family.length < 3 || family.length > 66) invalid()
+      if (family.slice(1, -1).includes(quoteCharacter)) invalid()
+      continue
+    }
+    if (family.length > 64 || !unquotedName.test(family)) invalid()
+  }
+  return families.join(', ')
 }
 
 function safeReference(value: string, expected: InternalReference['expected'], references: InternalReference[]): string {
@@ -412,13 +510,15 @@ export function sanitizeNoteSvg(input: Uint8Array): Buffer {
   }
   const stack: SvgFrame[] = []
   const ids = new Map<string, string>()
+  const symbols = new Map<string, Pick<SvgFrame, 'hasDrawing' | 'symbolUses'>>()
+  const rootSymbolUses: string[] = []
   const references: InternalReference[] = []
   const fontBytes = { total: 0, count: 0 }
   const embeddedImageBytes = { total: 0 }
   let rootSeen = false
   let rootClosed = false
   let elementCount = 0
-  let visualElementCount = 0
+  let rootHasDrawing = false
 
   const parser = new SaxNamespaceParser({
     xmlDecl(declaration) {
@@ -446,7 +546,6 @@ export function sanitizeNoteSvg(input: Uint8Array): Buffer {
       }
       elementCount += 1
       if (elementCount > MAX_ELEMENTS) tooLarge()
-      if (!['defs', 'style', 'title', 'desc', 'metadata', 'stop'].includes(name.localName)) visualElementCount += 1
 
       const serializedAttributes = new Map<string, string>()
       for (const [attributeName, rawValue] of attributes.entries()) {
@@ -500,15 +599,37 @@ export function sanitizeNoteSvg(input: Uint8Array): Buffer {
         if (parent?.tag !== 'defs') invalid()
         const className = serializedAttributes.get('class')
         if (className !== undefined && className !== 'style-fonts') invalid()
-        stack.push({ tag: name.localName, styleText: [] })
+        stack.push({
+          tag: name.localName,
+          inDefinition: true,
+          hasDrawing: false,
+          symbolUses: [],
+          styleText: [],
+        })
         return
+      }
+
+      const inDefinition = Boolean(parent?.inDefinition)
+        || (parent !== undefined && ['defs', 'clipPath', 'mask', 'linearGradient', 'radialGradient', 'symbol'].includes(parent.tag))
+      const frame: SvgFrame = {
+        tag: name.localName,
+        ...(serializedAttributes.has('id') ? { id: serializedAttributes.get('id') } : {}),
+        inDefinition,
+        hasDrawing: isPotentialDrawingElement(name.localName, serializedAttributes),
+        symbolUses: [],
+      }
+      if (name.localName === 'use') {
+        const targetId = (serializedAttributes.get('href') ?? '').slice(1)
+        const ownerSymbol = [...stack].reverse().find((ancestor) => ancestor.tag === 'symbol' && ancestor.id)
+        if (ownerSymbol) ownerSymbol.symbolUses.push(targetId)
+        else if (!inDefinition) rootSymbolUses.push(targetId)
       }
 
       const attributesText = [...serializedAttributes.entries()]
         .map(([key, value]) => ` ${key}="${escapeAttribute(value)}"`)
         .join('')
       append(`${isRoot ? `<svg xmlns="${SVG_NAMESPACE}"` : `<${name.localName}`}${attributesText}>`)
-      stack.push({ tag: name.localName })
+      stack.push(frame)
     },
     endTag(name) {
       const frame = stack.pop()
@@ -518,6 +639,14 @@ export function sanitizeNoteSvg(input: Uint8Array): Buffer {
         if (css) append(serializeStyle(css))
       } else {
         append(`</${frame.tag}>`)
+      }
+      if (frame.tag === 'symbol' && frame.id) {
+        symbols.set(frame.id, { hasDrawing: frame.hasDrawing, symbolUses: frame.symbolUses })
+      }
+      if (!frame.inDefinition && frame.hasDrawing) rootHasDrawing = true
+      const parent = stack.at(-1)
+      if (parent && ['g', 'symbol', 'text', 'tspan'].includes(parent.tag)) {
+        parent.hasDrawing ||= frame.hasDrawing
       }
       if (frame.tag === 'svg') rootClosed = true
     },
@@ -533,6 +662,7 @@ export function sanitizeNoteSvg(input: Uint8Array): Buffer {
         if (frame.styleTextLength > MAX_ATTRIBUTE_VALUE_LENGTH) tooLarge()
       } else if (TEXT_ELEMENTS.has(frame.tag)) {
         append(xmlEscape(value))
+        if ((frame.tag === 'text' || frame.tag === 'tspan') && value.trim()) frame.hasDrawing = true
       } else if (value.trim()) {
         invalid()
       }
@@ -556,7 +686,7 @@ export function sanitizeNoteSvg(input: Uint8Array): Buffer {
     return invalid()
   }
 
-  if (!rootSeen || !rootClosed || stack.length > 0 || visualElementCount === 0) invalid()
+  if (!rootSeen || !rootClosed || stack.length > 0) invalid()
   for (const reference of references) {
     const target = ids.get(reference.id)
     if (!target || (reference.expected === 'gradient' && !GRADIENT_ELEMENTS.has(target))
@@ -564,6 +694,8 @@ export function sanitizeNoteSvg(input: Uint8Array): Buffer {
       || (reference.expected === 'mask' && target !== 'mask')
       || (reference.expected === 'symbol' && target !== 'symbol')) invalid()
   }
+  const renderableSymbols = resolveRenderableSymbols(symbols)
+  if (!rootHasDrawing && !rootSymbolUses.some((id) => renderableSymbols.get(id) === true)) invalid()
   return Buffer.from(output.join(''), 'utf8')
 }
 

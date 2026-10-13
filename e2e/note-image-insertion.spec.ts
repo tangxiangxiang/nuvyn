@@ -208,6 +208,193 @@ test('selects, drops, and pastes SVG into Note Markdown, then renders it after r
   }
 })
 
+test('renders and decodes an SVG exported by the pinned Excalidraw package', async ({ page, request }) => {
+  const runId = randomUUID()
+  const notePath = `inbox/excalidraw-svg-${runId}`
+  const createdPaths: string[] = []
+  const uploadedPaths: string[] = []
+  const vaultRoot = process.env.NUVYN_DRAFT_E2E_VAULT
+  if (!vaultRoot) throw new Error('NUVYN_DRAFT_E2E_VAULT is required for Note image E2E')
+
+  try {
+    const fixture = await fs.readFile(path.resolve('e2e/fixtures/excalidraw-note-image.svg'))
+    const upload = await request.post('/api/note/images', {
+      headers: { Origin: process.env.NUVYN_PUBLIC_ORIGIN },
+      multipart: { image: { name: 'excalidraw-export.svg', mimeType: 'image/svg+xml', buffer: fixture } },
+    })
+    expect(upload.status(), await upload.text()).toBe(201)
+    const imagePath = (await upload.json() as { path: string }).path
+    uploadedPaths.push(imagePath)
+
+    await createDoc(request, notePath, `# Excalidraw export\n\n![Excalidraw scene](@/${imagePath})\n`, createdPaths)
+    await gotoVaultReady(page)
+    await openDoc(page, notePath)
+    await page.getByTestId('view-toggle').click()
+
+    const image = page.locator('.reading-pane img[alt="Excalidraw scene"]')
+    await expect(image).toBeVisible()
+    const decoded = await image.evaluate(async (element) => {
+      const img = element as HTMLImageElement
+      await img.decode()
+      const canvas = document.createElement('canvas')
+      canvas.width = img.naturalWidth
+      canvas.height = img.naturalHeight
+      const context = canvas.getContext('2d')
+      if (!context) throw new Error('Canvas 2D context is unavailable')
+      context.drawImage(img, 0, 0)
+      const pixels = context.getImageData(0, 0, canvas.width, canvas.height).data
+      let nonWhitePixels = 0
+      for (let index = 0; index < pixels.length; index += 4) {
+        if (pixels[index + 3]! > 0 && (pixels[index]! < 245 || pixels[index + 1]! < 245 || pixels[index + 2]! < 245)) {
+          nonWhitePixels += 1
+        }
+      }
+      return { width: img.naturalWidth, height: img.naturalHeight, nonWhitePixels }
+    })
+    expect(decoded.width).toBeGreaterThan(300)
+    expect(decoded.height).toBeGreaterThan(200)
+    expect(decoded.nonWhitePixels).toBeGreaterThan(3_000)
+    const initialBounds = await image.boundingBox()
+    expect(initialBounds).not.toBeNull()
+    await image.evaluate((element) => {
+      const img = element as HTMLImageElement
+      img.style.width = `${img.naturalWidth * 1.5}px`
+    })
+    const scaledBounds = await image.boundingBox()
+    expect(scaledBounds!.width).toBeGreaterThan(initialBounds!.width)
+
+    const safeResponse = await request.get(`/api/markdown-resources?kind=image&path=${encodeURIComponent(imagePath)}`)
+    expect(safeResponse.status()).toBe(200)
+    const safeSvg = await safeResponse.text()
+    expect(safeSvg).toContain('中文 / English')
+    expect(safeSvg).toContain('<clipPath')
+    expect(safeSvg).toContain('<use href="#image-fixture-png"')
+    expect(safeSvg).toContain('@font-face{font-family:Virgil;src:url(data:font/woff2;base64,')
+    const embeddedFontSource = safeSvg.match(/@font-face\{font-family:Virgil;src:url\((data:font\/woff2;base64,[^)]+)\)\}/u)?.[1]
+    expect(embeddedFontSource).toBeTruthy()
+    const fontLoaded = await page.evaluate(async (source) => {
+      const font = new FontFace('NuvynExcalidrawFixture', `url("${source}")`)
+      await font.load()
+      document.fonts.add(font)
+      return document.fonts.check('16px NuvynExcalidrawFixture')
+    }, embeddedFontSource!)
+    expect(fontLoaded).toBe(true)
+  } finally {
+    for (const createdPath of createdPaths) await request.delete(`/api/posts/${createdPath}`).catch(() => {})
+    for (const relativePath of new Set(uploadedPaths)) {
+      if (!relativePath.startsWith('attachments/images/')) continue
+      await fs.rm(path.join(vaultRoot, ...relativePath.split('/')), { force: true })
+    }
+    await request.post('/api/attachments/refresh').catch(() => {})
+    await request.post('/api/attachments/references/refresh').catch(() => {})
+  }
+})
+
+test('renders image-row as a real responsive image grid on desktop and mobile', async ({ page, request }) => {
+  const runId = randomUUID()
+  const notePath = `inbox/row-${runId.slice(0, 8)}`
+  const createdPaths: string[] = []
+  const uploadedPaths: string[] = []
+  const vaultRoot = process.env.NUVYN_DRAFT_E2E_VAULT
+  if (!vaultRoot) throw new Error('NUVYN_DRAFT_E2E_VAULT is required for Note image E2E')
+
+  try {
+    const pngUpload = await request.post('/api/note/images', {
+      headers: { Origin: process.env.NUVYN_PUBLIC_ORIGIN },
+      multipart: { image: { name: 'row.png', mimeType: 'image/png', buffer: PNG } },
+    })
+    expect(pngUpload.status(), await pngUpload.text()).toBe(201)
+    const pngPath = (await pngUpload.json() as { path: string }).path
+    uploadedPaths.push(pngPath)
+
+    const svgUpload = await request.post('/api/note/images', {
+      headers: { Origin: process.env.NUVYN_PUBLIC_ORIGIN },
+      multipart: { image: { name: 'row.svg', mimeType: 'image/svg+xml', buffer: SVG } },
+    })
+    expect(svgUpload.status(), await svgUpload.text()).toBe(201)
+    const svgPath = (await svgUpload.json() as { path: string }).path
+    uploadedPaths.push(svgPath)
+
+    await createDoc(request, notePath, [
+      '# Image row',
+      '',
+      `![Standalone](@/${pngPath})`,
+      '',
+      '::: image-row',
+      '',
+      `![Raster](@/${pngPath})`,
+      '',
+      `![Vector](@/${svgPath})`,
+      '',
+      ':::',
+    ].join('\n'), createdPaths)
+    await gotoVaultReady(page)
+    await openDoc(page, notePath)
+    await page.getByTestId('view-toggle').click()
+
+    const row = page.locator('.reading-pane .nuvyn-image-row')
+    const rowImages = row.locator('img')
+    await expect(row).toBeVisible()
+    await expect(rowImages).toHaveCount(2)
+    await expect.poll(() => rowImages.nth(0).evaluate((image) => (image as HTMLImageElement).naturalWidth)).toBe(1)
+    await expect.poll(() => rowImages.nth(1).evaluate((image) => (image as HTMLImageElement).naturalWidth)).toBe(120)
+
+    const desktopGeometry = await rowImages.evaluateAll((images) => images.map((image) => {
+      const bounds = image.getBoundingClientRect()
+      return { x: bounds.x, y: bounds.y, right: bounds.right, width: bounds.width }
+    }))
+    expect(desktopGeometry[0]!.x).not.toBe(desktopGeometry[1]!.x)
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true)
+
+    await page.setViewportSize({ width: 390, height: 844 })
+    const leftPanelToggle = page.getByTestId('left-panel-toggle')
+    if ((await leftPanelToggle.getAttribute('aria-pressed')) === 'true') await leftPanelToggle.click()
+    const rightRailToggle = page.locator('.right-rail-toggle')
+    if (await rightRailToggle.count()) {
+      if ((await rightRailToggle.getAttribute('aria-pressed')) === 'true') await rightRailToggle.click()
+    }
+    const mobileGeometry = await rowImages.evaluateAll((images) => images.map((image) => {
+      const bounds = image.getBoundingClientRect()
+      return { x: bounds.x, y: bounds.y, right: bounds.right, width: bounds.width }
+    }))
+    expect(mobileGeometry[0]!.y).toBeLessThan(mobileGeometry[1]!.y)
+    expect(mobileGeometry.every((bounds) => bounds.right <= 390 && bounds.width >= 0)).toBe(true)
+    const mobileOverflow = await page.evaluate(() => ({
+      viewport: window.innerWidth,
+      documentWidth: document.documentElement.scrollWidth,
+      bodyWidth: document.body.scrollWidth,
+      offenders: Array.from(document.body.querySelectorAll('*'))
+        .map((element) => ({
+          tag: element.tagName,
+          className: typeof element.className === 'string' ? element.className : '',
+          left: Math.round(element.getBoundingClientRect().left),
+          right: Math.round(element.getBoundingClientRect().right),
+          width: Math.round(element.getBoundingClientRect().width),
+          scrollWidth: element.scrollWidth,
+          clientWidth: element.clientWidth,
+        }))
+        .filter((element) => element.right > window.innerWidth + 1 || element.scrollWidth > element.clientWidth + 1)
+        .slice(0, 12),
+    }))
+    expect(mobileOverflow.documentWidth, JSON.stringify(mobileOverflow)).toBeLessThanOrEqual(mobileOverflow.viewport)
+
+    await page.reload()
+    const reloadedRowImages = page.locator('.reading-pane .nuvyn-image-row img')
+    await expect(reloadedRowImages).toHaveCount(2)
+    await expect.poll(() => reloadedRowImages.nth(0).evaluate((image) => (image as HTMLImageElement).naturalWidth)).toBe(1)
+    await expect.poll(() => reloadedRowImages.nth(1).evaluate((image) => (image as HTMLImageElement).naturalWidth)).toBe(120)
+    await expect(page.locator('.reading-pane img[alt="Standalone"]')).toBeVisible()
+  } finally {
+    for (const createdPath of createdPaths) await request.delete(`/api/posts/${createdPath}`).catch(() => {})
+    for (const relativePath of new Set(uploadedPaths)) {
+      if (!relativePath.startsWith('attachments/images/')) continue
+      await fs.rm(path.join(vaultRoot, ...relativePath.split('/')), { force: true })
+    }
+    await request.post('/api/attachments/refresh').catch(() => {})
+    await request.post('/api/attachments/references/refresh').catch(() => {})
+  }
+})
+
 test('Attachment Manager lists referenced SVGs and direct reads reject active content', async ({ page, request }) => {
   const runId = randomUUID()
   const notePath = `inbox/svg-manager-${runId}`

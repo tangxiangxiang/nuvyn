@@ -132,6 +132,42 @@ describe('Attachment reference index', () => {
     })])
   })
 
+  it('indexes PNG and SVG images inside image-row with accurate direct and Include source lines', async () => {
+    const pngPath = 'attachments/images/row-a.png'
+    const svgPath = 'attachments/images/row-b.svg'
+    await fs.mkdir(path.join(root, 'attachments', 'images'), { recursive: true })
+    await fs.writeFile(path.join(root, ...pngPath.split('/')), Buffer.from([1, 2, 3]))
+    await fs.writeFile(path.join(root, ...svgPath.split('/')), '<svg/>')
+    await writeNote('inbox/gallery', [
+      '::: image-row',
+      '',
+      `![PNG](@/${pngPath})`,
+      '',
+      `![SVG](@/${svgPath})`,
+      '',
+      ':::',
+    ].join('\n'))
+    await writeNote('inbox/gallery-consumer', '<!--@include: ./gallery.md-->')
+
+    const index = new AttachmentReferenceIndex(db)
+    await index.refresh()
+    const [png, svg] = await Promise.all([
+      index.query({ kind: 'vault-file', path: pngPath }),
+      index.query({ kind: 'vault-file', path: svgPath }),
+    ])
+
+    expect(png.references).toHaveLength(2)
+    expect(svg.references).toHaveLength(2)
+    expect(png.references).toEqual(expect.arrayContaining([
+      expect.objectContaining({ owner: expect.objectContaining({ id: 'inbox/gallery' }), relation: 'direct', line: 3 }),
+      expect.objectContaining({ owner: expect.objectContaining({ id: 'inbox/gallery-consumer' }), relation: 'indirect', via: [expect.objectContaining({ id: 'inbox/gallery' })] }),
+    ]))
+    expect(svg.references).toEqual(expect.arrayContaining([
+      expect.objectContaining({ owner: expect.objectContaining({ id: 'inbox/gallery' }), relation: 'direct', line: 5 }),
+      expect.objectContaining({ owner: expect.objectContaining({ id: 'inbox/gallery-consumer' }), relation: 'indirect', via: [expect.objectContaining({ id: 'inbox/gallery' })] }),
+    ]))
+  })
+
   it('records supported snippet dependencies and marks unresolved references as incomplete', async () => {
     await fs.mkdir(path.join(root, 'inbox', 'examples'), { recursive: true })
     await fs.writeFile(path.join(root, 'inbox', 'examples', 'sample.ts'), 'export const sample = true\n')

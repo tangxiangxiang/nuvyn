@@ -115,6 +115,28 @@ describe('PDF export helpers', () => {
     expect(styles).not.toContain('.pdf-document .article .callout-danger')
   })
 
+  it('keeps image-row structure in the PDF clone and supplies its own bounded grid styles', () => {
+    const article = document.createElement('article')
+    article.className = 'article reading'
+    article.innerHTML = `<div class="nuvyn-image-row">
+      <p><img src="a.png" alt="A" loading="lazy"></p>
+      <p><img src="b.svg" alt="B" loading="lazy"></p>
+    </div>`
+    const exported = document.createElement('div')
+    exported.innerHTML = preparePdfArticleHtml(article)
+    const row = exported.querySelector<HTMLElement>('.nuvyn-image-row')
+
+    expect(row?.querySelectorAll('img')).toHaveLength(2)
+    expect(Array.from(row?.querySelectorAll('img') ?? []).map((image) => image.getAttribute('src')))
+      .toEqual(['a.png', 'b.svg'])
+    expect(article.querySelectorAll('.nuvyn-image-row img')).toHaveLength(2)
+    expect(__testing__.PDF_DOWNLOAD_STYLES).toContain('.pdf-document .article .nuvyn-image-row {')
+    expect(__testing__.PDF_DOWNLOAD_STYLES).toContain('grid-template-columns: repeat(auto-fit, minmax(min(100%, 16rem), 1fr))')
+    expect(__testing__.PDF_DOWNLOAD_STYLES).toContain('.pdf-document .article .nuvyn-image-row > p')
+    expect(__testing__.PDF_DOWNLOAD_STYLES).toContain('break-inside: avoid;')
+    expect(__testing__.PDF_DOWNLOAD_STYLES).toContain('.pdf-document .article .pdf-allow-split')
+  })
+
   it('composes one trusted PDF stylesheet from the Shiki snapshot', async () => {
     const liveOwner = document.createElement('style')
     liveOwner.id = 'nuvyn-shiki-generated-styles'

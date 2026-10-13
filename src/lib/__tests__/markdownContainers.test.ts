@@ -61,6 +61,117 @@ describe('Nuvyn custom Markdown containers', () => {
     expect(doc.querySelector('.markdown-container-details summary')?.textContent).toBe('Click me')
   })
 
+  it('renders image-row as a plain responsive wrapper around standard Markdown image tokens', async () => {
+    const doc = parse(await render([
+      '::: image-row',
+      '',
+      '![Architecture A](a.png)',
+      '',
+      '![Architecture B](b.svg)',
+      '',
+      ':::',
+    ].join('\n')))
+    const row = doc.querySelector<HTMLElement>('.nuvyn-image-row')
+    const images = Array.from(row?.querySelectorAll<HTMLImageElement>('img') ?? [])
+
+    expect(row).not.toBeNull()
+    expect(row?.className).toBe('nuvyn-image-row')
+    expect(row?.classList.contains('markdown-container')).toBe(false)
+    expect(row?.querySelector('.markdown-container-title')).toBeNull()
+    expect(images.map((image) => image.getAttribute('src')))
+      .toEqual(['a.png', 'b.svg'])
+    expect(images.map((image) => image.getAttribute('alt'))).toEqual(['Architecture A', 'Architecture B'])
+    expect(images.every((image) => image.getAttribute('loading') === 'lazy')).toBe(true)
+
+    for (const imageCount of [3, 4, 5]) {
+      const source = [
+        '::: image-row',
+        '',
+        ...Array.from({ length: imageCount }, (_, index) => `![Image ${index + 1}](image-${index + 1}.png)`),
+        '',
+        ':::',
+      ].join('\n')
+      const rendered = parse(await render(source))
+      expect(rendered.querySelectorAll('.nuvyn-image-row')).toHaveLength(1)
+      expect(rendered.querySelectorAll('.nuvyn-image-row img')).toHaveLength(imageCount)
+    }
+  })
+
+  it('preserves invalid image-row source instead of swallowing content or changing normal images', async () => {
+    const invalidSources = [
+      '::: image-row\n\n:::',
+      '::: image-row\n\n![Only](only.png)\n\n:::',
+      '::: image-row\n\n![A](a.png)\n\nKeep this text.\n\n![B](b.png)\n\n:::',
+      '::: image-row\n\n![A](a.png)\n\n```text\ncode\n```\n\n![B](b.png)\n\n:::',
+      '::: image-row\n\n![A](a.png)\n\n| A | B |\n| --- | --- |\n| 1 | 2 |\n\n![B](b.png)\n\n:::',
+      '::: image-row Custom title\n\n![A](a.png)\n\n![B](b.png)\n\n:::',
+      '::: image-row\n\n![A](a.png)\n\n![B](b.png)',
+      '::: image-row\n\n![A](a.png)\n\n::: info nested\ntext\n:::\n\n![B](b.png)\n\n:::',
+    ]
+
+    for (const source of invalidSources) {
+      const doc = parse(await render(source))
+      expect(doc.querySelector('.nuvyn-image-row')).toBeNull()
+      expect(doc.body.textContent).toContain('image-row')
+    }
+
+    const ordinary = parse(await render('![Standalone](image.png)'))
+    expect(ordinary.querySelector('.nuvyn-image-row')).toBeNull()
+    expect(ordinary.querySelector('p > img')?.getAttribute('alt')).toBe('Standalone')
+  })
+
+  it('keeps image-row fenced as code and composes with existing containers', async () => {
+    const doc = parse(await render([
+      ':::: info Images',
+      '',
+      '::: image-row',
+      '',
+      '![A](a.png)',
+      '',
+      '![B](b.svg)',
+      '',
+      ':::',
+      '',
+      '```md',
+      '::: image-row',
+      '![Code](code.png)',
+      ':::',
+      '```',
+      '',
+      '::::',
+    ].join('\n')))
+
+    expect(doc.querySelector('.markdown-container-info .nuvyn-image-row img[src="a.png"]')).not.toBeNull()
+    expect(doc.querySelector('.markdown-container-info pre code')?.textContent)
+      .toContain('::: image-row\n![Code](code.png)\n:::')
+    expect(doc.querySelectorAll('.nuvyn-image-row')).toHaveLength(1)
+  })
+
+  it('keeps the image-row class parser-owned and preserves the existing sanitizer boundary', async () => {
+    const doc = parse(await render([
+      '::: image-row',
+      '',
+      '![A](a.png)',
+      '',
+      '![B](b.svg)',
+      '',
+      ':::',
+      '',
+      '<div class="nuvyn-image-row" style="display:flex" onclick="alert(1)">',
+      '<img src="javascript:alert(1)" onerror="alert(1)">',
+      '</div>',
+      '',
+      '<svg><rect width="1" height="1"></rect></svg>',
+    ].join('\n')))
+
+    expect(doc.querySelectorAll('.nuvyn-image-row')).toHaveLength(1)
+    expect(doc.querySelector('.nuvyn-image-row img')?.getAttribute('src')).toBe('a.png')
+    expect(doc.querySelector('[style]')).toBeNull()
+    expect(doc.querySelector('[onclick], [onerror]')).toBeNull()
+    expect(doc.querySelector('img[src^="javascript:"]')).toBeNull()
+    expect(doc.querySelector('svg')).toBeNull()
+  })
+
   it('uses native details state and accepts only the literal details {open} modifier', async () => {
     const closed = parse(await render('::: details\nHidden\n:::'))
     const opened = parse(await render('::: details Open {open}\nVisible\n:::'))

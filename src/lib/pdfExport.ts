@@ -131,6 +131,7 @@ const PDF_DOWNLOAD_STYLES = `
 .pdf-document .article li,
 .pdf-document .article .table-scroll,
 .pdf-document .article .nuvyn-code-group-pdf-item,
+.pdf-document .article .nuvyn-image-row,
 .pdf-document .article img,
 .pdf-document .article .markmap-widget,
 .pdf-document .article .mermaid-widget-host {
@@ -423,6 +424,35 @@ const PDF_DOWNLOAD_STYLES = `
 .pdf-document .article img {
   max-width: 100% !important;
   height: auto !important;
+}
+
+.pdf-document .article .nuvyn-image-row {
+  display: grid !important;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 16rem), 1fr)) !important;
+  align-items: start !important;
+  gap: 0.75rem !important;
+  min-width: 0 !important;
+  max-width: 100% !important;
+  margin: 1em 0 !important;
+  break-inside: avoid;
+  page-break-inside: avoid;
+}
+
+.pdf-document .article .nuvyn-image-row > p {
+  display: flex !important;
+  justify-content: center !important;
+  min-width: 0 !important;
+  margin: 0 !important;
+  break-inside: avoid;
+  page-break-inside: avoid;
+}
+
+.pdf-document .article .nuvyn-image-row img {
+  display: block !important;
+  width: auto !important;
+  max-width: 100% !important;
+  height: auto !important;
+  margin: 0 !important;
 }
 
 /* Mermaid is interactive in the reader: the live widget has a fixed
@@ -741,6 +771,7 @@ const PDF_LAYOUT_BLOCK_SELECTOR = [
   '.article .markmap-widget-host',
   '.article .pdf-markmap',
   '.article .nuvyn-code-group-pdf-item',
+  '.article .nuvyn-image-row',
   '.article .pdf-heading-group',
 ].join(', ')
 

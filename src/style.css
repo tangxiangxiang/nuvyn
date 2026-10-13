@@ -1009,6 +1009,37 @@ main.container.auth-page-shell {
 .article :first-child { margin-top: 0; }
 .article img { max-width: 100%; height: auto; }
 
+/* A narrow, Markdown-only image layout. The wrapper is emitted only for a
+   closed `::: image-row` containing at least two standalone image tokens. */
+.article .nuvyn-image-row {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 16rem), 1fr));
+  align-items: start;
+  gap: 1rem;
+  min-width: 0;
+  max-width: 100%;
+  margin: 1rem 0;
+}
+.article .nuvyn-image-row > p {
+  display: flex;
+  justify-content: center;
+  min-width: 0;
+  margin: 0;
+}
+.article .nuvyn-image-row img {
+  display: block;
+  width: auto;
+  max-width: 100%;
+  height: auto;
+  margin: 0;
+}
+@media (max-width: 600px) {
+  .article .nuvyn-image-row {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 0.75rem;
+  }
+}
+
 .article blockquote {
   border: 0;
   border-left: 2px solid #8d9daa;

@@ -153,6 +153,9 @@ const ALLOWED_MARKDOWN_DATA_ATTRS = new Set([
   'data-target',
 ])
 
+let activeImageRowProvenance: string | undefined
+let activeImageRowNodes = new WeakSet<Element>()
+
 export type MarkdownSanitizer = (html: string) => string
 
 function createSecureOpaqueToken(): string {
@@ -190,6 +193,13 @@ export function createMarkdownSanitizer(provenanceToken?: string): MarkdownSanit
   const trustedGeneratedAnchors = new WeakSet<Element>()
 
   purifier.addHook('beforeSanitizeAttributes', (node) => {
+    if (
+      activeImageRowProvenance
+      && typeof (node as Element).tagName === 'string'
+      && node.tagName.toLowerCase() === 'div'
+      && node.getAttribute('data-nuvyn-image-row-provenance') === activeImageRowProvenance
+      && node.classList.contains('nuvyn-image-row')
+    ) activeImageRowNodes.add(node)
     if (!provenanceToken || !isGeneratedExternalAnchor(node, provenanceToken)) return
     trustedGeneratedAnchors.add(node)
     // The generated renderer owns this value. Normalize it here so a trusted
@@ -207,6 +217,20 @@ export function createMarkdownSanitizer(provenanceToken?: string): MarkdownSanit
     if (data.attrName === EXTERNAL_LINK_PROVENANCE_ATTR) {
       data.keepAttr = false
       return
+    }
+
+    if (data.attrName === 'data-nuvyn-image-row-provenance') {
+      data.keepAttr = false
+      return
+    }
+
+    // Only the built-in image-row parser may activate its layout class. Raw
+    // HTML cannot opt into that component style by borrowing the class name.
+    if (data.attrName === 'class' && data.attrValue.split(/\s+/u).includes('nuvyn-image-row')) {
+      if (!activeImageRowNodes.has(node)) {
+        data.attrValue = data.attrValue.split(/\s+/u).filter((name) => name && name !== 'nuvyn-image-row').join(' ')
+        if (!data.attrValue) data.keepAttr = false
+      }
     }
 
     // DOMPurify treats `target` as a URI-valued attribute and therefore
@@ -239,7 +263,15 @@ export function createMarkdownSanitizer(provenanceToken?: string): MarkdownSanit
       data.keepAttr = ALLOWED_MARKDOWN_DATA_ATTRS.has(data.attrName)
     }
   })
-  return (html: string) => purifier.sanitize(html, MARKDOWN_SANITIZE_CONFIG)
+  return (html: string) => {
+    activeImageRowProvenance = provenanceToken
+    activeImageRowNodes = new WeakSet<Element>()
+    try {
+      return purifier.sanitize(html, MARKDOWN_SANITIZE_CONFIG)
+    } finally {
+      activeImageRowProvenance = undefined
+    }
+  }
 }
 
 export function sanitizeMarkdownHtml(html: string, provenanceToken?: string): string {
@@ -488,6 +520,7 @@ async function renderWithMetadata(
   const env: WikiLinkEnv = {
     ...(options.resolver ? { wikiResolver: options.resolver } : {}),
     externalLinkProvenance,
+    imageRowProvenance: externalLinkProvenance,
     codeGroupRenderScope: createCodeGroupRenderScope(),
     resourceSourcePathByLine: expanded.sourcePathByLine,
     deferWikiResolution: expanded.sourcePathByLine.some(Boolean),

@@ -89,6 +89,35 @@ describe('Markdown resource logical resolution and expansion', () => {
     ])
   })
 
+  it('renders images from an included image-row through their included source identity', async () => {
+    const resolver = resolverFor({
+      'docs/gallery.md': [
+        '::: image-row',
+        '',
+        '![PNG](@/attachments/images/a.png)',
+        '',
+        '![SVG](@/attachments/images/b.svg)',
+        '',
+        ':::',
+      ].join('\n'),
+    })
+    const html = await render('<!--@include: ./gallery.md-->', {
+      sourcePath: 'docs/page.md',
+      resourceResolver: resolver,
+    })
+    const doc = new DOMParser().parseFromString(html, 'text/html')
+    const images = Array.from(doc.querySelectorAll<HTMLImageElement>('.nuvyn-image-row img'))
+
+    expect(images).toHaveLength(2)
+    expect(images.map((image) => image.alt)).toEqual(['PNG', 'SVG'])
+    expect(images.map((image) => new URL(image.getAttribute('src') ?? '', 'https://nuvyn.test').searchParams.get('path')))
+      .toEqual(['attachments/images/a.png', 'attachments/images/b.svg'])
+    expect(resolver.read).toHaveBeenCalledWith(expect.objectContaining({
+      kind: 'include',
+      path: 'docs/gallery.md',
+    }))
+  })
+
   it('applies single-line, closed, mixed, and open-ended ranges to final output', async () => {
     const source = ['line1', 'line2', 'line3', 'line4', 'line5', 'line6'].join('\n')
     const resolver = resolverFor({ 'examples/part.md': source, 'examples/demo.ts': source })

@@ -102,6 +102,29 @@ When renaming a file or folder, Nuvyn can update incoming Wiki and Markdown refe
 
 ## Diagrams
 
+### Arrange images in a row
+
+Wrap two or more standalone Markdown image lines in `::: image-row` to place
+them in a responsive grid:
+
+```md
+::: image-row
+
+![Architecture A](@/attachments/images/a.png)
+
+![Architecture B](@/attachments/images/b.svg)
+
+:::
+```
+
+On wider screens the images share equal-width columns; on narrow screens they
+stack vertically. Images keep their original proportions, are never cropped,
+and are not enlarged when their source is smaller than a column. The layout is
+Reader-only Markdown—edit the source directly in Monaco. Invalid or incomplete
+rows remain ordinary Markdown rather than losing their contents. See the
+[Image Row design note](../design/note-image-row-prd.md) for supported syntax
+and limitations.
+
 ### Embed a Board
 
 Draw a diagram in **Board**, then choose **Copy Note reference** in the Board

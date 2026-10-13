@@ -53,6 +53,8 @@ export interface WikiLinkEnv {
   wikiResolver?: Resolver
   /** Opaque render-scoped provenance for generated external Markdown links. */
   externalLinkProvenance?: string
+  /** Opaque render-scoped provenance for the built-in image-row wrapper. */
+  imageRowProvenance?: string
   /** Opaque render-scoped namespace for generated code-group IDs. */
   codeGroupRenderScope?: string
   /** Source identity for each flattened Markdown line in resource-aware renders. */

@@ -25,10 +25,10 @@ PNG、JPEG、WebP、GIF 和 AVIF 继续使用原有光栅流程。Note 原始 Ma
 
 ## 支持的内容与限制
 
-支持常见静态矢量绘图和文字、分组、内部渐变、`clipPath`、Excalidraw 本地图片 `symbol/use` 与裁剪 `mask`。内嵌的外部图片/字体、嵌套 SVG、`filter`、脚本、交互、动画、未知标签和不在样式白名单内的 CSS 会失败关闭。特别是 Excalidraw 对其他 SVG 应用暗色滤镜的导出可能含有 `filter`，当前会拒绝；可改为导出静态浅色/深色矢量内容再插入。
+支持常见静态矢量绘图和文字、分组、内部渐变、`clipPath`、Excalidraw 本地图片 `symbol/use` 与裁剪 `mask`。校验会要求 SVG 根节点之外存在可渲染内容：空根、仅元数据/定义/空容器、无有效文字的空文本和零尺寸图形都会被拒绝；被实际使用的内部 symbol/use 图形仍算作内容。此检查是结构性证明，不尝试像素级可见性分析。内嵌的外部图片/字体、嵌套 SVG、`filter`、脚本、交互、动画、未知标签和不在样式白名单内的 CSS 会失败关闭。特别是 Excalidraw 对其他 SVG 应用暗色滤镜的导出可能含有 `filter`，当前会拒绝；可改为导出静态浅色/深色矢量内容再插入。
 
 大图或复杂图可能因 8 MiB、50,000 个元素、64 层深度、512 KiB 文本/属性或内嵌资源限制而被拒绝。服务端拒绝时不会生成附件文件。PDF 使用既有浏览器图片导出路径；PDF 专项的 SVG 字体保真度不作为这次实现的保证。
 
 ## 验证重点
 
-覆盖静态与 Excalidraw 风格 SVG、活动内容拒绝、上传不落盘、Vault 手工文件读取净化、资源响应头、Markdown 图片 URL、附件目录扫描和 Note 引用追踪。浏览器测试检查 SVG 的实际 `naturalWidth` / `naturalHeight`、刷新后加载及附件详情引用，而不只检查 HTTP 状态。
+覆盖静态与 Excalidraw 风格 SVG、活动内容拒绝、空内容拒绝、上传不落盘、Vault 手工文件读取净化、资源响应头、Markdown 图片 URL、附件目录扫描和 Note 引用追踪。`e2e/fixtures/excalidraw-note-image.svg` 是为测试原创场景并由锁定版本 `@excalidraw/excalidraw@0.18.0-4e758db` 导出的双语矢量/内嵌图片样本；来源、生成包与随导出嵌入的 Virgil 字体授权记录在 `e2e/fixtures/README.md`。浏览器测试解码并绘制该样本，检查实际 `naturalWidth` / `naturalHeight`、非空像素及嵌入字体可加载，同时检查刷新后加载及附件详情引用，而不只检查 HTTP 状态。Chromium / WebKit 的实际运行情况以测试报告为准。
