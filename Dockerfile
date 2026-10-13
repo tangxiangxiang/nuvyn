@@ -110,6 +110,11 @@ COPY --from=build --chown=node:node /app/node_modules ./node_modules
 COPY --from=build --chown=node:node /app/dist ./dist
 COPY --from=build --chown=node:node /app/server ./server
 COPY --from=build --chown=node:node /app/shared ./shared
+# The attachment reference scanner uses shared Markdown parsers from src/lib at
+# runtime. Keep only those server-side helpers in the production image.
+COPY --from=build --chown=node:node /app/src/lib/markdownInlineSource.ts ./src/lib/markdownInlineSource.ts
+COPY --from=build --chown=node:node /app/src/lib/boardReferences.ts ./src/lib/boardReferences.ts
+COPY --from=build --chown=node:node /app/src/lib/markdownResources.ts ./src/lib/markdownResources.ts
 COPY --from=build --chown=node:node /app/package.json ./package.json
 
 # data/ 放 SQLite 的 WAL；它包含 settings、加密 AI 凭据、会话历史和应用元数据。

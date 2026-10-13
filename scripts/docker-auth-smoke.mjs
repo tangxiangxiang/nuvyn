@@ -14,6 +14,7 @@ const setupToken = process.env.NUVYN_SMOKE_SETUP_TOKEN
   ?? 'phase8-docker-smoke-token-0123456789abcdef'
 const username = 'phase8-owner'
 const password = 'phase8-docker-password-0123456789'
+const sensitiveValues = new Set([setupToken, password])
 
 if (!Number.isInteger(port) || port < 1024 || port > 65_535) {
   throw new Error('Docker auth smoke requires a valid unprivileged host port')
@@ -73,20 +74,72 @@ async function startContainer(revokeSessionsOnStart) {
   await waitForHealth()
 }
 
+function redactSensitiveValues(value) {
+  let redacted = value.replace(/nuvyn_session=[^;\s]+/gu, 'nuvyn_session=[REDACTED]')
+  for (const secret of sensitiveValues) {
+    if (secret) redacted = redacted.split(secret).join('[REDACTED]')
+  }
+  return redacted
+}
+
+async function containerStartupDiagnostics() {
+  if (!currentContainer) return 'Container diagnostics unavailable: no container name.'
+
+  const details = []
+  try {
+    const { stdout } = await execFileAsync('docker', [
+      'inspect', '--format',
+      '{{.State.Status}} exit={{.State.ExitCode}} error={{.State.Error}} started={{.State.StartedAt}} finished={{.State.FinishedAt}}',
+      currentContainer,
+    ], { maxBuffer: 256 * 1024 })
+    details.push(`Container state: ${stdout.trim() || 'unavailable'}`)
+  } catch (error) {
+    const code = error && typeof error === 'object' && 'code' in error
+      ? String(error.code)
+      : 'unknown'
+    details.push(`Container state unavailable (${code}).`)
+  }
+
+  try {
+    const { stdout, stderr } = await execFileAsync('docker', [
+      'logs', '--tail', '80', currentContainer,
+    ], { maxBuffer: 1024 * 1024 })
+    const fullLogs = redactSensitiveValues(`${stdout}\n${stderr}`).trim()
+    const logs = fullLogs.length > 12_000
+      ? `[truncated to the last 12000 characters]\n${fullLogs.slice(-12_000)}`
+      : fullLogs
+    details.push(`Container logs (last 80 lines):\n${logs || '(empty)'}`)
+  } catch (error) {
+    const code = error && typeof error === 'object' && 'code' in error
+      ? String(error.code)
+      : 'unknown'
+    details.push(`Container logs unavailable (${code}).`)
+  }
+
+  return details.join('\n')
+}
+
 async function waitForHealth() {
+  let lastResponse = 'no response received'
   for (let attempt = 0; attempt < 60; attempt += 1) {
     try {
       const response = await fetch(`${origin}/api/health`)
+      lastResponse = `HTTP ${response.status}`
       if (response.ok) {
         const body = await response.json()
         if (JSON.stringify(body) === JSON.stringify({ ok: true })) return
+        lastResponse += ` with unexpected body ${redactSensitiveValues(JSON.stringify(body)).slice(0, 200)}`
       }
     } catch {
+      lastResponse = 'request failed or response was not valid JSON'
       // The production process may still be starting.
     }
     await new Promise((resolve) => setTimeout(resolve, 1_000))
   }
-  throw new Error('Docker auth smoke health endpoint did not become ready')
+  const diagnostics = await containerStartupDiagnostics()
+  throw new Error(
+    `Docker auth smoke health endpoint did not become ready (${lastResponse}).\n${diagnostics}`,
+  )
 }
 
 function cookieHeaders(response) {
@@ -100,7 +153,9 @@ function cookieHeaders(response) {
 function cookieValueFrom(headers, name) {
   const header = headers.find((value) => value.startsWith(`${name}=`))
   if (!header) throw new Error('Docker auth smoke did not receive the expected session cookie')
-  return header.split(';', 1)[0]
+  const cookie = header.split(';', 1)[0]
+  sensitiveValues.add(cookie)
+  return cookie
 }
 
 function assertCookieProfile(headers, name) {
