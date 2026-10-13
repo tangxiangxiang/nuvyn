@@ -102,13 +102,14 @@ When renaming a file or folder, Nuvyn can update incoming Wiki and Markdown refe
 
 ## Diagrams
 
-### Arrange images in a row
+### Arrange Markdown with Flex
 
-Wrap two or more standalone Markdown image lines in `::: image-row` to place
-them in a responsive grid:
+Use the single `flex` container for image rows and other block layouts. Each
+direct Markdown block automatically becomes one Flex item, so two images only
+need blank-line separation:
 
 ```md
-::: image-row
+::: flex
 
 ![Architecture A](@/attachments/images/a.png)
 
@@ -117,13 +118,79 @@ them in a responsive grid:
 :::
 ```
 
-On wider screens the images share equal-width columns; on narrow screens they
-stack vertically. Images keep their original proportions, are never cropped,
-and are not enlarged when their source is smaller than a column. The layout is
-Reader-only Markdown—edit the source directly in Monaco. Invalid or incomplete
-rows remain ordinary Markdown rather than losing their contents. See the
-[Image Row design note](../design/note-image-row-prd.md) for supported syntax
-and limitations.
+This also works for paragraphs, headings, lists, code blocks, tables, callouts,
+Mermaid, and other supported Markdown blocks. A soft line break stays in its
+paragraph; use a blank line when two blocks should be separate Flex items.
+Images remain normal Markdown resources and keep their existing authentication,
+Include, and Attachment Manager reference behavior.
+
+To group several blocks into one item, nest another `flex` container. The
+nested container's `grow`, `shrink`, `basis`, `self`, and `order` options size
+it as an item in its parent, while its other options arrange its own children:
+
+```md
+:::: flex direction=row gap=16
+
+::: flex direction=column grow=1 basis=50%
+
+![System architecture](architecture.svg)
+
+:::
+
+::: flex direction=column grow=1 basis=50%
+
+### System architecture
+
+The design contains a frontend, backend, and database.
+
+- Vue 3
+- Hono
+- SQLite
+
+:::
+
+::::
+```
+
+Container options and defaults:
+
+| Option | Allowed values | Default |
+| --- | --- | --- |
+| `direction` | `row`, `row-reverse`, `column`, `column-reverse` | `row` |
+| `wrap` | `nowrap`, `wrap`, `wrap-reverse` | `wrap` |
+| `justify` | `normal`, `start`, `end`, `flex-start`, `flex-end`, `center`, `left`, `right`, `stretch`, `space-between`, `space-around`, `space-evenly`, and safe/unsafe position variants | `flex-start` |
+| `items` | `normal`, `stretch`, baseline variants, start/end/self-start/self-end, flex-start/flex-end/center, and safe/unsafe position variants | `stretch` |
+| `content` | `normal`, `stretch`, baseline variants, start/end/flex-start/flex-end/center, space-between/around/evenly, and safe/unsafe position variants | `stretch` |
+| `gap` | `0`, `4`, `8`, `12`, `16`, `24`, `32` pixels | `16` |
+| `mobile` | `stack`, `preserve` | `stack` |
+| `grow` | integer `0`–`4` | `0` |
+| `shrink` | integer `0`–`4` | `1` |
+| `basis` | `auto`, `0`, `25%`, `33.33%`, `50%`, `66.67%`, `75%`, `100%` | `auto` |
+| `self` | `auto`, `stretch`, start/end/self-start/self-end, flex-start/flex-end/center, `baseline`, and safe/unsafe position variants | `auto` |
+| `order` | integer `-3`–`3` | `0` |
+
+Multi-word CSS alignment values use hyphens in the Markdown parameter, such as
+`items=first-baseline` or `justify=safe-center`. `content=start` uses the
+standard CSS `start` value. Arbitrary CSS, inline styles, expressions, URLs,
+`calc()`, and `var()` are not accepted.
+
+On narrow Note reading areas, horizontal layouts stack by default. Set
+`mobile=preserve` to retain the authored direction; overflow remains contained
+within the layout. This breakpoint follows the available article width rather
+than the device viewport. Nested Flex is supported at multiple levels; use
+longer colon fences for nested containers when it improves readability.
+
+Reverse directions and `order` change visual placement, not DOM or screen-reader
+reading order. PDF export applies a separate printable layout. Flex markup is
+rendered in Reader, Print/PDF, and other Markdown preview surfaces; edit its
+source directly in Monaco. Invalid or incomplete syntax remains ordinary
+Markdown.
+
+The former `image-row` syntax was removed after confirming it does not occur in
+the repository's default `src/content` vault Markdown. Existing image
+references there now use the same `flex` container as every other layout. See the
+[Flex Container design note](../design/note-flex-container-prd.md) for parser,
+security, responsive, PDF, and reference-index details.
 
 ### Embed a Board
 

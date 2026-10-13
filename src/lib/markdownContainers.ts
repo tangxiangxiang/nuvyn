@@ -9,7 +9,7 @@ const CONTAINER_DEFINITIONS = {
   warning: { title: 'Warning', tag: 'div' },
   danger: { title: 'Danger', tag: 'div' },
   details: { title: 'Details', tag: 'details' },
-  'image-row': { tag: 'div', className: 'nuvyn-image-row' },
+  flex: { tag: 'div' },
 } as const
 
 export type MarkdownContainerType = keyof typeof CONTAINER_DEFINITIONS
@@ -19,6 +19,73 @@ interface ContainerOpening {
   type: MarkdownContainerType
   title: string
   open: boolean
+  flex?: FlexContainerOptions
+}
+
+type FlexDirection = 'row' | 'row-reverse' | 'column' | 'column-reverse'
+type FlexWrap = 'nowrap' | 'wrap' | 'wrap-reverse'
+type FlexJustify = typeof FLEX_JUSTIFY[number]
+type FlexItems = typeof FLEX_ITEMS[number]
+type FlexContent = typeof FLEX_CONTENT[number]
+type FlexMobile = 'stack' | 'preserve'
+type FlexBasis = 'auto' | '0' | '25%' | '33.33%' | '50%' | '66.67%' | '75%' | '100%'
+type FlexSelf = typeof FLEX_SELF[number]
+
+interface FlexContainerOptions {
+  direction: FlexDirection
+  wrap: FlexWrap
+  justify: FlexJustify
+  items: FlexItems
+  content: FlexContent
+  gap: number
+  mobile: FlexMobile
+  item: FlexItemOptions
+}
+
+interface FlexItemOptions {
+  grow: number
+  shrink: number
+  basis: FlexBasis
+  self: FlexSelf
+  order: number
+}
+
+const FLEX_DIRECTIONS = ['row', 'row-reverse', 'column', 'column-reverse'] as const
+const FLEX_WRAPS = ['nowrap', 'wrap', 'wrap-reverse'] as const
+const FLEX_POSITIONS = ['start', 'end', 'flex-start', 'flex-end', 'center'] as const
+const FLEX_SAFE_POSITIONS = FLEX_POSITIONS.flatMap((value) => [`safe-${value}`, `unsafe-${value}`] as const)
+const FLEX_SELF_POSITIONS = [...FLEX_POSITIONS, 'self-start', 'self-end'] as const
+const FLEX_SAFE_SELF_POSITIONS = FLEX_SELF_POSITIONS.flatMap((value) => [`safe-${value}`, `unsafe-${value}`] as const)
+const FLEX_JUSTIFY = [
+  'normal', ...FLEX_POSITIONS, 'left', 'right', 'stretch',
+  'space-between', 'space-around', 'space-evenly', ...FLEX_SAFE_POSITIONS,
+] as const
+const FLEX_ITEMS = [
+  'normal', 'stretch', 'baseline', 'first-baseline', 'last-baseline',
+  'start', 'end', 'self-start', 'self-end', 'flex-start', 'flex-end', 'center',
+  ...FLEX_SAFE_POSITIONS, 'safe-self-start', 'unsafe-self-start', 'safe-self-end', 'unsafe-self-end',
+] as const
+const FLEX_CONTENT = [
+  'normal', 'stretch', 'baseline', 'first-baseline', 'last-baseline',
+  'start', 'end', 'flex-start', 'flex-end', 'center',
+  'space-between', 'space-around', 'space-evenly', ...FLEX_SAFE_POSITIONS,
+] as const
+const FLEX_GAPS = [0, 4, 8, 12, 16, 24, 32] as const
+const FLEX_BASES = ['auto', '0', '25%', '33.33%', '50%', '66.67%', '75%', '100%'] as const
+const FLEX_SELF = [
+  'auto', 'stretch', ...FLEX_SELF_POSITIONS, 'baseline', ...FLEX_SAFE_SELF_POSITIONS,
+] as const
+const FLEX_MOBILE = ['stack', 'preserve'] as const
+
+const FLEX_BASIS_CLASS_SUFFIX: Record<FlexBasis, string> = {
+  auto: 'auto',
+  '0': '0',
+  '25%': '25',
+  '33.33%': '33-33',
+  '50%': '50',
+  '66.67%': '66-67',
+  '75%': '75',
+  '100%': '100',
 }
 
 interface ContainerClosing {
@@ -42,6 +109,91 @@ interface HtmlBlockOpening {
 
 function isSupportedType(value: string): value is MarkdownContainerType {
   return Object.prototype.hasOwnProperty.call(CONTAINER_DEFINITIONS, value)
+}
+
+function isOneOf<const Values extends readonly string[]>(value: string, values: Values): value is Values[number] {
+  return (values as readonly string[]).includes(value)
+}
+
+function parseAttributes(source: string): Map<string, string> | null {
+  const attributes = new Map<string, string>()
+  const parts = source.trim() ? source.trim().split(/[ \t]+/u) : []
+  for (const part of parts) {
+    const match = /^([a-z-]+)=([a-z0-9.%_-]+)$/u.exec(part)
+    if (!match || attributes.has(match[1])) return null
+    attributes.set(match[1], match[2])
+  }
+  return attributes
+}
+
+function parseFlexOptions(source: string): FlexContainerOptions | null {
+  const attributes = parseAttributes(source)
+  if (!attributes) return null
+  const allowed = new Set([
+    'direction', 'wrap', 'justify', 'items', 'content', 'gap', 'mobile',
+    'grow', 'shrink', 'basis', 'self', 'order',
+  ])
+  if ([...attributes.keys()].some((key) => !allowed.has(key))) return null
+
+  const direction = attributes.get('direction') ?? 'row'
+  const wrap = attributes.get('wrap') ?? 'wrap'
+  const justify = attributes.get('justify') ?? 'flex-start'
+  const items = attributes.get('items') ?? 'stretch'
+  const content = attributes.get('content') ?? 'stretch'
+  const rawGap = attributes.get('gap') ?? '16'
+  const mobile = attributes.get('mobile') ?? 'stack'
+  const grow = attributes.get('grow') ?? '0'
+  const shrink = attributes.get('shrink') ?? '1'
+  const basis = attributes.get('basis') ?? 'auto'
+  const self = attributes.get('self') ?? 'auto'
+  const order = attributes.get('order') ?? '0'
+
+  if (!isOneOf(direction, FLEX_DIRECTIONS)) return null
+  if (!isOneOf(wrap, FLEX_WRAPS)) return null
+  if (!isOneOf(justify, FLEX_JUSTIFY)) return null
+  if (!isOneOf(items, FLEX_ITEMS)) return null
+  if (!isOneOf(content, FLEX_CONTENT)) return null
+  if (!isOneOf(mobile, FLEX_MOBILE)) return null
+  if (!FLEX_GAPS.some((gap) => String(gap) === rawGap)) return null
+  if (!/^[0-4]$/u.test(grow) || !/^[0-4]$/u.test(shrink)) return null
+  if (!isOneOf(basis, FLEX_BASES)) return null
+  if (!isOneOf(self, FLEX_SELF)) return null
+  if (!/^(0|[1-3]|-[1-3])$/u.test(order)) return null
+
+  return {
+    direction,
+    wrap,
+    justify,
+    items,
+    content,
+    gap: Number(rawGap),
+    mobile,
+    item: { grow: Number(grow), shrink: Number(shrink), basis, self, order: Number(order) },
+  }
+}
+
+function flexContainerClasses(options: FlexContainerOptions): string[] {
+  return [
+    'nuvyn-flex',
+    `nuvyn-flex-direction-${options.direction}`,
+    `nuvyn-flex-wrap-${options.wrap}`,
+    `nuvyn-flex-justify-${options.justify}`,
+    `nuvyn-flex-items-${options.items}`,
+    `nuvyn-flex-content-${options.content}`,
+    `nuvyn-flex-gap-${options.gap}`,
+    `nuvyn-flex-mobile-${options.mobile}`,
+  ]
+}
+
+function flexItemClasses(options: FlexItemOptions): string[] {
+  return [
+    'nuvyn-flex-item',
+    `nuvyn-flex-item-grow-${options.grow}`,
+    `nuvyn-flex-item-shrink-${options.shrink}`,
+    `nuvyn-flex-item-basis-${FLEX_BASIS_CLASS_SUFFIX[options.basis]}`,
+    `nuvyn-flex-item-self-${options.self}`,
+    `nuvyn-flex-item-order-${options.order}`,
+  ]
 }
 
 function getLineStart(state: StateBlock, line: number): number {
@@ -74,8 +226,12 @@ function parseOpening(state: StateBlock, line: number): ContainerOpening | null 
   if (!match || !isSupportedType(match[1])) return null
 
   const type = match[1]
-  if (type === 'image-row' && match[2]?.trim()) return null
-  let title = match[2]?.trim() ?? ''
+  const rawOptions = match[2] ?? ''
+  if (type === 'flex') {
+    const flex = parseFlexOptions(rawOptions)
+    return flex ? { markerLength, type, title: '', open: false, flex } : null
+  }
+  let title = rawOptions.trim()
   let open = false
 
   // `{open}` is a feature-specific literal, not an attributes grammar. It is
@@ -85,7 +241,7 @@ function parseOpening(state: StateBlock, line: number): ContainerOpening | null 
     open = true
   }
 
-  const defaultTitle = type === 'image-row' ? '' : CONTAINER_DEFINITIONS[type].title
+  const defaultTitle = CONTAINER_DEFINITIONS[type].title
 
   return {
     markerLength,
@@ -93,20 +249,6 @@ function parseOpening(state: StateBlock, line: number): ContainerOpening | null 
     title: title || defaultTitle,
     open,
   }
-}
-
-function isImageRowBody(state: StateBlock, startLine: number, endLine: number): boolean {
-  let imageCount = 0
-  for (let line = startLine; line < endLine; line += 1) {
-    if (state.isEmpty(line)) continue
-    if (state.sCount[line] - state.blkIndent >= 4) return false
-    const source = state.src.slice(getLineStart(state, line), getLineEnd(state, line)).trim()
-    const tokens: Parameters<typeof state.md.inline.parse>[3] = []
-    state.md.inline.parse(source, state.md, state.env, tokens)
-    if (tokens.length !== 1 || tokens[0]?.type !== 'image') return false
-    imageCount += 1
-  }
-  return imageCount >= 2
 }
 
 function parseClosing(state: StateBlock, line: number): ContainerClosing | null {
@@ -334,16 +476,17 @@ function terminatesParagraph(
 }
 
 /**
- * Find a close owned by the current opener. A shorter supported opener starts
- * a nested container and is skipped together with its own matching close. A
- * close is eligible only when its marker is at least as long as the opener's
- * marker, matching MarkdownIt fence ownership semantics.
+ * Find a close owned by the current opener. Existing containers retain the
+ * established shorter-fence nesting rule. Flex scans recognize independently
+ * fenced nested blocks so a nested layout can use shorter or longer
+ * delimiters without stealing its parent's close.
  */
 export function findClosingLine(
   state: StateBlock,
   bodyStart: number,
   endLine: number,
   openerLength: number,
+  nestedMode: 'shorter' | 'nested' = 'shorter',
 ): number {
   let inParagraph = false
 
@@ -354,8 +497,12 @@ export function findClosingLine(
     if (closing && closing.markerLength >= openerLength) return line
 
     const nested = parseOpening(state, line)
-    if (nested && nested.markerLength < openerLength) {
-      const nestedClose = findClosingLine(state, line + 1, endLine, nested.markerLength)
+    if (nested && (nested.markerLength < openerLength || nestedMode === 'nested')) {
+      // Flex items may contain another Flex whose delimiter is longer than
+      // the item delimiter. In that mode use local recursive ownership for
+      // every supported container while leaving the established delimiter
+      // behavior unchanged for existing callers such as code groups.
+      const nestedClose = findClosingLine(state, line + 1, endLine, nested.markerLength, nestedMode)
       if (nestedClose !== -1) {
         line = nestedClose
         inParagraph = false
@@ -424,20 +571,59 @@ function nuvynContainerRule(
   const opening = parseOpening(state, startLine)
   if (!opening) return false
 
-  const closeLine = findClosingLine(state, startLine + 1, endLine, opening.markerLength)
+  const closeLine = findClosingLine(
+    state,
+    startLine + 1,
+    endLine,
+    opening.markerLength,
+    opening.type === 'flex' ? 'nested' : 'shorter',
+  )
   if (closeLine === -1) return false
-  if (opening.type === 'image-row' && !isImageRowBody(state, startLine + 1, closeLine)) return false
+  if (opening.type === 'flex') {
+    let hasContent = false
+    for (let line = startLine + 1; line < closeLine; line += 1) {
+      if (!state.isEmpty(line)) {
+        hasContent = true
+        break
+      }
+    }
+    if (!hasContent) return false
+  }
   if (silent) return true
+
+  if (opening.type === 'flex' && opening.flex) {
+    const provenance = (state.env as { flexProvenance?: unknown } | undefined)?.flexProvenance
+    const scopeOpen = state.push('nuvyn_flex_scope_open', 'div', 1)
+    scopeOpen.attrSet('class', [
+      'nuvyn-flex-scope',
+      `nuvyn-flex-scope-mobile-${opening.flex.mobile}`,
+      ...flexItemClasses(opening.flex.item),
+    ].join(' '))
+    if (typeof provenance === 'string') scopeOpen.attrSet('data-nuvyn-flex-provenance', provenance)
+    scopeOpen.map = [startLine, closeLine + 1]
+
+    const flexOpen = state.push('nuvyn_flex_open', 'div', 1)
+    flexOpen.attrSet('class', flexContainerClasses(opening.flex).join(' '))
+    if (typeof provenance === 'string') flexOpen.attrSet('data-nuvyn-flex-provenance', provenance)
+    flexOpen.map = [startLine, closeLine + 1]
+
+    // MarkdownIt's normal block elements become Flex items automatically.
+    // This preserves block semantics: a soft line break stays in its
+    // paragraph, while separate paragraphs, images, code, tables, callouts,
+    // and nested Flex containers are independent direct children.
+    state.md.block.tokenize(state, startLine + 1, closeLine)
+
+    const flexClose = state.push('nuvyn_flex_close', 'div', -1)
+    flexClose.map = [closeLine, closeLine + 1]
+    const scopeClose = state.push('nuvyn_flex_scope_close', 'div', -1)
+    scopeClose.map = [closeLine, closeLine + 1]
+    state.line = closeLine + 1
+    return true
+  }
 
   const definition = CONTAINER_DEFINITIONS[opening.type]
   const openToken = state.push('nuvyn_container_open', definition.tag, 1)
-  openToken.attrSet('class', 'className' in definition
-    ? definition.className
-    : `markdown-container markdown-container-${opening.type}`)
-  const imageRowProvenance = (state.env as { imageRowProvenance?: unknown } | undefined)?.imageRowProvenance
-  if (opening.type === 'image-row' && typeof imageRowProvenance === 'string') {
-    openToken.attrSet('data-nuvyn-image-row-provenance', imageRowProvenance)
-  }
+  openToken.attrSet('class', `markdown-container markdown-container-${opening.type}`)
   if (opening.type === 'details' && opening.open) openToken.attrSet('open', 'open')
   openToken.map = [startLine, closeLine + 1]
   openToken.meta = {
@@ -446,15 +632,13 @@ function nuvynContainerRule(
     open: opening.open,
   }
 
-  if (opening.type !== 'image-row') {
-    const titleTag = opening.type === 'details' ? 'summary' : 'div'
-    const titleOpen = state.push('nuvyn_container_title_open', titleTag, 1)
-    titleOpen.attrSet('class', 'markdown-container-title')
-    titleOpen.map = [startLine, startLine + 1]
-    pushInlineTitle(state, opening.title, startLine)
-    const titleClose = state.push('nuvyn_container_title_close', titleTag, -1)
-    titleClose.map = [startLine, startLine + 1]
-  }
+  const titleTag = opening.type === 'details' ? 'summary' : 'div'
+  const titleOpen = state.push('nuvyn_container_title_open', titleTag, 1)
+  titleOpen.attrSet('class', 'markdown-container-title')
+  titleOpen.map = [startLine, startLine + 1]
+  pushInlineTitle(state, opening.title, startLine)
+  const titleClose = state.push('nuvyn_container_title_close', titleTag, -1)
+  titleClose.map = [startLine, startLine + 1]
 
   // Reuse MarkdownIt's current block state and rules for the body. This is
   // what keeps headings, callouts, math, WikiLinks, Shiki fences, Mermaid,
@@ -490,10 +674,19 @@ export function markdownContainersPlugin(md: MarkdownIt): void {
     self.renderToken(tokens, index, options)
   md.renderer.rules.nuvyn_container_title_close = (tokens, index, options, _env, self) =>
     self.renderToken(tokens, index, options)
+  md.renderer.rules.nuvyn_flex_scope_open = (tokens, index, options, _env, self) =>
+    self.renderToken(tokens, index, options)
+  md.renderer.rules.nuvyn_flex_scope_close = (tokens, index, options, _env, self) =>
+    self.renderToken(tokens, index, options)
+  md.renderer.rules.nuvyn_flex_open = (tokens, index, options, _env, self) =>
+    self.renderToken(tokens, index, options)
+  md.renderer.rules.nuvyn_flex_close = (tokens, index, options, _env, self) =>
+    self.renderToken(tokens, index, options)
 }
 
 export const __testing__ = {
   CONTAINER_DEFINITIONS,
+  parseFlexOptions,
   parseOpening,
   parseClosing,
   parseFencedCodeOpening,

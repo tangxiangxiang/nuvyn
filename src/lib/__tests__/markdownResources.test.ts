@@ -89,10 +89,10 @@ describe('Markdown resource logical resolution and expansion', () => {
     ])
   })
 
-  it('renders images from an included image-row through their included source identity', async () => {
+  it('renders images from included Flex content through their included source identity', async () => {
     const resolver = resolverFor({
       'docs/gallery.md': [
-        '::: image-row',
+        '::: flex',
         '',
         '![PNG](@/attachments/images/a.png)',
         '',
@@ -106,7 +106,7 @@ describe('Markdown resource logical resolution and expansion', () => {
       resourceResolver: resolver,
     })
     const doc = new DOMParser().parseFromString(html, 'text/html')
-    const images = Array.from(doc.querySelectorAll<HTMLImageElement>('.nuvyn-image-row img'))
+    const images = Array.from(doc.querySelectorAll<HTMLImageElement>('.nuvyn-flex img'))
 
     expect(images).toHaveLength(2)
     expect(images.map((image) => image.alt)).toEqual(['PNG', 'SVG'])

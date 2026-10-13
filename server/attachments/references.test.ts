@@ -132,14 +132,14 @@ describe('Attachment reference index', () => {
     })])
   })
 
-  it('indexes PNG and SVG images inside image-row with accurate direct and Include source lines', async () => {
-    const pngPath = 'attachments/images/row-a.png'
-    const svgPath = 'attachments/images/row-b.svg'
+  it('indexes PNG and SVG images inside Flex with accurate direct and Include source lines', async () => {
+    const pngPath = 'attachments/images/flex-a.png'
+    const svgPath = 'attachments/images/flex-b.svg'
     await fs.mkdir(path.join(root, 'attachments', 'images'), { recursive: true })
     await fs.writeFile(path.join(root, ...pngPath.split('/')), Buffer.from([1, 2, 3]))
     await fs.writeFile(path.join(root, ...svgPath.split('/')), '<svg/>')
     await writeNote('inbox/gallery', [
-      '::: image-row',
+      '::: flex',
       '',
       `![PNG](@/${pngPath})`,
       '',

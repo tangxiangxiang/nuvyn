@@ -290,7 +290,8 @@ test('renders and decodes an SVG exported by the pinned Excalidraw package', asy
   }
 })
 
-test('renders image-row as a real responsive image grid on desktop and mobile', async ({ page, request }) => {
+test('renders a Flex image layout on desktop and stacks it on mobile', async ({ page, request }) => {
+  await page.setViewportSize({ width: 1600, height: 1000 })
   const runId = randomUUID()
   const notePath = `inbox/row-${runId.slice(0, 8)}`
   const createdPaths: string[] = []
@@ -316,11 +317,11 @@ test('renders image-row as a real responsive image grid on desktop and mobile', 
     uploadedPaths.push(svgPath)
 
     await createDoc(request, notePath, [
-      '# Image row',
+      '# Image Flex',
       '',
       `![Standalone](@/${pngPath})`,
       '',
-      '::: image-row',
+      '::: flex',
       '',
       `![Raster](@/${pngPath})`,
       '',
@@ -332,14 +333,14 @@ test('renders image-row as a real responsive image grid on desktop and mobile', 
     await openDoc(page, notePath)
     await page.getByTestId('view-toggle').click()
 
-    const row = page.locator('.reading-pane .nuvyn-image-row')
-    const rowImages = row.locator('img')
-    await expect(row).toBeVisible()
-    await expect(rowImages).toHaveCount(2)
-    await expect.poll(() => rowImages.nth(0).evaluate((image) => (image as HTMLImageElement).naturalWidth)).toBe(1)
-    await expect.poll(() => rowImages.nth(1).evaluate((image) => (image as HTMLImageElement).naturalWidth)).toBe(120)
+    const flex = page.locator('.reading-pane .nuvyn-flex')
+    const flexImages = flex.locator('img')
+    await expect(flex).toBeVisible()
+    await expect(flexImages).toHaveCount(2)
+    await expect.poll(() => flexImages.nth(0).evaluate((image) => (image as HTMLImageElement).naturalWidth)).toBe(1)
+    await expect.poll(() => flexImages.nth(1).evaluate((image) => (image as HTMLImageElement).naturalWidth)).toBe(120)
 
-    const desktopGeometry = await rowImages.evaluateAll((images) => images.map((image) => {
+    const desktopGeometry = await flexImages.evaluateAll((images) => images.map((image) => {
       const bounds = image.getBoundingClientRect()
       return { x: bounds.x, y: bounds.y, right: bounds.right, width: bounds.width }
     }))
@@ -353,7 +354,7 @@ test('renders image-row as a real responsive image grid on desktop and mobile', 
     if (await rightRailToggle.count()) {
       if ((await rightRailToggle.getAttribute('aria-pressed')) === 'true') await rightRailToggle.click()
     }
-    const mobileGeometry = await rowImages.evaluateAll((images) => images.map((image) => {
+    const mobileGeometry = await flexImages.evaluateAll((images) => images.map((image) => {
       const bounds = image.getBoundingClientRect()
       return { x: bounds.x, y: bounds.y, right: bounds.right, width: bounds.width }
     }))
@@ -379,10 +380,10 @@ test('renders image-row as a real responsive image grid on desktop and mobile', 
     expect(mobileOverflow.documentWidth, JSON.stringify(mobileOverflow)).toBeLessThanOrEqual(mobileOverflow.viewport)
 
     await page.reload()
-    const reloadedRowImages = page.locator('.reading-pane .nuvyn-image-row img')
-    await expect(reloadedRowImages).toHaveCount(2)
-    await expect.poll(() => reloadedRowImages.nth(0).evaluate((image) => (image as HTMLImageElement).naturalWidth)).toBe(1)
-    await expect.poll(() => reloadedRowImages.nth(1).evaluate((image) => (image as HTMLImageElement).naturalWidth)).toBe(120)
+    const reloadedFlexImages = page.locator('.reading-pane .nuvyn-flex img')
+    await expect(reloadedFlexImages).toHaveCount(2)
+    await expect.poll(() => reloadedFlexImages.nth(0).evaluate((image) => (image as HTMLImageElement).naturalWidth)).toBe(1)
+    await expect.poll(() => reloadedFlexImages.nth(1).evaluate((image) => (image as HTMLImageElement).naturalWidth)).toBe(120)
     await expect(page.locator('.reading-pane img[alt="Standalone"]')).toBeVisible()
   } finally {
     for (const createdPath of createdPaths) await request.delete(`/api/posts/${createdPath}`).catch(() => {})

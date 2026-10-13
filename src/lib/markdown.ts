@@ -153,10 +153,12 @@ const ALLOWED_MARKDOWN_DATA_ATTRS = new Set([
   'data-target',
 ])
 
-let activeImageRowProvenance: string | undefined
-let activeImageRowNodes = new WeakSet<Element>()
-
 export type MarkdownSanitizer = (html: string) => string
+
+export interface MarkdownSanitizerProvenance {
+  externalLink?: string
+  flex?: string
+}
 
 function createSecureOpaqueToken(): string {
   const secureCrypto = globalThis.crypto
@@ -165,10 +167,14 @@ function createSecureOpaqueToken(): string {
     const bytes = secureCrypto.getRandomValues(new Uint8Array(16))
     return Array.from(bytes, (byte) => byte.toString(16).padStart(2, '0')).join('')
   }
-  throw new Error('Secure randomness is required for Markdown link provenance')
+  throw new Error('Secure randomness is required for Markdown provenance')
 }
 
 function createExternalLinkProvenance(): string {
+  return createSecureOpaqueToken()
+}
+
+function createFlexRenderProvenance(): string {
   return createSecureOpaqueToken()
 }
 
@@ -185,26 +191,32 @@ function isGeneratedExternalAnchor(node: Element, provenanceToken: string): bool
     && node.getAttribute('target') === '_blank'
 }
 
-export function createMarkdownSanitizer(provenanceToken?: string): MarkdownSanitizer {
+export function createMarkdownSanitizer(
+  provenance?: string | MarkdownSanitizerProvenance,
+): MarkdownSanitizer {
   // DOMPurify's ESM default export is a factory when the module is evaluated
   // without a DOM (for example, before Vitest installs jsdom). Creating the
   // instance lazily keeps the same code safe in the browser and test runtime.
   const purifier = DOMPurify(typeof window === 'undefined' ? undefined : window)
-  const trustedGeneratedAnchors = new WeakSet<Element>()
+  let trustedGeneratedAnchors = new WeakSet<Element>()
+  let trustedFlexElements = new WeakSet<Element>()
+  const externalLinkProvenance = typeof provenance === 'string' ? provenance : provenance?.externalLink
+  const flexProvenance = typeof provenance === 'string' ? undefined : provenance?.flex
 
   purifier.addHook('beforeSanitizeAttributes', (node) => {
     if (
-      activeImageRowProvenance
+      flexProvenance
       && typeof (node as Element).tagName === 'string'
       && node.tagName.toLowerCase() === 'div'
-      && node.getAttribute('data-nuvyn-image-row-provenance') === activeImageRowProvenance
-      && node.classList.contains('nuvyn-image-row')
-    ) activeImageRowNodes.add(node)
-    if (!provenanceToken || !isGeneratedExternalAnchor(node, provenanceToken)) return
-    trustedGeneratedAnchors.add(node)
-    // The generated renderer owns this value. Normalize it here so a trusted
-    // generated link cannot be weakened before the final sanitized output.
-    node.setAttribute('rel', 'noopener noreferrer')
+      && node.getAttribute('data-nuvyn-flex-provenance') === flexProvenance
+      && (node.classList.contains('nuvyn-flex') || node.classList.contains('nuvyn-flex-scope'))
+    ) trustedFlexElements.add(node)
+    if (externalLinkProvenance && isGeneratedExternalAnchor(node, externalLinkProvenance)) {
+      trustedGeneratedAnchors.add(node)
+      // The generated renderer owns this value. Normalize it here so a trusted
+      // generated link cannot be weakened before the final sanitized output.
+      node.setAttribute('rel', 'noopener noreferrer')
+    }
   })
   purifier.addHook('uponSanitizeAttribute', (node, data) => {
     if (data.attrName.startsWith('on')) {
@@ -219,16 +231,21 @@ export function createMarkdownSanitizer(provenanceToken?: string): MarkdownSanit
       return
     }
 
-    if (data.attrName === 'data-nuvyn-image-row-provenance') {
+    if (
+      data.attrName === 'data-nuvyn-flex-provenance'
+    ) {
       data.keepAttr = false
       return
     }
 
-    // Only the built-in image-row parser may activate its layout class. Raw
-    // HTML cannot opt into that component style by borrowing the class name.
-    if (data.attrName === 'class' && data.attrValue.split(/\s+/u).includes('nuvyn-image-row')) {
-      if (!activeImageRowNodes.has(node)) {
-        data.attrValue = data.attrValue.split(/\s+/u).filter((name) => name && name !== 'nuvyn-image-row').join(' ')
+    if (data.attrName === 'class') {
+      const classes = data.attrValue.split(/\s+/u).filter(Boolean)
+      const filtered = classes.filter((name) => {
+        if (/^nuvyn-flex(?:-|$)/u.test(name)) return trustedFlexElements.has(node)
+        return true
+      })
+      if (filtered.length !== classes.length) {
+        data.attrValue = filtered.join(' ')
         if (!data.attrValue) data.keepAttr = false
       }
     }
@@ -264,18 +281,17 @@ export function createMarkdownSanitizer(provenanceToken?: string): MarkdownSanit
     }
   })
   return (html: string) => {
-    activeImageRowProvenance = provenanceToken
-    activeImageRowNodes = new WeakSet<Element>()
-    try {
-      return purifier.sanitize(html, MARKDOWN_SANITIZE_CONFIG)
-    } finally {
-      activeImageRowProvenance = undefined
-    }
+    trustedGeneratedAnchors = new WeakSet<Element>()
+    trustedFlexElements = new WeakSet<Element>()
+    return purifier.sanitize(html, MARKDOWN_SANITIZE_CONFIG)
   }
 }
 
-export function sanitizeMarkdownHtml(html: string, provenanceToken?: string): string {
-  return createMarkdownSanitizer(provenanceToken)(html)
+export function sanitizeMarkdownHtml(
+  html: string,
+  provenance?: string | MarkdownSanitizerProvenance,
+): string {
+  return createMarkdownSanitizer(provenance)(html)
 }
 
 /* URL-encode the markmap / mermaid source before putting it in a data
@@ -517,10 +533,11 @@ async function renderWithMetadata(
   // Keep the final env separate from the discovery env. In particular, the
   // real resolver must only be visible to the actual render pass.
   const externalLinkProvenance = createExternalLinkProvenance()
+  const flexProvenance = createFlexRenderProvenance()
   const env: WikiLinkEnv = {
     ...(options.resolver ? { wikiResolver: options.resolver } : {}),
     externalLinkProvenance,
-    imageRowProvenance: externalLinkProvenance,
+    flexProvenance,
     codeGroupRenderScope: createCodeGroupRenderScope(),
     resourceSourcePathByLine: expanded.sourcePathByLine,
     deferWikiResolution: expanded.sourcePathByLine.some(Boolean),
@@ -546,7 +563,10 @@ async function renderWithMetadata(
   const html = md.renderer.render(tokens, md.options, env)
   syncGeneratedShikiStylesheet()
   return {
-    html: sanitizeMarkdownHtml(html, externalLinkProvenance),
+    html: sanitizeMarkdownHtml(html, {
+      externalLink: externalLinkProvenance,
+      flex: flexProvenance,
+    }),
     headingSources,
   }
 }

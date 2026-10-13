@@ -115,26 +115,27 @@ describe('PDF export helpers', () => {
     expect(styles).not.toContain('.pdf-document .article .callout-danger')
   })
 
-  it('keeps image-row structure in the PDF clone and supplies its own bounded grid styles', () => {
+  it('preserves automatic Flex items and supplies independent printable layout rules', () => {
     const article = document.createElement('article')
     article.className = 'article reading'
-    article.innerHTML = `<div class="nuvyn-image-row">
-      <p><img src="a.png" alt="A" loading="lazy"></p>
-      <p><img src="b.svg" alt="B" loading="lazy"></p>
+    article.innerHTML = `<div class="nuvyn-flex-scope nuvyn-flex-scope-mobile-stack nuvyn-flex-item nuvyn-flex-item-grow-2 nuvyn-flex-item-basis-0">
+      <div class="nuvyn-flex nuvyn-flex-direction-row-reverse nuvyn-flex-wrap-wrap nuvyn-flex-gap-24">
+        <p>Main</p>
+        <p>Aside</p>
+      </div>
     </div>`
     const exported = document.createElement('div')
     exported.innerHTML = preparePdfArticleHtml(article)
-    const row = exported.querySelector<HTMLElement>('.nuvyn-image-row')
 
-    expect(row?.querySelectorAll('img')).toHaveLength(2)
-    expect(Array.from(row?.querySelectorAll('img') ?? []).map((image) => image.getAttribute('src')))
-      .toEqual(['a.png', 'b.svg'])
-    expect(article.querySelectorAll('.nuvyn-image-row img')).toHaveLength(2)
-    expect(__testing__.PDF_DOWNLOAD_STYLES).toContain('.pdf-document .article .nuvyn-image-row {')
-    expect(__testing__.PDF_DOWNLOAD_STYLES).toContain('grid-template-columns: repeat(auto-fit, minmax(min(100%, 16rem), 1fr))')
-    expect(__testing__.PDF_DOWNLOAD_STYLES).toContain('.pdf-document .article .nuvyn-image-row > p')
-    expect(__testing__.PDF_DOWNLOAD_STYLES).toContain('break-inside: avoid;')
-    expect(__testing__.PDF_DOWNLOAD_STYLES).toContain('.pdf-document .article .pdf-allow-split')
+    expect(exported.querySelectorAll('.nuvyn-flex')).toHaveLength(1)
+    expect(exported.querySelectorAll('.nuvyn-flex > p')).toHaveLength(2)
+    expect(exported.querySelectorAll('.nuvyn-flex-item')).toHaveLength(1)
+    expect(__testing__.PDF_DOWNLOAD_STYLES).toContain('.pdf-document .article .nuvyn-flex {')
+    expect(__testing__.PDF_DOWNLOAD_STYLES).toContain('.pdf-document .article .nuvyn-flex-direction-row-reverse { flex-direction: row-reverse; }')
+    expect(__testing__.PDF_DOWNLOAD_STYLES).toContain('.pdf-document .article .nuvyn-flex-gap-24 { gap: 24px; }')
+    expect(__testing__.PDF_DOWNLOAD_STYLES).not.toContain('.pdf-document .article .nuvyn-image-row')
+    expect(__testing__.PDF_DOWNLOAD_STYLES).toContain('page-break-inside: auto;')
+    expect(__testing__.PDF_DOWNLOAD_STYLES).not.toContain('overflow: hidden')
   })
 
   it('composes one trusted PDF stylesheet from the Shiki snapshot', async () => {

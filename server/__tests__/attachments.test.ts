@@ -97,6 +97,82 @@ describe('Attachment Manager API', () => {
     expect(db.prepare('SELECT COUNT(*) AS count FROM assets').get()).toEqual({ count: 0 })
   })
 
+  it('indexes direct, repeated, included, SVG, and Board references inside Flex Markdown', async () => {
+    const timestamp = Date.now()
+    const sharedImage = path.join(root, 'inbox', 'shared.png')
+    const includedSvg = path.join(root, 'inbox', 'included.svg')
+    await fs.writeFile(sharedImage, Buffer.from([1, 2, 3]))
+    await fs.writeFile(includedSvg, '<svg xmlns="http://www.w3.org/2000/svg"></svg>')
+    await fs.writeFile(path.join(root, 'inbox', 'parts.md'), [
+      '![Included PNG](./shared.png)',
+      '',
+      '![Included SVG](./included.svg)',
+    ].join('\n'))
+
+    const boardId = '9b5b4c41-c0e8-4aca-a531-751e4013d1ef'
+    const assetId = 'c4d4dd34-1ce4-4b38-9849-eef1607754c0'
+    db.prepare('INSERT INTO boards (id, title, created_at, updated_at) VALUES (?, ?, ?, ?)')
+      .run(boardId, 'Flex board', timestamp, timestamp)
+    db.prepare(`INSERT INTO assets (id, mime_type, byte_size, sha256, storage_key, created_at)
+      VALUES (?, ?, ?, ?, ?, ?)`)
+      .run(assetId, 'image/svg+xml', 1, 'a'.repeat(64), 'test/flex-board.svg', timestamp)
+    db.prepare(`INSERT INTO asset_references (asset_id, owner_type, owner_id, purpose, created_at)
+      VALUES (?, 'board', ?, 'scene', ?)`)
+      .run(assetId, boardId, timestamp)
+
+    await fs.writeFile(path.join(root, 'inbox', 'flex-note.md'), [
+      ':::: flex direction=row gap=16',
+      '![First use](./shared.png)',
+      '',
+      '![Second use](./shared.png)',
+      '',
+      '<!--@include: ./parts.md-->',
+      '',
+      `![Board diagram](board:${boardId})`,
+      '::::',
+    ].join('\n'))
+
+    const index = new AttachmentReferenceIndex(db, { root: () => root })
+    await index.refresh()
+    const shared = await index.query({ kind: 'vault-file', path: 'inbox/shared.png' }, 0, 10)
+    const svg = await index.query({ kind: 'vault-file', path: 'inbox/included.svg' }, 0, 10)
+    const board = await index.query({ kind: 'asset', id: assetId }, 0, 10)
+
+    expect(shared.referenceCount).toBe(4)
+    expect(shared.references.filter((reference) => (
+      reference.relation === 'direct' && reference.owner.id === 'inbox/flex-note'
+    ))).toHaveLength(2)
+    expect(shared.references.find((reference) => (
+      reference.relation === 'direct' && reference.owner.id === 'inbox/flex-note'
+    ))).toMatchObject({
+      owner: { kind: 'note', id: 'inbox/flex-note' },
+      sourcePath: 'inbox/flex-note',
+      line: 2,
+    })
+    expect(shared.references.filter((reference) => reference.owner.id === 'inbox/parts')).toHaveLength(1)
+    expect(shared.references.find((reference) => reference.relation === 'indirect')).toMatchObject({
+      owner: { kind: 'note', id: 'inbox/flex-note' },
+      sourcePath: 'inbox/parts',
+      via: [{ kind: 'include', id: 'inbox/parts' }],
+    })
+    expect(svg.references.find((reference) => reference.relation === 'indirect')).toMatchObject({
+      owner: { kind: 'note', id: 'inbox/flex-note' },
+      kind: 'note-image',
+      relation: 'indirect',
+      sourcePath: 'inbox/parts',
+      target: { kind: 'vault-file', id: 'inbox/included.svg' },
+    })
+    expect(svg.references.find((reference) => reference.relation === 'direct')).toMatchObject({
+      owner: { kind: 'note', id: 'inbox/parts' },
+      target: { kind: 'vault-file', id: 'inbox/included.svg' },
+    })
+    expect(board.references.filter((reference) => reference.kind === 'board-embed')).toMatchObject([{
+      owner: { kind: 'note', id: 'inbox/flex-note' },
+      sourcePath: 'inbox/flex-note',
+      target: { kind: 'asset', id: assetId },
+    }])
+  })
+
   it('reports an initial reference-index failure and allows an explicit retry', async () => {
     const index = new AttachmentReferenceIndex(db, { root: () => root })
     vi.spyOn(index as unknown as {

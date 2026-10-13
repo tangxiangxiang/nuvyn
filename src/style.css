@@ -1009,34 +1009,179 @@ main.container.auth-page-shell {
 .article :first-child { margin-top: 0; }
 .article img { max-width: 100%; height: auto; }
 
-/* A narrow, Markdown-only image layout. The wrapper is emitted only for a
-   closed `::: image-row` containing at least two standalone image tokens. */
-.article .nuvyn-image-row {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(min(100%, 16rem), 1fr));
-  align-items: start;
-  gap: 1rem;
+/* A controlled Flex layout. All layout values are represented by parser-owned
+   classes; this wrapper provides a Note-content-width container query without
+   coupling the responsive breakpoint to the browser viewport. */
+.article .nuvyn-flex-scope {
+  width: 100%;
+  min-width: 0;
+  max-width: 100%;
+  container-type: inline-size;
+}
+.article .nuvyn-flex-scope-mobile-preserve {
+  overflow-x: auto;
+}
+.article .nuvyn-flex {
+  display: flex;
+  box-sizing: border-box;
+  width: 100%;
   min-width: 0;
   max-width: 100%;
   margin: 1rem 0;
 }
-.article .nuvyn-image-row > p {
-  display: flex;
-  justify-content: center;
+.article .nuvyn-flex-direction-row { flex-direction: row; }
+.article .nuvyn-flex-direction-row-reverse { flex-direction: row-reverse; }
+.article .nuvyn-flex-direction-column { flex-direction: column; }
+.article .nuvyn-flex-direction-column-reverse { flex-direction: column-reverse; }
+.article .nuvyn-flex-wrap-nowrap { flex-wrap: nowrap; }
+.article .nuvyn-flex-wrap-wrap { flex-wrap: wrap; }
+.article .nuvyn-flex-wrap-wrap-reverse { flex-wrap: wrap-reverse; }
+.article .nuvyn-flex-justify-normal { justify-content: normal; }
+.article .nuvyn-flex-justify-start { justify-content: start; }
+.article .nuvyn-flex-justify-end { justify-content: end; }
+.article .nuvyn-flex-justify-flex-start { justify-content: flex-start; }
+.article .nuvyn-flex-justify-flex-end { justify-content: flex-end; }
+.article .nuvyn-flex-justify-center { justify-content: center; }
+.article .nuvyn-flex-justify-left { justify-content: left; }
+.article .nuvyn-flex-justify-right { justify-content: right; }
+.article .nuvyn-flex-justify-stretch { justify-content: stretch; }
+.article .nuvyn-flex-justify-space-between { justify-content: space-between; }
+.article .nuvyn-flex-justify-space-around { justify-content: space-around; }
+.article .nuvyn-flex-justify-space-evenly { justify-content: space-evenly; }
+.article .nuvyn-flex-justify-safe-start { justify-content: safe start; }
+.article .nuvyn-flex-justify-unsafe-start { justify-content: unsafe start; }
+.article .nuvyn-flex-justify-safe-end { justify-content: safe end; }
+.article .nuvyn-flex-justify-unsafe-end { justify-content: unsafe end; }
+.article .nuvyn-flex-justify-safe-flex-start { justify-content: safe flex-start; }
+.article .nuvyn-flex-justify-unsafe-flex-start { justify-content: unsafe flex-start; }
+.article .nuvyn-flex-justify-safe-flex-end { justify-content: safe flex-end; }
+.article .nuvyn-flex-justify-unsafe-flex-end { justify-content: unsafe flex-end; }
+.article .nuvyn-flex-justify-safe-center { justify-content: safe center; }
+.article .nuvyn-flex-justify-unsafe-center { justify-content: unsafe center; }
+.article .nuvyn-flex-items-normal { align-items: normal; }
+.article .nuvyn-flex-items-stretch { align-items: stretch; }
+.article .nuvyn-flex-items-baseline { align-items: baseline; }
+.article .nuvyn-flex-items-first-baseline { align-items: first baseline; }
+.article .nuvyn-flex-items-last-baseline { align-items: last baseline; }
+.article .nuvyn-flex-items-start { align-items: start; }
+.article .nuvyn-flex-items-end { align-items: end; }
+.article .nuvyn-flex-items-self-start { align-items: self-start; }
+.article .nuvyn-flex-items-self-end { align-items: self-end; }
+.article .nuvyn-flex-items-flex-start { align-items: flex-start; }
+.article .nuvyn-flex-items-flex-end { align-items: flex-end; }
+.article .nuvyn-flex-items-center { align-items: center; }
+.article .nuvyn-flex-items-safe-start { align-items: safe start; }
+.article .nuvyn-flex-items-unsafe-start { align-items: unsafe start; }
+.article .nuvyn-flex-items-safe-end { align-items: safe end; }
+.article .nuvyn-flex-items-unsafe-end { align-items: unsafe end; }
+.article .nuvyn-flex-items-safe-flex-start { align-items: safe flex-start; }
+.article .nuvyn-flex-items-unsafe-flex-start { align-items: unsafe flex-start; }
+.article .nuvyn-flex-items-safe-flex-end { align-items: safe flex-end; }
+.article .nuvyn-flex-items-unsafe-flex-end { align-items: unsafe flex-end; }
+.article .nuvyn-flex-items-safe-center { align-items: safe center; }
+.article .nuvyn-flex-items-unsafe-center { align-items: unsafe center; }
+.article .nuvyn-flex-items-safe-self-start { align-items: safe self-start; }
+.article .nuvyn-flex-items-unsafe-self-start { align-items: unsafe self-start; }
+.article .nuvyn-flex-items-safe-self-end { align-items: safe self-end; }
+.article .nuvyn-flex-items-unsafe-self-end { align-items: unsafe self-end; }
+.article .nuvyn-flex-content-normal { align-content: normal; }
+.article .nuvyn-flex-content-stretch { align-content: stretch; }
+.article .nuvyn-flex-content-baseline { align-content: baseline; }
+.article .nuvyn-flex-content-first-baseline { align-content: first baseline; }
+.article .nuvyn-flex-content-last-baseline { align-content: last baseline; }
+.article .nuvyn-flex-content-start { align-content: start; }
+.article .nuvyn-flex-content-end { align-content: end; }
+.article .nuvyn-flex-content-flex-start { align-content: flex-start; }
+.article .nuvyn-flex-content-flex-end { align-content: flex-end; }
+.article .nuvyn-flex-content-center { align-content: center; }
+.article .nuvyn-flex-content-space-between { align-content: space-between; }
+.article .nuvyn-flex-content-space-around { align-content: space-around; }
+.article .nuvyn-flex-content-space-evenly { align-content: space-evenly; }
+.article .nuvyn-flex-content-safe-start { align-content: safe start; }
+.article .nuvyn-flex-content-unsafe-start { align-content: unsafe start; }
+.article .nuvyn-flex-content-safe-end { align-content: safe end; }
+.article .nuvyn-flex-content-unsafe-end { align-content: unsafe end; }
+.article .nuvyn-flex-content-safe-flex-start { align-content: safe flex-start; }
+.article .nuvyn-flex-content-unsafe-flex-start { align-content: unsafe flex-start; }
+.article .nuvyn-flex-content-safe-flex-end { align-content: safe flex-end; }
+.article .nuvyn-flex-content-unsafe-flex-end { align-content: unsafe flex-end; }
+.article .nuvyn-flex-content-safe-center { align-content: safe center; }
+.article .nuvyn-flex-content-unsafe-center { align-content: unsafe center; }
+.article .nuvyn-flex-gap-0 { gap: 0; }
+.article .nuvyn-flex-gap-4 { gap: 4px; }
+.article .nuvyn-flex-gap-8 { gap: 8px; }
+.article .nuvyn-flex-gap-12 { gap: 12px; }
+.article .nuvyn-flex-gap-16 { gap: 16px; }
+.article .nuvyn-flex-gap-24 { gap: 24px; }
+.article .nuvyn-flex-gap-32 { gap: 32px; }
+.article .nuvyn-flex-item {
+  box-sizing: border-box;
   min-width: 0;
-  margin: 0;
-}
-.article .nuvyn-image-row img {
-  display: block;
-  width: auto;
   max-width: 100%;
-  height: auto;
+  flex-grow: 0;
+  flex-shrink: 1;
+  flex-basis: auto;
+  align-self: auto;
+  order: 0;
+}
+.article .nuvyn-flex > *:not(.nuvyn-flex-item) {
+  box-sizing: border-box;
+  min-width: 0;
+  max-width: 100%;
   margin: 0;
 }
-@media (max-width: 600px) {
-  .article .nuvyn-image-row {
-    grid-template-columns: minmax(0, 1fr);
-    gap: 0.75rem;
+.article .nuvyn-flex-scope > .nuvyn-flex { margin: 0; }
+.article .nuvyn-flex-item-grow-0 { flex-grow: 0; }
+.article .nuvyn-flex-item-grow-1 { flex-grow: 1; }
+.article .nuvyn-flex-item-grow-2 { flex-grow: 2; }
+.article .nuvyn-flex-item-grow-3 { flex-grow: 3; }
+.article .nuvyn-flex-item-grow-4 { flex-grow: 4; }
+.article .nuvyn-flex-item-shrink-0 { flex-shrink: 0; }
+.article .nuvyn-flex-item-shrink-1 { flex-shrink: 1; }
+.article .nuvyn-flex-item-shrink-2 { flex-shrink: 2; }
+.article .nuvyn-flex-item-shrink-3 { flex-shrink: 3; }
+.article .nuvyn-flex-item-shrink-4 { flex-shrink: 4; }
+.article .nuvyn-flex-item-basis-auto { flex-basis: auto; }
+.article .nuvyn-flex-item-basis-0 { flex-basis: 0; }
+.article .nuvyn-flex-item-basis-25 { flex-basis: 25%; }
+.article .nuvyn-flex-item-basis-33-33 { flex-basis: 33.33%; }
+.article .nuvyn-flex-item-basis-50 { flex-basis: 50%; }
+.article .nuvyn-flex-item-basis-66-67 { flex-basis: 66.67%; }
+.article .nuvyn-flex-item-basis-75 { flex-basis: 75%; }
+.article .nuvyn-flex-item-basis-100 { flex-basis: 100%; }
+.article .nuvyn-flex-item-self-auto { align-self: auto; }
+.article .nuvyn-flex-item-self-stretch { align-self: stretch; }
+.article .nuvyn-flex-item-self-flex-start { align-self: flex-start; }
+.article .nuvyn-flex-item-self-flex-end { align-self: flex-end; }
+.article .nuvyn-flex-item-self-center { align-self: center; }
+.article .nuvyn-flex-item-self-baseline { align-self: baseline; }
+.article .nuvyn-flex-item-self-safe-start { align-self: safe start; }
+.article .nuvyn-flex-item-self-unsafe-start { align-self: unsafe start; }
+.article .nuvyn-flex-item-self-safe-end { align-self: safe end; }
+.article .nuvyn-flex-item-self-unsafe-end { align-self: unsafe end; }
+.article .nuvyn-flex-item-self-safe-self-start { align-self: safe self-start; }
+.article .nuvyn-flex-item-self-unsafe-self-start { align-self: unsafe self-start; }
+.article .nuvyn-flex-item-self-safe-self-end { align-self: safe self-end; }
+.article .nuvyn-flex-item-self-unsafe-self-end { align-self: unsafe self-end; }
+.article .nuvyn-flex-item-self-safe-flex-start { align-self: safe flex-start; }
+.article .nuvyn-flex-item-self-unsafe-flex-start { align-self: unsafe flex-start; }
+.article .nuvyn-flex-item-self-safe-flex-end { align-self: safe flex-end; }
+.article .nuvyn-flex-item-self-unsafe-flex-end { align-self: unsafe flex-end; }
+.article .nuvyn-flex-item-self-safe-center { align-self: safe center; }
+.article .nuvyn-flex-item-self-unsafe-center { align-self: unsafe center; }
+.article .nuvyn-flex-item-order--3 { order: -3; }
+.article .nuvyn-flex-item-order--2 { order: -2; }
+.article .nuvyn-flex-item-order--1 { order: -1; }
+.article .nuvyn-flex-item-order-0 { order: 0; }
+.article .nuvyn-flex-item-order-1 { order: 1; }
+.article .nuvyn-flex-item-order-2 { order: 2; }
+.article .nuvyn-flex-item-order-3 { order: 3; }
+
+@container (max-width: 600px) {
+  .article .nuvyn-flex-mobile-stack.nuvyn-flex-direction-row,
+  .article .nuvyn-flex-mobile-stack.nuvyn-flex-direction-row-reverse {
+    flex-direction: column;
+    flex-wrap: nowrap;
   }
 }
 

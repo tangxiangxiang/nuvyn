@@ -3,6 +3,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { Highlighter } from 'shiki'
 import { render } from '../markdown'
+import { __testing__ as containerTesting } from '../markdownContainers'
 import { __testing__ as shikiTesting } from '../shiki'
 
 function installFakeShikiRuntime() {
@@ -61,93 +62,67 @@ describe('Nuvyn custom Markdown containers', () => {
     expect(doc.querySelector('.markdown-container-details summary')?.textContent).toBe('Click me')
   })
 
-  it('renders image-row as a plain responsive wrapper around standard Markdown image tokens', async () => {
+  it('uses one Flex container and makes each direct Markdown block an implicit item', async () => {
     const doc = parse(await render([
-      '::: image-row',
+      '::: flex',
       '',
       '![Architecture A](a.png)',
       '',
       '![Architecture B](b.svg)',
       '',
+      'A paragraph with a soft line break',
+      'that remains in the same Markdown block.',
+      '',
+      'A second paragraph.',
+      '',
       ':::',
     ].join('\n')))
-    const row = doc.querySelector<HTMLElement>('.nuvyn-image-row')
-    const images = Array.from(row?.querySelectorAll<HTMLImageElement>('img') ?? [])
+    const flex = doc.querySelector<HTMLElement>('.nuvyn-flex')
+    const children = Array.from(flex?.children ?? [])
 
-    expect(row).not.toBeNull()
-    expect(row?.className).toBe('nuvyn-image-row')
-    expect(row?.classList.contains('markdown-container')).toBe(false)
-    expect(row?.querySelector('.markdown-container-title')).toBeNull()
-    expect(images.map((image) => image.getAttribute('src')))
-      .toEqual(['a.png', 'b.svg'])
-    expect(images.map((image) => image.getAttribute('alt'))).toEqual(['Architecture A', 'Architecture B'])
-    expect(images.every((image) => image.getAttribute('loading') === 'lazy')).toBe(true)
-
-    for (const imageCount of [3, 4, 5]) {
-      const source = [
-        '::: image-row',
-        '',
-        ...Array.from({ length: imageCount }, (_, index) => `![Image ${index + 1}](image-${index + 1}.png)`),
-        '',
-        ':::',
-      ].join('\n')
-      const rendered = parse(await render(source))
-      expect(rendered.querySelectorAll('.nuvyn-image-row')).toHaveLength(1)
-      expect(rendered.querySelectorAll('.nuvyn-image-row img')).toHaveLength(imageCount)
-    }
+    expect(flex).not.toBeNull()
+    expect(children.map((child) => child.tagName)).toEqual(['P', 'P', 'P', 'P'])
+    expect(children[0]?.querySelector('img')?.getAttribute('src')).toBe('a.png')
+    expect(children[1]?.querySelector('img')?.getAttribute('src')).toBe('b.svg')
+    expect(children[2]?.textContent).toMatch(/soft line break\s+that remains/u)
+    expect(children[2]?.querySelectorAll('br')).toHaveLength(0)
+    expect(children[3]?.textContent).toBe('A second paragraph.')
+    expect(flex?.querySelector('.nuvyn-flex-item')).toBeNull()
   })
 
-  it('preserves invalid image-row source instead of swallowing content or changing normal images', async () => {
-    const invalidSources = [
-      '::: image-row\n\n:::',
-      '::: image-row\n\n![Only](only.png)\n\n:::',
-      '::: image-row\n\n![A](a.png)\n\nKeep this text.\n\n![B](b.png)\n\n:::',
-      '::: image-row\n\n![A](a.png)\n\n```text\ncode\n```\n\n![B](b.png)\n\n:::',
-      '::: image-row\n\n![A](a.png)\n\n| A | B |\n| --- | --- |\n| 1 | 2 |\n\n![B](b.png)\n\n:::',
-      '::: image-row Custom title\n\n![A](a.png)\n\n![B](b.png)\n\n:::',
-      '::: image-row\n\n![A](a.png)\n\n![B](b.png)',
-      '::: image-row\n\n![A](a.png)\n\n::: info nested\ntext\n:::\n\n![B](b.png)\n\n:::',
-    ]
-
-    for (const source of invalidSources) {
-      const doc = parse(await render(source))
-      expect(doc.querySelector('.nuvyn-image-row')).toBeNull()
-      expect(doc.body.textContent).toContain('image-row')
-    }
-
-    const ordinary = parse(await render('![Standalone](image.png)'))
-    expect(ordinary.querySelector('.nuvyn-image-row')).toBeNull()
-    expect(ordinary.querySelector('p > img')?.getAttribute('alt')).toBe('Standalone')
-  })
-
-  it('keeps image-row fenced as code and composes with existing containers', async () => {
+  it('keeps headings, lists, code, callouts, and tables as distinct automatic Flex items', async () => {
     const doc = parse(await render([
-      ':::: info Images',
+      '::: flex',
       '',
-      '::: image-row',
+      '## Heading item',
       '',
-      '![A](a.png)',
+      '- First list item',
+      '- Second list item',
       '',
-      '![B](b.svg)',
-      '',
-      ':::',
-      '',
-      '```md',
-      '::: image-row',
-      '![Code](code.png)',
-      ':::',
+      '```text',
+      'code item',
       '```',
       '',
-      '::::',
+      '::: tip',
+      'Callout item',
+      ':::',
+      '',
+      '| A | B |',
+      '| --- | --- |',
+      '| 1 | 2 |',
+      ':::',
     ].join('\n')))
+    const flex = doc.querySelector<HTMLElement>('.nuvyn-flex')
 
-    expect(doc.querySelector('.markdown-container-info .nuvyn-image-row img[src="a.png"]')).not.toBeNull()
-    expect(doc.querySelector('.markdown-container-info pre code')?.textContent)
-      .toContain('::: image-row\n![Code](code.png)\n:::')
-    expect(doc.querySelectorAll('.nuvyn-image-row')).toHaveLength(1)
+    expect(Array.from(flex?.children ?? []).map((child) => child.tagName)).toEqual([
+      'H2', 'UL', 'PRE', 'DIV', 'DIV',
+    ])
+    expect(flex?.children[0]?.textContent).toContain('Heading item')
+    expect(flex?.children[3]?.textContent).toContain('Callout item')
+    expect(flex?.children[4]?.querySelector('.table-scroll > table')).not.toBeNull()
   })
 
-  it('keeps the image-row class parser-owned and preserves the existing sanitizer boundary', async () => {
+  it('does not activate the removed image-row syntax or lose its ordinary Markdown content', async () => {
     const doc = parse(await render([
       '::: image-row',
       '',
@@ -156,20 +131,12 @@ describe('Nuvyn custom Markdown containers', () => {
       '![B](b.svg)',
       '',
       ':::',
-      '',
-      '<div class="nuvyn-image-row" style="display:flex" onclick="alert(1)">',
-      '<img src="javascript:alert(1)" onerror="alert(1)">',
-      '</div>',
-      '',
-      '<svg><rect width="1" height="1"></rect></svg>',
     ].join('\n')))
 
-    expect(doc.querySelectorAll('.nuvyn-image-row')).toHaveLength(1)
-    expect(doc.querySelector('.nuvyn-image-row img')?.getAttribute('src')).toBe('a.png')
-    expect(doc.querySelector('[style]')).toBeNull()
-    expect(doc.querySelector('[onclick], [onerror]')).toBeNull()
-    expect(doc.querySelector('img[src^="javascript:"]')).toBeNull()
-    expect(doc.querySelector('svg')).toBeNull()
+    expect(doc.querySelector('.nuvyn-image-row, .nuvyn-flex')).toBeNull()
+    expect(Array.from(doc.querySelectorAll('img')).map((image) => image.getAttribute('src')))
+      .toEqual(['a.png', 'b.svg'])
+    expect(doc.body.textContent).toContain('image-row')
   })
 
   it('uses native details state and accepts only the literal details {open} modifier', async () => {
@@ -226,6 +193,205 @@ describe('Nuvyn custom Markdown containers', () => {
     expect(infoContainers).toHaveLength(2)
     expect(infoContainers[1]?.parentElement).toBe(infoContainers[0])
     expect(infoContainers[0]?.textContent).toContain('Same type.')
+  })
+
+  it('renders Flexbox properties on one container and its nested Flex items', async () => {
+    const doc = parse(await render([
+      ':::: flex direction=row-reverse wrap=wrap-reverse justify=space-evenly items=first-baseline content=space-between gap=32 mobile=preserve',
+      '',
+      '::: flex direction=column grow=4 shrink=0 basis=33.33% self=flex-end order=-2',
+      '',
+      '## First item',
+      '',
+      'Multiple Markdown blocks stay inside this nested Flex.',
+      ':::',
+      '',
+      '::: flex basis=50%',
+      '',
+      '| A | B |',
+      '| --- | --- |',
+      '| 1 | 2 |',
+      ':::',
+      '::::',
+    ].join('\n')))
+    const flexes = Array.from(doc.querySelectorAll<HTMLElement>('.nuvyn-flex'))
+    const outer = flexes[0]
+    const firstNested = flexes[1]
+    const firstScope = firstNested?.parentElement
+    const secondNested = flexes[2]
+    const secondScope = secondNested?.parentElement
+
+    expect(flexes).toHaveLength(3)
+    expect(outer?.classList.contains('nuvyn-flex-direction-row-reverse')).toBe(true)
+    expect(outer?.classList.contains('nuvyn-flex-wrap-wrap-reverse')).toBe(true)
+    expect(outer?.classList.contains('nuvyn-flex-justify-space-evenly')).toBe(true)
+    expect(outer?.classList.contains('nuvyn-flex-items-first-baseline')).toBe(true)
+    expect(outer?.classList.contains('nuvyn-flex-content-space-between')).toBe(true)
+    expect(outer?.classList.contains('nuvyn-flex-gap-32')).toBe(true)
+    expect(outer?.classList.contains('nuvyn-flex-mobile-preserve')).toBe(true)
+    expect(firstNested?.children).toHaveLength(2)
+    expect(firstNested?.querySelector('h2')?.textContent).toBe('First item')
+    expect(firstNested?.querySelector('p')?.textContent).toContain('Multiple Markdown blocks')
+    expect(firstScope?.classList.contains('nuvyn-flex-item-grow-4')).toBe(true)
+    expect(firstScope?.classList.contains('nuvyn-flex-item-shrink-0')).toBe(true)
+    expect(firstScope?.classList.contains('nuvyn-flex-item-basis-33-33')).toBe(true)
+    expect(firstScope?.classList.contains('nuvyn-flex-item-self-flex-end')).toBe(true)
+    expect(firstScope?.classList.contains('nuvyn-flex-item-order--2')).toBe(true)
+    expect(secondNested?.querySelector('table')).not.toBeNull()
+    expect(secondScope?.classList.contains('nuvyn-flex-item-basis-50')).toBe(true)
+    expect(doc.querySelector('[data-nuvyn-flex-provenance], [data-nuvyn-flex-item-provenance]')).toBeNull()
+  })
+
+  it('applies CSS-standard defaults and allowlisted extended alignment values', async () => {
+    const defaults = parse(await render('::: flex\nDefault direct item.\n:::'))
+    const flex = defaults.querySelector<HTMLElement>('.nuvyn-flex')
+    const scope = defaults.querySelector<HTMLElement>('.nuvyn-flex-scope')
+
+    expect(flex?.classList.contains('nuvyn-flex-direction-row')).toBe(true)
+    expect(flex?.classList.contains('nuvyn-flex-wrap-wrap')).toBe(true)
+    expect(flex?.classList.contains('nuvyn-flex-justify-flex-start')).toBe(true)
+    expect(flex?.classList.contains('nuvyn-flex-items-stretch')).toBe(true)
+    expect(flex?.classList.contains('nuvyn-flex-content-stretch')).toBe(true)
+    expect(flex?.classList.contains('nuvyn-flex-gap-16')).toBe(true)
+    expect(flex?.classList.contains('nuvyn-flex-mobile-stack')).toBe(true)
+    expect(scope?.classList.contains('nuvyn-flex-item-grow-0')).toBe(true)
+    expect(scope?.classList.contains('nuvyn-flex-item-shrink-1')).toBe(true)
+    expect(scope?.classList.contains('nuvyn-flex-item-basis-auto')).toBe(true)
+    expect(scope?.classList.contains('nuvyn-flex-item-self-auto')).toBe(true)
+    expect(scope?.classList.contains('nuvyn-flex-item-order-0')).toBe(true)
+
+    const alignments = parse(await render([
+      '::: flex justify=safe-center items=self-start content=first-baseline',
+      'Custom alignment.',
+      ':::',
+    ].join('\n')))
+    const alignedFlex = alignments.querySelector<HTMLElement>('.nuvyn-flex')
+    expect(alignedFlex?.classList.contains('nuvyn-flex-justify-safe-center')).toBe(true)
+    expect(alignedFlex?.classList.contains('nuvyn-flex-items-self-start')).toBe(true)
+    expect(alignedFlex?.classList.contains('nuvyn-flex-content-first-baseline')).toBe(true)
+
+    const safeAlignment = parse(await render([
+      ':::: flex items=safe-self-start',
+      '::: flex self=unsafe-flex-end',
+      'Nested item.',
+      ':::',
+      '::::',
+    ].join('\n')))
+    expect(safeAlignment.querySelector('.nuvyn-flex-items-safe-self-start')).not.toBeNull()
+    expect(safeAlignment.querySelector('.nuvyn-flex-item-self-unsafe-flex-end')).not.toBeNull()
+  })
+
+  it('accepts the full controlled CSS alignment keyword sets', () => {
+    const values = {
+      direction: ['row', 'row-reverse', 'column', 'column-reverse'],
+      wrap: ['nowrap', 'wrap', 'wrap-reverse'],
+      justify: [
+        'normal', 'start', 'end', 'flex-start', 'flex-end', 'center', 'left', 'right', 'stretch',
+        'space-between', 'space-around', 'space-evenly', 'safe-start', 'unsafe-start', 'safe-end',
+        'unsafe-end', 'safe-flex-start', 'unsafe-flex-start', 'safe-flex-end', 'unsafe-flex-end',
+        'safe-center', 'unsafe-center',
+      ],
+      items: [
+        'normal', 'stretch', 'baseline', 'first-baseline', 'last-baseline', 'start', 'end',
+        'self-start', 'self-end', 'flex-start', 'flex-end', 'center', 'safe-start', 'unsafe-start',
+        'safe-end', 'unsafe-end', 'safe-flex-start', 'unsafe-flex-start', 'safe-flex-end',
+        'unsafe-flex-end', 'safe-center', 'unsafe-center', 'safe-self-start', 'unsafe-self-start',
+        'safe-self-end', 'unsafe-self-end',
+      ],
+      content: [
+        'normal', 'stretch', 'baseline', 'first-baseline', 'last-baseline', 'start', 'end',
+        'flex-start', 'flex-end', 'center', 'space-between', 'space-around', 'space-evenly',
+        'safe-start', 'unsafe-start', 'safe-end', 'unsafe-end', 'safe-flex-start',
+        'unsafe-flex-start', 'safe-flex-end', 'unsafe-flex-end', 'safe-center', 'unsafe-center',
+      ],
+      self: [
+        'auto', 'stretch', 'start', 'end', 'self-start', 'self-end', 'flex-start', 'flex-end',
+        'center', 'baseline', 'safe-start', 'unsafe-start', 'safe-end', 'unsafe-end',
+        'safe-self-start', 'unsafe-self-start', 'safe-self-end', 'unsafe-self-end',
+        'safe-flex-start', 'unsafe-flex-start', 'safe-flex-end', 'unsafe-flex-end', 'safe-center',
+        'unsafe-center',
+      ],
+      gap: ['0', '4', '8', '12', '16', '24', '32'],
+      grow: ['0', '1', '2', '3', '4'],
+      shrink: ['0', '1', '2', '3', '4'],
+      basis: ['auto', '0', '25%', '33.33%', '50%', '66.67%', '75%', '100%'],
+      order: ['-3', '-2', '-1', '0', '1', '2', '3'],
+      mobile: ['stack', 'preserve'],
+    }
+
+    for (const [name, allowedValues] of Object.entries(values)) {
+      for (const value of allowedValues) {
+        expect(containerTesting.parseFlexOptions(`${name}=${value}`), `${name}=${value}`).not.toBeNull()
+      }
+    }
+  })
+
+  it('supports nested Flex containers as automatic parent items', async () => {
+    const doc = parse(await render([
+      ':::: flex direction=row gap=16',
+      '::: flex direction=column grow=1 basis=50%',
+      'Outer item heading.',
+      '::::: flex direction=row gap=8',
+      'Nested item.',
+      ':::::',
+      ':::',
+      '::::',
+    ].join('\n')))
+    const outer = doc.querySelector<HTMLElement>('.nuvyn-flex')
+    const nested = outer?.querySelector<HTMLElement>('.nuvyn-flex')
+
+    expect(doc.querySelectorAll('.nuvyn-flex')).toHaveLength(3)
+    expect(doc.querySelectorAll('.nuvyn-flex-item')).toHaveLength(3)
+    expect(nested?.classList.contains('nuvyn-flex-direction-column')).toBe(true)
+    expect(nested?.parentElement?.classList.contains('nuvyn-flex-item-grow-1')).toBe(true)
+    expect(nested?.querySelector('p')?.textContent).toBe('Outer item heading.')
+    expect(nested?.querySelector(':scope > .nuvyn-flex-scope')).not.toBeNull()
+    expect(nested?.textContent).toContain('Nested item.')
+  })
+
+  it('falls back to ordinary Markdown for invalid, empty, unclosed, or orphaned Flex syntax', async () => {
+    const invalidSources = [
+      ':::: flex\n::::',
+      ':::: flex gap=12 gap=16\nOrdinary text.\n::::',
+      ':::: flex direction=row;display:grid\nText\n::::',
+      ':::: flex gap=calc(100%)\nText\n::::',
+      ':::: flex grow=5\nText\n::::',
+      ':::: flex basis=calc(100%)\nText\n::::',
+      ':::: flex-item basis=50%\nText\n::::',
+      ':::: flex\nMissing close.',
+    ]
+
+    for (const source of invalidSources) {
+      const doc = parse(await render(source))
+      expect(doc.querySelector('.nuvyn-flex')).toBeNull()
+      expect(doc.querySelector('.nuvyn-flex-item')).toBeNull()
+      expect(doc.body.textContent?.trim()).not.toBe('')
+    }
+  })
+
+  it('keeps Flex classes parser-owned and isolates provenance across concurrent renders', async () => {
+    const flexSource = [
+      ':::: flex direction=row',
+      '::: flex grow=1 basis=50%',
+      'Trusted layout.',
+      ':::',
+      '::::',
+    ].join('\n')
+    const rawSource = [
+      '<div class="nuvyn-flex nuvyn-flex-direction-row" data-nuvyn-flex-provenance="forged" style="display:flex" onclick="alert(1)">',
+      'Untrusted layout.</div>',
+      '<svg><rect width="1" height="1"></rect></svg>',
+    ].join('\n')
+    const [trustedHtml, rawHtml] = await Promise.all([render(flexSource), render(rawSource)])
+    const trusted = parse(trustedHtml)
+    const raw = parse(rawHtml)
+
+    expect(trusted.querySelectorAll('.nuvyn-flex')).toHaveLength(2)
+    expect(trusted.querySelectorAll('.nuvyn-flex-item')).toHaveLength(2)
+    expect(raw.querySelector('.nuvyn-flex')).toBeNull()
+    expect(raw.querySelector('[data-nuvyn-flex-provenance]')).toBeNull()
+    expect(raw.querySelector('[style], [onclick], svg')).toBeNull()
+    expect(raw.body.textContent).toContain('Untrusted layout.')
   })
 
   it('does not treat container-looking lines inside fenced code as delimiters', async () => {

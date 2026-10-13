@@ -1,7 +1,12 @@
 # Nuvyn Note Image Row
 
-**Status:** Implemented (V1)
+**Status:** Superseded by the unified Flex container (2026-10-13)
 **Scope:** Markdown rendering and PDF export for ordinary Notes
+
+> Historical design record only. The `image-row` parser and styles have been
+> removed. A check of the current `src/content` vault found no stored-note
+> usage. New layouts use the single `flex` syntax documented in
+> `note-flex-container-prd.md`.
 
 ## Goal
 

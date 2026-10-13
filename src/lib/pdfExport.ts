@@ -131,7 +131,6 @@ const PDF_DOWNLOAD_STYLES = `
 .pdf-document .article li,
 .pdf-document .article .table-scroll,
 .pdf-document .article .nuvyn-code-group-pdf-item,
-.pdf-document .article .nuvyn-image-row,
 .pdf-document .article img,
 .pdf-document .article .markmap-widget,
 .pdf-document .article .mermaid-widget-host {
@@ -426,34 +425,185 @@ const PDF_DOWNLOAD_STYLES = `
   height: auto !important;
 }
 
-.pdf-document .article .nuvyn-image-row {
-  display: grid !important;
-  grid-template-columns: repeat(auto-fit, minmax(min(100%, 16rem), 1fr)) !important;
-  align-items: start !important;
-  gap: 0.75rem !important;
+/* Flex is rendered from parser-owned allowlisted classes, but PDF is a
+   separate document and cannot depend on the live Reader stylesheet. Keep
+   the authored layout while allowing long items to flow across pages. */
+.pdf-document .article .nuvyn-flex-scope {
+  display: block !important;
+  width: 100% !important;
+  min-width: 0 !important;
+  max-width: 100% !important;
+  overflow: visible !important;
+  container-type: normal !important;
+}
+.pdf-document .article .nuvyn-flex-scope-mobile-preserve {
+  overflow: visible !important;
+}
+.pdf-document .article .nuvyn-flex {
+  display: flex !important;
+  box-sizing: border-box !important;
+  width: 100% !important;
   min-width: 0 !important;
   max-width: 100% !important;
   margin: 1em 0 !important;
-  break-inside: avoid;
-  page-break-inside: avoid;
+  flex-direction: row;
+  flex-wrap: wrap;
+  justify-content: flex-start;
+  align-items: stretch;
+  align-content: stretch;
+  gap: 16px;
+  break-inside: auto;
+  page-break-inside: auto;
 }
-
-.pdf-document .article .nuvyn-image-row > p {
-  display: flex !important;
-  justify-content: center !important;
+.pdf-document .article .nuvyn-flex-direction-row { flex-direction: row; }
+.pdf-document .article .nuvyn-flex-direction-row-reverse { flex-direction: row-reverse; }
+.pdf-document .article .nuvyn-flex-direction-column { flex-direction: column; }
+.pdf-document .article .nuvyn-flex-direction-column-reverse { flex-direction: column-reverse; }
+.pdf-document .article .nuvyn-flex-wrap-nowrap { flex-wrap: nowrap; }
+.pdf-document .article .nuvyn-flex-wrap-wrap { flex-wrap: wrap; }
+.pdf-document .article .nuvyn-flex-wrap-wrap-reverse { flex-wrap: wrap-reverse; }
+.pdf-document .article .nuvyn-flex-justify-normal { justify-content: normal; }
+.pdf-document .article .nuvyn-flex-justify-start { justify-content: start; }
+.pdf-document .article .nuvyn-flex-justify-end { justify-content: end; }
+.pdf-document .article .nuvyn-flex-justify-flex-start { justify-content: flex-start; }
+.pdf-document .article .nuvyn-flex-justify-flex-end { justify-content: flex-end; }
+.pdf-document .article .nuvyn-flex-justify-center { justify-content: center; }
+.pdf-document .article .nuvyn-flex-justify-left { justify-content: left; }
+.pdf-document .article .nuvyn-flex-justify-right { justify-content: right; }
+.pdf-document .article .nuvyn-flex-justify-stretch { justify-content: stretch; }
+.pdf-document .article .nuvyn-flex-justify-space-between { justify-content: space-between; }
+.pdf-document .article .nuvyn-flex-justify-space-around { justify-content: space-around; }
+.pdf-document .article .nuvyn-flex-justify-space-evenly { justify-content: space-evenly; }
+.pdf-document .article .nuvyn-flex-justify-safe-start { justify-content: safe start; }
+.pdf-document .article .nuvyn-flex-justify-unsafe-start { justify-content: unsafe start; }
+.pdf-document .article .nuvyn-flex-justify-safe-end { justify-content: safe end; }
+.pdf-document .article .nuvyn-flex-justify-unsafe-end { justify-content: unsafe end; }
+.pdf-document .article .nuvyn-flex-justify-safe-flex-start { justify-content: safe flex-start; }
+.pdf-document .article .nuvyn-flex-justify-unsafe-flex-start { justify-content: unsafe flex-start; }
+.pdf-document .article .nuvyn-flex-justify-safe-flex-end { justify-content: safe flex-end; }
+.pdf-document .article .nuvyn-flex-justify-unsafe-flex-end { justify-content: unsafe flex-end; }
+.pdf-document .article .nuvyn-flex-justify-safe-center { justify-content: safe center; }
+.pdf-document .article .nuvyn-flex-justify-unsafe-center { justify-content: unsafe center; }
+.pdf-document .article .nuvyn-flex-items-normal { align-items: normal; }
+.pdf-document .article .nuvyn-flex-items-stretch { align-items: stretch; }
+.pdf-document .article .nuvyn-flex-items-baseline { align-items: baseline; }
+.pdf-document .article .nuvyn-flex-items-first-baseline { align-items: first baseline; }
+.pdf-document .article .nuvyn-flex-items-last-baseline { align-items: last baseline; }
+.pdf-document .article .nuvyn-flex-items-start { align-items: start; }
+.pdf-document .article .nuvyn-flex-items-end { align-items: end; }
+.pdf-document .article .nuvyn-flex-items-self-start { align-items: self-start; }
+.pdf-document .article .nuvyn-flex-items-self-end { align-items: self-end; }
+.pdf-document .article .nuvyn-flex-items-flex-start { align-items: flex-start; }
+.pdf-document .article .nuvyn-flex-items-flex-end { align-items: flex-end; }
+.pdf-document .article .nuvyn-flex-items-center { align-items: center; }
+.pdf-document .article .nuvyn-flex-items-safe-start { align-items: safe start; }
+.pdf-document .article .nuvyn-flex-items-unsafe-start { align-items: unsafe start; }
+.pdf-document .article .nuvyn-flex-items-safe-end { align-items: safe end; }
+.pdf-document .article .nuvyn-flex-items-unsafe-end { align-items: unsafe end; }
+.pdf-document .article .nuvyn-flex-items-safe-flex-start { align-items: safe flex-start; }
+.pdf-document .article .nuvyn-flex-items-unsafe-flex-start { align-items: unsafe flex-start; }
+.pdf-document .article .nuvyn-flex-items-safe-flex-end { align-items: safe flex-end; }
+.pdf-document .article .nuvyn-flex-items-unsafe-flex-end { align-items: unsafe flex-end; }
+.pdf-document .article .nuvyn-flex-items-safe-center { align-items: safe center; }
+.pdf-document .article .nuvyn-flex-items-unsafe-center { align-items: unsafe center; }
+.pdf-document .article .nuvyn-flex-items-safe-self-start { align-items: safe self-start; }
+.pdf-document .article .nuvyn-flex-items-unsafe-self-start { align-items: unsafe self-start; }
+.pdf-document .article .nuvyn-flex-items-safe-self-end { align-items: safe self-end; }
+.pdf-document .article .nuvyn-flex-items-unsafe-self-end { align-items: unsafe self-end; }
+.pdf-document .article .nuvyn-flex-content-normal { align-content: normal; }
+.pdf-document .article .nuvyn-flex-content-stretch { align-content: stretch; }
+.pdf-document .article .nuvyn-flex-content-baseline { align-content: baseline; }
+.pdf-document .article .nuvyn-flex-content-first-baseline { align-content: first baseline; }
+.pdf-document .article .nuvyn-flex-content-last-baseline { align-content: last baseline; }
+.pdf-document .article .nuvyn-flex-content-start { align-content: start; }
+.pdf-document .article .nuvyn-flex-content-end { align-content: end; }
+.pdf-document .article .nuvyn-flex-content-flex-start { align-content: flex-start; }
+.pdf-document .article .nuvyn-flex-content-flex-end { align-content: flex-end; }
+.pdf-document .article .nuvyn-flex-content-center { align-content: center; }
+.pdf-document .article .nuvyn-flex-content-space-between { align-content: space-between; }
+.pdf-document .article .nuvyn-flex-content-space-around { align-content: space-around; }
+.pdf-document .article .nuvyn-flex-content-space-evenly { align-content: space-evenly; }
+.pdf-document .article .nuvyn-flex-content-safe-start { align-content: safe start; }
+.pdf-document .article .nuvyn-flex-content-unsafe-start { align-content: unsafe start; }
+.pdf-document .article .nuvyn-flex-content-safe-end { align-content: safe end; }
+.pdf-document .article .nuvyn-flex-content-unsafe-end { align-content: unsafe end; }
+.pdf-document .article .nuvyn-flex-content-safe-flex-start { align-content: safe flex-start; }
+.pdf-document .article .nuvyn-flex-content-unsafe-flex-start { align-content: unsafe flex-start; }
+.pdf-document .article .nuvyn-flex-content-safe-flex-end { align-content: safe flex-end; }
+.pdf-document .article .nuvyn-flex-content-unsafe-flex-end { align-content: unsafe flex-end; }
+.pdf-document .article .nuvyn-flex-content-safe-center { align-content: safe center; }
+.pdf-document .article .nuvyn-flex-content-unsafe-center { align-content: unsafe center; }
+.pdf-document .article .nuvyn-flex-gap-0 { gap: 0; }
+.pdf-document .article .nuvyn-flex-gap-4 { gap: 4px; }
+.pdf-document .article .nuvyn-flex-gap-8 { gap: 8px; }
+.pdf-document .article .nuvyn-flex-gap-12 { gap: 12px; }
+.pdf-document .article .nuvyn-flex-gap-16 { gap: 16px; }
+.pdf-document .article .nuvyn-flex-gap-24 { gap: 24px; }
+.pdf-document .article .nuvyn-flex-gap-32 { gap: 32px; }
+.pdf-document .article .nuvyn-flex-item {
+  box-sizing: border-box !important;
   min-width: 0 !important;
-  margin: 0 !important;
+  max-width: 100% !important;
+  flex-grow: 0;
+  flex-shrink: 1;
+  flex-basis: auto;
+  align-self: auto;
+  order: 0;
   break-inside: avoid;
   page-break-inside: avoid;
 }
-
-.pdf-document .article .nuvyn-image-row img {
-  display: block !important;
-  width: auto !important;
+.pdf-document .article .nuvyn-flex > *:not(.nuvyn-flex-item) {
+  box-sizing: border-box !important;
+  min-width: 0 !important;
   max-width: 100% !important;
-  height: auto !important;
   margin: 0 !important;
 }
+.pdf-document .article .nuvyn-flex-scope > .nuvyn-flex { margin: 0 !important; }
+.pdf-document .article .nuvyn-flex-item-grow-0 { flex-grow: 0; }
+.pdf-document .article .nuvyn-flex-item-grow-1 { flex-grow: 1; }
+.pdf-document .article .nuvyn-flex-item-grow-2 { flex-grow: 2; }
+.pdf-document .article .nuvyn-flex-item-grow-3 { flex-grow: 3; }
+.pdf-document .article .nuvyn-flex-item-grow-4 { flex-grow: 4; }
+.pdf-document .article .nuvyn-flex-item-shrink-0 { flex-shrink: 0; }
+.pdf-document .article .nuvyn-flex-item-shrink-1 { flex-shrink: 1; }
+.pdf-document .article .nuvyn-flex-item-shrink-2 { flex-shrink: 2; }
+.pdf-document .article .nuvyn-flex-item-shrink-3 { flex-shrink: 3; }
+.pdf-document .article .nuvyn-flex-item-shrink-4 { flex-shrink: 4; }
+.pdf-document .article .nuvyn-flex-item-basis-auto { flex-basis: auto; }
+.pdf-document .article .nuvyn-flex-item-basis-0 { flex-basis: 0; }
+.pdf-document .article .nuvyn-flex-item-basis-25 { flex-basis: 25%; }
+.pdf-document .article .nuvyn-flex-item-basis-33-33 { flex-basis: 33.33%; }
+.pdf-document .article .nuvyn-flex-item-basis-50 { flex-basis: 50%; }
+.pdf-document .article .nuvyn-flex-item-basis-66-67 { flex-basis: 66.67%; }
+.pdf-document .article .nuvyn-flex-item-basis-75 { flex-basis: 75%; }
+.pdf-document .article .nuvyn-flex-item-basis-100 { flex-basis: 100%; }
+.pdf-document .article .nuvyn-flex-item-self-auto { align-self: auto; }
+.pdf-document .article .nuvyn-flex-item-self-stretch { align-self: stretch; }
+.pdf-document .article .nuvyn-flex-item-self-flex-start { align-self: flex-start; }
+.pdf-document .article .nuvyn-flex-item-self-flex-end { align-self: flex-end; }
+.pdf-document .article .nuvyn-flex-item-self-center { align-self: center; }
+.pdf-document .article .nuvyn-flex-item-self-baseline { align-self: baseline; }
+.pdf-document .article .nuvyn-flex-item-self-safe-start { align-self: safe start; }
+.pdf-document .article .nuvyn-flex-item-self-unsafe-start { align-self: unsafe start; }
+.pdf-document .article .nuvyn-flex-item-self-safe-end { align-self: safe end; }
+.pdf-document .article .nuvyn-flex-item-self-unsafe-end { align-self: unsafe end; }
+.pdf-document .article .nuvyn-flex-item-self-safe-self-start { align-self: safe self-start; }
+.pdf-document .article .nuvyn-flex-item-self-unsafe-self-start { align-self: unsafe self-start; }
+.pdf-document .article .nuvyn-flex-item-self-safe-self-end { align-self: safe self-end; }
+.pdf-document .article .nuvyn-flex-item-self-unsafe-self-end { align-self: unsafe self-end; }
+.pdf-document .article .nuvyn-flex-item-self-safe-flex-start { align-self: safe flex-start; }
+.pdf-document .article .nuvyn-flex-item-self-unsafe-flex-start { align-self: unsafe flex-start; }
+.pdf-document .article .nuvyn-flex-item-self-safe-flex-end { align-self: safe flex-end; }
+.pdf-document .article .nuvyn-flex-item-self-unsafe-flex-end { align-self: unsafe flex-end; }
+.pdf-document .article .nuvyn-flex-item-self-safe-center { align-self: safe center; }
+.pdf-document .article .nuvyn-flex-item-self-unsafe-center { align-self: unsafe center; }
+.pdf-document .article .nuvyn-flex-item-order--3 { order: -3; }
+.pdf-document .article .nuvyn-flex-item-order--2 { order: -2; }
+.pdf-document .article .nuvyn-flex-item-order--1 { order: -1; }
+.pdf-document .article .nuvyn-flex-item-order-0 { order: 0; }
+.pdf-document .article .nuvyn-flex-item-order-1 { order: 1; }
+.pdf-document .article .nuvyn-flex-item-order-2 { order: 2; }
+.pdf-document .article .nuvyn-flex-item-order-3 { order: 3; }
 
 /* Mermaid is interactive in the reader: the live widget has a fixed
    height, svg-pan-zoom transforms, and a hover toolbar. Those rules are
@@ -771,7 +921,8 @@ const PDF_LAYOUT_BLOCK_SELECTOR = [
   '.article .markmap-widget-host',
   '.article .pdf-markmap',
   '.article .nuvyn-code-group-pdf-item',
-  '.article .nuvyn-image-row',
+  '.article .nuvyn-flex',
+  '.article .nuvyn-flex-item',
   '.article .pdf-heading-group',
 ].join(', ')
 

@@ -1419,12 +1419,16 @@ describe('markdown anchors, links, and images', () => {
     const marked = `<a class="nuvyn-external-link" ${EXTERNAL_LINK_PROVENANCE_ATTR}="token-a" href="https://example.com" target="_blank" rel="noopener noreferrer">A</a>`
     const sanitizedA = createMarkdownSanitizer('token-a')(marked)
     const sanitizedB = createMarkdownSanitizer('token-b')(marked)
+    const forgedFlex = createMarkdownSanitizer('token-a')(
+      '<div class="nuvyn-flex nuvyn-flex-direction-row" data-nuvyn-flex-provenance="token-a">Not trusted</div>',
+    )
 
     expect(sanitizedA).toContain('target="_blank"')
     expect(sanitizedA).toContain('rel="noopener noreferrer"')
     expect(sanitizedB).not.toContain('target="_blank"')
     expect(sanitizedA).not.toContain(EXTERNAL_LINK_PROVENANCE_ATTR)
     expect(sanitizedB).not.toContain(EXTERNAL_LINK_PROVENANCE_ATTR)
+    expect(forgedFlex).not.toContain('nuvyn-flex')
 
     const [htmlA, htmlB] = await Promise.all([
       render('[A](https://a.example)'),
