@@ -6,6 +6,9 @@ import {
   MAX_INCLUDE_BYTES,
   MAX_EXPANDED_MARKDOWN_BYTES,
   MAX_SNIPPET_BYTES,
+  imageMimeTypeForPath,
+  isAllowedResourcePath,
+  markdownResourceImageUrl,
   parseMarkdownResourceDirective,
   parseResourceRanges,
   resolveLogicalResourceReference,
@@ -36,6 +39,11 @@ describe('Markdown resource logical resolution and expansion', () => {
     expect(resolveLogicalResourceReference('guides/index.md', 'C:\\secret.ts')).toBeNull()
     expect(resolveLogicalResourceReference('guides/index.md', 'https://example.test/x.ts')).toBeNull()
     expect(resolveLogicalResourceReference('guides/index.md', 'file:///etc/passwd')).toBeNull()
+    const svgPath = 'attachments/images/550e8400-e29b-41d4-a716-446655440000.svg'
+    expect(isAllowedResourcePath('image', svgPath)).toBe(true)
+    expect(imageMimeTypeForPath(svgPath)).toBe('image/svg+xml')
+    expect(markdownResourceImageUrl(undefined, `@/${svgPath}`))
+      .toBe(`/api/markdown-resources?kind=image&path=${encodeURIComponent(svgPath)}`)
   })
 
   it('parses bounded inclusive ranges including an open end', () => {

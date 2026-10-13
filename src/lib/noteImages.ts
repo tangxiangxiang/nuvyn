@@ -1,8 +1,14 @@
 import { authFetch } from './auth-session'
 import {
   detectNoteImageFormat,
+  isCompatibleNoteSvgMimeType,
+  isNoteSvgMimeType,
+  normalizeNoteImageMimeType,
   NOTE_IMAGE_FORMATS,
+  NOTE_SVG_FORMAT,
+  NOTE_SVG_MAX_BYTES,
   NOTE_IMAGE_UPLOAD_MAX_BYTES,
+  type NoteImageFormat,
   type NoteImageUploadResult,
 } from '../../shared/noteImageProtocol'
 
@@ -41,25 +47,32 @@ function extensionOf(name: string): string {
   return dot >= 0 ? name.slice(dot).toLowerCase() : ''
 }
 
-async function validateFile(file: File): Promise<void> {
+async function validateFile(file: File): Promise<NoteImageFormat> {
   if (file.size > NOTE_IMAGE_UPLOAD_MAX_BYTES) throw new NoteImageError('too-large')
   if (file.size === 0) throw new NoteImageError('invalid')
+  const extension = extensionOf(file.name)
+  const declaredType = normalizeNoteImageMimeType(file.type)
+  if (extension === NOTE_SVG_FORMAT.extension || isNoteSvgMimeType(declaredType)) {
+    if (file.size > NOTE_SVG_MAX_BYTES) throw new NoteImageError('too-large')
+    if (!isCompatibleNoteSvgMimeType(declaredType)) throw new NoteImageError('invalid')
+    if (extension && extension !== NOTE_SVG_FORMAT.extension) throw new NoteImageError('invalid')
+    return NOTE_SVG_FORMAT
+  }
   const bytes = new Uint8Array(await file.slice(0, 16).arrayBuffer())
   const format = detectNoteImageFormat(bytes)
   if (!format) throw new NoteImageError('unsupported')
 
-  const declaredType = file.type.trim().toLowerCase()
   if (declaredType && declaredType !== 'application/octet-stream' && declaredType !== format.mimeType) {
     throw new NoteImageError('invalid')
   }
-  const extension = extensionOf(file.name)
   if (extension && !NOTE_IMAGE_FORMATS.some((candidate) => (
     candidate.extension === extension && candidate.mimeType === format.mimeType
   ))) throw new NoteImageError('invalid')
+  return format
 }
 
 async function performUpload(file: File, signal?: AbortSignal): Promise<NoteImageUploadResult> {
-  await validateFile(file)
+  const inputFormat = await validateFile(file)
   const form = new FormData()
   form.append('image', file, file.name || 'pasted-image')
 
@@ -90,13 +103,18 @@ async function performUpload(file: File, signal?: AbortSignal): Promise<NoteImag
   } catch {
     throw new NoteImageError('unknown')
   }
-  const expectedPath = /^attachments\/images\/[0-9a-f-]{36}\.(?:png|jpg|gif|webp|avif)$/iu
+  const expectedPath = /^attachments\/images\/[0-9a-f-]{36}\.(?:png|jpe?g|gif|webp|avif|svg)$/iu
+  const pathFormat = typeof result?.path === 'string'
+    ? NOTE_IMAGE_FORMATS.find((format) => result.path.endsWith(format.extension))
+    : undefined
   if (!result || typeof result !== 'object'
     || typeof result.id !== 'string'
     || typeof result.path !== 'string'
     || !expectedPath.test(result.path)
     || result.markdownUrl !== `@/${result.path}`
-    || !NOTE_IMAGE_FORMATS.some((format) => format.mimeType === result.mimeType)
+    || !pathFormat
+    || pathFormat.mimeType !== result.mimeType
+    || result.mimeType !== inputFormat.mimeType
     || !Number.isSafeInteger(result.byteSize)
     || result.byteSize < 1
     || result.byteSize > NOTE_IMAGE_UPLOAD_MAX_BYTES) {

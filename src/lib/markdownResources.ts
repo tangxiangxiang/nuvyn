@@ -53,6 +53,7 @@ const IMAGE_MIME_BY_EXTENSION: Record<string, string> = {
   '.gif': 'image/gif',
   '.webp': 'image/webp',
   '.avif': 'image/avif',
+  '.svg': 'image/svg+xml',
 }
 
 const RESOURCE_SEGMENT_RE = /^[A-Za-z0-9][A-Za-z0-9._-]*$/u

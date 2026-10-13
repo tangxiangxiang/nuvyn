@@ -4,9 +4,14 @@ import path from 'node:path'
 import { Hono } from 'hono'
 import {
   detectNoteImageFormat,
+  isCompatibleNoteSvgMimeType,
+  isNoteSvgMimeType,
+  normalizeNoteImageMimeType,
   NOTE_IMAGE_FORMATS,
   NOTE_IMAGE_UPLOAD_MAX_BYTES,
   NOTE_IMAGE_UPLOAD_MAX_MULTIPART_OVERHEAD,
+  NOTE_SVG_FORMAT,
+  type NoteImageFormat,
   type NoteImageUploadResult,
 } from '../../shared/noteImageProtocol.js'
 import { ApiRequestError, apiErrorResponse } from '../apiErrors.js'
@@ -14,6 +19,7 @@ import { readBoundedBody } from '../apiBody.js'
 import { invalidateDefaultAttachmentCatalog } from '../attachments/routes.js'
 import { CONTENT_DIR, resolveSafeRelativePathDetailed } from '../paths.js'
 import { writeCreateOnlyDurableFile } from '../durableCreateOnlyFile.js'
+import { NoteSvgValidationError, sanitizeNoteSvg } from '../noteSvg.js'
 
 const IMAGE_DIRECTORY = path.join('attachments', 'images')
 const MAX_UPLOADS_IN_FLIGHT = 2
@@ -41,9 +47,12 @@ function multipartContentType(value: string | null): value is string {
   return value !== null && /^multipart\/form-data\s*;\s*boundary=(?:"[^"]+"|[^;\s]+)(?:\s*;.*)?$/iu.test(value)
 }
 
-function validateDeclaredType(file: File, format: typeof NOTE_IMAGE_FORMATS[number]): void {
-  const declaredMime = file.type.trim().toLowerCase()
-  if (declaredMime && declaredMime !== 'application/octet-stream' && declaredMime !== format.mimeType) {
+function validateDeclaredType(file: File, format: NoteImageFormat): void {
+  const declaredMime = normalizeNoteImageMimeType(file.type)
+  const compatibleSvgMime = format.mimeType === NOTE_SVG_FORMAT.mimeType
+    && isCompatibleNoteSvgMimeType(declaredMime)
+  if (declaredMime && declaredMime !== 'application/octet-stream'
+    && declaredMime !== format.mimeType && !compatibleSvgMime) {
     throw new ApiRequestError('NOTE_IMAGE_INVALID', 415, 'Image content does not match its declared type.')
   }
   const extension = path.extname(file.name).toLowerCase()
@@ -53,7 +62,7 @@ function validateDeclaredType(file: File, format: typeof NOTE_IMAGE_FORMATS[numb
   }
 }
 
-async function parseImage(request: Request): Promise<{ file: File; bytes: Buffer }> {
+async function parseImage(request: Request): Promise<{ file: File; bytes: Buffer; format: NoteImageFormat }> {
   const contentType = request.headers.get('content-type')
   if (!multipartContentType(contentType)) {
     throw new ApiRequestError('NOTE_IMAGE_MULTIPART_REQUIRED', 415, 'An image file is required.')
@@ -83,10 +92,34 @@ async function parseImage(request: Request): Promise<{ file: File; bytes: Buffer
   }
 
   const bytes = Buffer.from(await file.arrayBuffer())
-  const format = detectNoteImageFormat(bytes)
-  if (!format) throw new ApiRequestError('NOTE_IMAGE_INVALID', 415, 'Image content is invalid or unsupported.')
+  const declaredMime = normalizeNoteImageMimeType(file.type)
+  const extension = path.extname(file.name).toLowerCase()
+  const svgDeclared = isNoteSvgMimeType(declaredMime) || extension === NOTE_SVG_FORMAT.extension
+  let format: NoteImageFormat
+  let safeBytes: Buffer<ArrayBufferLike> = bytes
+  if (svgDeclared) {
+    if (!isCompatibleNoteSvgMimeType(declaredMime)) {
+      throw new ApiRequestError('NOTE_IMAGE_INVALID', 415, 'Image content does not match its declared type.')
+    }
+    if (extension && extension !== NOTE_SVG_FORMAT.extension) {
+      throw new ApiRequestError('NOTE_IMAGE_INVALID', 415, 'Image content does not match its file extension.')
+    }
+    try {
+      safeBytes = sanitizeNoteSvg(bytes)
+    } catch (error) {
+      if (error instanceof NoteSvgValidationError && error.code === 'too-large') {
+        throw new ApiRequestError('NOTE_IMAGE_TOO_LARGE', 413, 'SVG image exceeds its safe size limit.')
+      }
+      throw new ApiRequestError('NOTE_IMAGE_INVALID', 415, 'SVG image content is invalid or unsupported.')
+    }
+    format = NOTE_SVG_FORMAT
+  } else {
+    const rasterFormat = detectNoteImageFormat(bytes)
+    if (!rasterFormat) throw new ApiRequestError('NOTE_IMAGE_INVALID', 415, 'Image content is invalid or unsupported.')
+    format = rasterFormat
+  }
   validateDeclaredType(file, format)
-  return { file, bytes }
+  return { file, bytes: safeBytes, format }
 }
 
 routes.post('/api/note/images', async (c) => {
@@ -99,9 +132,7 @@ routes.post('/api/note/images', async (c) => {
 
   activeUploads += 1
   try {
-    const { file, bytes } = await parseImage(c.req.raw)
-    const format = detectNoteImageFormat(bytes)
-    if (!format) throw new ApiRequestError('NOTE_IMAGE_INVALID', 415, 'Image content is invalid or unsupported.')
+    const { bytes, format } = await parseImage(c.req.raw)
 
     await ensureImageDirectory()
     const id = randomUUID()
@@ -117,7 +148,7 @@ routes.post('/api/note/images', async (c) => {
       path: relativePath,
       markdownUrl: `@/${relativePath}`,
       mimeType: format.mimeType,
-      byteSize: file.size,
+      byteSize: bytes.byteLength,
     }
     c.header('Cache-Control', 'no-store')
     return c.json(result, 201)

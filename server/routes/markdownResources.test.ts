@@ -83,6 +83,33 @@ describe('authenticated Markdown resource boundary', () => {
     expect(new Uint8Array(await response.arrayBuffer())).toEqual(new Uint8Array([137, 80, 78, 71]))
   })
 
+  it('sanitizes manually placed SVGs on every read and applies a restrictive direct-navigation policy', async () => {
+    const safeSvg = '<svg xmlns="http://www.w3.org/2000/svg" width="20" height="10"><rect width="20" height="10" fill="#6270ac"/></svg>'
+    const hostileSvg = '<svg xmlns="http://www.w3.org/2000/svg"><script>window.__svgExecuted=true</script><rect width="10" height="10"/></svg>'
+    await fs.writeFile(path.join(tempRoot, 'manual.svg'), safeSvg)
+    await fs.writeFile(path.join(tempRoot, 'hostile.svg'), hostileSvg)
+
+    const safeResponse = await app.fetch(authenticatedRequest(
+      auth,
+      '/api/markdown-resources?kind=image&path=manual.svg',
+    ))
+    expect(safeResponse.status).toBe(200)
+    expect(safeResponse.headers.get('content-type')).toBe('image/svg+xml')
+    expect(safeResponse.headers.get('cache-control')).toBe('no-store')
+    expect(safeResponse.headers.get('x-content-type-options')).toBe('nosniff')
+    expect(safeResponse.headers.get('cross-origin-resource-policy')).toBe('same-origin')
+    expect(safeResponse.headers.get('content-security-policy')).toContain("script-src 'none'")
+    expect(safeResponse.headers.get('content-security-policy')).toContain('sandbox')
+    expect((await safeResponse.text()).match(/<rect\b/gu)).toHaveLength(1)
+
+    const hostileResponse = await app.fetch(authenticatedRequest(
+      auth,
+      '/api/markdown-resources?kind=image&path=hostile.svg',
+    ))
+    expect(hostileResponse.status).toBe(415)
+    expect(await hostileResponse.json()).toMatchObject({ code: 'resource-invalid-svg' })
+  })
+
   it('rejects symlinked resources without disclosing the target', async () => {
     await fs.writeFile(path.join(tempRoot, 'real.md'), 'secret', 'utf8')
     await fs.symlink(path.join(tempRoot, 'real.md'), path.join(tempRoot, 'link.md'))

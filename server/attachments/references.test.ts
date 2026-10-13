@@ -112,6 +112,26 @@ describe('Attachment reference index', () => {
     ]))
   })
 
+  it('traces SVG Note images as ordinary Vault image attachments', async () => {
+    const svgPath = 'attachments/images/550e8400-e29b-41d4-a716-446655440000.svg'
+    await fs.mkdir(path.join(root, 'attachments', 'images'), { recursive: true })
+    await fs.writeFile(path.join(root, ...svgPath.split('/')), '<svg xmlns="http://www.w3.org/2000/svg"/>')
+    await writeNote('inbox/svg-reference', `![Architecture](@/${svgPath})`)
+
+    const index = new AttachmentReferenceIndex(db)
+    await index.refresh()
+    const result = await index.query({ kind: 'vault-file', path: svgPath })
+
+    expect(result.currentFinding).toBe('in-use')
+    expect(result.referenceCount).toBe(1)
+    expect(result.references).toEqual([expect.objectContaining({
+      owner: expect.objectContaining({ kind: 'note', id: 'inbox/svg-reference' }),
+      kind: 'note-image',
+      relation: 'direct',
+      target: { kind: 'vault-file', id: svgPath },
+    })])
+  })
+
   it('records supported snippet dependencies and marks unresolved references as incomplete', async () => {
     await fs.mkdir(path.join(root, 'inbox', 'examples'), { recursive: true })
     await fs.writeFile(path.join(root, 'inbox', 'examples', 'sample.ts'), 'export const sample = true\n')

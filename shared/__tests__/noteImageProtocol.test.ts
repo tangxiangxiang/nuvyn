@@ -1,5 +1,14 @@
 import { describe, expect, it } from 'vitest'
-import { detectNoteImageFormat, NOTE_IMAGE_UPLOAD_MAX_BYTES } from '../noteImageProtocol.js'
+import {
+  detectNoteImageFormat,
+  isCompatibleNoteSvgMimeType,
+  isNoteSvgMimeType,
+  normalizeNoteImageMimeType,
+  NOTE_IMAGE_FORMATS,
+  NOTE_IMAGE_UPLOAD_MAX_BYTES,
+  NOTE_SVG_FORMAT,
+  NOTE_SVG_MAX_BYTES,
+} from '../noteImageProtocol.js'
 
 describe('Note image upload protocol', () => {
   it('recognizes only the supported binary image signatures', () => {
@@ -13,5 +22,16 @@ describe('Note image upload protocol', () => {
 
   it('uses the documented 20 MiB per-image maximum', () => {
     expect(NOTE_IMAGE_UPLOAD_MAX_BYTES).toBe(20 * 1024 * 1024)
+    expect(NOTE_SVG_MAX_BYTES).toBe(8 * 1024 * 1024)
+    expect(NOTE_IMAGE_FORMATS.at(-1)).toEqual(NOTE_SVG_FORMAT)
+  })
+
+  it('normalizes browser SVG MIME aliases without changing the stored canonical MIME type', () => {
+    expect(normalizeNoteImageMimeType(' Image/SVG+XML; charset=utf-8 ')).toBe('image/svg+xml')
+    expect(isNoteSvgMimeType('application/svg+xml')).toBe(true)
+    for (const mimeType of ['image/svg+xml', 'application/svg+xml', 'application/xml', 'text/xml', 'text/plain', 'application/octet-stream', '']) {
+      expect(isCompatibleNoteSvgMimeType(mimeType)).toBe(true)
+    }
+    expect(isCompatibleNoteSvgMimeType('image/png')).toBe(false)
   })
 })

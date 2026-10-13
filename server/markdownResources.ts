@@ -1,7 +1,8 @@
 import path from 'node:path'
 import { TextDecoder } from 'node:util'
-import { NOTE_IMAGE_UPLOAD_MAX_BYTES } from '../shared/noteImageProtocol.js'
+import { NOTE_IMAGE_UPLOAD_MAX_BYTES, NOTE_SVG_MAX_BYTES } from '../shared/noteImageProtocol.js'
 import { CONTENT_DIR, readSafeRelativeFile, SafePathResourceLimitError } from './paths.js'
+import { NoteSvgValidationError, sanitizeNoteSvg } from './noteSvg.js'
 
 export const MAX_SNIPPET_BYTES = 256 * 1024
 export const MAX_INCLUDE_BYTES = 512 * 1024
@@ -35,6 +36,7 @@ export const MARKDOWN_RESOURCE_IMAGE_MIME_BY_EXTENSION: Readonly<Record<string, 
   '.gif': 'image/gif',
   '.webp': 'image/webp',
   '.avif': 'image/avif',
+  '.svg': 'image/svg+xml',
 }
 
 const RESOURCE_SEGMENT_RE = /^[A-Za-z0-9][A-Za-z0-9._-]*$/u
@@ -136,13 +138,29 @@ export async function readMarkdownResource(
     ? MAX_SNIPPET_BYTES
     : kind === 'include'
       ? MAX_INCLUDE_BYTES
-      : MAX_IMAGE_BYTES
+      : extensionOf(resourcePath) === '.svg'
+        ? NOTE_SVG_MAX_BYTES
+        : MAX_IMAGE_BYTES
 
   try {
     const value = await readSafeRelativeFile(CONTENT_DIR, resourcePath, undefined, { maxBytes, signal })
     if (value === null) throw new MarkdownResourceError('resource-unavailable', 404)
     if (typeof value === 'string') throw new MarkdownResourceError('resource-not-binary', 500)
     if (kind === 'image') {
+      const extension = extensionOf(resourcePath)
+      if (extension === '.svg') {
+        try {
+          return {
+            kind,
+            path: resourcePath,
+            content: sanitizeNoteSvg(value),
+            contentType: MARKDOWN_RESOURCE_IMAGE_MIME_BY_EXTENSION[extension] as string,
+          }
+        } catch (error) {
+          const status = error instanceof NoteSvgValidationError && error.code === 'too-large' ? 413 : 415
+          throw new MarkdownResourceError('resource-invalid-svg', status)
+        }
+      }
       return {
         kind,
         path: resourcePath,

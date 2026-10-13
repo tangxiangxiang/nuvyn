@@ -932,7 +932,7 @@ onMounted(() => {
   imageInput = document.createElement('input')
   imageInput.className = 'note-image-file-input'
   imageInput.type = 'file'
-  imageInput.accept = 'image/png,image/jpeg,image/webp,image/gif,image/avif'
+  imageInput.accept = 'image/png,image/jpeg,image/webp,image/gif,image/avif,image/svg+xml,.svg'
   imageInput.multiple = true
   imageInput.addEventListener('change', onImageInputChange)
   imageInput.addEventListener('cancel', onImageInputCancel)

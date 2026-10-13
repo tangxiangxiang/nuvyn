@@ -36,14 +36,20 @@ const PNG = Buffer.concat([
   pngChunk('IEND', Buffer.alloc(0)),
 ])
 const PNG_BASE64 = PNG.toString('base64')
+const SVG = Buffer.from('<?xml version="1.0" standalone="no"?><!DOCTYPE svg PUBLIC "-//W3C//DTD SVG 1.1//EN" "http://www.w3.org/Graphics/SVG/1.1/DTD/svg11.dtd"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 120 60" width="120" height="60"><defs><mask id="crop" maskUnits="userSpaceOnUse" maskContentUnits="userSpaceOnUse"><rect x="0" y="0" width="120" height="60" fill="#fff"/></mask><symbol id="vector"><rect width="120" height="60" fill="#6270ac"/><text x="8" y="36" fill="#fff">Vector works</text></symbol></defs><g mask="url(#crop)"><use href="#vector" width="120" height="60"/></g></svg>')
+const SVG_BASE64 = SVG.toString('base64')
 
-async function dispatchImageDrop(page: import('@playwright/test').Page, name: string): Promise<void> {
+async function dispatchImageDrop(
+  page: import('@playwright/test').Page,
+  name: string,
+  options: { bytes?: string; mimeType?: string } = {},
+): Promise<void> {
   const editor = page.locator('.editor-pane .monaco-editor').first()
   const bounds = await editor.boundingBox()
   expect(bounds).not.toBeNull()
   await editor.evaluate((element, input) => {
     const bytes = Uint8Array.from(atob(input.base64), (character) => character.charCodeAt(0))
-    const file = new File([bytes], input.name, { type: 'image/png' })
+    const file = new File([bytes], input.name, { type: input.mimeType })
     const data = new DataTransfer()
     data.items.add(file)
     element.dispatchEvent(new DragEvent('drop', {
@@ -53,16 +59,23 @@ async function dispatchImageDrop(page: import('@playwright/test').Page, name: st
       clientY: input.y,
       dataTransfer: data,
     }))
-  }, { name, base64: PNG_BASE64, x: bounds!.x + 90, y: bounds!.y + 18 })
+  }, {
+    name,
+    base64: options.bytes ?? PNG_BASE64,
+    mimeType: options.mimeType ?? 'image/png',
+    x: bounds!.x + 90,
+    y: bounds!.y + 18,
+  })
 }
 
 async function dispatchNativeEditContextImagePaste(
   page: import('@playwright/test').Page,
   name = '',
+  options: { bytes?: string; mimeType?: string } = {},
 ): Promise<{ defaultPrevented: boolean; types: string[]; targetClass: string }> {
   return page.locator('.editor-pane .monaco-editor').first().evaluate((editor, input) => {
     const bytes = Uint8Array.from(atob(input.base64), (character) => character.charCodeAt(0))
-    const file = new File([bytes], input.name, { type: 'image/png' })
+    const file = new File([bytes], input.name, { type: input.mimeType })
     const clipboard = new DataTransfer()
     clipboard.items.add(file)
 
@@ -84,7 +97,7 @@ async function dispatchNativeEditContextImagePaste(
       types: Array.from(clipboard.types),
       targetClass: target.className,
     }
-  }, { base64: PNG_BASE64, name })
+  }, { base64: options.bytes ?? PNG_BASE64, mimeType: options.mimeType ?? 'image/png', name })
 }
 
 async function waitForSavedRaw(
@@ -102,10 +115,146 @@ async function waitForSavedRaw(
 }
 
 function imagePathFromMarkdown(raw: string): string {
-  const match = raw.match(/@\/(attachments\/images\/[0-9a-f-]{36}\.(?:png|jpe?g|gif|webp|avif))/iu)
+  const match = raw.match(/@\/(attachments\/images\/[0-9a-f-]{36}\.(?:png|jpe?g|gif|webp|avif|svg))/iu)
   if (!match?.[1]) throw new Error('Saved Note did not contain a generated image reference')
   return match[1]
 }
+
+test('selects, drops, and pastes SVG into Note Markdown, then renders it after reload', async ({ page, request }) => {
+  const runId = randomUUID()
+  const notePath = `inbox/svg-reference-${runId}`
+  const createdPaths: string[] = []
+  const uploadedPaths: string[] = []
+  const vaultRoot = process.env.NUVYN_DRAFT_E2E_VAULT
+  if (!vaultRoot) throw new Error('NUVYN_DRAFT_E2E_VAULT is required for Note image E2E')
+
+  try {
+    await createDoc(request, notePath, 'Keep this paragraph intact.\n', createdPaths)
+    await gotoVaultReady(page)
+    await openDoc(page, notePath)
+    const editor = page.locator('.editor-pane .monaco-editor').first()
+    await editor.locator('.view-lines').click({ position: { x: 35, y: 12 } })
+    await page.keyboard.press('Control+End')
+
+    const pickerResponsePromise = page.waitForResponse((response) => (
+      new URL(response.url()).pathname === '/api/note/images' && response.request().method() === 'POST'
+    ))
+    const chooserPromise = page.waitForEvent('filechooser')
+    await page.getByRole('button', { name: /插入图片|Insert image/ }).click()
+    const chooser = await chooserPromise
+    await chooser.setFiles({ name: 'Architecture.svg', mimeType: 'image/svg+xml', buffer: SVG })
+    const pickerResponse = await pickerResponsePromise
+    expect(pickerResponse.status(), await pickerResponse.text()).toBe(201)
+    await expect(editor.locator('.view-lines')).toContainText('![Architecture](@/attachments/images/')
+
+    await editor.locator('.view-lines').click({ position: { x: 35, y: 12 } })
+    await page.keyboard.press('Control+End')
+    const dropResponsePromise = page.waitForResponse((response) => (
+      new URL(response.url()).pathname === '/api/note/images' && response.request().method() === 'POST'
+    ))
+    // Some operating systems expose locally dragged SVG files with a generic
+    // XML MIME type; the server still validates the actual SVG bytes.
+    await dispatchImageDrop(page, 'Dropped Diagram.svg', { bytes: SVG_BASE64, mimeType: 'application/xml' })
+    const dropResponse = await dropResponsePromise
+    expect(dropResponse.status(), await dropResponse.text()).toBe(201)
+
+    await page.keyboard.press('Control+End')
+    const pasteResponsePromise = page.waitForResponse((response) => (
+      new URL(response.url()).pathname === '/api/note/images' && response.request().method() === 'POST'
+    ))
+    const clipboardEvent = await dispatchNativeEditContextImagePaste(page, 'Clipboard Map.svg', {
+      bytes: SVG_BASE64,
+      mimeType: 'image/svg+xml',
+    })
+    expect(clipboardEvent.types).toEqual(['Files'])
+    expect(clipboardEvent.defaultPrevented).toBe(true)
+    const pasteResponse = await pasteResponsePromise
+    expect(pasteResponse.status(), await pasteResponse.text()).toBe(201)
+
+    const saved = await waitForSavedRaw(request, notePath, 'Clipboard Map')
+    expect(saved).toContain('![Architecture](@/attachments/images/')
+    expect(saved).toContain('![Dropped Diagram](@/attachments/images/')
+    expect(saved).toContain('![Clipboard Map](@/attachments/images/')
+    expect(saved.replace(/!\[[^\]]*\]\(@\/attachments\/images\/[0-9a-f-]{36}\.svg\)/gu, ''))
+      .toContain('Keep this paragraph intact.')
+    uploadedPaths.push(...[...saved.matchAll(/@\/(attachments\/images\/[0-9a-f-]{36}\.svg)/gu)].map((match) => match[1]!))
+    expect(new Set(uploadedPaths).size).toBe(3)
+
+    await page.getByTestId('view-toggle').click()
+    const images = page.locator('.reading-pane img')
+    await expect(images).toHaveCount(3)
+    for (const image of await images.all()) {
+      await expect.poll(() => image.evaluate((element) => (element as HTMLImageElement).naturalWidth)).toBe(120)
+      const dimensions = await image.evaluate((element) => ({
+        width: (element as HTMLImageElement).naturalWidth,
+        height: (element as HTMLImageElement).naturalHeight,
+      }))
+      expect(dimensions.width / dimensions.height).toBe(2)
+    }
+
+    await page.reload()
+    const reloadedImage = page.locator('.reading-pane img').first()
+    await expect(reloadedImage).toBeVisible()
+    await expect.poll(() => reloadedImage.evaluate((element) => (element as HTMLImageElement).naturalWidth)).toBe(120)
+
+  } finally {
+    for (const createdPath of createdPaths) await request.delete(`/api/posts/${createdPath}`).catch(() => {})
+    for (const relativePath of new Set(uploadedPaths)) {
+      if (!relativePath.startsWith('attachments/images/')) continue
+      await fs.rm(path.join(vaultRoot, ...relativePath.split('/')), { force: true })
+    }
+    await request.post('/api/attachments/refresh').catch(() => {})
+    await request.post('/api/attachments/references/refresh').catch(() => {})
+  }
+})
+
+test('Attachment Manager lists referenced SVGs and direct reads reject active content', async ({ page, request }) => {
+  const runId = randomUUID()
+  const notePath = `inbox/svg-manager-${runId}`
+  const safePath = `attachments/images/${runId}.svg`
+  const unsafePath = `attachments/images/manual-${runId}.svg`
+  const createdPaths: string[] = []
+  const vaultRoot = process.env.NUVYN_DRAFT_E2E_VAULT
+  if (!vaultRoot) throw new Error('NUVYN_DRAFT_E2E_VAULT is required for Note image E2E')
+
+  try {
+    await createDoc(request, notePath, `# SVG Manager Reference\n\n![Vector](@/${safePath})\n`, createdPaths)
+    await fs.mkdir(path.dirname(path.join(vaultRoot, safePath)), { recursive: true })
+    await fs.writeFile(path.join(vaultRoot, safePath), SVG)
+    await fs.writeFile(path.join(vaultRoot, unsafePath), '<svg xmlns="http://www.w3.org/2000/svg"><script>window.__nuvynSvgExecuted=true</script><rect width="10" height="10"/></svg>')
+    await request.post('/api/attachments/refresh')
+    await request.post('/api/attachments/references/refresh')
+
+    await gotoVaultReady(page)
+    await openDoc(page, notePath)
+    await page.locator('[data-testid="account-button"]').click()
+    await page.locator('[data-testid="account-settings"]').click()
+    const settings = page.locator('.settings-modal')
+    await settings.getByRole('button', { name: /存储与附件|Storage & attachments/ }).click()
+    await expect(settings.locator('#attachment-manager-title')).toBeVisible()
+    await settings.locator('.attachment-toolbar input').fill(path.posix.basename(safePath))
+    const resource = settings.locator('.attachment-resource-row').filter({ hasText: safePath })
+    await expect(resource).toBeVisible()
+    await resource.click()
+    await expect(settings.locator('.attachment-detail-panel')).toContainText(safePath)
+    await expect(settings.locator('.attachment-reference-row').filter({ hasText: 'SVG Manager Reference' })).toBeVisible()
+
+    const directPage = await page.context().newPage()
+    await directPage.addInitScript(() => { (window as Window & { __nuvynSvgExecuted?: boolean }).__nuvynSvgExecuted = false })
+    const unsafeResponse = await directPage.goto(`/api/markdown-resources?kind=image&path=${encodeURIComponent(unsafePath)}`)
+    expect(unsafeResponse?.status()).toBe(415)
+    await expect(directPage.locator('body')).toContainText('resource-invalid-svg')
+    expect(await directPage.evaluate(() => (window as Window & { __nuvynSvgExecuted?: boolean }).__nuvynSvgExecuted)).toBe(false)
+    await directPage.close()
+  } finally {
+    for (const createdPath of createdPaths) await request.delete(`/api/posts/${createdPath}`).catch(() => {})
+    for (const relativePath of [safePath, unsafePath]) {
+      await fs.rm(path.join(vaultRoot, ...relativePath.split('/')), { force: true })
+    }
+    await request.post('/api/attachments/refresh').catch(() => {})
+    await request.post('/api/attachments/references/refresh').catch(() => {})
+  }
+})
 
 test('selects an image, supports undo/redo, renders after reload, and tracks its Note reference', async ({ page, request }) => {
   const runId = randomUUID()

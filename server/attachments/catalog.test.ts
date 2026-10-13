@@ -95,6 +95,8 @@ describe('Attachment Manager adapters', () => {
     await fs.mkdir(path.join(root, 'diary', '2026-10-12'), { recursive: true })
     await fs.mkdir(path.join(root, '.nuvyn'), { recursive: true })
     await fs.writeFile(path.join(root, 'inbox', 'assets', 'same.png'), Buffer.from([1, 2, 3, 4]))
+    const svg = '<svg xmlns="http://www.w3.org/2000/svg"><circle cx="5" cy="5" r="4"/></svg>'
+    await fs.writeFile(path.join(root, 'inbox', 'assets', 'same.svg'), svg)
     await fs.writeFile(path.join(root, 'inbox', 'assets', 'snippet.ts'), 'const x = 1')
     await fs.writeFile(path.join(root, 'inbox', 'assets', 'main-note.md'), '# not an attachment')
     await fs.writeFile(path.join(root, 'inbox', 'assets', 'cache.tmp'), 'temporary')
@@ -108,9 +110,11 @@ describe('Attachment Manager adapters', () => {
       expect(result.complete).toBe(true)
       expect(result.items.map((item) => item.key)).toEqual([
         { kind: 'vault-file', path: 'inbox/assets/same.png' },
+        { kind: 'vault-file', path: 'inbox/assets/same.svg' },
         { kind: 'vault-file', path: 'inbox/assets/snippet.ts' },
       ])
-      expect(result.items.map((item) => item.byteSize)).toEqual([4, Buffer.byteLength('const x = 1')])
+      expect(result.items.map((item) => item.mimeType)).toEqual(['image/png', 'image/svg+xml', 'text/plain'])
+      expect(result.items.map((item) => item.byteSize)).toEqual([4, Buffer.byteLength(svg), Buffer.byteLength('const x = 1')])
       expect(result.items.every((item) => item.referenceStatus === 'unknown')).toBe(true)
       expect(JSON.stringify(result.items)).not.toContain(root)
       expect(JSON.stringify(result.items)).not.toContain('private')

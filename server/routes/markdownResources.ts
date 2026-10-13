@@ -31,12 +31,20 @@ markdownResourceRoutes.get('/api/markdown-resources', async (c) => {
     c.header('Cache-Control', 'no-store')
     c.header('X-Content-Type-Options', 'nosniff')
     if (result.kind === 'image') {
+      const headers = new Headers({
+        'Cache-Control': 'no-store',
+        'Content-Type': result.contentType,
+        'X-Content-Type-Options': 'nosniff',
+      })
+      if (result.contentType === 'image/svg+xml') {
+        headers.set(
+          'Content-Security-Policy',
+          "default-src 'none'; script-src 'none'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'; img-src data:; font-src data:; style-src 'unsafe-inline'; sandbox",
+        )
+        headers.set('Cross-Origin-Resource-Policy', 'same-origin')
+      }
       return new Response(result.content, {
-        headers: {
-          'Cache-Control': 'no-store',
-          'Content-Type': result.contentType,
-          'X-Content-Type-Options': 'nosniff',
-        },
+        headers,
       })
     }
     return c.json({ kind: result.kind, path: result.path, content: result.content })

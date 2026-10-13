@@ -4,6 +4,12 @@
 
 Nuvyn uses Monaco for Markdown source editing and a separate Read mode for rendered output. There is no split Preview mode. Use the navigation-bar toggle to switch modes.
 
+### Images in Notes
+
+Use the existing **Insert image** control, drag a local image into the editor, or paste a local image file when the clipboard provides one. Nuvyn uploads it to the Vault and inserts a Markdown image reference; PNG, JPEG, WebP, GIF and AVIF keep their existing behavior.
+
+Static SVG files are supported up to 8 MiB. SVG is validated on the server before storage and again when read, so scripts, event handlers, remote resources, animation, arbitrary HTML, and unsupported CSS are rejected. Common static vectors, text, internal gradients/clipping, and bounded Excalidraw WOFF2 fonts and raster embeds are supported. Excalidraw exports containing unsupported features such as SVG filters may be rejected; the file is not silently converted to PNG. Raw inline `<svg>` markup is still not allowed in Markdown.
+
 ## PDF Export
 
 ### Export from File Tree

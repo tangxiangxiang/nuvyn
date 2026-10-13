@@ -5,19 +5,20 @@ const { authFetch } = vi.hoisted(() => ({ authFetch: vi.fn() }))
 vi.mock('../auth-session', () => ({ authFetch }))
 
 const PNG_BYTES = new Uint8Array([137, 80, 78, 71, 13, 10, 26, 10, 0, 0, 0, 0])
+const SVG_BYTES = new TextEncoder().encode('<svg xmlns="http://www.w3.org/2000/svg"/>')
 const UUID = '550e8400-e29b-41d4-a716-446655440000'
 
 function file(name = 'diagram.png', bytes = PNG_BYTES, type = 'image/png'): File {
   return new File([bytes], name, { type })
 }
 
-function successResponse(fileName = 'diagram.png'): Response {
+function successResponse(fileName = 'diagram.png', format: 'png' | 'svg' = 'png'): Response {
   return Response.json({
     id: UUID,
-    path: `attachments/images/${UUID}.png`,
-    markdownUrl: `@/attachments/images/${UUID}.png`,
-    mimeType: 'image/png',
-    byteSize: fileName.length ? PNG_BYTES.byteLength : 0,
+    path: `attachments/images/${UUID}.${format}`,
+    markdownUrl: `@/attachments/images/${UUID}.${format}`,
+    mimeType: format === 'svg' ? 'image/svg+xml' : 'image/png',
+    byteSize: fileName.length ? (format === 'svg' ? SVG_BYTES.byteLength : PNG_BYTES.byteLength) : 0,
   })
 }
 
@@ -38,6 +39,35 @@ describe('Note image upload client', () => {
     expect(init.headers).toBeUndefined()
     expect(init.body).toBeInstanceOf(FormData)
     expect((init.body as FormData).get('image')).toBeInstanceOf(File)
+  })
+
+  it('preflights and validates SVG upload responses without raster magic detection', async () => {
+    authFetch.mockResolvedValue(successResponse('Architecture.svg', 'svg'))
+    const result = await uploadNoteImage(file('Architecture.svg', SVG_BYTES, 'image/svg+xml'))
+    expect(result.path).toBe(`attachments/images/${UUID}.svg`)
+    expect(result.mimeType).toBe('image/svg+xml')
+
+    authFetch.mockResolvedValue(successResponse('wrong-path', 'png'))
+    await expect(uploadNoteImage(file('diagram.svg', SVG_BYTES, 'image/svg+xml')))
+      .rejects.toMatchObject({ code: 'unknown' })
+  })
+
+  it.each(['application/xml', 'text/xml', 'text/plain', 'image/svg+xml; charset=utf-8'])(
+    'accepts a sanitized .svg file reported by the browser as %s',
+    async (mimeType) => {
+      authFetch.mockResolvedValue(successResponse('Architecture.svg', 'svg'))
+      const result = await uploadNoteImage(file('Architecture.svg', SVG_BYTES, mimeType))
+      expect(result.mimeType).toBe('image/svg+xml')
+      expect(authFetch).toHaveBeenCalledOnce()
+    },
+  )
+
+  it('rejects SVG declaration mismatches and its stricter size limit before upload', async () => {
+    await expect(uploadNoteImage(file('diagram.png', SVG_BYTES, 'image/svg+xml')))
+      .rejects.toMatchObject({ code: 'invalid' })
+    const tooLarge = new File([new Uint8Array(8 * 1024 * 1024 + 1)], 'large.svg', { type: 'image/svg+xml' })
+    await expect(uploadNoteImage(tooLarge)).rejects.toMatchObject({ code: 'too-large' })
+    expect(authFetch).not.toHaveBeenCalled()
   })
 
   it('rejects unsupported and over-limit files before making a request', async () => {
