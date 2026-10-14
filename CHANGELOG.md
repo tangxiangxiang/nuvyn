@@ -3,6 +3,50 @@
 All notable changes to Nuvyn are documented in this file. Entries dated before
 the Nuvyn brand baseline may refer to Nuvyn as the historical product name.
 
+## Nuvyn v0.1.0-alpha.8 — 2026-10-15
+
+Changes since `v0.1.0-alpha.7`.
+
+### Attachment Manager
+
+- Added Settings → Storage & attachments with a unified catalog, source/type/reference filters, search, statistics, pagination and mobile layouts.
+- Added current Note and Board reference tracing, Include/Board-mediated relationships, reference navigation and conservative cleanup-risk preflight. History, browser drafts, unsaved buffers, protected Diary and Board checkpoints are not treated as verified unused sources.
+- Added authenticated on-demand previews, image pickers and controlled Note-library uploads. Existing Vault images are referenced directly by Note; Board-to-Note and Vault-to-Board imports create validated copies, while Board Asset reuse preserves its ID and existing Asset Session lifecycle.
+- Added a recoverable trash for verified Nuvyn-uploaded Note images, with upload-generation/hash checks, independent persistent journals, startup crash reconciliation, search, preview and original-path restore without overwriting conflicts. Only completed `trashed` records can be restored from the UI.
+- Original authenticated Markdown image paths remain readable from trash, including historical and later references. Recycling does not free physical storage; permanent deletion and automatic expiration remain disabled. Board resources and Diary files are outside this cleanup scope.
+
+### Note & Markdown
+
+- Added Note image insertion through Monaco's **Insert image** context menu, clipboard image paste and local drag-and-drop, retaining tracked insertion, undo/redo and cross-document safeguards. Removed the persistent image button from the Note tab bar.
+- Added server-validated static SVG upload/read support, including bounded Excalidraw font/raster embeds and safer format/CSS handling. SVGs with active or unsupported features are rejected rather than converted silently.
+- Added one formal `flex` Markdown layout container: direct blocks are automatic items; nesting and validated parameters support images, text and richer layouts. Narrow containers stack by default; PDF layout is constrained separately. Existing `image-row` syntax retains compatibility.
+- Added image-only Board embeds in Notes, authenticated previews, click-to-open Board navigation, asynchronous refresh cancellation and temporary-resource cleanup.
+- Added temporary Zen Mode for Note and unlocked Diary on desktop, tablet and phone, with `Ctrl/Cmd+K → Z`, three-second Logo hover/long-press and the bilingual Nine Virtues → Oneness entry. Editor instances, saves and recovery remain intact; refresh returns to the regular layout.
+- Refined full-width Zen editing, the existing focus-width shortcut `Ctrl/Cmd+K → F`, auto-hiding Monaco scrollbars and compact document-property/tag controls.
+
+### Reliability
+
+- Added AI title/tag generation as reviewable metadata drafts, slash prompt templates, internal Note-link navigation and a unified composer. Successful read/list calls collapse into an activity summary; pending/error calls and mutations remain visible, including successful empty results and restored history.
+- Added History file-revision context actions and refined compact sidebar, link, outline and diff presentation.
+- Fixed ordinary Note/folder renames being blocked by unrelated locked Diary content; encrypted Diary bodies remain excluded from generic reference rewrites.
+- Aligned Draft Store, Markdown/PDF callout, History and Diary export tests with current UI and routing contracts; synchronized schema-version scale checks.
+- Included server-side Markdown scanner helpers in the Docker runtime and improved packaged-smoke diagnostics.
+
+### Security
+
+- Kept existing owner-session, Origin/CSRF and Diary encryption boundaries on attachment operations and image reads. No public trash/static image endpoint is introduced.
+- Added bounded metadata-only attachment audit events independent of long-lived upload identities and recovery records. The audit contains no file bytes or absolute NAS paths.
+- Kept strict SVG sanitization, safe resource paths, no-symlink checks, controlled parser-generated Flex layout classes and DOMPurify restrictions.
+
+### Migration & Deployment
+
+- Adds SQLite migration **0037** for bounded attachment audit and **0038** for `note_image_identity`, `attachment_trash` and expanded audit operations. Migration 0038 and startup recovery are included in the runtime image.
+- Only uploads with a verified original identity record are eligible for trash. Old images without that record remain readable but cannot be recycled merely because their filename is a UUID.
+- Trash binaries persist at `VAULT_DIR/.nuvyn/attachment-trash/`; SQLite remains in the existing data volume. Production Compose mounts need no change. Activity and trash storage are reported separately.
+- Back up the complete SQLite data volume and Vault at one consistent stopped/snapshot point, including WAL/SHM as applicable, hidden `.nuvyn` state, Git History and any external master key.
+- NAS deployment remains subject to manual hard-link/directory-fsync, restart and paired-backup restore acceptance. Independent external writers are not coordinated by Nuvyn's process-local lock; copied backups or remounts that change file identities may require administrator review.
+- After migration 0038, changing the image back to an older tag alone is not a guaranteed safe rollback. Prepare matching pre-upgrade database and Vault backups. See [Phase 4 safety notes](docs/design/attachment-manager-phase4.md) and [Docker release deployment](docs/deployment/docker-release.md).
+
 ## Nuvyn v0.1.0-alpha.4 — 2026-09-20
 
 This release closes out a substantial Ledger increment with stronger financial
