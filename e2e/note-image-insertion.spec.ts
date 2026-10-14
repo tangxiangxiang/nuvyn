@@ -68,6 +68,25 @@ async function dispatchImageDrop(
   })
 }
 
+async function openNoteImagePickerFromContextMenu(page: import('@playwright/test').Page): Promise<void> {
+  const editor = page.locator('.editor-pane .monaco-editor').first()
+  const cursor = editor.locator('.cursors-layer .cursor').first()
+  const cursorBounds = await cursor.boundingBox()
+  expect(cursorBounds).not.toBeNull()
+  await page.mouse.click(
+    cursorBounds!.x,
+    cursorBounds!.y + cursorBounds!.height / 2,
+    { button: 'right' },
+  )
+  const insertImage = page.getByRole('menuitem', { name: /插入图片|Insert image/i })
+  await expect(insertImage).toBeVisible()
+  // Monaco attaches its menu mouse-up handler 100ms after rendering so the
+  // right-click that opened the menu cannot accidentally activate an item.
+  await page.waitForTimeout(120)
+  await insertImage.click()
+  await expect(page.locator('.attachment-picker-modal')).toBeVisible()
+}
+
 async function dispatchNativeEditContextImagePaste(
   page: import('@playwright/test').Page,
   name = '',
@@ -140,7 +159,7 @@ test('selects, drops, and pastes SVG into Note Markdown, then renders it after r
       new URL(response.url()).pathname === '/api/note/images' && response.request().method() === 'POST'
     ))
     const chooserPromise = page.waitForEvent('filechooser')
-    await page.getByRole('button', { name: /插入图片|Insert image/ }).click()
+    await openNoteImagePickerFromContextMenu(page)
     const picker = page.locator('.attachment-picker-modal')
     await expect(picker).toBeVisible()
     await picker.getByRole('button', { name: /上传新图片|Upload (?:a )?new image/ }).click()
@@ -251,7 +270,7 @@ test('reuses Vault images directly in Note and imports Board Assets as validated
     }
     page.on('request', countNoteImageUploads)
 
-    await page.getByRole('button', { name: /插入图片|Insert image/ }).click()
+    await openNoteImagePickerFromContextMenu(page)
     const picker = page.locator('.attachment-picker-modal')
     await expect(picker).toBeVisible()
     await picker.getByPlaceholder(/搜索名称、路径或 ID|Search names, paths, or IDs/).fill(sourcePath.split('/').at(-1)!)
@@ -267,7 +286,7 @@ test('reuses Vault images directly in Note and imports Board Assets as validated
 
     await editor.locator('.view-lines').click({ position: { x: 35, y: 12 } })
     await page.keyboard.press('Control+End')
-    await page.getByRole('button', { name: /插入图片|Insert image/ }).click()
+    await openNoteImagePickerFromContextMenu(page)
     await expect(picker).toBeVisible()
     await picker.getByPlaceholder(/搜索名称、路径或 ID|Search names, paths, or IDs/).fill(boardAssetId)
     const boardOption = picker.getByRole('option').filter({ hasText: boardAssetId.slice(0, 8) })
@@ -571,7 +590,7 @@ test('selects an image, supports undo/redo, renders after reload, and tracks its
       new URL(response.url()).pathname === '/api/note/images' && response.request().method() === 'POST'
     ), { timeout: 5_000 })
     const fileChooserPromise = page.waitForEvent('filechooser')
-    await page.getByRole('button', { name: /插入图片|Insert image/ }).click()
+    await openNoteImagePickerFromContextMenu(page)
     const picker = page.locator('.attachment-picker-modal')
     await expect(picker).toBeVisible()
     await picker.getByRole('button', { name: /上传新图片|Upload (?:a )?new image/ }).click()

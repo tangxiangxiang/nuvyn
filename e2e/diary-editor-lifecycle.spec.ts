@@ -766,7 +766,7 @@ test('Native Diary does not expose a separate Mood context action', async ({ pag
   expect(state.consoleErrors).toEqual([])
 })
 
-test('ordinary Note does not expose the native Diary mood context', async ({ page, request }) => {
+test('ordinary Note keeps image insertion in Monaco context menu without Diary mood controls', async ({ page, request }) => {
   const path = `inbox/d7-2-mood-note-${RUN_ID}`
   const state = diagnostics(page, ['net::ERR_FAILED'])
 
@@ -777,11 +777,25 @@ test('ordinary Note does not expose the native Diary mood context', async ({ pag
     await expect(page.locator(`[role="tab"][data-tab-id="${path}"]`)).toHaveAttribute('aria-selected', 'true')
     await expect(page.getByTestId('diary-native-mood-context')).toHaveCount(0)
     await expect(page.getByTestId('diary-mood-picker')).toHaveCount(0)
-    const contextActions = page.locator('.editor-tabs-context-actions')
-    await expect(contextActions).toHaveCount(1)
-    await expect(
-      contextActions.getByRole('button', { name: /插入图片|Insert image/i }),
-    ).toBeVisible()
+    await expect(page.locator('.editor-tabs-context-actions')).toHaveCount(0)
+    const editor = page.locator('.editor-pane .monaco-editor').first()
+    await editor.locator('.view-lines').click({ position: { x: 100, y: 20 } })
+    const cursor = editor.locator('.cursors-layer .cursor').first()
+    const cursorBounds = await cursor.boundingBox()
+    expect(cursorBounds).not.toBeNull()
+    await page.mouse.click(
+      cursorBounds!.x,
+      cursorBounds!.y + cursorBounds!.height / 2,
+      { button: 'right' },
+    )
+    const insertImage = page.getByRole('menuitem', { name: /插入图片|Insert image/i })
+    await expect(insertImage).toBeVisible()
+    // Monaco defers menu mouse-up registration briefly after opening.
+    await page.waitForTimeout(120)
+    await insertImage.click()
+    await expect(page.locator('.attachment-picker-modal')).toBeVisible()
+    await page.keyboard.press('Escape')
+    await expect(page.locator('.attachment-picker-modal')).toHaveCount(0)
   } finally {
     await deletePost(request, path)
   }

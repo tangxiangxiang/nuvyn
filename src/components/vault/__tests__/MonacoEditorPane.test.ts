@@ -447,6 +447,40 @@ describe('Monaco EditorPane', () => {
     wrapper.unmount()
   })
 
+  it('registers the image context action only while Note image insertion is allowed', async () => {
+    const wrapper = mount(EditorPane, {
+      props: { modelValue: 'unchanged', path: 'diary/2026-10-13', allowImageInsertion: false },
+    })
+    const imageActionIndex = () => registeredActions().findIndex(([options]) => options.id === 'nuvyn.insert-note-image')
+
+    try {
+      expect(imageActionIndex()).toBe(-1)
+      ;(wrapper.vm as any).chooseImage()
+      expect(wrapper.findComponent(AttachmentPickerDialog).props('show')).toBe(false)
+
+      await wrapper.setProps({ allowImageInsertion: true })
+      const index = imageActionIndex()
+      expect(index).toBeGreaterThanOrEqual(0)
+      const action = registeredActions()[index]![0]
+      const disposable = mocks.editor.addAction.mock.results[index]!.value as { dispose: ReturnType<typeof vi.fn> }
+      expect(action).toMatchObject({
+        contextMenuGroupId: '1_modification',
+        contextMenuOrder: 3,
+      })
+      action.run?.()
+      await nextTick()
+      expect(wrapper.findComponent(AttachmentPickerDialog).props('show')).toBe(true)
+
+      await wrapper.setProps({ allowImageInsertion: false })
+      expect(disposable.dispose).toHaveBeenCalledOnce()
+      action.run?.()
+      await nextTick()
+      expect(wrapper.findComponent(AttachmentPickerDialog).props('show')).toBe(false)
+    } finally {
+      wrapper.unmount()
+    }
+  })
+
   it('does not handle clipboard images from outside this Note editor or after unmount', () => {
     const file = imageFile()
     const wrapper = mount(EditorPane, { props: { modelValue: 'unchanged', path: 'inbox/test', allowImageInsertion: true } })

@@ -77,6 +77,7 @@ let themeObserver: MutationObserver | null = null
 let decorationIds: string[] = []
 let pasteHandler: ((event: ClipboardEvent) => void) | null = null
 let unregisterImagePasteHandler: (() => void) | null = null
+let noteImageInsertionAction: { dispose: () => void } | null = null
 let imageInput: HTMLInputElement | null = null
 const showAttachmentPicker = ref(false)
 let mounted = false
@@ -304,6 +305,27 @@ function chooseImage(): void {
   if (!intent) return
   filePickerIntent = intent
   showAttachmentPicker.value = true
+}
+
+function syncNoteImageInsertionAction(): void {
+  if (!editor) return
+  if (props.allowImageInsertion !== true) {
+    noteImageInsertionAction?.dispose()
+    noteImageInsertionAction = null
+    return
+  }
+  if (noteImageInsertionAction) return
+
+  noteImageInsertionAction = editor.addAction({
+    id: 'nuvyn.insert-note-image',
+    label: t('editor.insert_image'),
+    contextMenuGroupId: '1_modification',
+    contextMenuOrder: 3,
+    run() {
+      editor?.focus()
+      chooseImage()
+    },
+  })
 }
 
 function cancelAttachmentPicker(): void {
@@ -1148,15 +1170,7 @@ onMounted(() => {
       instance.setSelection(new monaco.Selection(start.lineNumber, start.column, end.lineNumber, end.column))
     },
   })
-  editor.addAction({
-    id: 'nuvyn.insert-note-image',
-    label: t('editor.insert_image'),
-    contextMenuGroupId: '1_modification',
-    contextMenuOrder: 3,
-    run() {
-      chooseImage()
-    },
-  })
+  syncNoteImageInsertionAction()
   editor.addAction({
     id: 'nuvyn.toggle-view-mode',
     label: 'Toggle Edit / Reading Mode',
@@ -1275,7 +1289,10 @@ watch(() => props.modelValue, (value) => {
   suppressChange = false
 })
 
-watch(() => props.allowImageInsertion, syncImagePasteHandler)
+watch(() => props.allowImageInsertion, () => {
+  syncImagePasteHandler()
+  syncNoteImageInsertionAction()
+})
 watch(() => props.allowImageInsertion, (allowed) => {
   if (!allowed && showAttachmentPicker.value) cancelAttachmentPicker()
 })
@@ -1352,6 +1369,8 @@ onBeforeUnmount(() => {
   if (pasteHandler && host.value) host.value.removeEventListener('paste', pasteHandler, true)
   unregisterImagePasteHandler?.()
   unregisterImagePasteHandler = null
+  noteImageInsertionAction?.dispose()
+  noteImageInsertionAction = null
   resetFocusWidthChord()
   zenOverlayObserver?.disconnect()
   zenOverlayObserver = null

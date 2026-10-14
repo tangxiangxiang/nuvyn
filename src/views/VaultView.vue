@@ -11,7 +11,6 @@ import { NUVYN_BROWSER_STORAGE_KEYS } from '../technicalNamespace'
 import { isNuvynShortcutBlocked } from '../lib/keyboard'
 import { useConfirm } from '../composables/useConfirm'
 import { useI18n } from '../composables/useI18n'
-import { NButton } from 'naive-ui'
 import { useAuth, type WorkspaceAuthTransitionAdapter } from '../composables/useAuth'
 import { useEditorTabs } from '../composables/vault/useEditorTabs'
 import { pathToUrl } from '../composables/vault/editor-tabs/tabState'
@@ -3181,25 +3180,13 @@ watch(isReadMode, async (reading) => {
         ref="editorTabsRef"
         :tabs="workspaceTabs"
         :active-path="activeWorkspaceTabId"
-        :context-actions-visible="canInsertNoteImage"
         @select="selectWorkspaceTab"
         @close="closeWorkspaceTab"
         @close-many="closeManyWorkspaceTabs"
         @copy-path="copyWorkspaceTabPath"
         @reveal-in-tree="revealWorkspaceTabInTree"
         @reorder="reorderWorkspaceTabs"
-      >
-        <template #context-actions>
-          <NButton
-            attr-type="button"
-            size="small"
-            text
-            :bordered="false"
-            :title="t('editor.insert_image')"
-            @click="editorPaneRef?.chooseImage()"
-          >{{ t('editor.insert_image') }}</NButton>
-        </template>
-      </EditorTabs>
+      />
 
       <!-- Calendar Home is the only Diary-owned surface. The subtree stays
            mounted for the whole Diary scope while native Vault documents use
