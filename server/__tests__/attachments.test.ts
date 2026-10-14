@@ -10,6 +10,8 @@ import { __setAttachmentCatalogForTesting, __setAttachmentReferenceIndexForRoute
 import { AttachmentCatalog, type AttachmentCatalogAdapter } from '../attachments/catalog.js'
 import { AttachmentReferenceIndex } from '../attachments/references.js'
 import { recordAttachmentOperation } from '../attachments/audit.js'
+import { randomUUID } from 'node:crypto'
+import { registerNoteImage } from '../attachments/trash.js'
 import type { AttachmentSource } from '../../shared/attachmentProtocol.js'
 import {
   authenticatedRequest,
@@ -42,6 +44,55 @@ afterEach(async () => {
 })
 
 describe('Attachment Manager API', () => {
+  async function managedImage(): Promise<string> {
+    await fs.mkdir(path.join(root, 'attachments/images'), { recursive: true })
+    const resourcePath = `attachments/images/${randomUUID()}.png`
+    await fs.writeFile(path.join(root, resourcePath), Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]))
+    await registerNoteImage(db, root, resourcePath)
+    return resourcePath
+  }
+  async function jsonRequest(route: string, data: unknown): Promise<Response> {
+    return app.fetch(authenticatedRequest(auth, route, { method: 'POST', origin: auth.runtime.config.publicOrigin, body: data }))
+  }
+  it('recycles and restores managed Note images via authenticated endpoints without breaking historical reads', async () => {
+    const resourcePath = await managedImage()
+    const preflight = await jsonRequest('/api/attachments/cleanup-preview', { resource: { kind: 'vault-file', path: resourcePath } })
+    expect(preflight.status).toBe(200)
+    const preview = await preflight.json() as { quarantineAllowed: boolean; quarantineToken: string; deletionAllowed: boolean }
+    expect(preview).toMatchObject({ quarantineAllowed: true, deletionAllowed: false })
+    const recycled = await jsonRequest('/api/attachments/quarantine', { token: preview.quarantineToken })
+    expect(recycled.status, await recycled.clone().text()).toBe(200)
+    const item = await recycled.json() as { id: string }
+    const duplicate = await jsonRequest('/api/attachments/quarantine', { token: preview.quarantineToken })
+    expect(duplicate.ok).toBe(false)
+    const fallback = await app.fetch(authenticatedRequest(auth, `/api/markdown-resources?kind=image&path=${resourcePath}`))
+    expect(fallback.status).toBe(200)
+    const trash = await app.fetch(authenticatedRequest(auth, '/api/attachments/trash'))
+    expect(await trash.json()).toMatchObject({ total: 1, items: [{ id: item.id, path: resourcePath, state: 'trashed' }] })
+    const restore = await jsonRequest('/api/attachments/trash/restore', { id: item.id })
+    expect(restore.status, await restore.clone().text()).toBe(200)
+    expect((await app.fetch(authenticatedRequest(auth, '/api/attachments/trash')).then((res) => res.json()))).toMatchObject({ total: 0 })
+  })
+  it('rechecks newly added current Note references after preflight and leaves the image active', async () => {
+    const resourcePath = await managedImage()
+    const prepared = await jsonRequest('/api/attachments/cleanup-preview', { resource: { kind: 'vault-file', path: resourcePath } })
+    const preview = await prepared.json() as { quarantineToken: string }
+    await fs.writeFile(path.join(root, 'inbox/current.md'), `# Current\n\n![image](@/${resourcePath})`)
+    const result = await jsonRequest('/api/attachments/quarantine', { token: preview.quarantineToken })
+    expect(result.status).toBe(409)
+    expect(await fs.readFile(path.join(root, resourcePath))).toHaveLength(8)
+    const blocked = await jsonRequest('/api/attachments/cleanup-preview', { resource: { kind: 'vault-file', path: resourcePath } })
+    expect(await blocked.json()).toMatchObject({ quarantineAllowed: false, currentFinding: 'in-use' })
+  })
+  it('protects trash endpoints with owner authentication and Origin checks', async () => {
+    for (const [route, method] of [['/api/attachments/trash', 'GET'], ['/api/attachments/quarantine', 'POST'], ['/api/attachments/trash/restore', 'POST']]) {
+      expect((await app.fetch(new Request(`http://localhost${route}`, { method }))).status).toBe(401)
+    }
+    const result = await app.fetch(authenticatedRequest(auth, '/api/attachments/quarantine', {
+      method: 'POST', origin: 'https://example.invalid', body: { token: 'invalid' },
+    }))
+    expect(result.status).toBe(403)
+  })
   it('requires the existing authenticated owner session for catalog and refresh endpoints', async () => {
     const list = await app.fetch(new Request('http://localhost/api/attachments'))
     const summary = await app.fetch(new Request('http://localhost/api/attachments/summary'))

@@ -17,6 +17,8 @@ import {
 } from './references.js'
 import type { AttachmentResourceKey } from '../../shared/attachmentProtocol.js'
 import { listAttachmentOperations } from './audit.js'
+import { AttachmentTrash, managedNoteImage } from './trash.js'
+import { withVaultMutation } from '../vaultMutation.js'
 
 let defaultCatalog: { db: DatabaseT; contentDir: string; catalog: AttachmentCatalog } | null = null
 let catalogOverride: AttachmentCatalog | null = null
@@ -150,6 +152,56 @@ export function createAttachmentRoutes(
 ): Hono {
   const routes = new Hono()
 
+  function trash(): AttachmentTrash { return new AttachmentTrash(getDb(), CONTENT_DIR) }
+  function session(c: any): number {
+    const id = c.get('authSessionId')
+    if (!Number.isSafeInteger(id)) throw new ApiRequestError('auth-session-required', 401, 'Owner session required.')
+    return id
+  }
+
+  routes.get('/trash', async (c) => {
+    try {
+      session(c)
+      const query = parseListQuery(new URL(c.req.url))
+      return c.json(trash().list(query.search, query.offset, query.limit))
+    } catch (error) { return apiErrorResponse(c, error, { code: 'ATTACHMENT_TRASH_UNAVAILABLE', message: 'Trash could not be loaded.' }) }
+  })
+
+  routes.post('/quarantine', async (c) => {
+    try {
+      const sessionId = session(c)
+      const input = await readReferenceRequest(c.req.raw)
+      const result = await trash().quarantine(input.token as string, sessionId, async (snapshot, resourcePath) => {
+        const index = resolveIndex()
+        if (index.getStatus().snapshotId !== snapshot || index.getStatus().state !== 'ready') {
+          throw new ApiRequestError('ATTACHMENT_TRASH_STALE', 409, 'Risk preview expired. Refresh and try again.')
+        }
+        await resolveCatalog().refresh(true)
+        await index.refresh(true)
+        const preview = await index.preview({ kind: 'vault-file', path: resourcePath })
+        if (!resolveCatalog().getIndexStatus().complete || preview.stale
+          || preview.currentFinding !== 'no-current-reference' || preview.coverage.currentNotes !== 'complete'
+          || preview.coverage.boardReferences !== 'complete') {
+          throw new ApiRequestError('ATTACHMENT_TRASH_IN_USE', 409, 'Attachment references changed or could not be verified.')
+        }
+      })
+      await resolveCatalog().refresh(true)
+      await resolveIndex().refresh(true)
+      return c.json(result)
+    } catch (error) { return apiErrorResponse(c, error, { code: 'ATTACHMENT_TRASH_FAILED', message: 'Image could not be recycled. Refresh and try again.' }) }
+  })
+
+  routes.post('/trash/restore', async (c) => {
+    try {
+      session(c)
+      const input = await readReferenceRequest(c.req.raw)
+      await trash().restore(input.id as string)
+      await resolveCatalog().refresh(true)
+      await resolveIndex().refresh(true)
+      return c.json({ restored: true })
+    } catch (error) { return apiErrorResponse(c, error, { code: 'ATTACHMENT_RESTORE_FAILED', message: 'Image could not be restored. The original path may be occupied.' }) }
+  })
+
   routes.get('/', async (c) => {
     try {
       const index = resolveIndex()
@@ -264,7 +316,21 @@ export function createAttachmentRoutes(
       ) {
         throw new ApiRequestError('ATTACHMENT_RESOURCE_NOT_FOUND', 404, 'Attachment resource is unavailable')
       }
-      const result = await index.preview(resource)
+      const result = await withVaultMutation(CONTENT_DIR, async () => {
+        await trash().reconcile()
+        // Quarantine is a fresh preflight, not permission inferred from a cached zero count.
+        let preview = await index.preview(resource)
+        if (resource.kind === 'vault-file' && managedNoteImage(resource.path)
+          && !preview.stale && index.getStatus().state === 'ready') {
+          await resolveCatalog().refresh(true)
+          await index.refresh(true)
+          preview = await index.preview(resource)
+        }
+        const sessionId = (c as any).get('authSessionId')
+        return Number.isSafeInteger(sessionId)
+          ? trash().preview(preview, sessionId, resolveCatalog().getIndexStatus().complete === true)
+          : { ...preview, quarantineAllowed: false }
+      })
       c.header('Cache-Control', 'no-store')
       return c.json(result)
     } catch (error) {

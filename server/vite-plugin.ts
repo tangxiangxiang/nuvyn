@@ -17,6 +17,8 @@ import { initializeTagIdentityAndHealth } from './tagIdentityMigration.ts'
 import { initializeTagUndoFoundationHealth } from './tagUndoHealth.ts'
 import { recoverInterruptedOperations } from './crashRecovery.ts'
 import { reconcileHistoryMetadata } from './history/metadataRevisions.ts'
+import { AttachmentTrash } from './attachments/trash.ts'
+import { withVaultMutation } from './vaultMutation.ts'
 import {
   acquireVaultWriterOwnership,
   installVaultWriterShutdownHandlers,
@@ -41,6 +43,7 @@ export function serverPlugin(): Plugin {
           env: process.env,
         })
         const recovery = await recoverInterruptedOperations(CONTENT_DIR, getDb())
+        await withVaultMutation(CONTENT_DIR, () => new AttachmentTrash(getDb(), CONTENT_DIR).reconcile())
         if (recovery.actions.length > 0) {
           console.log(`[nuvyn] crash recovery: resolved ${recovery.actions.length} interrupted operation(s)`)
           for (const action of recovery.actions) {

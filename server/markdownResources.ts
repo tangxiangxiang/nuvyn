@@ -3,6 +3,8 @@ import { TextDecoder } from 'node:util'
 import { NOTE_IMAGE_UPLOAD_MAX_BYTES, NOTE_SVG_MAX_BYTES } from '../shared/noteImageProtocol.js'
 import { CONTENT_DIR, readSafeRelativeFile, SafePathResourceLimitError } from './paths.js'
 import { NoteSvgValidationError, sanitizeNoteSvg } from './noteSvg.js'
+import { AttachmentTrash, managedNoteImage } from './attachments/trash.js'
+import { getDb } from './db.js'
 
 export const MAX_SNIPPET_BYTES = 256 * 1024
 export const MAX_INCLUDE_BYTES = 512 * 1024
@@ -143,7 +145,21 @@ export async function readMarkdownResource(
         : MAX_IMAGE_BYTES
 
   try {
-    const value = await readSafeRelativeFile(CONTENT_DIR, resourcePath, undefined, { maxBytes, signal })
+    let value: Buffer | string | null
+    try {
+      value = await readSafeRelativeFile(CONTENT_DIR, resourcePath, undefined, { maxBytes, signal })
+    } catch (error) {
+      // A removed active image directory must not break retained historical
+      // bytes. Only absence permits fallback; unsafe/symlink paths still fail.
+      if (kind !== 'image' || !managedNoteImage(resourcePath) || (error as NodeJS.ErrnoException).code !== 'ENOENT') throw error
+      value = null
+    }
+    if (kind === 'image' && managedNoteImage(resourcePath)) {
+      // A live trash record also detects an incumbent replacement; never serve
+      // unrelated bytes at a recycled image's historical logical identity.
+      const recovered = await new AttachmentTrash(getDb(), CONTENT_DIR).read(resourcePath)
+      if (recovered !== null) value = recovered
+    }
     if (value === null) throw new MarkdownResourceError('resource-unavailable', 404)
     if (typeof value === 'string') throw new MarkdownResourceError('resource-not-binary', 500)
     if (kind === 'image') {

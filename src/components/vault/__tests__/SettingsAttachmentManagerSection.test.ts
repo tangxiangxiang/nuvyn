@@ -27,6 +27,9 @@ vi.mock('../../../lib/attachments-api', () => ({
   queryAttachmentReferences: (...args: unknown[]) => queryAttachmentReferences(...args),
   previewAttachmentCleanup: (...args: unknown[]) => previewAttachmentCleanup(...args),
   listAttachmentAudit: (...args: unknown[]) => listAttachmentAudit(...args),
+  listAttachmentTrash: vi.fn().mockResolvedValue({ items: [], total: 0, knownBytes: 0, offset: 0, limit: 30 }),
+  quarantineAttachment: vi.fn(),
+  restoreAttachment: vi.fn(),
 }))
 
 vi.mock('../AttachmentImagePreview.vue', () => ({

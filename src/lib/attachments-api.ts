@@ -9,7 +9,24 @@ import type {
   AttachmentCleanupPreview,
   AttachmentResourceKey,
   AttachmentAuditEntry,
+  AttachmentTrashPage,
 } from '../../shared/attachmentProtocol'
+
+export async function listAttachmentTrash(search = '', offset = 0, signal?: AbortSignal): Promise<AttachmentTrashPage> {
+  return jsonOrThrow(await authFetch(`/api/attachments/trash?${new URLSearchParams({ search, offset: String(offset), limit: '30' })}`, { signal }))
+}
+
+export async function quarantineAttachment(token: string): Promise<void> {
+  await jsonOrThrow(await authFetch('/api/attachments/quarantine', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ token }),
+  }))
+}
+
+export async function restoreAttachment(id: string): Promise<void> {
+  await jsonOrThrow(await authFetch('/api/attachments/trash/restore', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id }),
+  }))
+}
 
 function queryString(query: AttachmentListQuery): string {
   const params = new URLSearchParams()

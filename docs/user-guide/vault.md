@@ -47,3 +47,24 @@ The file tree supports create, rename, move, recursive folder deletion, document
 Reference updates cover ordinary documents only. An unrelated locked Diary does not block renaming a note or folder. References inside encrypted Diary bodies are not scanned or rewritten; those links may need manual adjustment after a rename. Managed Diary identities remain protected from rename and move.
 
 See [Document Lifecycle Architecture](../architecture/document-lifecycle.md) for the implementation guarantees.
+
+## Note image trash
+
+Open Settings → Storage & attachments, select a Note image and run **Check
+reference risks**. **Move to trash** is enabled only when the server can prove
+the original upload identity and reliable current scans find no references.
+Confirm the risk notice before moving it. Existing images without upload
+provenance remain ineligible; arbitrary Vault files and Board/Diary resources
+are excluded.
+
+The **Trash** view supports search, paging, preview and **Restore** to the
+original path. Restore never overwrites an existing file. If an operation fails,
+the binary and pending journal remain available for retry/storage review.
+Original authenticated Markdown image URLs still work, including historical
+versions and later references. SVG safety checks remain in effect.
+
+Trash does not immediately free disk space; its storage is shown separately.
+There is no permanent delete or automatic expiration. Back up both the Vault
+(including `.nuvyn/attachment-trash/`) and SQLite data volume together. After
+NAS mount relocation or independent file changes, identity validation may
+reject an operation; see the [Phase 4 safety notes](../design/attachment-manager-phase4.md).

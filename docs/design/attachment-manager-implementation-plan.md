@@ -42,7 +42,20 @@ This plan separates the unified catalog foundation from later reference analysis
 - Keep cleanup preview read-only: `deletionAllowed` remains false. No delete, quarantine, or garbage-collection action is added by Phase 3.
 - Keep Diary encryption and access controls independent; no Diary attachment is listed, previewed, uploaded, or routed through a generic plaintext attachment service.
 
-## Verification gates
+## Phase 4 — Recoverable Note image trash
+
+- See [Phase 4 lifecycle and safety design](attachment-manager-phase4.md).
+- Persist verified upload provenance and independent recovery journals; keep
+  trash binaries in the Vault's protected `.nuvyn/attachment-trash/` directory.
+- Allow confirmed recycling only for proven Note uploads with no current
+  references and reliable indexes. Recheck under the Vault mutation lock.
+- Preserve authenticated historical Markdown reads; restore exclusively to
+  the original path. No permanent deletion or automatic expiration.
+- Add Settings trash search, paging, preview, restore and separate storage totals.
+- Old images without upload provenance remain ineligible. NAS power-loss
+  durability requires manual verification; process crashes are tested.
+
+## Verification gates (all phases)
 
 - Each phase must add focused backend and frontend tests before expanding scope.
 - Run `npm run typecheck`, focused unit tests, relevant E2E, and `npm run build` for each phase.

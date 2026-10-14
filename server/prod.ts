@@ -27,6 +27,8 @@ import { resolveAuthOrigin, resolveServerHost } from './prodConfig.ts'
 import { loadAuthConfig } from './auth/config.ts'
 import { initializeAuthRuntime } from './auth/runtime.ts'
 import { getDiaryMigrationService } from './diaryMigration/service.ts'
+import { AttachmentTrash } from './attachments/trash.ts'
+import { withVaultMutation } from './vaultMutation.ts'
 
 const PORT = Number(process.env.PORT ?? 3000)
 const HOST = resolveServerHost()
@@ -80,6 +82,7 @@ try {
   // Reconcile operations interrupted by a previous crash (kill -9, power
   // loss, container stop) BEFORE the server accepts a single request.
   const recovery = await recoverInterruptedOperations(CONTENT_DIR, getDb())
+  await withVaultMutation(CONTENT_DIR, () => new AttachmentTrash(getDb(), CONTENT_DIR).reconcile())
   if (recovery.actions.length > 0) {
     console.log(`[nuvyn] crash recovery: resolved ${recovery.actions.length} interrupted operation(s)`)
     for (const action of recovery.actions) {

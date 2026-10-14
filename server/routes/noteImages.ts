@@ -23,6 +23,8 @@ import { NoteSvgValidationError, sanitizeNoteSvg } from '../noteSvg.js'
 import { isAssetId } from '../../shared/assetProtocol.js'
 import { attachmentFailureCategory, recordAttachmentOperation, type AttachmentAuditInput } from '../attachments/audit.js'
 import { getDb } from '../db.js'
+import { registerNoteImage } from '../attachments/trash.js'
+import { withVaultMutation } from '../vaultMutation.js'
 
 const IMAGE_DIRECTORY = path.join('attachments', 'images')
 const MAX_UPLOADS_IN_FLIGHT = 2
@@ -165,7 +167,12 @@ routes.post('/api/note/images', async (c) => {
     const resolution = await resolveSafeRelativePathDetailed(CONTENT_DIR, relativePath, { allowMissingFinal: true })
     // The durable create-only helper fsyncs and verifies the completed bytes
     // before returning; no temporary or partially written file is exposed.
-    await writeCreateOnlyDurableFile(resolution.absolute, bytes, { mode: 0o600 })
+    await withVaultMutation(CONTENT_DIR, async () => {
+      await writeCreateOnlyDurableFile(resolution.absolute, bytes, { mode: 0o600 })
+      // A failed provenance write leaves a valid uploaded image usable, but
+      // ineligible for cleanup. Never misreport a completed upload as failed.
+      try { await registerNoteImage(getDb(), CONTENT_DIR, relativePath) } catch { /* fail closed for cleanup */ }
+    })
 
     invalidateDefaultAttachmentCatalog()
     const result: NoteImageUploadResult = {

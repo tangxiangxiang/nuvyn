@@ -205,6 +205,11 @@ async function ensureNuvynHistoryExclude(repoRoot: string): Promise<void> {
       && lines[index + 1] === NUVYN_EXCLUDE_BLOCK[1]
       && lines[index + 2] === NUVYN_EXCLUDE_BLOCK[2]
     ))
+    const trashExclusion = '/.nuvyn/attachment-trash/'
+    if (!lines.includes(trashExclusion)) {
+      await fs.mkdir(path.dirname(excludePath), { recursive: true })
+      await fs.appendFile(excludePath, `${content.endsWith('\n') || !content ? '' : '\n'}${trashExclusion}\n`, 'utf8')
+    }
     if (blockExists) return
 
     await fs.mkdir(path.dirname(excludePath), { recursive: true })

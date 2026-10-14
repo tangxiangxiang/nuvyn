@@ -4,9 +4,13 @@ import { NButton, NEmpty, NIcon, NInput, NSelect, NSpin, NTag } from 'naive-ui'
 import { ArrowLeft, File, Photo, Refresh, Shape, Copy, Upload } from '@vicons/tabler'
 import { useI18n } from '../../composables/useI18n'
 import { useToast } from '../../composables/useToast'
+import { useConfirm } from '../../composables/useConfirm'
+import AttachmentTrashView from './AttachmentTrashView.vue'
 import { copyTextToClipboard } from './workspaceTabActions'
 import {
   listAttachmentAudit,
+  listAttachmentTrash,
+  quarantineAttachment,
   listAttachments,
   previewAttachmentCleanup,
   queryAttachmentReferences,
@@ -35,6 +39,12 @@ const emit = defineEmits<{
 }>()
 const { t } = useI18n()
 const toast = useToast()
+const { confirmCancellable } = useConfirm()
+const trashVisible = ref(false)
+const trashBytes = ref<number | null>(null)
+const quarantineBusy = ref(false)
+let cancelConfirm: (() => void) | undefined
+let disposed = false
 const page = ref<AttachmentPage | null>(null)
 const loading = ref(false)
 const refreshing = ref(false)
@@ -66,6 +76,37 @@ const uploadBusy = ref(false)
 const auditEntries = ref<AttachmentAuditEntry[]>([])
 const auditLoading = ref(false)
 const auditFailed = ref(false)
+
+async function loadTrashStorage(): Promise<void> {
+  try {
+    const result = await listAttachmentTrash()
+    if (!disposed) trashBytes.value = result.knownBytes
+  } catch { if (!disposed) trashBytes.value = null }
+}
+
+async function quarantine(): Promise<void> {
+  const preview = riskPreview.value
+  if (!preview?.quarantineAllowed || !preview.quarantineToken || quarantineBusy.value) return
+  const confirmation = confirmCancellable(t('attachments.trash.confirm'), t('attachments.trash.warning'), { confirmLabel: t('attachments.trash.quarantine') })
+  cancelConfirm = confirmation.cancel
+  const approved = await confirmation.promise
+  cancelConfirm = undefined
+  if (!approved || disposed) return
+  quarantineBusy.value = true
+  try {
+    await quarantineAttachment(preview.quarantineToken)
+    if (disposed) return
+    toast.success(t('attachments.trash.success'))
+    selectedKey.value = ''
+    riskPreview.value = null
+    await refresh()
+    await Promise.all([loadAudit(), loadTrashStorage()])
+  } catch {
+    if (!disposed) { riskPreview.value = null; toast.error(t('attachments.trash.failed')); await refresh() }
+  } finally { quarantineBusy.value = false }
+}
+
+function onTrashChanged(): void { void refresh(); void loadAudit(); void loadTrashStorage() }
 
 const currentQueryKey = computed(() => JSON.stringify(query()))
 const isPageQueryStale = computed(() => Boolean(page.value && pageQueryKey.value !== currentQueryKey.value))
@@ -379,8 +420,10 @@ watch(selectedKey, (key) => {
   previewError.value = false
   if (key && selected.value) loadReferences(selected.value)
 })
-onMounted(() => { void loadPage(); void loadAudit() })
+onMounted(() => { void loadPage(); void loadAudit(); void loadTrashStorage() })
 onBeforeUnmount(() => {
+  disposed = true
+  cancelConfirm?.()
   loadSequence += 1
   referenceSequence += 1
   previewSequence += 1
@@ -398,7 +441,10 @@ onBeforeUnmount(() => {
           <template #icon><NIcon aria-hidden="true"><ArrowLeft /></NIcon></template>
           {{ t('attachments.back_to_settings') }}
         </NButton>
-        <h3 id="attachment-manager-title">{{ t('attachments.title') }}</h3>
+        <div class="attachment-title-row">
+          <h3 id="attachment-manager-title">{{ t('attachments.title') }}</h3>
+          <NButton size="tiny" quaternary :disabled="quarantineBusy" @click="trashVisible = !trashVisible">{{ t(trashVisible ? 'attachments.trash.active' : 'attachments.trash.title') }}</NButton>
+        </div>
         <p>{{ t('attachments.subtitle') }}</p>
       </div>
       <NButton attr-type="button" size="medium" class="btn attachment-refresh" :loading="refreshing" :disabled="refreshing" @click="refresh">
@@ -412,9 +458,13 @@ onBeforeUnmount(() => {
       <input ref="uploadInput" class="attachment-upload-input" type="file" accept="image/png,image/jpeg,image/webp,image/gif,image/avif,image/svg+xml,.svg" @change="uploadToNoteLibrary">
     </header>
 
+    <AttachmentTrashView v-if="trashVisible" @changed="onTrashChanged" @storage="trashBytes = $event" />
+
+    <template v-else>
+
     <div v-if="page" class="attachment-summary" :aria-label="t('attachments.summary.label')">
       <div><span>{{ t('attachments.summary.total') }}</span><strong>{{ page.summary.total }}</strong></div>
-      <div><span>{{ t('attachments.summary.storage') }}</span><strong>{{ formatBytes(page.summary.knownBytes) }}<small v-if="page.summary.unknownByteSizeCount"> + {{ t('attachments.summary.unknown_sizes', { count: page.summary.unknownByteSizeCount }) }}</small></strong></div>
+      <div><span>{{ t('attachments.summary.storage') }}</span><strong>{{ formatBytes(page.summary.knownBytes) }}<small v-if="page.summary.unknownByteSizeCount"> + {{ t('attachments.summary.unknown_sizes', { count: page.summary.unknownByteSizeCount }) }}</small><small> · {{ t('attachments.trash.storage') }} {{ formatBytes(trashBytes) }}</small></strong></div>
       <div><span>{{ t('attachments.summary.review') }}</span><strong>{{ page.summary.unknownReferenceCount }}</strong></div>
       <div class="attachment-index-status" role="status">
         <span>{{ t('attachments.index_status') }}</span>
@@ -604,6 +654,8 @@ onBeforeUnmount(() => {
                 <li v-for="reason in riskPreview.riskReasons" :key="reason">{{ riskReasonLabel(reason) }}</li>
               </ul>
               <small>{{ t('attachments.risk.no_delete') }}</small>
+              <p v-if="riskPreview.quarantineReason">{{ t(`attachments.trash.reason.${riskPreview.quarantineReason}`) }}</p>
+              <NButton v-if="riskPreview.resource.kind === 'vault-file'" size="small" :disabled="!riskPreview.quarantineAllowed || quarantineBusy" :loading="quarantineBusy" @click="quarantine">{{ t('attachments.trash.quarantine') }}</NButton>
             </div>
           </section>
         </template>
@@ -611,6 +663,7 @@ onBeforeUnmount(() => {
       </aside>
     </div>
 
+    </template>
     <details class="attachment-audit">
       <summary>{{ t('attachments.audit.title') }}</summary>
       <div v-if="auditLoading" class="attachment-audit-state" role="status"><NSpin size="small" />{{ t('attachments.audit.loading') }}</div>
@@ -637,6 +690,7 @@ onBeforeUnmount(() => {
 </template>
 
 <style scoped>
+.attachment-title-row { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
 .attachment-manager { gap: 16px; height: 100%; min-height: 0; }
 .attachment-manager-header { flex: 0 0 auto; align-items: flex-end; }
 .attachment-manager-heading { min-width: 0; }

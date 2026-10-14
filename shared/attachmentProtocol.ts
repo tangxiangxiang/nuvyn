@@ -109,6 +109,9 @@ export interface AttachmentCleanupPreview {
     | 'board-material-usage-unknown'
   >
   deletionAllowed: false
+  quarantineAllowed?: boolean
+  quarantineToken?: string
+  quarantineReason?: 'unsupported' | 'identity-unverified' | 'index-unverified' | 'storage-unavailable'
   snapshotId: string | null
   checkedAt: number
 }
@@ -184,10 +187,31 @@ export interface AttachmentListQuery {
 }
 
 export type AttachmentAuditOperation =
+  | 'attachment-quarantine'
+  | 'attachment-restore'
   | 'attachment-manager-upload'
   | 'note-import-from-board-asset'
   | 'board-import-from-vault-image'
   | 'board-reuse-asset'
+
+export interface AttachmentTrashItem {
+  id: string
+  path: string
+  resourceId: string
+  mimeType: string
+  byteSize: number
+  sha256: string
+  recycledAt: number
+  state: 'recycling' | 'trashed' | 'restoring' | 'blocked'
+}
+
+export interface AttachmentTrashPage {
+  items: AttachmentTrashItem[]
+  total: number
+  knownBytes: number
+  offset: number
+  limit: number
+}
 
 export type AttachmentAuditWorkspace = 'local-file' | 'vault-image' | 'board-asset' | 'note-library' | 'board'
 
