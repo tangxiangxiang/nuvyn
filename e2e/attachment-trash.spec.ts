@@ -39,8 +39,9 @@ test('Note image trash preserves authenticated Markdown reads, preview, refresh 
     await confirmation.getByRole('button', { name: /移入回收站|Move to trash/ }).click()
     await expect(settings.locator('.attachment-resource-row')).toHaveCount(0)
     const trashResponse = await request.get('/api/attachments/trash')
-    const trash = await trashResponse.json() as { items: Array<{ id: string; path: string }> }
+    const trash = await trashResponse.json() as { items: Array<{ id: string; path: string; state: string }> }
     recycledId = trash.items.find((item) => item.path === image.path)!.id
+    expect(trash.items.find((item) => item.id === recycledId)?.state).toBe('trashed')
     const historical = await request.get(`/api/markdown-resources?kind=image&path=${image.path}`)
     expect(historical.status()).toBe(200)
     expect(await historical.body()).toEqual(PNG)
@@ -62,7 +63,9 @@ test('Note image trash preserves authenticated Markdown reads, preview, refresh 
       const overflow = await settings.locator('.settings-detail').evaluate((element) => element.scrollWidth - element.clientWidth)
       expect(overflow).toBeLessThanOrEqual(1)
     }
-    await settings.locator('.trash-detail').getByRole('button', { name: /^(恢复|Restore)$/ }).click()
+    const restoreButton = settings.locator('.trash-detail').getByRole('button', { name: /^(恢复|Restore)$/ })
+    await expect(restoreButton).toBeEnabled()
+    await restoreButton.click()
     await expect(settings.locator('.trash-list button')).toHaveCount(0)
     recycledId = null
     const restored = await request.get(`/api/markdown-resources?kind=image&path=${image.path}`)

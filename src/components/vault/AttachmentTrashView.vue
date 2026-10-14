@@ -47,7 +47,7 @@ async function load(nextOffset = offset.value): Promise<void> {
 }
 async function restore(): Promise<void> {
   const item = selected.value
-  if (!item || busy.value) return
+  if (!item || busy.value || loading.value || item.state !== 'trashed') return
   busy.value = true
   try {
     await restoreAttachment(item.id)
@@ -86,7 +86,7 @@ onBeforeUnmount(() => { sequence += 1; controller?.abort(); if (searchTimer) cle
         <p>{{ t('attachments.trash.date') }}: {{ date(selected.recycledAt) }}</p>
         <p>{{ size(selected.byteSize) }}</p>
         <p v-if="selected.state !== 'trashed'">{{ t('attachments.trash.pending') }}</p>
-        <NButton size="small" :loading="busy" :disabled="loading || busy" @click="restore">{{ t('attachments.trash.restore') }}</NButton>
+        <NButton size="small" :loading="busy" :disabled="loading || busy || selected.state !== 'trashed'" @click="restore">{{ t('attachments.trash.restore') }}</NButton>
       </aside>
     </div>
     <footer v-if="page && page.total > 0">
