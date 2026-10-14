@@ -1,4 +1,4 @@
-/** Read-only Attachment Manager contracts shared by the server and browser. */
+/** Attachment Manager contracts shared by the server and browser. */
 
 export const ATTACHMENT_SOURCES = [
   'board-asset',
@@ -181,4 +181,26 @@ export interface AttachmentListQuery {
   referenceStatus?: AttachmentReferenceStatus
   offset?: number
   limit?: number
+}
+
+export type AttachmentAuditOperation =
+  | 'attachment-manager-upload'
+  | 'note-import-from-board-asset'
+  | 'board-import-from-vault-image'
+  | 'board-reuse-asset'
+
+export type AttachmentAuditWorkspace = 'local-file' | 'vault-image' | 'board-asset' | 'note-library' | 'board'
+
+export interface AttachmentAuditEntry {
+  id: number
+  operation: AttachmentAuditOperation
+  resourceType: 'vault-image' | 'board-asset'
+  resourceId: string
+  sourceWorkspace: AttachmentAuditWorkspace
+  sourceResourceId: string | null
+  targetWorkspace: 'note-library' | 'board'
+  targetWorkspaceId: string | null
+  result: 'success' | 'failure'
+  failureCategory: 'validation' | 'authorization' | 'storage' | 'stale-target' | 'unknown' | null
+  occurredAt: number
 }

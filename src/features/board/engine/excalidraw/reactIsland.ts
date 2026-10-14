@@ -22,6 +22,7 @@ import '@excalidraw/excalidraw/index.css'
 import { BoardReactErrorBoundary } from './ReactErrorBoundary'
 import type { BoardRuntimeAsset, ExcalidrawRuntimeScene } from '../types'
 import type { BoardMaterial } from '../../../../../shared/boardMaterialProtocol'
+import { isBoardAssetMimeType } from '../../../../../shared/assetProtocol'
 import {
   boardLibraryPersistenceAdapter,
   createBoardLibraryInstallHashGuard,
@@ -48,6 +49,7 @@ export interface BoardEditorMenuOptions {
     copy: string
     delete: string
     materials: string
+    attachments: string
     titleInput: string
   }
   onBack: () => void
@@ -59,6 +61,7 @@ export interface BoardEditorMenuOptions {
   onCopy: () => void
   onDelete: () => void
   onOpenMaterials: () => void
+  onOpenAttachments: () => void
 }
 
 export interface ExcalidrawIslandMountOptions {
@@ -80,6 +83,7 @@ export interface ExcalidrawIslandMountOptions {
 export interface ExcalidrawIslandHandle {
   update(options: { theme: ExcalidrawIslandTheme, langCode: ExcalidrawIslandLangCode, editorMenu?: BoardEditorMenuOptions }): void
   insertSvgMaterial(material: BoardMaterial): Promise<void>
+  insertImage(blob: Blob, mimeType: string, engineFileId: string): Promise<void>
   unmount(): void
 }
 
@@ -181,6 +185,7 @@ function BoardEditorMainMenu({ menu }: { menu: BoardEditorMenuOptions }): React.
     ),
     React.createElement(MainMenu.Item, { onSelect: menu.onBack, children: menu.labels.back }),
     React.createElement(MainMenu.Item, { onSelect: menu.onOpenMaterials, disabled: menu.busy, children: menu.labels.materials }),
+    React.createElement(MainMenu.Item, { onSelect: menu.onOpenAttachments, disabled: menu.busy, children: menu.labels.attachments }),
     React.createElement(MainMenu.Separator),
     React.createElement(MainMenu.Item, {
       onSelect: (event) => {
@@ -249,6 +254,78 @@ function boardMaterialDataUrl(svg: string): DataURL {
     binary += String.fromCharCode(...bytes.subarray(offset, offset + chunkSize))
   }
   return `data:image/svg+xml;base64,${btoa(binary)}` as DataURL
+}
+
+async function blobDataUrl(blob: Blob, mimeType: string): Promise<DataURL> {
+  if (typeof btoa !== 'function') throw new Error('Browser base64 support is unavailable')
+  const bytes = new Uint8Array(await blob.arrayBuffer())
+  let binary = ''
+  const chunkSize = 0x8000
+  for (let offset = 0; offset < bytes.length; offset += chunkSize) {
+    binary += String.fromCharCode(...bytes.subarray(offset, offset + chunkSize))
+  }
+  return `data:${mimeType};base64,${btoa(binary)}` as DataURL
+}
+
+async function imageDimensions(blob: Blob, mimeType: string): Promise<{ width: number; height: number }> {
+  if (mimeType === 'image/svg+xml') return svgIntrinsicDimensions(await blob.text())
+  if (typeof createImageBitmap === 'function') {
+    const bitmap = await createImageBitmap(blob)
+    const dimensions = { width: bitmap.width, height: bitmap.height }
+    bitmap.close()
+    if (dimensions.width > 0 && dimensions.height > 0) return dimensions
+  }
+  return { width: 320, height: 240 }
+}
+
+async function insertBoardImageIntoScene(
+  api: ExcalidrawImperativeAPI,
+  input: { blob: Blob; mimeType: string; engineFileId: string },
+  isCurrent: () => boolean,
+): Promise<void> {
+  if (!isBoardAssetMimeType(input.mimeType)) throw new Error('Unsupported Board image MIME type')
+  const intrinsic = await imageDimensions(input.blob, input.mimeType)
+  if (!isCurrent()) throw new Error('Excalidraw is no longer available')
+  const appState = api.getAppState()
+  const zoom = appState.zoom.value || 1
+  const viewportWidth = appState.width > 0 ? appState.width : 800
+  const viewportHeight = appState.height > 0 ? appState.height : 600
+  const maxVisibleEdge = Math.max(160, Math.min(640, Math.min(viewportWidth, viewportHeight) * 0.5 / zoom))
+  const scale = Math.min(1, maxVisibleEdge / Math.max(intrinsic.width, intrinsic.height))
+  const width = intrinsic.width * scale
+  const height = intrinsic.height * scale
+  const center = viewportCoordsToSceneCoords({
+    clientX: appState.offsetLeft + viewportWidth / 2,
+    clientY: appState.offsetTop + viewportHeight / 2,
+  }, appState)
+  const now = Date.now()
+  const fileId = input.engineFileId as FileId
+  const dataURL = await blobDataUrl(input.blob, input.mimeType)
+  if (!isCurrent()) throw new Error('Excalidraw is no longer available')
+  const file: BinaryFileData = {
+    id: fileId,
+    mimeType: input.mimeType,
+    dataURL,
+    created: now,
+    lastRetrieved: now,
+    version: 1,
+  }
+  const [element] = convertToExcalidrawElements([{
+    type: 'image',
+    x: center.x - width / 2,
+    y: center.y - height / 2,
+    width,
+    height,
+    fileId,
+    status: 'saved',
+  }], { regenerateIds: true })
+  if (!element) throw new Error('Excalidraw did not create an image element')
+  api.addFiles([file])
+  api.updateScene({
+    elements: [...api.getSceneElementsIncludingDeleted(), element],
+    appState: { selectedElementIds: { [element.id]: true } },
+    captureUpdate: CaptureUpdateAction.IMMEDIATELY,
+  })
 }
 
 export function numericSvgAttribute(attributes: string, name: string): number | null {
@@ -468,6 +545,12 @@ export async function mountExcalidrawIsland(
       const api = currentAPI ?? await apiReady
       if (!mounted || api.isDestroyed) throw new Error('Excalidraw is no longer available')
       insertBoardMaterialIntoScene(api, material)
+    },
+    async insertImage(blob: Blob, mimeType: string, engineFileId: string): Promise<void> {
+      if (!mounted) throw new Error('Excalidraw is no longer mounted')
+      const api = currentAPI ?? await apiReady
+      if (!mounted || api.isDestroyed) throw new Error('Excalidraw is no longer available')
+      await insertBoardImageIntoScene(api, { blob, mimeType, engineFileId }, () => mounted && currentAPI === api && !api.isDestroyed)
     },
     unmount(): void {
       if (!mounted) return

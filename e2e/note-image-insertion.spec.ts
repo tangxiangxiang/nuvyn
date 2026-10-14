@@ -141,6 +141,9 @@ test('selects, drops, and pastes SVG into Note Markdown, then renders it after r
     ))
     const chooserPromise = page.waitForEvent('filechooser')
     await page.getByRole('button', { name: /插入图片|Insert image/ }).click()
+    const picker = page.locator('.attachment-picker-modal')
+    await expect(picker).toBeVisible()
+    await picker.getByRole('button', { name: /上传新图片|Upload (?:a )?new image/ }).click()
     const chooser = await chooserPromise
     await chooser.setFiles({ name: 'Architecture.svg', mimeType: 'image/svg+xml', buffer: SVG })
     const pickerResponse = await pickerResponsePromise
@@ -203,6 +206,110 @@ test('selects, drops, and pastes SVG into Note Markdown, then renders it after r
       if (!relativePath.startsWith('attachments/images/')) continue
       await fs.rm(path.join(vaultRoot, ...relativePath.split('/')), { force: true })
     }
+    await request.post('/api/attachments/refresh').catch(() => {})
+    await request.post('/api/attachments/references/refresh').catch(() => {})
+  }
+})
+
+test('reuses Vault images directly in Note and imports Board Assets as validated copies', async ({ page, request }) => {
+  const runId = randomUUID()
+  const notePath = `inbox/attachment-picker-${runId}`
+  const createdPaths: string[] = []
+  const createdVaultImages: string[] = []
+  const boardAssetId = randomUUID()
+  const vaultRoot = process.env.NUVYN_DRAFT_E2E_VAULT
+  if (!vaultRoot) throw new Error('NUVYN_DRAFT_E2E_VAULT is required for Note image E2E')
+
+  try {
+    const sourceUpload = await request.post('/api/note/images', {
+      headers: { Origin: process.env.NUVYN_PUBLIC_ORIGIN },
+      multipart: { image: { name: 'direct-reference.png', mimeType: 'image/png', buffer: PNG } },
+    })
+    expect(sourceUpload.status(), await sourceUpload.text()).toBe(201)
+    const sourcePath = (await sourceUpload.json() as { path: string }).path
+    createdVaultImages.push(sourcePath)
+
+    const boardAssetUpload = await request.put(`/api/assets/${boardAssetId}`, {
+      headers: { Origin: process.env.NUVYN_PUBLIC_ORIGIN, 'Content-Type': 'image/png' },
+      data: PNG,
+    })
+    expect(boardAssetUpload.status(), await boardAssetUpload.text()).toBe(200)
+
+    await createDoc(request, notePath, '# Attachment picker\n', createdPaths)
+    await request.post('/api/attachments/refresh')
+    await gotoVaultReady(page)
+    await openDoc(page, notePath)
+    const editor = page.locator('.editor-pane .monaco-editor').first()
+    await editor.locator('.view-lines').click({ position: { x: 35, y: 12 } })
+    await page.keyboard.press('Control+End')
+
+    let noteImageUploads = 0
+    const countNoteImageUploads = (requestEvent: import('@playwright/test').Request) => {
+      if (requestEvent.method() === 'POST' && new URL(requestEvent.url()).pathname === '/api/note/images') {
+        noteImageUploads += 1
+      }
+    }
+    page.on('request', countNoteImageUploads)
+
+    await page.getByRole('button', { name: /插入图片|Insert image/ }).click()
+    const picker = page.locator('.attachment-picker-modal')
+    await expect(picker).toBeVisible()
+    await picker.getByPlaceholder(/搜索名称、路径或 ID|Search names, paths, or IDs/).fill(sourcePath.split('/').at(-1)!)
+    const vaultOption = picker.getByRole('option').filter({ hasText: sourcePath.split('/').at(-1)! })
+    await expect(vaultOption).toHaveCount(1)
+    await expect(vaultOption).toContainText(/直接引用|Direct reference/)
+    await vaultOption.click()
+    await picker.getByRole('button', { name: /插入图片|Insert image/ }).click()
+    await expect(editor.locator('.view-lines')).toContainText(`@/${sourcePath}`)
+    const directRaw = await waitForSavedRaw(request, notePath, `@/${sourcePath}`)
+    expect(directRaw).toContain(`![${sourcePath.split('/').at(-1)?.replace(/\.[^.]+$/u, '')}](@/${sourcePath})`)
+    expect(noteImageUploads).toBe(0)
+
+    await editor.locator('.view-lines').click({ position: { x: 35, y: 12 } })
+    await page.keyboard.press('Control+End')
+    await page.getByRole('button', { name: /插入图片|Insert image/ }).click()
+    await expect(picker).toBeVisible()
+    await picker.getByPlaceholder(/搜索名称、路径或 ID|Search names, paths, or IDs/).fill(boardAssetId)
+    const boardOption = picker.getByRole('option').filter({ hasText: boardAssetId.slice(0, 8) })
+    await expect(boardOption).toHaveCount(1)
+    await expect(boardOption).toContainText(/导入副本|Import a copy/)
+    await boardOption.click()
+    const importResponsePromise = page.waitForResponse((response) => (
+      new URL(response.url()).pathname === '/api/note/images' && response.request().method() === 'POST'
+    ))
+    await picker.getByRole('button', { name: /插入图片|Insert image/ }).click()
+    const importResponse = await importResponsePromise
+    expect(importResponse.status(), await importResponse.text()).toBe(201)
+    const imported = await importResponse.json() as { id: string; path: string }
+    createdVaultImages.push(imported.path)
+    expect(imported.path).toMatch(/^attachments\/images\/[0-9a-f-]{36}\.png$/iu)
+    expect(imported.id).not.toBe(boardAssetId)
+    expect(await waitForSavedRaw(request, notePath, `@/${imported.path}`)).toContain(`@/${imported.path}`)
+    expect(noteImageUploads).toBe(1)
+
+    const originalAsset = await request.get(`/api/assets/${boardAssetId}`)
+    expect(originalAsset.status()).toBe(200)
+    expect(await originalAsset.body()).toEqual(PNG)
+    const audit = await request.get('/api/attachments/audit?limit=100')
+    expect(audit.status()).toBe(200)
+    expect((await audit.json() as { entries: Array<{ operation: string; sourceResourceId: string | null }> }).entries)
+      .toEqual(expect.arrayContaining([
+        expect.objectContaining({ operation: 'note-import-from-board-asset', sourceResourceId: boardAssetId }),
+      ]))
+    page.off('request', countNoteImageUploads)
+
+    await page.reload()
+    await expect(page.locator('.editor-pane .monaco-editor').first()).toBeVisible()
+    const restoredRaw = await (await request.get(`/api/posts/${notePath}`)).json() as { raw: string }
+    expect(restoredRaw.raw).toContain(`@/${sourcePath}`)
+    expect(restoredRaw.raw).toContain(`@/${imported.path}`)
+  } finally {
+    for (const createdPath of createdPaths) await request.delete(`/api/posts/${createdPath}`).catch(() => {})
+    for (const relativePath of new Set(createdVaultImages)) {
+      if (!relativePath.startsWith('attachments/images/')) continue
+      await fs.rm(path.join(vaultRoot, ...relativePath.split('/')), { force: true })
+    }
+    await request.delete(`/api/assets/${boardAssetId}/unreferenced`).catch(() => {})
     await request.post('/api/attachments/refresh').catch(() => {})
     await request.post('/api/attachments/references/refresh').catch(() => {})
   }
@@ -465,6 +572,9 @@ test('selects an image, supports undo/redo, renders after reload, and tracks its
     ), { timeout: 5_000 })
     const fileChooserPromise = page.waitForEvent('filechooser')
     await page.getByRole('button', { name: /插入图片|Insert image/ }).click()
+    const picker = page.locator('.attachment-picker-modal')
+    await expect(picker).toBeVisible()
+    await picker.getByRole('button', { name: /上传新图片|Upload (?:a )?new image/ }).click()
     const fileChooser = await fileChooserPromise
     await fileChooser.setFiles({ name: 'Architecture Screenshot.png', mimeType: 'image/png', buffer: PNG })
     const uploadResponse = await uploadResponsePromise

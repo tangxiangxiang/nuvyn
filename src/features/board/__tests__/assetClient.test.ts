@@ -3,7 +3,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 const authFetch = vi.hoisted(() => vi.fn())
 vi.mock('../../../lib/auth-session', () => ({ authFetch }))
 
-import { BoardAssetError, cleanupUnreferencedAsset, fetchAssetBlob, uploadAsset } from '../assetClient'
+import { BoardAssetError, cleanupUnreferencedAsset, fetchAssetBlob, fetchAssetPreviewBlob, uploadAsset } from '../assetClient'
 
 const assetId = '11111111-1111-4111-8111-111111111111'
 
@@ -77,6 +77,34 @@ describe('Board asset client', () => {
       headers: { 'content-type': 'image/svg+xml' },
       body: blob,
     })
+  })
+
+  it('attaches only the constrained import audit context to a Board Asset write', async () => {
+    authFetch.mockResolvedValueOnce(new Response(JSON.stringify({
+      id: assetId,
+      mimeType: 'image/png',
+      byteSize: 3,
+      sha256: 'hash',
+    }), { status: 200, headers: { 'content-type': 'application/json' } }))
+    const blob = new Blob(['png'], { type: 'image/png' })
+    await uploadAsset(assetId, 'image/png', blob, {
+      operation: 'board-reuse-asset',
+      sourceId: assetId,
+      targetBoardId: assetId,
+    })
+    const [, init] = authFetch.mock.calls[0] as [string, RequestInit]
+    const headers = new Headers(init.headers)
+    expect(headers.get('x-nuvyn-attachment-operation')).toBe('board-reuse-asset')
+    expect(headers.get('x-nuvyn-attachment-source-id')).toBe(assetId)
+    expect(headers.get('x-nuvyn-attachment-target-board-id')).toBe(assetId)
+  })
+
+  it('uses a distinct authenticated endpoint for Board Asset previews', async () => {
+    const signal = new AbortController().signal
+    authFetch.mockResolvedValueOnce(new Response('<svg />', { headers: { 'content-type': 'image/svg+xml' } }))
+    const preview = await fetchAssetPreviewBlob(assetId, signal)
+    expect(preview.type).toBe('image/svg+xml')
+    expect(authFetch).toHaveBeenCalledWith(`/api/assets/${assetId}/preview`, { signal })
   })
 
   it('uses the narrow idempotent endpoint for unreferenced cleanup', async () => {

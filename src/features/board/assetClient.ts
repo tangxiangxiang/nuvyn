@@ -64,6 +64,12 @@ export interface AssetUploadResult {
   sha256: string
 }
 
+export interface BoardAssetAuditContext {
+  operation: 'board-import-from-vault-image' | 'board-reuse-asset'
+  sourceId: string
+  targetBoardId: string
+}
+
 function errorDetails(error: unknown): { message: string; status: number; code?: string } {
   const source = error as {
     message?: unknown
@@ -158,12 +164,21 @@ export async function uploadAsset(
   assetId: string,
   mimeType: string,
   blob: Blob,
+  auditContext?: BoardAssetAuditContext,
 ): Promise<AssetUploadResult> {
   const supportedMimeType = validateAssetInput(assetId, mimeType, blob)
   try {
+    let headers: HeadersInit = { 'content-type': supportedMimeType }
+    if (auditContext) {
+      const auditedHeaders = new Headers(headers)
+      auditedHeaders.set('x-nuvyn-attachment-operation', auditContext.operation)
+      auditedHeaders.set('x-nuvyn-attachment-source-id', auditContext.sourceId)
+      auditedHeaders.set('x-nuvyn-attachment-target-board-id', auditContext.targetBoardId)
+      headers = auditedHeaders
+    }
     const response = await authFetch(`/api/assets/${encodeURIComponent(assetId)}`, {
       method: 'PUT',
-      headers: { 'content-type': supportedMimeType },
+      headers,
       body: blob,
     })
     if (!response.ok) {
@@ -249,12 +264,12 @@ export async function cleanupUnreferencedAsset(assetId: string): Promise<void> {
   }
 }
 
-export async function fetchAssetBlob(assetId: string, signal?: AbortSignal): Promise<Blob> {
+async function fetchAssetBlobFromUrl(assetId: string, url: string, signal?: AbortSignal): Promise<Blob> {
   if (!isAssetId(assetId)) {
     throw new BoardAssetError('ASSET_RESOLVE_FAILED', 'Asset ID must be a UUID.', 400, { uncertain: false, assetId })
   }
   try {
-    const response = await authFetch(boardAssetUrl(assetId), { signal })
+    const response = await authFetch(url, { signal })
     if (response.status === 404) {
       throw new BoardAssetError('ASSET_MISSING', 'Board asset was not found.', 404, { uncertain: false, assetId })
     }
@@ -283,6 +298,14 @@ export async function fetchAssetBlob(assetId: string, signal?: AbortSignal): Pro
     const details = errorDetails(error)
     throw new BoardAssetError('ASSET_RESOLVE_FAILED', details.message, details.status, { cause: error, assetId })
   }
+}
+
+export function fetchAssetBlob(assetId: string, signal?: AbortSignal): Promise<Blob> {
+  return fetchAssetBlobFromUrl(assetId, boardAssetUrl(assetId), signal)
+}
+
+export function fetchAssetPreviewBlob(assetId: string, signal?: AbortSignal): Promise<Blob> {
+  return fetchAssetBlobFromUrl(assetId, `${boardAssetUrl(assetId)}/preview`, signal)
 }
 
 export function isSupportedBoardAssetMimeType(value: unknown): value is BoardAssetMimeType {

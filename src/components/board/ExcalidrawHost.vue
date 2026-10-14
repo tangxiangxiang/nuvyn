@@ -78,7 +78,12 @@ async function insertMaterial(material: BoardMaterial): Promise<void> {
   await island.insertSvgMaterial(material)
 }
 
-defineExpose({ insertMaterial })
+async function insertImage(blob: Blob, mimeType: string, engineFileId: string): Promise<void> {
+  if (!island) throw new Error('Excalidraw is not ready')
+  await island.insertImage(blob, mimeType, engineFileId)
+}
+
+defineExpose({ insertMaterial, insertImage })
 </script>
 
 <template>

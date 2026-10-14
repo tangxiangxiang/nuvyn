@@ -9,6 +9,7 @@ import { CONTENT_DIR, setContentDir } from '../paths.js'
 import { __setAttachmentCatalogForTesting, __setAttachmentReferenceIndexForRoutesTesting } from '../attachments/routes.js'
 import { AttachmentCatalog, type AttachmentCatalogAdapter } from '../attachments/catalog.js'
 import { AttachmentReferenceIndex } from '../attachments/references.js'
+import { recordAttachmentOperation } from '../attachments/audit.js'
 import type { AttachmentSource } from '../../shared/attachmentProtocol.js'
 import {
   authenticatedRequest,
@@ -49,11 +50,49 @@ describe('Attachment Manager API', () => {
     const referenceStatus = await app.fetch(new Request('http://localhost/api/attachments/references/status'))
     const referenceQuery = await app.fetch(new Request('http://localhost/api/attachments/references/query', { method: 'POST' }))
     const cleanupPreview = await app.fetch(new Request('http://localhost/api/attachments/cleanup-preview', { method: 'POST' }))
-    expect([list.status, summary.status, status.status, refresh.status, referenceStatus.status, referenceQuery.status, cleanupPreview.status])
-      .toEqual([401, 401, 401, 401, 401, 401, 401])
+    const audit = await app.fetch(new Request('http://localhost/api/attachments/audit'))
+    expect([list.status, summary.status, status.status, refresh.status, referenceStatus.status, referenceQuery.status, cleanupPreview.status, audit.status])
+      .toEqual([401, 401, 401, 401, 401, 401, 401, 401])
 
     const allowed = await app.fetch(authenticatedRequest(auth, '/api/attachments/index-status'))
     expect(allowed.status).toBe(200)
+  })
+
+  it('returns only bounded attachment operation metadata and rejects invalid audit paths', async () => {
+    const resourceId = '550e8400-e29b-41d4-a716-446655440000'
+    recordAttachmentOperation(db, {
+      operation: 'board-import-from-vault-image',
+      resourceType: 'board-asset',
+      resourceId,
+      sourceWorkspace: 'vault-image',
+      sourceResourceId: 'attachments/images/660e8400-e29b-41d4-a716-446655440000.svg',
+      targetWorkspace: 'board',
+      targetWorkspaceId: resourceId,
+      result: 'success',
+      occurredAt: 10,
+    })
+    recordAttachmentOperation(db, {
+      operation: 'board-import-from-vault-image',
+      resourceType: 'board-asset',
+      resourceId,
+      sourceWorkspace: 'vault-image',
+      sourceResourceId: '/Volumes/private/diary.svg',
+      targetWorkspace: 'board',
+      targetWorkspaceId: resourceId,
+      result: 'success',
+      occurredAt: 11,
+    })
+
+    const response = await app.fetch(authenticatedRequest(auth, '/api/attachments/audit?limit=10'))
+    expect(response.status).toBe(200)
+    expect(response.headers.get('cache-control')).toBe('no-store')
+    expect(await response.json()).toMatchObject({ entries: [{
+      operation: 'board-import-from-vault-image',
+      resourceId,
+      sourceResourceId: 'attachments/images/660e8400-e29b-41d4-a716-446655440000.svg',
+      result: 'success',
+    }] })
+    expect((await app.fetch(authenticatedRequest(auth, '/api/attachments/audit?limit=101'))).status).toBe(400)
   })
 
   it('returns authenticated reference pages and a read-only risk preflight for a real Vault file', async () => {

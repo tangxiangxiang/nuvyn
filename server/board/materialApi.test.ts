@@ -39,7 +39,7 @@ describe('Board Material API', () => {
     applyMigrations(legacy, 33)
     expect((legacy.prepare('SELECT version FROM schema_version').get() as { version: number }).version).toBe(33)
     applyMigrations(legacy)
-    expect((legacy.prepare('SELECT version FROM schema_version').get() as { version: number }).version).toBe(36)
+    expect((legacy.prepare('SELECT version FROM schema_version').get() as { version: number }).version).toBe(37)
     expect(legacy.prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'board_materials'").get()).toEqual({ name: 'board_materials' })
     legacy.close()
   })
@@ -58,6 +58,29 @@ describe('Board Material API', () => {
     const listed = await request(fixture, '/')
     expect(await json<typeof material[]>(listed)).toEqual([material])
     expect(await request(fixture, '/?archived=true').then(json)).toEqual([])
+  })
+
+  it('serves an SVG-sanitized material preview without changing the stored material', async () => {
+    const originalSvg = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 10 10"><rect width="10" height="10" /></svg>'
+    const material = fixture.service.create({ name: 'Preview', svg: originalSvg })
+    const response = await request(fixture, `/${material.id}`)
+    expect(response.status).toBe(200)
+    expect(response.headers.get('cache-control')).toBe('no-store')
+    expect(response.headers.get('x-content-type-options')).toBe('nosniff')
+    const result = await json<{ svg: string }>(response)
+    expect(result.svg).toContain('<rect')
+    expect(result.svg).not.toContain('<script')
+    expect(result.svg).not.toContain('onload')
+    expect(fixture.service.get(material.id).svg).toBe(originalSvg)
+  })
+
+  it('fails closed when a stored Board Material is outside the safe SVG preview profile', async () => {
+    const unsafeSvg = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 10 10" onload="alert(1)"><script>alert(2)</script><rect width="10" height="10" /></svg>'
+    const material = fixture.service.create({ name: 'Unsafe preview', svg: unsafeSvg })
+    const response = await request(fixture, `/${material.id}`)
+    expect(response.status).toBe(422)
+    expect(await json<{ code: string }>(response)).toMatchObject({ code: 'BOARD_MATERIAL_SVG_INVALID' })
+    expect(fixture.service.get(material.id).svg).toBe(unsafeSvg)
   })
 
   it.each([

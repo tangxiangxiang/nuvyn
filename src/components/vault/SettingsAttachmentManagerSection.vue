@@ -1,18 +1,22 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { NButton, NEmpty, NIcon, NInput, NSelect, NSpin, NTag } from 'naive-ui'
-import { ArrowLeft, File, Photo, Refresh, Shape, Copy } from '@vicons/tabler'
+import { ArrowLeft, File, Photo, Refresh, Shape, Copy, Upload } from '@vicons/tabler'
 import { useI18n } from '../../composables/useI18n'
 import { useToast } from '../../composables/useToast'
 import { copyTextToClipboard } from './workspaceTabActions'
 import {
+  listAttachmentAudit,
   listAttachments,
   previewAttachmentCleanup,
   queryAttachmentReferences,
   refreshAttachmentIndex,
   refreshAttachmentReferences,
 } from '../../lib/attachments-api'
+import { uploadNoteImage } from '../../lib/noteImages'
+import AttachmentImagePreview from './AttachmentImagePreview.vue'
 import type {
+  AttachmentAuditEntry,
   AttachmentCleanupPreview,
   AttachmentIndexStatus,
   AttachmentListQuery,
@@ -57,6 +61,11 @@ let previewSequence = 0
 let referenceController: AbortController | null = null
 let previewController: AbortController | null = null
 let searchTimer: ReturnType<typeof setTimeout> | undefined
+const uploadInput = ref<HTMLInputElement | null>(null)
+const uploadBusy = ref(false)
+const auditEntries = ref<AttachmentAuditEntry[]>([])
+const auditLoading = ref(false)
+const auditFailed = ref(false)
 
 const currentQueryKey = computed(() => JSON.stringify(query()))
 const isPageQueryStale = computed(() => Boolean(page.value && pageQueryKey.value !== currentQueryKey.value))
@@ -176,6 +185,18 @@ async function loadPage(failureContext: 'query' | 'after-refresh' = 'query'): Pr
     return false
   } finally {
     if (current === loadSequence) loading.value = false
+  }
+}
+
+async function loadAudit(): Promise<void> {
+  auditLoading.value = true
+  auditFailed.value = false
+  try {
+    auditEntries.value = await listAttachmentAudit(20)
+  } catch {
+    auditFailed.value = true
+  } finally {
+    auditLoading.value = false
   }
 }
 
@@ -310,6 +331,25 @@ async function copyIdentity(): Promise<void> {
   toast[copied ? 'success' : 'error'](t(copied ? 'attachments.copied' : 'attachments.copy_failed'))
 }
 
+async function uploadToNoteLibrary(event: Event): Promise<void> {
+  const input = event.currentTarget as HTMLInputElement
+  const file = input.files?.[0]
+  input.value = ''
+  if (!file || uploadBusy.value) return
+  uploadBusy.value = true
+  try {
+    await uploadNoteImage(file, undefined, { operation: 'attachment-manager-upload' })
+    toast.success(t('attachments.upload_success'))
+    await refresh()
+    if (selected.value) loadReferences(selected.value)
+    await loadAudit()
+  } catch {
+    toast.error(t('attachments.upload_failed'))
+  } finally {
+    uploadBusy.value = false
+  }
+}
+
 const typeOptions = computed(() => [
   { label: t('attachments.filter.all_types'), value: 'all' },
   { label: t('attachments.type.image'), value: 'image' },
@@ -339,7 +379,7 @@ watch(selectedKey, (key) => {
   previewError.value = false
   if (key && selected.value) loadReferences(selected.value)
 })
-onMounted(() => { void loadPage() })
+onMounted(() => { void loadPage(); void loadAudit() })
 onBeforeUnmount(() => {
   loadSequence += 1
   referenceSequence += 1
@@ -365,6 +405,11 @@ onBeforeUnmount(() => {
         <template #icon><NIcon aria-hidden="true"><Refresh /></NIcon></template>
         {{ t(refreshing ? 'attachments.refreshing' : 'attachments.refresh') }}
       </NButton>
+      <NButton attr-type="button" size="medium" class="btn attachment-upload" :loading="uploadBusy" :disabled="uploadBusy" @click="uploadInput?.click()">
+        <template #icon><NIcon aria-hidden="true"><Upload /></NIcon></template>
+        {{ t('attachments.upload') }}
+      </NButton>
+      <input ref="uploadInput" class="attachment-upload-input" type="file" accept="image/png,image/jpeg,image/webp,image/gif,image/avif,image/svg+xml,.svg" @change="uploadToNoteLibrary">
     </header>
 
     <div v-if="page" class="attachment-summary" :aria-label="t('attachments.summary.label')">
@@ -464,6 +509,7 @@ onBeforeUnmount(() => {
             <NIcon aria-hidden="true"><component :is="resourceIcon(selected)" /></NIcon>
             <div><h4>{{ displayName(selected) }}</h4><p>{{ typeLabel(selected) }} · {{ sourceLabel(selected) }}</p></div>
           </div>
+          <AttachmentImagePreview v-if="selected.type === 'image' || selected.type === 'material'" :item="selected" />
           <dl class="attachment-detail-list">
             <div><dt>{{ t('attachments.detail.size') }}</dt><dd>{{ formatBytes(selected.byteSize) }}</dd></div>
             <div><dt>{{ t('attachments.detail.mime') }}</dt><dd>{{ selected.mimeType ?? t('attachments.not_available') }}</dd></div>
@@ -565,6 +611,27 @@ onBeforeUnmount(() => {
       </aside>
     </div>
 
+    <details class="attachment-audit">
+      <summary>{{ t('attachments.audit.title') }}</summary>
+      <div v-if="auditLoading" class="attachment-audit-state" role="status"><NSpin size="small" />{{ t('attachments.audit.loading') }}</div>
+      <div v-else-if="auditFailed" class="attachment-audit-state is-error" role="alert">{{ t('attachments.audit.failed') }}</div>
+      <div v-else-if="auditEntries.length === 0" class="attachment-audit-state">{{ t('attachments.audit.empty') }}</div>
+      <ol v-else class="attachment-audit-list">
+        <li v-for="entry in auditEntries" :key="entry.id" class="attachment-audit-item">
+          <div>
+            <strong>{{ t(`attachments.audit.operation.${entry.operation}`) }}</strong>
+            <small>{{ t(`attachments.audit.workspace.${entry.sourceWorkspace}`) }} → {{ t(`attachments.audit.workspace.${entry.targetWorkspace}`) }}</small>
+          </div>
+          <code :title="entry.resourceId">{{ entry.resourceId }}</code>
+          <span :class="entry.result === 'success' ? 'is-success' : 'is-failure'">
+            {{ t(`attachments.audit.${entry.result}`) }}<template v-if="entry.failureCategory"> · {{ t(`attachments.audit.failure.${entry.failureCategory}`) }}</template>
+          </span>
+          <time :datetime="new Date(entry.occurredAt).toISOString()">{{ formatDate(entry.occurredAt) }}</time>
+        </li>
+      </ol>
+      <small class="attachment-audit-retention">{{ t('attachments.audit.retention') }}</small>
+    </details>
+
     <p class="attachment-reference-note">{{ t('attachments.reference_note') }}</p>
   </section>
 </template>
@@ -575,6 +642,8 @@ onBeforeUnmount(() => {
 .attachment-manager-heading { min-width: 0; }
 .attachment-back { margin: -8px 0 8px -8px; color: var(--settings-muted); }
 .attachment-refresh { flex: 0 0 auto; }
+.attachment-upload { flex: 0 0 auto; }
+.attachment-upload-input { position: fixed; width: 1px; height: 1px; opacity: 0; pointer-events: none; }
 .attachment-summary { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; }
 .attachment-summary > div { min-width: 0; display: flex; flex-direction: column; gap: 6px; padding: 12px 14px; border: 1px solid var(--settings-border); border-radius: 9px; background: var(--settings-card); }
 .attachment-summary span { color: var(--settings-muted); font-size: .78rem; }
@@ -655,10 +724,14 @@ onBeforeUnmount(() => {
   .attachment-detail-panel { min-height: 180px; }
 }
 @media (max-width: 520px) {
-  .attachment-manager-header { flex-direction: row; align-items: flex-end; gap: 8px; }
+  .attachment-manager-header { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); align-items: center; gap: 8px; }
+  .attachment-manager-heading { grid-column: 1 / -1; }
   .attachment-manager-heading h3 { font-size: 1.1rem; }
   .attachment-manager-heading p { max-width: 42vw; font-size: .75rem; }
-  .attachment-refresh { padding-inline: 8px; }
+  .attachment-refresh, .attachment-upload { width: 100%; min-width: 0; padding-inline: 6px; }
+  .attachment-refresh { grid-column: 1; grid-row: 2; }
+  .attachment-upload { grid-column: 2; grid-row: 2; }
+  .attachment-refresh :deep(.n-button__content), .attachment-upload :deep(.n-button__content) { white-space: normal; text-align: center; }
   .attachment-summary { gap: 7px; }
   .attachment-summary > div { padding: 9px 10px; }
   .attachment-toolbar { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 7px; }

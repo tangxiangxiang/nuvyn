@@ -41,6 +41,20 @@ describe('Note image upload client', () => {
     expect((init.body as FormData).get('image')).toBeInstanceOf(File)
   })
 
+  it('sends a constrained Board-to-Note import audit context without changing multipart content', async () => {
+    authFetch.mockResolvedValue(successResponse())
+    await uploadNoteImage(file(), undefined, {
+      operation: 'note-import-from-board-asset',
+      sourceId: UUID,
+    })
+    const [url, init] = authFetch.mock.calls[0] as [string, RequestInit]
+    expect(url).toBe('/api/note/images')
+    expect(new Headers(init.headers).get('x-nuvyn-attachment-operation')).toBe('note-import-from-board-asset')
+    expect(new Headers(init.headers).get('x-nuvyn-attachment-source-id')).toBe(UUID)
+    expect(init.body).toBeInstanceOf(FormData)
+    expect((init.body as FormData).get('image')).toBeInstanceOf(File)
+  })
+
   it('preflights and validates SVG upload responses without raster magic detection', async () => {
     authFetch.mockResolvedValue(successResponse('Architecture.svg', 'svg'))
     const result = await uploadNoteImage(file('Architecture.svg', SVG_BYTES, 'image/svg+xml'))

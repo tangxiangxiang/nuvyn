@@ -4,6 +4,7 @@ import { apiErrorResponse } from '../apiErrors.js'
 import { getDb } from '../db.js'
 import { BoardMaterialError } from './materialErrors.js'
 import { createBoardMaterialService, type BoardMaterialService } from './materialService.js'
+import { NoteSvgValidationError, sanitizeNoteSvg } from '../noteSvg.js'
 
 const BOARD_MATERIAL_MAX_JSON_BYTES = 3 * 1024 * 1024
 
@@ -54,6 +55,29 @@ export function createBoardMaterialRoutes(
       return apiErrorResponse(c, error, {
         code: 'BOARD_MATERIAL_INTERNAL_ERROR',
         message: 'Board materials could not be loaded.',
+      })
+    }
+  })
+
+  routes.get('/:materialId', (c) => {
+    try {
+      c.header('Cache-Control', 'no-store')
+      c.header('X-Content-Type-Options', 'nosniff')
+      const material = getService().get(c.req.param('materialId'))
+      let svg: string
+      try {
+        svg = sanitizeNoteSvg(Buffer.from(material.svg, 'utf8')).toString('utf8')
+      } catch (error) {
+        if (error instanceof NoteSvgValidationError) {
+          throw new BoardMaterialError('BOARD_MATERIAL_SVG_INVALID', 422, 'Board material SVG cannot be safely previewed.')
+        }
+        throw error
+      }
+      return c.json({ ...material, svg })
+    } catch (error) {
+      return apiErrorResponse(c, error, {
+        code: 'BOARD_MATERIAL_INTERNAL_ERROR',
+        message: 'Board material could not be loaded.',
       })
     }
   })

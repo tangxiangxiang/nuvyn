@@ -728,6 +728,31 @@ describe('Asset HTTP API', () => {
     expect(new Uint8Array(await read.arrayBuffer())).toEqual(new Uint8Array(data))
   })
 
+  it('serves sanitized SVG only from the dedicated preview read while preserving the original Asset', async () => {
+    const assetId = randomUUID()
+    const originalSvg = Buffer.from('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 10 10"><rect width="10" height="10" /></svg>')
+    expect((await uploadAsset(assetId, originalSvg, 'image/svg+xml')).status).toBe(200)
+
+    const preview = await request(`/api/assets/${assetId}/preview`)
+    expect(preview.status).toBe(200)
+    expect(preview.headers.get('cache-control')).toBe('no-store')
+    expect(preview.headers.get('content-security-policy')).toContain("script-src 'none'")
+    const safeText = await preview.text()
+    expect(safeText).toContain('<rect')
+    expect(safeText).not.toContain('<script')
+    expect(safeText).not.toContain('onload')
+
+    const original = await request(`/api/assets/${assetId}`)
+    expect(new Uint8Array(await original.arrayBuffer())).toEqual(new Uint8Array(originalSvg))
+
+    const unsafeId = randomUUID()
+    const unsafeSvg = Buffer.from('<svg xmlns="http://www.w3.org/2000/svg" onload="alert(1)"><script>alert(2)</script><rect width="10" height="10" /></svg>')
+    expect((await uploadAsset(unsafeId, unsafeSvg, 'image/svg+xml')).status).toBe(200)
+    const unsafePreview = await request(`/api/assets/${unsafeId}/preview`)
+    expect(unsafePreview.status).toBe(422)
+    expect(await unsafePreview.json()).toMatchObject({ code: 'ASSET_PREVIEW_UNSAFE' })
+  })
+
   it('cleans only unreferenced Assets and treats missing Assets as already clean', async () => {
     const orphanId = randomUUID()
     expect((await uploadAsset(orphanId)).status).toBe(200)

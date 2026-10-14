@@ -1,6 +1,6 @@
 # Nuvyn Attachment Manager — Implementation Phases
 
-**Last updated:** 2026-10-12
+**Last updated:** 2026-10-14
 
 This plan separates the unified catalog foundation from later reference analysis and write capabilities. Existing resource identities, physical storage, and lifecycle remain owned by their current modules.
 
@@ -29,17 +29,21 @@ This plan separates the unified catalog foundation from later reference analysis
 - A failed reference refresh returns an API error and preserves the last successful snapshot only as explicitly stale evidence. Stale or unavailable reference data projects as unknown and cleanup preflight remains unverified; a successful retry replaces the snapshot.
 - Coverage is intentionally partial: Diary is restricted; Git history, browser drafts, unsaved editor buffers, Board checkpoints, and external changes after scanning are not checked. Board Material usage remains unknown. A zero current-reference result never authorizes deletion.
 
-## Phase 3 — Upload and cross-module reuse
+## Phase 3 — Safe previews, insertion, and audited operations
 
-**Status: Planned**
+**Status: Implemented (P3.1–P3.3; cleanup remains read-only)**
 
-- Define a unified attachment intake flow while preserving source-specific storage and ownership.
-- Support insertion into Note and Board through their existing write boundaries.
-- Add audited cleanup only after Phase 2 reference and safety evidence is sufficient.
-- Keep Diary encryption and access controls independent; do not route encrypted Diary resources through a generic plaintext attachment service.
+- Add on-demand previews for Note/Vault images, Board Assets, and Board Materials. Reads use each source's authenticated API; Vault image paths are constrained to generated Note-image identities, SVG content is sanitized for previews, and object URLs/requests are cancelled and released when selection changes or the component unmounts.
+- Add a searchable, source-filtered, paginated, keyboard-operable image picker to Note and Board flows. Note can directly reference an existing Vault image; a Board Asset selected for Note is verified and copied through the existing Note image upload and Monaco tracked-range insertion path.
+- Add a constrained Attachment Manager upload entry that writes only through the existing Note image upload service; it is not a generic file upload surface.
+- Add Board insertion through the existing Board Asset Session. An existing Board Asset keeps its Asset ID and is revalidated through the session's durable Pending Blob/recovery flow; a Vault image becomes a new Board Asset. Board Material storage and insertion remain under their existing API.
+- Refresh catalog/reference snapshots after supported writes and insertions. Authentication, SVG validation, Board integrity checks, editor identity checks, and Diary exclusions remain owned by the existing modules.
+- Add a bounded SQLite operation audit for Note image uploads/imports and Board image imports/reuse. It retains at most 500 metadata-only events; source identities are constrained and no binary payload, Diary plaintext, credentials, or absolute paths are recorded.
+- Keep cleanup preview read-only: `deletionAllowed` remains false. No delete, quarantine, or garbage-collection action is added by Phase 3.
+- Keep Diary encryption and access controls independent; no Diary attachment is listed, previewed, uploaded, or routed through a generic plaintext attachment service.
 
 ## Verification gates
 
 - Each phase must add focused backend and frontend tests before expanding scope.
-- Run `npm run typecheck`, focused unit tests, relevant E2E, and `npm run build` for Phase 1.
+- Run `npm run typecheck`, focused unit tests, relevant E2E, and `npm run build` for each phase.
 - Do not treat an incomplete index as a complete inventory or as permission to mutate a resource.

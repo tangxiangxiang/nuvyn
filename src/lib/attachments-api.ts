@@ -8,6 +8,7 @@ import type {
   AttachmentReferencePage,
   AttachmentCleanupPreview,
   AttachmentResourceKey,
+  AttachmentAuditEntry,
 } from '../../shared/attachmentProtocol'
 
 function queryString(query: AttachmentListQuery): string {
@@ -24,6 +25,14 @@ function queryString(query: AttachmentListQuery): string {
 
 export async function listAttachments(query: AttachmentListQuery = {}, signal?: AbortSignal): Promise<AttachmentPage> {
   return jsonOrThrow<AttachmentPage>(await authFetch(`/api/attachments${queryString(query)}`, { signal }))
+}
+
+export async function listAttachmentAudit(limit = 50, signal?: AbortSignal): Promise<AttachmentAuditEntry[]> {
+  const result = await jsonOrThrow<{ entries: AttachmentAuditEntry[] }>(await authFetch(
+    `/api/attachments/audit?limit=${encodeURIComponent(String(limit))}`,
+    { signal },
+  ))
+  return result.entries
 }
 
 export async function getAttachmentIndexStatus(signal?: AbortSignal): Promise<AttachmentIndexStatus> {

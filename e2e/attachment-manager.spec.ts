@@ -3,6 +3,11 @@ import { promises as fs } from 'node:fs'
 import path from 'node:path'
 import { expect, test } from './fixtures/auth'
 
+const PREVIEW_PNG = Buffer.from(
+  'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=',
+  'base64',
+)
+
 test('Attachment Manager lists real sources, filters, refreshes, and preserves the open editor', async ({ page, request }) => {
   const runId = randomUUID()
   const notePath = `inbox/attachment-manager-note-${runId}`
@@ -26,8 +31,13 @@ test('Attachment Manager lists real sources, filters, refreshes, and preserves t
   let consumerNoteCreated = false
   let sourceNoteCreated = false
   let assetCreated = false
+  let assetPreviewRequests = 0
+  const countAssetPreviewRequests = (requestEvent: import('@playwright/test').Request) => {
+    if (new URL(requestEvent.url()).pathname === `/api/assets/${assetId}/preview`) assetPreviewRequests += 1
+  }
 
   try {
+    page.on('request', countAssetPreviewRequests)
     const note = await request.post('/api/posts', { data: { path: notePath, title: 'Attachment manager editor state' } })
     expect(note.status(), await note.text()).toBe(201)
     noteCreated = true
@@ -59,7 +69,7 @@ test('Attachment Manager lists real sources, filters, refreshes, and preserves t
 
     const asset = await request.put(`/api/assets/${assetId}`, {
       headers: { 'Content-Type': 'image/png' },
-      data: Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x00]),
+      data: PREVIEW_PNG,
     })
     expect(asset.status(), await asset.text()).toBe(200)
     assetCreated = true
@@ -121,7 +131,9 @@ test('Attachment Manager lists real sources, filters, refreshes, and preserves t
     await expect(settings.locator('.attachment-resource-row').filter({ hasText: initialFileName })).toBeVisible()
     await expect(settings.locator('.attachment-resource-row').filter({ hasText: materialName })).toBeVisible()
     await expect(settings.getByText(new RegExp(`(?:未命名图片|Unnamed image) · ${assetId.slice(0, 8)}`), { exact: true })).toBeVisible()
-    await expect(settings.getByRole('button', { name: /删除|上传/ })).toHaveCount(0)
+    expect(assetPreviewRequests).toBe(0)
+    await expect(settings.getByRole('button', { name: /删除|Delete/ })).toHaveCount(0)
+    await expect(settings.getByRole('button', { name: /上传图片到 Note 附件库|Upload image to Note library/ })).toBeVisible()
 
     await settings.locator('.attachment-resource-row').filter({ hasText: initialFileName }).click()
     await expect(settings.locator('.attachment-detail-panel')).toContainText(`inbox/${initialFileName}`)
@@ -138,6 +150,9 @@ test('Attachment Manager lists real sources, filters, refreshes, and preserves t
     await expect(settings.locator('.attachment-resource-row')).toHaveCount(1)
     await settings.locator('.attachment-resource-row').click()
     await expect(settings.locator('.attachment-detail-panel')).toContainText(assetId)
+    await expect(settings.locator('.attachment-detail-panel img')).toBeVisible()
+    await expect.poll(() => settings.locator('.attachment-detail-panel img').evaluate((image) => (image as HTMLImageElement).naturalWidth)).toBeGreaterThan(0)
+    await expect.poll(() => assetPreviewRequests).toBe(1)
     await expect(settings.locator('.attachment-reference-row')).toHaveCount(3)
     const boardSceneReference = settings.locator('.attachment-reference-row').filter({ hasText: /画布资源|canvas asset/ })
     const boardThumbnailReference = settings.locator('.attachment-reference-row').filter({ hasText: /缩略图|thumbnail/ })
@@ -196,6 +211,7 @@ test('Attachment Manager lists real sources, filters, refreshes, and preserves t
     await expect(page).toHaveURL(new RegExp(`/vault/${consumerNotePath}$`))
     await expect(page.locator('.editor-pane .monaco-editor').first()).toBeVisible()
   } finally {
+    page.off('request', countAssetPreviewRequests)
     if (boardCreated && boardId) await request.delete(`/api/board/${boardId}`).catch(() => {})
     if (materialId) {
       await request.post(`/api/board-materials/${materialId}/archive`).catch(() => {})
@@ -257,21 +273,25 @@ test('Attachment Manager remains reachable in desktop, tablet, and short mobile 
       const detailScroller = settings.locator('.settings-detail')
       await detailScroller.evaluate((element) => { element.scrollTop = 0 })
 
-      const topContentVisible = await settings.evaluate((dialog) => {
+      const topContentLayout = await settings.evaluate((dialog) => {
         const withinViewport = (selector: string) => {
           const element = dialog.querySelector(selector)
-          if (!element) return false
+          if (!element) return { visible: false, missing: true }
           const rect = element.getBoundingClientRect()
           const bounds = dialog.getBoundingClientRect()
-          return rect.top >= Math.max(0, bounds.top)
-            && rect.bottom <= Math.min(window.innerHeight, bounds.bottom)
-            && rect.left >= Math.max(0, bounds.left)
-            && rect.right <= Math.min(window.innerWidth, bounds.right)
+          return {
+            visible: rect.top >= Math.max(0, bounds.top)
+              && rect.bottom <= Math.min(window.innerHeight, bounds.bottom)
+              && rect.left >= Math.max(0, bounds.left)
+              && rect.right <= Math.min(window.innerWidth, bounds.right),
+            rect: { top: rect.top, right: rect.right, bottom: rect.bottom, left: rect.left },
+            bounds: { top: bounds.top, right: bounds.right, bottom: bounds.bottom, left: bounds.left },
+          }
         }
-        return ['#attachment-manager-title', '.attachment-back', '.attachment-refresh', '.attachment-summary', '.attachment-toolbar']
-          .every(withinViewport)
+        const selectors = ['#attachment-manager-title', '.attachment-back', '.attachment-refresh', '.attachment-summary', '.attachment-toolbar']
+        return Object.fromEntries(selectors.map((selector) => [selector, withinViewport(selector)]))
       })
-      expect(topContentVisible, `${viewport.label}: title, back, refresh, summary and filters fit in the viewport`).toBe(true)
+      expect(Object.values(topContentLayout).every((layout) => layout.visible), `${viewport.label}: title, back, refresh, summary and filters fit in the viewport: ${JSON.stringify(topContentLayout)}`).toBe(true)
 
       if (viewport.width === 375 && viewport.height === 600) {
         const searchInput = settings.locator('.attachment-toolbar input')

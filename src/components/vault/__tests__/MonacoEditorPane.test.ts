@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { flushPromises, mount } from '@vue/test-utils'
+import { nextTick } from 'vue'
 
 const imageMocks = vi.hoisted(() => ({ uploadNoteImage: vi.fn() }))
 
@@ -206,6 +207,7 @@ vi.mock('../../../lib/noteImages', async (importOriginal) => {
 })
 
 import EditorPane from '../EditorPane.vue'
+import AttachmentPickerDialog from '../AttachmentPickerDialog.vue'
 import { resetMarkdownModelsForTesting } from '../monacoModels'
 import { parseDoc } from '../../../lib/frontmatter'
 import { useToast } from '../../../composables/useToast'
@@ -320,14 +322,18 @@ describe('Monaco EditorPane', () => {
     return event as ClipboardEvent
   }
 
+  function editorHost(wrapper: { element: Element }): HTMLElement {
+    if (wrapper.element instanceof HTMLElement && wrapper.element.matches('.monaco-host')) return wrapper.element
+    return wrapper.element.querySelector<HTMLElement>('.monaco-host')!
+  }
+
   function dispatchEditorPaste(
     wrapper: { element: Element },
     event: Event,
     targetKind: 'textarea' | 'native-edit-context' = 'textarea',
   ): void {
-    const mountRoot = wrapper.element.parentElement
-    if (mountRoot && !mountRoot.isConnected) document.body.append(mountRoot)
-    const editorNode = (wrapper.element as HTMLElement).querySelector<HTMLElement>('.monaco-editor')!
+    if (!wrapper.element.isConnected) document.body.append(wrapper.element)
+    const editorNode = editorHost(wrapper).querySelector<HTMLElement>('.monaco-editor')!
     let target: HTMLElement
     if (targetKind === 'native-edit-context') {
       target = document.createElement('div')
@@ -452,7 +458,7 @@ describe('Monaco EditorPane', () => {
     expect(outsideEvent.defaultPrevented).toBe(false)
     expect(imageMocks.uploadNoteImage).not.toHaveBeenCalled()
 
-    const editorNode = (wrapper.element as HTMLElement).querySelector<HTMLElement>('.monaco-editor')!
+    const editorNode = editorHost(wrapper).querySelector<HTMLElement>('.monaco-editor')!
     const nativeTarget = document.createElement('div')
     nativeTarget.className = 'native-edit-context'
     nativeTarget.tabIndex = 0
@@ -522,26 +528,27 @@ describe('Monaco EditorPane', () => {
       clientX: { value: 10 },
       clientY: { value: 12 },
     })
-    wrapper.element.dispatchEvent(event)
+    editorHost(wrapper).dispatchEvent(event)
     await flushPromises()
     expect(event.defaultPrevented).toBe(true)
     expect(mocks.editor.executeEdits.mock.calls[0]?.[1][0]?.range.startColumn).toBe(3)
 
     const ordinaryDrop = new Event('drop', { bubbles: true, cancelable: true })
     Object.defineProperty(ordinaryDrop, 'dataTransfer', { value: { files: [], items: [] } })
-    wrapper.element.dispatchEvent(ordinaryDrop)
+    editorHost(wrapper).dispatchEvent(ordinaryDrop)
     expect(ordinaryDrop.defaultPrevented).toBe(false)
     wrapper.unmount()
   })
 
-  it('exposes the image picker and leaves the document unchanged when it is cancelled', async () => {
+  it('opens the attachment picker and leaves the document unchanged when it is cancelled', async () => {
     const wrapper = mount(EditorPane, { props: { modelValue: 'unchanged', path: 'inbox/test', allowImageInsertion: true } })
-    const input = document.body.querySelector<HTMLInputElement>('.note-image-file-input')!
-    const click = vi.spyOn(input, 'click')
     ;(wrapper.vm as any).chooseImage()
-    expect(click).toHaveBeenCalledOnce()
-    input.dispatchEvent(new Event('cancel'))
+    await nextTick()
+    const picker = wrapper.getComponent(AttachmentPickerDialog)
+    expect(picker.props('show')).toBe(true)
+    picker.vm.$emit('close')
     await flushPromises()
+    expect(picker.props('show')).toBe(false)
     expect(mocks.editor.executeEdits).not.toHaveBeenCalled()
     expect(mocks.model.value).toBe('unchanged')
     wrapper.unmount()
@@ -566,7 +573,7 @@ describe('Monaco EditorPane', () => {
   it('reveals Monaco scrollbars while scrolling and hides them after 900ms idle', () => {
     vi.useFakeTimers()
     const wrapper = mount(EditorPane, { props: { modelValue: 'start', path: 'inbox/test' } })
-    const host = wrapper.element as HTMLElement
+    const host = editorHost(wrapper)
 
     expect(host.classList.contains('is-scrollbar-visible')).toBe(false)
     mocks.scrollListeners.forEach((fn) => fn({ scrollTopChanged: true, scrollLeftChanged: false }))
@@ -585,7 +592,7 @@ describe('Monaco EditorPane', () => {
   it('keeps Monaco scrollbars visible while dragging and starts the idle delay on release', () => {
     vi.useFakeTimers()
     const wrapper = mount(EditorPane, { props: { modelValue: 'start', path: 'inbox/test' } })
-    const host = wrapper.element as HTMLElement
+    const host = editorHost(wrapper)
     const scrollable = document.createElement('div')
     scrollable.className = 'monaco-scrollable-element'
     const scrollbar = document.createElement('div')

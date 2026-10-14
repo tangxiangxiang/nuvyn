@@ -36,8 +36,14 @@ const MAX_CONCURRENT_UPLOADS = 2
 type UploadTask = {
   file: File
   signal?: AbortSignal
+  auditContext?: NoteImageUploadAuditContext
   resolve: (result: NoteImageUploadResult) => void
   reject: (error: NoteImageError) => void
+}
+
+export interface NoteImageUploadAuditContext {
+  operation: 'attachment-manager-upload' | 'note-import-from-board-asset'
+  sourceId?: string
 }
 const uploadQueue: UploadTask[] = []
 let activeUploads = 0
@@ -71,14 +77,25 @@ async function validateFile(file: File): Promise<NoteImageFormat> {
   return format
 }
 
-async function performUpload(file: File, signal?: AbortSignal): Promise<NoteImageUploadResult> {
+async function performUpload(
+  file: File,
+  signal?: AbortSignal,
+  auditContext?: NoteImageUploadAuditContext,
+): Promise<NoteImageUploadResult> {
   const inputFormat = await validateFile(file)
   const form = new FormData()
   form.append('image', file, file.name || 'pasted-image')
 
   let response: Response
   try {
-    response = await authFetch('/api/note/images', { method: 'POST', body: form, signal })
+    const init: RequestInit = { method: 'POST', body: form, signal }
+    if (auditContext) {
+      const headers = new Headers()
+      headers.set('x-nuvyn-attachment-operation', auditContext.operation)
+      if (auditContext.sourceId) headers.set('x-nuvyn-attachment-source-id', auditContext.sourceId)
+      init.headers = headers
+    }
+    response = await authFetch('/api/note/images', init)
   } catch {
     if (signal?.aborted) throw new NoteImageError('network')
     throw new NoteImageError('network')
@@ -131,7 +148,7 @@ function pumpQueue(): void {
       continue
     }
     activeUploads += 1
-    void performUpload(task.file, task.signal)
+    void performUpload(task.file, task.signal, task.auditContext)
       .then(task.resolve, task.reject)
       .finally(() => {
         activeUploads -= 1
@@ -140,9 +157,13 @@ function pumpQueue(): void {
   }
 }
 
-export function uploadNoteImage(file: File, signal?: AbortSignal): Promise<NoteImageUploadResult> {
+export function uploadNoteImage(
+  file: File,
+  signal?: AbortSignal,
+  auditContext?: NoteImageUploadAuditContext,
+): Promise<NoteImageUploadResult> {
   return new Promise((resolve, reject) => {
-    uploadQueue.push({ file, signal, resolve, reject })
+    uploadQueue.push({ file, signal, auditContext, resolve, reject })
     pumpQueue()
   })
 }

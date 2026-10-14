@@ -15,6 +15,7 @@ const refreshAttachmentIndex = vi.fn()
 const refreshAttachmentReferences = vi.fn()
 const queryAttachmentReferences = vi.fn()
 const previewAttachmentCleanup = vi.fn()
+const listAttachmentAudit = vi.fn()
 const toastSuccess = vi.fn()
 const toastError = vi.fn()
 const wrappers: VueWrapper[] = []
@@ -25,6 +26,11 @@ vi.mock('../../../lib/attachments-api', () => ({
   refreshAttachmentReferences: (...args: unknown[]) => refreshAttachmentReferences(...args),
   queryAttachmentReferences: (...args: unknown[]) => queryAttachmentReferences(...args),
   previewAttachmentCleanup: (...args: unknown[]) => previewAttachmentCleanup(...args),
+  listAttachmentAudit: (...args: unknown[]) => listAttachmentAudit(...args),
+}))
+
+vi.mock('../AttachmentImagePreview.vue', () => ({
+  default: { props: ['item', 'compact'], template: '<div class="attachment-image-preview" />' },
 }))
 
 vi.mock('../../../composables/useToast', () => ({
@@ -150,6 +156,7 @@ beforeEach(() => {
   refreshAttachmentReferences.mockResolvedValue(referencePage())
   queryAttachmentReferences.mockResolvedValue(referencePage())
   previewAttachmentCleanup.mockResolvedValue(riskPreview)
+  listAttachmentAudit.mockResolvedValue([])
 })
 
 afterEach(() => {
@@ -165,7 +172,7 @@ function mountManager() {
 }
 
 describe('SettingsAttachmentManagerSection', () => {
-  it('shows real catalog summary, details, unknown references and no mutation controls', async () => {
+  it('shows real catalog summary, details, unknown references and only the scoped Note upload control', async () => {
     mountManager()
     await flushPromises()
 
@@ -173,7 +180,8 @@ describe('SettingsAttachmentManagerSection', () => {
     expect(document.body.textContent).toContain('未命名图片 · 12345678')
     expect(document.body.textContent).toContain('引用待确认')
     expect(document.body.querySelectorAll('.attachment-resource-row')).toHaveLength(2)
-    expect(Array.from(document.body.querySelectorAll('button')).some((button) => /删除|上传/.test(button.textContent ?? ''))).toBe(false)
+    expect(Array.from(document.body.querySelectorAll('button')).some((button) => /删除/.test(button.textContent ?? ''))).toBe(false)
+    expect(Array.from(document.body.querySelectorAll('button')).some((button) => /上传图片到 Note 附件库/.test(button.textContent ?? ''))).toBe(true)
 
     const row = Array.from(document.body.querySelectorAll<HTMLButtonElement>('.attachment-resource-row'))
       .find((button) => button.textContent?.includes('diagram.png'))!

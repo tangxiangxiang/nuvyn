@@ -16,6 +16,7 @@ import {
   type AttachmentReferenceIndex,
 } from './references.js'
 import type { AttachmentResourceKey } from '../../shared/attachmentProtocol.js'
+import { listAttachmentOperations } from './audit.js'
 
 let defaultCatalog: { db: DatabaseT; contentDir: string; catalog: AttachmentCatalog } | null = null
 let catalogOverride: AttachmentCatalog | null = null
@@ -181,6 +182,16 @@ export function createAttachmentRoutes(
   routes.get('/index-status', (c) => {
     c.header('Cache-Control', 'no-store')
     return c.json(resolveCatalog().getIndexStatus())
+  })
+
+  routes.get('/audit', (c) => {
+    const rawLimit = c.req.query('limit')
+    const limit = rawLimit === undefined ? 50 : Number(rawLimit)
+    if (!Number.isSafeInteger(limit) || limit < 1 || limit > 100) {
+      return c.json({ code: 'ATTACHMENT_QUERY_INVALID', error: 'limit is outside the supported range' }, 400)
+    }
+    c.header('Cache-Control', 'no-store')
+    return c.json({ entries: listAttachmentOperations(getDb(), limit) })
   })
 
   routes.post('/refresh', async (c) => {

@@ -20,11 +20,32 @@ import { invalidateDefaultAttachmentCatalog } from '../attachments/routes.js'
 import { CONTENT_DIR, resolveSafeRelativePathDetailed } from '../paths.js'
 import { writeCreateOnlyDurableFile } from '../durableCreateOnlyFile.js'
 import { NoteSvgValidationError, sanitizeNoteSvg } from '../noteSvg.js'
+import { isAssetId } from '../../shared/assetProtocol.js'
+import { attachmentFailureCategory, recordAttachmentOperation, type AttachmentAuditInput } from '../attachments/audit.js'
+import { getDb } from '../db.js'
 
 const IMAGE_DIRECTORY = path.join('attachments', 'images')
 const MAX_UPLOADS_IN_FLIGHT = 2
 const routes = new Hono()
 let activeUploads = 0
+
+function auditContext(request: Request): Pick<AttachmentAuditInput, 'operation' | 'sourceWorkspace' | 'sourceResourceId' | 'targetWorkspace'> | null {
+  const operation = request.headers.get('x-nuvyn-attachment-operation')
+  if (operation === 'attachment-manager-upload') {
+    return { operation, sourceWorkspace: 'local-file', targetWorkspace: 'note-library' }
+  }
+  if (operation === 'note-import-from-board-asset') {
+    const sourceId = request.headers.get('x-nuvyn-attachment-source-id')
+    if (sourceId && isAssetId(sourceId)) {
+      return { operation, sourceWorkspace: 'board-asset', sourceResourceId: sourceId, targetWorkspace: 'note-library' }
+    }
+  }
+  return null
+}
+
+function recordUploadAudit(input: AttachmentAuditInput): void {
+  try { recordAttachmentOperation(getDb(), input) } catch { /* Audit failure must not misreport a durable image write. */ }
+}
 
 async function ensureImageDirectory(): Promise<void> {
   const rootStat = await fs.lstat(CONTENT_DIR)
@@ -123,8 +144,12 @@ async function parseImage(request: Request): Promise<{ file: File; bytes: Buffer
 }
 
 routes.post('/api/note/images', async (c) => {
+  const audit = auditContext(c.req.raw)
+  const auditResourceId = randomUUID()
   if (activeUploads >= MAX_UPLOADS_IN_FLIGHT) {
-    return apiErrorResponse(c, new ApiRequestError('NOTE_IMAGE_UPLOAD_BUSY', 429, 'Image upload capacity is busy.'), {
+    const error = new ApiRequestError('NOTE_IMAGE_UPLOAD_BUSY', 429, 'Image upload capacity is busy.')
+    if (audit) recordUploadAudit({ ...audit, resourceType: 'vault-image', resourceId: auditResourceId, result: 'failure', failureCategory: 'unknown' })
+    return apiErrorResponse(c, error, {
       code: 'NOTE_IMAGE_UPLOAD_FAILED',
       message: 'Image could not be uploaded.',
     })
@@ -135,7 +160,7 @@ routes.post('/api/note/images', async (c) => {
     const { bytes, format } = await parseImage(c.req.raw)
 
     await ensureImageDirectory()
-    const id = randomUUID()
+    const id = auditResourceId
     const relativePath = `${IMAGE_DIRECTORY.split(path.sep).join('/')}/${id}${format.extension}`
     const resolution = await resolveSafeRelativePathDetailed(CONTENT_DIR, relativePath, { allowMissingFinal: true })
     // The durable create-only helper fsyncs and verifies the completed bytes
@@ -150,9 +175,17 @@ routes.post('/api/note/images', async (c) => {
       mimeType: format.mimeType,
       byteSize: bytes.byteLength,
     }
+    if (audit) recordUploadAudit({ ...audit, resourceType: 'vault-image', resourceId: id, result: 'success' })
     c.header('Cache-Control', 'no-store')
     return c.json(result, 201)
   } catch (error) {
+    if (audit) recordUploadAudit({
+      ...audit,
+      resourceType: 'vault-image',
+      resourceId: auditResourceId,
+      result: 'failure',
+      failureCategory: attachmentFailureCategory(error),
+    })
     return apiErrorResponse(c, error, {
       code: 'NOTE_IMAGE_UPLOAD_FAILED',
       message: 'Image could not be stored.',

@@ -57,6 +57,44 @@ function wrappedStore(base: MemoryBoardCheckpointStore, putPendingAsset: MemoryB
 }
 
 describe('Board asset session', () => {
+  it('reuses an existing Board Asset identity through the normal Pending Blob and upload path', async () => {
+    const store = createMemoryBoardCheckpointStore()
+    const upload = vi.fn(async (assetId: string, _mimeType: string, blob: Blob) => uploadResult(assetId, blob))
+    const session = createBoardAssetSession({ boardId: 'board-1', store, upload })
+    const runtime = runtimeImage('file-existing')
+    session.registerExistingAsset(ASSET_B, 'file-existing', 'image/png', runtime.scene.blob)
+
+    await session.observeRuntimeAssets([runtime.scene])
+    await vi.waitFor(() => expect(upload).toHaveBeenCalledOnce())
+
+    expect(session.getFileMap()).toEqual({ 'file-existing': ASSET_B })
+    expect(upload).toHaveBeenCalledWith(ASSET_B, 'image/png', runtime.scene.blob, {
+      operation: 'board-reuse-asset',
+      sourceId: ASSET_B,
+      targetBoardId: 'board-1',
+    })
+    expect(await store.getPendingAsset(ASSET_B)).toBeNull()
+  })
+
+  it('audits a Vault image import as a new Board Asset while keeping the source path out of scene identity', async () => {
+    const store = createMemoryBoardCheckpointStore()
+    const upload = vi.fn(async (assetId: string, _mimeType: string, blob: Blob) => uploadResult(assetId, blob))
+    const session = createBoardAssetSession({ boardId: 'board-1', store, createAssetId: () => ASSET_A, upload })
+    const runtime = runtimeImage('file-imported')
+    const sourcePath = 'attachments/images/550e8400-e29b-41d4-a716-446655440000.png'
+    session.registerVaultImport('file-imported', sourcePath)
+
+    await session.observeRuntimeAssets([runtime.scene])
+    await vi.waitFor(() => expect(upload).toHaveBeenCalledOnce())
+
+    expect(session.getFileMap()).toEqual({ 'file-imported': ASSET_A })
+    expect(upload).toHaveBeenCalledWith(ASSET_A, 'image/png', runtime.scene.blob, {
+      operation: 'board-import-from-vault-image',
+      sourceId: sourcePath,
+      targetBoardId: 'board-1',
+    })
+  })
+
   it('durably stores a new Pending Blob before starting its upload', async () => {
     const base = createMemoryBoardCheckpointStore()
     let releasePending!: () => void

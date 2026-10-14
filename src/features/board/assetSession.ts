@@ -1,4 +1,4 @@
-import { isBoardAssetMimeType } from '../../../shared/assetProtocol'
+import { isAssetId, isBoardAssetMimeType } from '../../../shared/assetProtocol'
 import type { BoardScene } from '../../../shared/boardProtocol'
 import type {
   BoardRuntimeAsset,
@@ -11,6 +11,7 @@ import {
   fetchAssetBlob,
   uploadAsset,
   type BoardAssetErrorCode,
+  type BoardAssetAuditContext,
   type AssetUploadResult,
 } from './assetClient'
 import type { BoardCheckpointStore } from './checkpointStore'
@@ -29,6 +30,7 @@ interface SessionAssetRecord {
   pendingDurable: boolean
   pendingError: unknown | null
   uploadError: unknown | null
+  auditContext?: Omit<BoardAssetAuditContext, 'targetBoardId'>
 }
 
 export interface BoardAssetSessionOptions {
@@ -46,6 +48,8 @@ export interface BoardAssetSession {
   observeRuntimeAssets(assets: readonly BoardRuntimeAsset[]): Promise<void>
   ensureCheckpointAssetsDurable(runtimeScene: ExcalidrawRuntimeScene): Promise<void>
   ensureAssetReady(assetId: string): Promise<void>
+  registerExistingAsset(assetId: string, engineFileId: string, mimeType: string, blob: Blob): void
+  registerVaultImport(engineFileId: string, sourceId: string): void
   ensureSceneAssetsReady(scene: BoardScene): Promise<void>
   resolveSceneAssets(scene: BoardScene): Promise<ResolvedBoardAsset[]>
   getFileMap(): Readonly<Record<string, string>>
@@ -164,6 +168,7 @@ export function createBoardAssetSession(options: BoardAssetSessionOptions): Boar
 
   const recordsByFileId = new Map<string, SessionAssetRecord>()
   const recordsByAssetId = new Map<string, SessionAssetRecord>()
+  const vaultImportsByFileId = new Map<string, string>()
   let disposed = false
 
   function getFileMap(): Readonly<Record<string, string>> {
@@ -261,6 +266,11 @@ export function createBoardAssetSession(options: BoardAssetSessionOptions): Boar
       pendingError: null,
       uploadError: null,
     }
+    const vaultSourceId = vaultImportsByFileId.get(record.engineFileId)
+    if (vaultSourceId) {
+      record.auditContext = { operation: 'board-import-from-vault-image', sourceId: vaultSourceId }
+      vaultImportsByFileId.delete(record.engineFileId)
+    }
     recordsByFileId.set(record.engineFileId, record)
     recordsByAssetId.set(record.assetId, record)
     return record
@@ -345,7 +355,12 @@ export function createBoardAssetSession(options: BoardAssetSessionOptions): Boar
     const blob = record.blob
     const uploadPromise = (async () => {
       try {
-        const result = await upload(record.assetId, record.mimeType, blob!)
+        const auditContext = record.auditContext
+          ? { ...record.auditContext, targetBoardId: options.boardId }
+          : undefined
+        const result = auditContext
+          ? await upload(record.assetId, record.mimeType, blob!, auditContext)
+          : await upload(record.assetId, record.mimeType, blob!)
         record.state = 'uploaded'
         record.uploadError = null
         try {
@@ -428,6 +443,45 @@ export function createBoardAssetSession(options: BoardAssetSessionOptions): Boar
     if (record.pendingPromise) await record.pendingPromise
     if (!record.pendingDurable) await persistPending(record)
     await startUpload(record)
+  }
+
+  function registerVaultImport(engineFileId: string, sourceId: string): void {
+    if (disposed) throw assetError('ASSET_PENDING_INVALID', 'Board asset session is no longer active.')
+    if (!engineFileId || engineFileId.length > 128 || !sourceId || sourceId.length > 1024) {
+      throw assetError('ASSET_PENDING_INVALID', 'Vault image import identity is invalid.')
+    }
+    vaultImportsByFileId.set(engineFileId, sourceId)
+  }
+
+  function registerExistingAsset(assetId: string, engineFileId: string, mimeTypeValue: string, blob: Blob): void {
+    if (disposed) throw assetError('ASSET_PENDING_INVALID', 'Board asset session is no longer active.')
+    if (!isAssetId(assetId) || !engineFileId || engineFileId.length > 128 || !isBlob(blob) || blob.size <= 0 || blob.size > maxBytes) {
+      throw assetError('ASSET_PENDING_INVALID', 'Existing Board Asset identity or content is invalid.')
+    }
+    const mimeType = normalizeMimeType(mimeTypeValue)
+    if (!isBoardAssetMimeType(mimeType) || normalizeMimeType(blob.type) !== mimeType) {
+      throw assetError('UNSUPPORTED_ASSET_MIME', 'Existing Board Asset MIME type is invalid.')
+    }
+    const existingFile = recordsByFileId.get(engineFileId)
+    if (existingFile && existingFile.assetId !== assetId) {
+      throw assetError('ASSET_ID_CONFLICT', `Excalidraw file ID ${engineFileId} already belongs to another asset.`)
+    }
+    if (existingFile) return
+    const record: SessionAssetRecord = {
+      engineFileId,
+      assetId,
+      mimeType,
+      blob,
+      state: 'pending',
+      pendingPromise: null,
+      uploadPromise: null,
+      pendingDurable: false,
+      pendingError: null,
+      uploadError: null,
+      auditContext: { operation: 'board-reuse-asset', sourceId: assetId },
+    }
+    recordsByFileId.set(engineFileId, record)
+    if (!recordsByAssetId.has(assetId)) recordsByAssetId.set(assetId, record)
   }
 
   async function ensureSceneAssetsReady(scene: BoardScene): Promise<void> {
@@ -563,6 +617,8 @@ export function createBoardAssetSession(options: BoardAssetSessionOptions): Boar
     observeRuntimeAssets,
     ensureCheckpointAssetsDurable,
     ensureAssetReady,
+    registerExistingAsset,
+    registerVaultImport,
     ensureSceneAssetsReady,
     resolveSceneAssets,
     getFileMap,

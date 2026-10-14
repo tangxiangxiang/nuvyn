@@ -213,6 +213,21 @@ failures offer **Reload**. Embeds use the existing authenticated Board/Asset
 APIs and do not change the Board's last-opened time. They require Nuvyn to
 render; use PNG/SVG export when sharing a static diagram outside Nuvyn.
 
+### Reuse an image from Attachment Manager
+
+Open **Settings → Storage & attachments** to inspect and preview supported
+images. The manager's upload action adds an image to the Note image library;
+it does not accept arbitrary files. In a Note, choose **Insert image** and then
+select a Vault image to insert its existing reference, or a Board image to
+import a validated copy into the Note library. In Board, open the editor menu
+and choose **Insert image from attachments**: a Board image keeps its Asset
+identity, while a Vault image is imported as a new Board Asset. These actions
+use the existing Note and Board save/recovery flows. Diary content is excluded.
+
+The manager's cleanup check is advisory only; it does not delete or quarantine
+resources. A missing current reference is not proof that a file is safe to
+remove.
+
 ### Mermaid and Markmap
 
 Use a `mermaid` fence for diagrams and a `markmap` fence for an interactive outline map:

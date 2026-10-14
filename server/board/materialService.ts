@@ -31,6 +31,12 @@ export class BoardMaterialService {
     return this.repository.list(archived)
   }
 
+  get(id: string): BoardMaterial {
+    const material = this.repository.get(assertBoardMaterialId(id))
+    if (!material) throw new BoardMaterialError('BOARD_MATERIAL_NOT_FOUND', 404, 'Board material was not found')
+    return material
+  }
+
   create(input: { readonly name?: unknown; readonly svg?: unknown }): BoardMaterial {
     const name = normalizeBoardMaterialName(input.name)
     const svg = normalizeBoardMaterialSvg(input.svg)

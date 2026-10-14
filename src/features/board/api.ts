@@ -192,6 +192,17 @@ export async function listBoardMaterials(archived = false): Promise<BoardMateria
   }
 }
 
+export async function getBoardMaterial(materialId: string, signal?: AbortSignal): Promise<BoardMaterial> {
+  try {
+    return await readJson<BoardMaterial>(await authFetch(
+      `/api/board-materials/${encodeURIComponent(materialId)}`,
+      { signal },
+    ))
+  } catch (error) {
+    throw asBoardApiError(error)
+  }
+}
+
 export async function createBoardMaterial(name: string, svg: string): Promise<BoardMaterial> {
   return requestJson<BoardMaterial>('/api/board-materials', 'POST', { name, svg })
 }

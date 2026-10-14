@@ -1,4 +1,7 @@
+import { promises as fs } from 'node:fs'
 import { readFile } from 'node:fs/promises'
+import { randomUUID } from 'node:crypto'
+import path from 'node:path'
 import { expect, test } from './fixtures/auth'
 import {
   attachBrowserDiagnostics,
@@ -228,6 +231,115 @@ test('Board V1 persists image assets and exports the restored runtime', async ({
       await clearBoardRecovery(page, boardId).catch(() => {})
       await deleteBoardIfExists(request, boardId).catch(() => {})
     }
+  }
+})
+test('Board attachment picker preserves shared Asset identity and imports Vault images through Asset Session', async ({ page, request }) => {
+  const sharedAssetId = randomUUID()
+  let boardA = ''
+  let boardB = ''
+  let vaultImagePath = ''
+
+  try {
+    const assetUpload = await request.put(`/api/assets/${sharedAssetId}`, {
+      headers: { Origin: process.env.NUVYN_PUBLIC_ORIGIN, 'Content-Type': 'image/png' },
+      data: SMALL_PNG,
+    })
+    expect(assetUpload.status(), await assetUpload.text()).toBe(200)
+    await request.post('/api/attachments/refresh')
+
+    await page.goto('/board')
+    boardA = await createBoardThroughUi(page)
+    await openEditorMenuItem(page, /从附件库插入图片|Insert image from attachments/)
+    const picker = page.locator('.attachment-picker-modal')
+    await expect(picker).toBeVisible()
+    await picker.getByPlaceholder(/搜索名称、路径或 ID|Search names, paths, or IDs/).fill(sharedAssetId)
+    const sharedOption = picker.getByRole('option').filter({ hasText: sharedAssetId.slice(0, 8) })
+    await expect(sharedOption).toHaveCount(1)
+    await expect(sharedOption).toContainText(/复用原资源|Reuse existing Asset/)
+    await sharedOption.click()
+    const firstAssetWrite = page.waitForResponse((response) => (
+      new URL(response.url()).pathname === `/api/assets/${sharedAssetId}`
+      && response.request().method() === 'PUT'
+    ))
+    await picker.getByRole('button', { name: /插入图片|Insert image/ }).click()
+    expect((await firstAssetWrite).status()).toBe(200)
+    await waitForLocalRevision(page, 1)
+    await waitForBoardSaved(page)
+    const firstSaved = await waitForServerRevision(request, boardA, 1)
+    expect(firstSaved.sceneRecord.scene.assetRefs).toContain(sharedAssetId)
+
+    await goBackToBoardHome(page)
+    boardB = await createBoardThroughUi(page)
+    await openEditorMenuItem(page, /从附件库插入图片|Insert image from attachments/)
+    const secondPicker = page.locator('.attachment-picker-modal')
+    await expect(secondPicker).toBeVisible()
+    await secondPicker.getByPlaceholder(/搜索名称、路径或 ID|Search names, paths, or IDs/).fill(sharedAssetId)
+    const secondOption = secondPicker.getByRole('option').filter({ hasText: sharedAssetId.slice(0, 8) })
+    await expect(secondOption).toHaveCount(1)
+    await expect(secondOption).toContainText(/复用原资源|Reuse existing Asset/)
+    await secondOption.click()
+    const secondAssetWrite = page.waitForResponse((response) => (
+      new URL(response.url()).pathname === `/api/assets/${sharedAssetId}`
+      && response.request().method() === 'PUT'
+    ))
+    await secondPicker.getByRole('button', { name: /插入图片|Insert image/ }).click()
+    expect((await secondAssetWrite).status()).toBe(200)
+    await waitForLocalRevision(page, 1)
+    await waitForBoardSaved(page)
+    const secondSaved = await waitForServerRevision(request, boardB, 1)
+    expect(secondSaved.sceneRecord.scene.assetRefs).toContain(sharedAssetId)
+
+    const vaultUpload = await request.post('/api/note/images', {
+      headers: { Origin: process.env.NUVYN_PUBLIC_ORIGIN },
+      multipart: { image: { name: 'vault-source.png', mimeType: 'image/png', buffer: SMALL_PNG } },
+    })
+    expect(vaultUpload.status(), await vaultUpload.text()).toBe(201)
+    vaultImagePath = (await vaultUpload.json() as { path: string }).path
+    await request.post('/api/attachments/refresh')
+
+    await openEditorMenuItem(page, /从附件库插入图片|Insert image from attachments/)
+    const vaultPicker = page.locator('.attachment-picker-modal')
+    await expect(vaultPicker).toBeVisible()
+    await vaultPicker.getByPlaceholder(/搜索名称、路径或 ID|Search names, paths, or IDs/).fill(vaultImagePath.split('/').at(-1)!)
+    const vaultOption = vaultPicker.getByRole('option').filter({ hasText: vaultImagePath.split('/').at(-1)! })
+    await expect(vaultOption).toHaveCount(1)
+    await expect(vaultOption).toContainText(/导入副本|Import a copy/)
+    await vaultOption.click()
+    await vaultPicker.getByRole('button', { name: /插入图片|Insert image/ }).click()
+    await waitForLocalRevision(page, 2)
+    await waitForBoardSaved(page)
+    const withVaultImport = await waitForServerRevision(request, boardB, secondSaved.sceneRecord.revision + 1)
+    const importedAssetIds = withVaultImport.sceneRecord.scene.assetRefs
+    expect(importedAssetIds).toContain(sharedAssetId)
+    expect(importedAssetIds).toHaveLength(2)
+    const importedAssetId = importedAssetIds.find((assetId) => assetId !== sharedAssetId)
+    expect(importedAssetId).toBeTruthy()
+    const importedAsset = await request.get(`/api/assets/${importedAssetId}`)
+    expect(importedAsset.status()).toBe(200)
+    expect(await importedAsset.body()).toEqual(SMALL_PNG)
+
+    await deleteBoardIfExists(request, boardA)
+    boardA = ''
+    const survivingAsset = await request.get(`/api/assets/${sharedAssetId}`)
+    expect(survivingAsset.status()).toBe(200)
+    expect((await getBoard(request, boardB)).sceneRecord.scene.assetRefs).toContain(sharedAssetId)
+  } finally {
+    if (boardA) {
+      await clearBoardRecovery(page, boardA).catch(() => {})
+      await deleteBoardIfExists(request, boardA).catch(() => {})
+    }
+    if (boardB) {
+      await clearBoardRecovery(page, boardB).catch(() => {})
+      await deleteBoardIfExists(request, boardB).catch(() => {})
+    }
+    if (vaultImagePath) {
+      const root = process.env.NUVYN_DRAFT_E2E_VAULT
+      if (root) {
+        await fs.rm(path.join(root, ...vaultImagePath.split('/')), { force: true }).catch(() => {})
+        await request.post('/api/attachments/refresh').catch(() => {})
+      }
+    }
+    await request.delete(`/api/assets/${sharedAssetId}/unreferenced`).catch(() => {})
   }
 })
 test('Board V1 persists and reloads an SVG asset without rasterizing it', async ({ page, request }) => {

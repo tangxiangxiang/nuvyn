@@ -14,6 +14,9 @@ import { useEditorPreferences } from '../../composables/vault/useEditorPreferenc
 import { useI18n } from '../../composables/useI18n'
 import { useToast } from '../../composables/useToast'
 import { isPotentialNoteImage, markdownImageReference, NoteImageError, uploadNoteImage } from '../../lib/noteImages'
+import { fetchAssetBlob } from '../../features/board/assetClient'
+import AttachmentPickerDialog from './AttachmentPickerDialog.vue'
+import type { ManagedAttachment } from '../../../shared/attachmentProtocol'
 import {
   indentMarkdownLine,
   getEmojiCompletionContext,
@@ -75,6 +78,7 @@ let decorationIds: string[] = []
 let pasteHandler: ((event: ClipboardEvent) => void) | null = null
 let unregisterImagePasteHandler: (() => void) | null = null
 let imageInput: HTMLInputElement | null = null
+const showAttachmentPicker = ref(false)
 let mounted = false
 let imageEditorGeneration = 0
 let imageBatchSequence = 0
@@ -297,10 +301,95 @@ function uploadImagesAtIntent(files: File[], capturedIntent: ImageInsertionInten
 function chooseImage(): void {
   if (props.allowImageInsertion !== true) return
   const intent = createImageInsertionIntent()
-  if (!intent || !imageInput) return
+  if (!intent) return
   filePickerIntent = intent
+  showAttachmentPicker.value = true
+}
+
+function cancelAttachmentPicker(): void {
+  showAttachmentPicker.value = false
+  if (filePickerIntent) releaseImageInsertionIntent(filePickerIntent)
+  filePickerIntent = null
+}
+
+function uploadNewImageFromPicker(): void {
+  if (!filePickerIntent || !imageInput) return
+  showAttachmentPicker.value = false
   imageInput.value = ''
   imageInput.click()
+}
+
+function insertImageReference(intent: ImageInsertionIntent, reference: string): boolean {
+  const range = canInsertImageAt(intent)
+  if (!range || !editor) {
+    offerImageMarkdownFallback([reference])
+    releaseImageInsertionIntent(intent)
+    return false
+  }
+  try {
+    editor.pushUndoStop()
+    const inserted = editor.executeEdits('nuvyn.insert-note-image', [{ range, text: reference }]) !== false
+    editor.pushUndoStop()
+    if (!inserted) offerImageMarkdownFallback([reference])
+    releaseImageInsertionIntent(intent)
+    return inserted
+  } catch {
+    offerImageMarkdownFallback([reference])
+    releaseImageInsertionIntent(intent)
+    return false
+  }
+}
+
+function imageFileName(item: ManagedAttachment, mimeType: string): string {
+  const fallbackExtension: Record<string, string> = {
+    'image/png': '.png', 'image/jpeg': '.jpg', 'image/gif': '.gif',
+    'image/webp': '.webp', 'image/avif': '.avif', 'image/svg+xml': '.svg',
+  }
+  const original = item.displayName?.trim().replace(/[\\/\u0000-\u001f\u007f]/gu, '_') ?? ''
+  if (original && /\.[a-z0-9]{1,8}$/iu.test(original)) return original
+  return `${original || 'Image'}${fallbackExtension[mimeType] ?? '.png'}`
+}
+
+async function chooseExistingAttachment(item: ManagedAttachment): Promise<void> {
+  const intent = filePickerIntent
+  filePickerIntent = null
+  showAttachmentPicker.value = false
+  if (!intent) return
+  if (props.allowImageInsertion !== true || !canInsertImageAt(intent)) {
+    releaseImageInsertionIntent(intent)
+    return
+  }
+
+  if (item.key.kind === 'vault-file') {
+    const fileName = item.key.path.split('/').at(-1) ?? 'Image'
+    insertImageReference(intent, markdownImageReference(fileName, `@/${item.key.path}`))
+    return
+  }
+  if (item.key.kind !== 'asset') {
+    releaseImageInsertionIntent(intent)
+    return
+  }
+
+  const statusToastId = toast.info(t('editor.image_uploading', { count: 1 }), 0)
+  try {
+    const blob = await fetchAssetBlob(item.key.id)
+    if (!canInsertImageAt(intent)) {
+      releaseImageInsertionIntent(intent)
+      return
+    }
+    const fileName = imageFileName(item, blob.type)
+    const file = new File([blob], fileName, { type: blob.type })
+    const uploaded = await uploadNoteImage(file, undefined, {
+      operation: 'note-import-from-board-asset',
+      sourceId: item.key.id,
+    })
+    insertImageReference(intent, markdownImageReference(fileName, uploaded.markdownUrl))
+  } catch (error) {
+    releaseImageInsertionIntent(intent)
+    toast.error(imageUploadErrorMessage(error))
+  } finally {
+    toast.dismiss(statusToastId)
+  }
 }
 
 function onImageInputChange(): void {
@@ -1187,9 +1276,13 @@ watch(() => props.modelValue, (value) => {
 })
 
 watch(() => props.allowImageInsertion, syncImagePasteHandler)
+watch(() => props.allowImageInsertion, (allowed) => {
+  if (!allowed && showAttachmentPicker.value) cancelAttachmentPicker()
+})
 
 watch(() => props.path, (nextPath, previousPath) => {
   if (!editor) return
+  if (showAttachmentPicker.value) cancelAttachmentPicker()
   imageEditorGeneration += 1
   saveViewState(previousPath)
   if (model) unbindMarkdownProviderContext(model)
@@ -1232,6 +1325,7 @@ onBeforeUnmount(() => {
   imageEditorGeneration += 1
   if (filePickerIntent) releaseImageInsertionIntent(filePickerIntent)
   filePickerIntent = null
+  showAttachmentPicker.value = false
   imageInput?.removeEventListener('change', onImageInputChange)
   imageInput?.removeEventListener('cancel', onImageInputCancel)
   imageInput?.remove()
@@ -1308,4 +1402,11 @@ defineExpose({
 
 <template>
   <div ref="host" class="monaco-host" :class="{ 'focus-width': focusWidth, 'zen-mode-width': zenMode }" />
+  <AttachmentPickerDialog
+    :show="showAttachmentPicker"
+    target="note"
+    @close="cancelAttachmentPicker"
+    @upload="uploadNewImageFromPicker"
+    @select="chooseExistingAttachment"
+  />
 </template>

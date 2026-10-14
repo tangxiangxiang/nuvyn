@@ -4,6 +4,7 @@ import { NButton, NSpin } from 'naive-ui'
 import { onBeforeRouteLeave, onBeforeRouteUpdate, useRoute, useRouter } from 'vue-router'
 import ExcalidrawHost from '../components/board/ExcalidrawHost.vue'
 import BoardMaterialPanel from '../components/board/BoardMaterialPanel.vue'
+import AttachmentPickerDialog from '../components/vault/AttachmentPickerDialog.vue'
 import {
   BoardApiError,
   createBoard,
@@ -40,6 +41,10 @@ import { reconcileBoardCheckpoint, type BoardCheckpointReconciliation } from '..
 import type { BoardCheckpoint } from '../features/board/recoveryTypes'
 import { createBoardAssetSession, type BoardAssetSession } from '../features/board/assetSession'
 import { BoardAssetError } from '../features/board/assetClient'
+import { fetchAssetBlob } from '../features/board/assetClient'
+import { fetchAttachmentPreview } from '../lib/attachmentPreview'
+import { refreshAttachmentIndex, refreshAttachmentReferences } from '../lib/attachments-api'
+import type { ManagedAttachment } from '../../shared/attachmentProtocol'
 import { boardExportFilename, downloadBoardBlob, type BoardExportFormat } from '../features/board/boardExport'
 import { createBoardThumbnailScheduler, type BoardThumbnailScheduler } from '../features/board/thumbnailScheduler'
 import {
@@ -106,7 +111,11 @@ const renaming = ref(false)
 const copying = ref(false)
 const copyingReference = ref(false)
 const showMaterialPanel = ref(false)
-const excalidrawHost = ref<{ insertMaterial: (material: BoardMaterial) => Promise<void> } | null>(null)
+const showAttachmentPicker = ref(false)
+const excalidrawHost = ref<{
+  insertMaterial: (material: BoardMaterial) => Promise<void>
+  insertImage: (blob: Blob, mimeType: string, engineFileId: string) => Promise<void>
+} | null>(null)
 const loadGeneration = ref(0)
 const recoveryStore: BoardCheckpointStore = createIndexedDbBoardCheckpointStore()
 let assetIntakePromise: Promise<void> = Promise.resolve()
@@ -926,6 +935,7 @@ const editorMenu = computed<BoardEditorMenuOptions>(() => ({
     copy: t('board.editor_copy'),
     delete: t('board.editor_delete'),
     materials: t('board.materials_open'),
+    attachments: t('attachments.picker.board_menu'),
     titleInput: t('board.title_label'),
   },
   onBack: backToBoards,
@@ -937,7 +947,53 @@ const editorMenu = computed<BoardEditorMenuOptions>(() => ({
   onCopy: () => { void copyCurrentBoard() },
   onDelete: () => { void deleteCurrentBoard() },
   onOpenMaterials: () => { showMaterialPanel.value = true },
+  onOpenAttachments: () => { showAttachmentPicker.value = true },
 }))
+
+function createEngineFileId(): string {
+  const id = globalThis.crypto?.randomUUID?.()
+  if (!id) throw new Error('The browser cannot create an Excalidraw image ID.')
+  return id
+}
+
+async function insertBoardAttachment(item: ManagedAttachment): Promise<void> {
+  showAttachmentPicker.value = false
+  if (item.key.kind === 'board-material') return
+  const currentBoardSession = session.value
+  const currentAssetSession = assetSession.value
+  if (status.value !== 'ready' || !currentBoardSession || !currentAssetSession || !excalidrawHost.value) return
+  const currentHost = excalidrawHost.value
+  const controller = new AbortController()
+  try {
+    const blob = item.key.kind === 'asset'
+      ? await fetchAssetBlob(item.key.id, controller.signal)
+      : item.key.kind === 'vault-file'
+        ? await fetchAttachmentPreview(item, controller.signal)
+        : null
+    if (!blob || session.value !== currentBoardSession || assetSession.value !== currentAssetSession
+      || excalidrawHost.value !== currentHost || status.value !== 'ready') return
+    const mimeType = blob.type.trim().toLowerCase()
+    const engineFileId = createEngineFileId()
+    if (item.key.kind === 'asset') {
+      currentAssetSession.registerExistingAsset(item.key.id, engineFileId, mimeType, blob)
+    } else {
+      currentAssetSession.registerVaultImport(engineFileId, item.key.path)
+    }
+    await currentHost.insertImage(blob, mimeType, engineFileId)
+    if (session.value !== currentBoardSession || assetSession.value !== currentAssetSession
+      || excalidrawHost.value !== currentHost || status.value !== 'ready') return
+    await assetIntakePromise
+    await hostChangePromise
+    if (session.value !== currentBoardSession || assetSession.value !== currentAssetSession) return
+    const saveResult = await saveCoordinator.value?.flush()
+    if (!saveResult?.ok) throw new Error('Board scene could not be saved.')
+    toast.success(t('board.editor_attachment_inserted'))
+    void Promise.allSettled([refreshAttachmentIndex(), refreshAttachmentReferences()])
+  } catch (error) {
+    if (error instanceof BoardAssetError) reportAssetFailure(error, 'upload')
+    toast.error(t('board.editor_attachment_insert_failed'))
+  }
+}
 
 async function insertBoardMaterial(material: BoardMaterial): Promise<void> {
   try {
@@ -1227,6 +1283,12 @@ onBeforeUnmount(() => {
         v-if="showMaterialPanel && status === 'ready'"
         @close="showMaterialPanel = false"
         @insert="insertBoardMaterial"
+      />
+      <AttachmentPickerDialog
+        :show="showAttachmentPicker"
+        target="board"
+        @close="showAttachmentPicker = false"
+        @select="insertBoardAttachment"
       />
     </section>
   </main>
