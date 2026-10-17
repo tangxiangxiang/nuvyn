@@ -138,6 +138,91 @@ describe('PDF export helpers', () => {
     expect(__testing__.PDF_DOWNLOAD_STYLES).not.toContain('overflow: hidden')
   })
 
+  it.each([900, 1300])('keeps %ipx Flex structures pageable while protecting their actual content blocks', (height) => {
+    const root = document.createElement('div')
+    root.innerHTML = `<style>${__testing__.PDF_DOWNLOAD_STYLES}</style>${buildPdfDownloadDocument(`
+      <article class="article reading">
+        <h1>Title</h1>
+        <div class="nuvyn-flex-scope nuvyn-flex-item">
+          <div class="nuvyn-flex nuvyn-flex-direction-row nuvyn-flex-wrap-nowrap">
+            <div class="nuvyn-flex-scope nuvyn-flex-item nuvyn-flex-item-grow-1 nuvyn-flex-item-basis-0">
+              <div class="nuvyn-flex nuvyn-flex-direction-column">
+                <p><img src="image.png" alt="Image one"></p>
+                <p><img src="image-two.png" alt="Image two"></p>
+              </div>
+            </div>
+            <div class="nuvyn-flex-scope nuvyn-flex-item nuvyn-flex-item-grow-2 nuvyn-flex-item-basis-0">
+              <div class="nuvyn-flex nuvyn-flex-direction-column">
+                <p>First short paragraph.</p>
+                <p>Second short paragraph.</p>
+              </div>
+            </div>
+          </div>
+        </div>
+      </article>`)}`
+    document.body.append(root)
+    try {
+      const structures = Array.from(root.querySelectorAll<HTMLElement>('.nuvyn-flex, .nuvyn-flex-scope'))
+      for (const structure of structures) {
+        vi.spyOn(structure, 'getBoundingClientRect').mockReturnValue({ height } as DOMRect)
+      }
+      __testing__.markOversizedPdfBlocks(root)
+
+      for (const structure of structures) {
+        expect(getComputedStyle(structure).breakInside).toBe('auto')
+        expect(getComputedStyle(structure).pageBreakInside).toBe('auto')
+        expect(structure.classList.contains('pdf-allow-split'))
+          .toBe(height > __testing__.PDF_PRINTABLE_PAGE_HEIGHT_MM * 96 / 25.4)
+      }
+      for (const content of root.querySelectorAll<HTMLElement>('p, img')) {
+        expect(getComputedStyle(content).breakInside).toBe('avoid')
+        expect(getComputedStyle(content).pageBreakInside).toBe('avoid')
+        expect(content.classList.contains('pdf-allow-split')).toBe(false)
+      }
+      expect(getComputedStyle(root.querySelector('img')!).boxSizing).toBe('border-box')
+      const scopes = root.querySelectorAll<HTMLElement>('.nuvyn-flex-scope')
+      expect(getComputedStyle(scopes[0]!).width).toBe('100%')
+      expect(getComputedStyle(scopes[0]!).maxWidth).toBe('100%')
+      expect(getComputedStyle(scopes[0]!).minWidth).toBe('0px')
+      expect(getComputedStyle(scopes[0]!).overflow).toBe('visible')
+      expect(getComputedStyle(scopes[0]!).containerType).toBe('normal')
+      expect(getComputedStyle(scopes[1]!).flexGrow).toBe('1')
+      expect(getComputedStyle(scopes[2]!).flexGrow).toBe('2')
+      expect(getComputedStyle(scopes[2]!).flexBasis).toBe('0px')
+    } finally {
+      root.remove()
+    }
+  })
+
+  it('preserves a mixed nested Flex clone without grouping the whole row with its heading', () => {
+    const article = document.createElement('article')
+    article.className = 'article reading'
+    article.innerHTML = `<h1>Title</h1>
+      <div class="nuvyn-flex-scope nuvyn-flex-item">
+        <div class="nuvyn-flex nuvyn-flex-direction-row-reverse nuvyn-flex-gap-24">
+          <div class="nuvyn-flex-scope nuvyn-flex-item nuvyn-flex-item-basis-25">
+            <div class="nuvyn-flex nuvyn-flex-direction-column"><p><img src="one.png"></p><p><img src="two.png"></p></div>
+          </div>
+          <div class="nuvyn-flex-scope nuvyn-flex-item nuvyn-flex-item-basis-75">
+            <div class="nuvyn-flex nuvyn-flex-direction-column"><p>One</p><p>Two</p></div>
+          </div>
+        </div>
+      </div>`
+    const original = article.outerHTML
+    const exported = document.createElement('div')
+    exported.innerHTML = preparePdfArticleHtml(article)
+
+    expect(article.outerHTML).toBe(original)
+    expect(exported.querySelectorAll('.nuvyn-flex')).toHaveLength(3)
+    expect(exported.querySelectorAll('.nuvyn-flex-scope')).toHaveLength(3)
+    expect(exported.querySelectorAll('.nuvyn-flex > p')).toHaveLength(4)
+    expect(exported.querySelectorAll('img')).toHaveLength(2)
+    expect(exported.querySelector('h1')?.nextElementSibling?.classList.contains('nuvyn-flex-scope')).toBe(true)
+    expect(exported.querySelector('.pdf-heading-group')).toBeNull()
+    expect(exported.querySelector('.nuvyn-flex-item-basis-25')).not.toBeNull()
+    expect(exported.querySelector('.nuvyn-flex-item-basis-75')).not.toBeNull()
+  })
+
   it('composes one trusted PDF stylesheet from the Shiki snapshot', async () => {
     const liveOwner = document.createElement('style')
     liveOwner.id = 'nuvyn-shiki-generated-styles'

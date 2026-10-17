@@ -549,8 +549,12 @@ const PDF_DOWNLOAD_STYLES = `
   flex-basis: auto;
   align-self: auto;
   order: 0;
-  break-inside: avoid;
-  page-break-inside: avoid;
+  /* These are structural scopes, including the outermost Flex wrapper, not
+     indivisible content blocks. Keeping a whole column together pushes a
+     near-page-height row past its heading. Its paragraphs/images retain
+     their own keep-together rules and provide the safe page boundaries. */
+  break-inside: auto;
+  page-break-inside: auto;
 }
 .pdf-document .article .nuvyn-flex > *:not(.nuvyn-flex-item) {
   box-sizing: border-box !important;
@@ -559,6 +563,10 @@ const PDF_DOWNLOAD_STYLES = `
   margin: 0 !important;
 }
 .pdf-document .article .nuvyn-flex-scope > .nuvyn-flex { margin: 0 !important; }
+.pdf-document .article .nuvyn-flex img {
+  /* Include the image border in a narrow column's 100% width constraint. */
+  box-sizing: border-box;
+}
 .pdf-document .article .nuvyn-flex-item-grow-0 { flex-grow: 0; }
 .pdf-document .article .nuvyn-flex-item-grow-1 { flex-grow: 1; }
 .pdf-document .article .nuvyn-flex-item-grow-2 { flex-grow: 2; }
