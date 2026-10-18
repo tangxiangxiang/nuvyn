@@ -302,12 +302,16 @@ function encodeMountAttr(s: string): string {
   return encodeURIComponent(s)
 }
 
-function addCodeLanguageLabel(html: string, language: string): string {
+function addCodeLanguageLabel(html: string, language: string, source: string): string {
   const label = language.trim()
   if (!label) return html
   const openingTag = /^<pre\b[^>]*>/u.exec(html)?.[0]
   if (!openingTag) return html
-  const labeledOpeningTag = openingTag.replace(/>$/u, ` data-language="${escapeHtml(label)}">`)
+  const singleLine = !normalizeCodeLineEndings(source).replace(/\n$/u, '').includes('\n')
+  const positionedOpeningTag = singleLine
+    ? openingTag.replace(/\bclass="([^"]*)"/u, 'class="$1 nuvyn-code-single-line"')
+    : openingTag
+  const labeledOpeningTag = positionedOpeningTag.replace(/>$/u, ` data-language="${escapeHtml(label)}">`)
   return `${labeledOpeningTag}${html.slice(openingTag.length)}`
 }
 
@@ -364,7 +368,7 @@ function renderFence(str: string, info: string): string {
   const highlighted = highlightShikiFence(str, meta)
   return highlighted === null
     ? renderPlainCodeFallback(str, meta)
-    : addCodeLanguageLabel(highlighted, meta.language)
+    : addCodeLanguageLabel(highlighted, meta.language, str)
 }
 
 let mdPromise: Promise<MarkdownIt> | null = null

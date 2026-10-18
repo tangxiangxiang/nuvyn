@@ -168,6 +168,9 @@ for (const theme of ['light', 'dark'] as const) {
     await expect(quote).toHaveCSS('border-left-color', 'rgb(141, 157, 170)')
     await expect(quote).toHaveCSS('background-color', alerts[0]!.background)
     await expect(quote).toHaveCSS('padding-left', '16px')
+    await expect(quote).toHaveCSS('font-size', '14px')
+    await expect(quote).toHaveCSS('line-height', '21px')
+    expect((await quote.boundingBox())?.height).toBeCloseTo(alerts[0]!.cardHeight, 1)
     const codeSurface = await article.evaluate((root) => {
       const pre = Array.from(root.querySelectorAll<HTMLElement>('pre.shiki'))
         .find((candidate) => candidate.textContent?.includes('metaFirst'))
@@ -179,6 +182,8 @@ for (const theme of ['light', 'dark'] as const) {
         language: pre.getAttribute('data-language'),
         borderTopWidth: preStyle.borderTopWidth,
         borderRadius: preStyle.borderRadius,
+        labelTop: getComputedStyle(pre.querySelector('.nuvyn-code-copy')!).top,
+        labelTransform: getComputedStyle(pre.querySelector('.nuvyn-code-copy')!).transform,
         background: preStyle.backgroundColor,
         marginTop: preStyle.marginTop,
         marginBottom: preStyle.marginBottom,
@@ -189,7 +194,9 @@ for (const theme of ['light', 'dark'] as const) {
     expect(codeSurface).not.toBeNull()
     expect(codeSurface?.language).toBe('typescript')
     expect(codeSurface?.borderTopWidth).toBe('0px')
-    expect(codeSurface?.borderRadius).toBe('8px')
+    expect(codeSurface?.borderRadius).toBe('12px')
+    expect(codeSurface?.labelTop).toBe('12px')
+    expect(codeSurface?.labelTransform).toBe('none')
     expect(codeSurface?.marginTop).toBe('16px')
     expect(codeSurface?.marginBottom).toBe('16px')
     expect(codeSurface?.background).not.toMatch(/^(transparent|rgba\(0, 0, 0, 0\))$/u)
@@ -211,6 +218,9 @@ for (const theme of ['light', 'dark'] as const) {
       const result = pre && code && line && preStyle && lineStyle
         ? {
             preHeight: pre.getBoundingClientRect().height,
+            labelTop: getComputedStyle(pre, '::after').top,
+            labelHeight: getComputedStyle(pre, '::after').lineHeight,
+            labelTransform: getComputedStyle(pre, '::after').transform,
             lineHeight: line.getBoundingClientRect().height,
             codeHeight: code.getBoundingClientRect().height,
             paddingTop: preStyle.paddingTop,
@@ -223,6 +233,8 @@ for (const theme of ['light', 'dark'] as const) {
       return result
     })
     expect(singleLineCode).not.toBeNull()
+    expect(Number.parseFloat(singleLineCode!.labelTop)).toBeCloseTo(singleLineCode!.preHeight / 2, 1)
+    expect(singleLineCode?.labelTransform).toBe(`matrix(1, 0, 0, 1, 0, ${-Number.parseFloat(singleLineCode!.labelHeight) / 2})`)
     expect(singleLineCode?.paddingTop).toBe('16px')
     expect(singleLineCode?.paddingBottom).toBe('16px')
     expect(singleLineCode?.marginTop).toBe('16px')
@@ -267,6 +279,40 @@ for (const theme of ['light', 'dark'] as const) {
     })
   })
 }
+
+test('reading code language labels copy only code with mouse and keyboard', async ({ page, context }) => {
+  await context.grantPermissions(['clipboard-read', 'clipboard-write'])
+  await page.goto('/__markdown-test?mode=reading')
+  const article = page.locator('.article.reading')
+  const blocks = [
+    article.locator('pre.shiki.nuvyn-code-single-line[data-language]').first(),
+    article.locator('pre.shiki').filter({ hasText: 'metaFirst' }).first(),
+    article.locator('pre.shiki.nuvyn-line-numbers[data-language]').first(),
+  ]
+  for (const [index, block] of blocks.entries()) {
+    const button = block.locator(':scope > button.nuvyn-code-copy')
+    await expect(button).toBeVisible()
+    const expected = await block.locator(':scope > code').evaluate((code) => {
+      const clone = code.cloneNode(true) as HTMLElement
+      clone.querySelectorAll('.nuvyn-line-number').forEach((number) => number.remove())
+      return clone.textContent ?? ''
+    })
+    await page.evaluate(() => navigator.clipboard.writeText('sentinel'))
+    if (index === 0) {
+      const position = await button.evaluate((label) => {
+        const pre = label.parentElement!.getBoundingClientRect()
+        const rect = label.getBoundingClientRect()
+        return { label: rect.y + rect.height / 2, pre: pre.y + pre.height / 2 }
+      })
+      expect(position.label).toBeCloseTo(position.pre, 1)
+      await button.click()
+    } else {
+      await button.focus()
+      await button.press(index === 1 ? 'Enter' : 'Space')
+    }
+    await expect.poll(() => page.evaluate(() => navigator.clipboard.readText())).toBe(expected)
+  }
+})
 
 test('reading forced Alert theme overrides the operating-system color scheme', async ({ page }) => {
   await page.emulateMedia({ colorScheme: 'dark' })
@@ -329,3 +375,102 @@ test('reading narrow Alerts retain quote borders without overflowing the content
     expect(card.hasTitle).toBe(false)
   }
 })
+
+for (const theme of ['light', 'dark'] as const) {
+  test(`reading ${theme} quotes match Alert density for single-line and wrapped content`, async ({ page }, testInfo) => {
+    const pageErrors: string[] = []
+    page.on('pageerror', (error) => pageErrors.push(error.message))
+    await page.addInitScript((value) => localStorage.setItem('nuvyn.theme', value), theme)
+    await page.goto('/__markdown-test?mode=reading')
+    await expect(page.locator('.article.reading')).toBeVisible()
+    await page.evaluate(async () => {
+      const { render } = await import('/src/lib/markdown.ts')
+      const bodies = [
+        'Same short content.',
+        'This longer paragraph wraps naturally without a fixed height. '.repeat(8).trim(),
+        '**Rich content** with a [link](https://example.com).\n\n- First item\n- Second item\n\nFinal paragraph.',
+      ]
+      const fixture = document.createElement('div')
+      fixture.className = 'quote-density-fixture'
+      fixture.innerHTML = await render(bodies.flatMap((body) => {
+        const quoted = body.split('\n').map((line) => `> ${line}`).join('\n')
+        return [quoted, '', `> [!NOTE]\n${quoted}`, '']
+      }).join('\n'))
+      document.querySelector('.article.reading')!.prepend(fixture)
+    })
+
+    for (const width of [1280, 375]) {
+      await page.setViewportSize({ width, height: 900 })
+      const result = await page.evaluate(async () => {
+        const { __testing__, buildPdfDownloadDocument, preparePdfArticleHtml } = await import('/src/lib/pdfExport.ts')
+        const fixture = document.querySelector<HTMLElement>('.quote-density-fixture')!
+        const measure = (element: HTMLElement) => {
+          const style = getComputedStyle(element)
+          const bounds = element.getBoundingClientRect()
+          return {
+            text: element.textContent?.replace(/\s+/gu, ' ').trim(),
+            width: bounds.width,
+            height: bounds.height,
+            fontSize: style.fontSize,
+            lineHeight: style.lineHeight,
+            paddingTop: parseFloat(style.paddingTop),
+            paddingBottom: parseFloat(style.paddingBottom),
+            paddingLeft: style.paddingLeft,
+            paddingRight: style.paddingRight,
+            border: style.borderLeftWidth,
+            radius: style.borderRadius,
+          }
+        }
+        const readPairs = (root: HTMLElement) => {
+          const quotes = Array.from(root.querySelectorAll<HTMLElement>(':scope > blockquote'))
+          const alerts = Array.from(root.querySelectorAll<HTMLElement>(':scope > .callout-note'))
+          return quotes.map((quote, index) => ({ quote: measure(quote), alert: measure(alerts[index]!) }))
+        }
+        const reader = readPairs(fixture)
+        const source = fixture.outerHTML
+        const pdfArticle = document.createElement('article')
+        pdfArticle.className = 'article reading'
+        pdfArticle.innerHTML = fixture.innerHTML
+        const exported = document.createElement('div')
+        exported.innerHTML = `<style>${__testing__.PDF_DOWNLOAD_STYLES}</style>${buildPdfDownloadDocument(preparePdfArticleHtml(pdfArticle))}`
+        document.body.append(exported)
+        try {
+          return { reader, pdf: readPairs(exported.querySelector<HTMLElement>('.article')!), readerUnchanged: source === fixture.outerHTML }
+        } finally {
+          exported.remove()
+        }
+      })
+
+      expect(result.readerUnchanged).toBe(true)
+      for (const surface of [result.reader, result.pdf]) {
+        expect(surface).toHaveLength(3)
+        for (const { quote, alert } of surface) {
+          expect(quote.text).toBe(alert.text)
+          expect(quote.fontSize).toBe('14px')
+          expect(quote.lineHeight).toBe('21px')
+          expect(quote.paddingTop).toBeCloseTo(10.4, 1)
+          expect(quote.paddingBottom).toBeCloseTo(10.4, 1)
+          expect(quote.paddingLeft).toBe('16px')
+          expect(quote.paddingRight).toBe('16px')
+          expect(quote.border).toBe('2px')
+          expect(quote.radius).toBe('12px')
+          expect(quote.width).toBeCloseTo(alert.width, 1)
+          expect(quote.height).toBeCloseTo(alert.height, 1)
+        }
+        expect(surface[0]!.quote.height).toBeCloseTo(41.8, 1)
+        expect(surface[1]!.quote.height).toBeGreaterThan(surface[0]!.quote.height)
+        expect(surface[2]!.quote.height).toBeGreaterThan(surface[0]!.quote.height)
+      }
+
+      await page.locator('.quote-density-fixture > blockquote').first().scrollIntoViewIfNeeded()
+      const clip = await page.evaluate(() => {
+        const fixture = document.querySelector('.quote-density-fixture')!
+        const quote = fixture.querySelector(':scope > blockquote')!.getBoundingClientRect()
+        const alert = fixture.querySelector(':scope > .callout-note')!.getBoundingClientRect()
+        return { x: quote.left, y: quote.top, width: quote.width, height: alert.bottom - quote.top }
+      })
+      await page.screenshot({ path: testInfo.outputPath(`quotes-and-alerts-${theme}-${width}.png`), clip })
+    }
+    expect(pageErrors).toEqual([])
+  })
+}

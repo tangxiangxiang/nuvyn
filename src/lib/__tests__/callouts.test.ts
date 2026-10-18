@@ -259,6 +259,11 @@ describe('GitHub-style Markdown Alerts', () => {
 
   it('uses quote-style Alerts without changing the plain container surface', () => {
     const styles = readFileSync(resolve(process.cwd(), 'src/style.css'), 'utf8')
+    const quoteStyles = styles.match(/\.article blockquote \{([^}]+)\}/u)?.[1] ?? ''
+    expect(quoteStyles).toContain('font-size: 0.875rem')
+    expect(quoteStyles).toContain('line-height: 1.5')
+    expect(quoteStyles).toContain('padding: 0.65rem 1rem')
+    expect(quoteStyles).not.toMatch(/(?:^|[;\n])\s*(?:min-|max-)?height:/u)
     const start = styles.indexOf('/* ---------- Nuvyn notice cards: Alerts + Markdown Containers')
     const end = styles.indexOf('/* Nuvyn code groups', start)
     const noticeStyles = styles.slice(start, end)

@@ -1192,6 +1192,8 @@ main.container.auth-page-shell {
   padding: 0.65rem 1rem;
   background: color-mix(in srgb, var(--notice-bg) 60%, transparent);
   color: var(--vs-text-1, var(--text));
+  font-size: 0.875rem;
+  line-height: 1.5;
 }
 .article blockquote > :first-child { margin-top: 0; }
 .article blockquote > :last-child { margin-bottom: 0; }

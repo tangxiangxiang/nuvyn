@@ -321,6 +321,8 @@ const PDF_DOWNLOAD_STYLES = `
   background: #f5f6f8 !important;
   border-left-color: #005fb8 !important;
   color: #4b5563 !important;
+  font-size: 0.875rem !important;
+  line-height: 1.5 !important;
 }
 
 /* Resolve Nuvyn notice surfaces at the printable boundary.

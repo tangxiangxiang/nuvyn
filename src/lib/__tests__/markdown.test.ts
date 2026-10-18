@@ -1044,6 +1044,19 @@ describe('markdown H3 renderer cutover', () => {
     expect(html).not.toMatch(/\sstyle=/i)
   })
 
+  it.each([
+    ['one line', 'const value = 1', true],
+    ['two lines', 'const first = 1\nconst second = 2', false],
+    ['an explicit blank line', 'const value = 1\n', false],
+    ['CRLF lines', 'const first = 1\r\nconst second = 2', false],
+  ])('marks %s for language label placement', async (_name, source, singleLine) => {
+    const html = await render(['```ts', source, '```'].join('\n'))
+    const doc = new DOMParser().parseFromString(html, 'text/html')
+    const pre = doc.querySelector('pre.shiki')
+    expect(pre?.getAttribute('data-language')).toBe('ts')
+    expect(pre?.classList.contains('nuvyn-code-single-line')).toBe(singleLine)
+  })
+
   it('preserves final-render line highlight classes for a non-numbered fence', async () => {
     const html = await render([
       '```ts {1,3-5}',

@@ -33,8 +33,10 @@ The supported markers are exactly `NOTE`, `TIP`, `IMPORTANT`, `WARNING`, and
 blockquote by themselves. Alerts display only their body, without a generated
 type title or empty title row. They use the same thin left-border treatment as
 ordinary quotes, with a soft type-colored background and border. This applies
-to reading mode, light/dark themes, and PDF export. Ordinary quotes keep their
-existing style; colon-fenced containers remain borderless pastel cards.
+to reading mode, light/dark themes, and PDF export. Ordinary quotes use the
+same compact font size, line height, and padding as Alerts while retaining
+their own colors. Heights remain content-driven; colon-fenced containers
+remain borderless pastel cards.
 
 For example:
 

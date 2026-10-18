@@ -582,6 +582,8 @@ const STRINGS: Strings = {
   'editor.image_upload_failed': { zh: '图片上传失败。', en: 'Image upload failed.' },
   'editor.image_upload_some_failed': { zh: '{count} 张图片上传失败，其余图片已处理。', en: '{count} images failed to upload; the others were processed.' },
   'editor.image_saved_not_inserted': { zh: '图片已保存，但插入位置已失效。', en: 'The image was saved, but its insertion point is no longer available.' },
+  'editor.copy_code': { zh: '复制代码', en: 'Copy code' },
+  'editor.code_copied': { zh: '代码已复制', en: 'Code copied' },
   'editor.copy_markdown': { zh: '复制 Markdown', en: 'Copy Markdown' },
   'editor.image_markdown_copied': { zh: 'Markdown 图片引用已复制', en: 'Markdown image reference copied' },
   'editor.tab_limit': { zh: '标签页已达上限（{count}），请先关闭一些', en: 'Tab limit reached ({count}); close some tabs first' },

@@ -86,6 +86,9 @@ describe('PDF export helpers', () => {
 
   it('prints quote-style Alerts separately from plain pastel containers', () => {
     const styles = __testing__.PDF_DOWNLOAD_STYLES
+    const quoteStyles = styles.match(/\.pdf-document \.article blockquote \{([^}]+)\}/u)?.[1] ?? ''
+    expect(quoteStyles).toContain('font-size: 0.875rem !important;')
+    expect(quoteStyles).toContain('line-height: 1.5 !important;')
 
     expect(styles).toContain('.pdf-document .article .callout,')
     expect(styles).toContain('.pdf-document .article .markdown-container {')
