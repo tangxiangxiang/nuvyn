@@ -27,7 +27,7 @@ function parse(html: string): Document {
 }
 
 describe('Nuvyn custom Markdown containers', () => {
-  it('renders the five allowlisted types with default and custom titles', async () => {
+  it('renders titles only when an explicit alias is supplied', async () => {
     const doc = parse(await render([
       '::: info',
       'Information.',
@@ -51,15 +51,52 @@ describe('Nuvyn custom Markdown containers', () => {
     ].join('\n')))
 
     expect(doc.querySelectorAll('.markdown-container')).toHaveLength(5)
-    expect(doc.querySelector('.markdown-container-info')?.textContent).toContain('Info')
+    expect(doc.querySelector('.markdown-container-info')?.textContent?.trim()).toBe('Information.')
+    expect(doc.querySelector('.markdown-container-info .markdown-container-title')).toBeNull()
     expect(doc.querySelector('.markdown-container-tip .markdown-container-title')?.innerHTML)
       .toContain('<strong>Custom</strong> Tip')
-    expect(doc.querySelector('.markdown-container-warning .markdown-container-title')?.textContent)
-      .toBe('Warning')
+    expect(doc.querySelector('.markdown-container-warning .markdown-container-title')).toBeNull()
     expect(doc.querySelector('.markdown-container-danger .markdown-container-title')?.textContent)
       .toBe('STOP')
     expect(doc.querySelector('.markdown-container-details')?.tagName).toBe('DETAILS')
     expect(doc.querySelector('.markdown-container-details summary')?.textContent).toBe('Click me')
+  })
+
+  it.each(['info', 'tip', 'warning', 'danger', 'details'])(
+    'omits the default %s title and its empty heading without losing the body',
+    async (type) => {
+      const doc = parse(await render(`::: ${type}   \n\n**Body** with content.\n\n:::`))
+      const container = doc.querySelector(`.markdown-container-${type}`)!
+
+      expect(container).not.toBeNull()
+      expect(container.tagName).toBe('DIV')
+      expect(container.querySelector('.markdown-container-title, summary, details')).toBeNull()
+      expect(container.firstElementChild?.tagName).toBe('P')
+      expect(container.querySelector('strong')?.textContent).toBe('Body')
+      expect(container.textContent).toContain('with content.')
+    },
+  )
+
+  it.each(['info', 'tip', 'warning', 'danger', 'details'])(
+    'preserves an explicit %s alias and safe inline Markdown',
+    async (type) => {
+      const doc = parse(await render(`::: ${type} 自定义 **别名**\nBody.\n:::`))
+      const container = doc.querySelector(`.markdown-container-${type}`)!
+
+      expect(container.querySelector('.markdown-container-title')?.textContent).toBe('自定义 别名')
+      expect(container.querySelector('.markdown-container-title strong')?.textContent).toBe('别名')
+      expect(container.tagName).toBe(type === 'details' ? 'DETAILS' : 'DIV')
+    },
+  )
+
+  it('shows an unnamed details body directly even when only the open modifier is supplied', async () => {
+    const doc = parse(await render('::: details {open}\nAlways visible.\n:::'))
+    const container = doc.querySelector('.markdown-container-details')!
+
+    expect(container.tagName).toBe('DIV')
+    expect(container.hasAttribute('open')).toBe(false)
+    expect(container.querySelector('summary, .markdown-container-title')).toBeNull()
+    expect(container.textContent).toContain('Always visible.')
   })
 
   it('uses one Flex container and makes each direct Markdown block an implicit item', async () => {
@@ -140,7 +177,7 @@ describe('Nuvyn custom Markdown containers', () => {
   })
 
   it('uses native details state and accepts only the literal details {open} modifier', async () => {
-    const closed = parse(await render('::: details\nHidden\n:::'))
+    const closed = parse(await render('::: details Closed\nHidden\n:::'))
     const opened = parse(await render('::: details Open {open}\nVisible\n:::'))
     const invalid = parse(await render([
       '::: details {OPEN}',

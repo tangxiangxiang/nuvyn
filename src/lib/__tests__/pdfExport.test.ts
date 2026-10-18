@@ -84,7 +84,7 @@ describe('PDF export helpers', () => {
     expect(__testing__.PDF_DOWNLOAD_STYLES).toContain('size: A4')
   })
 
-  it('keeps Alerts and custom containers printable as shared Nuvyn pastel cards', () => {
+  it('prints quote-style Alerts separately from plain pastel containers', () => {
     const styles = __testing__.PDF_DOWNLOAD_STYLES
 
     expect(styles).toContain('.pdf-document .article .callout,')
@@ -96,6 +96,16 @@ describe('PDF export helpers', () => {
     expect(styles).toContain('font-size: 0.875rem !important;')
     expect(styles).toContain('font-weight: 700 !important;')
     expect(styles).toContain('line-height: 1.4 !important;')
+    const alertStyles = styles.match(/\.pdf-document \.article \.callout \{([^}]+)\}/u)?.[1] ?? ''
+    expect(alertStyles).toContain('border-left: 2px solid var(--notice-accent) !important;')
+    expect(alertStyles).toContain('padding: 0.65rem 1rem !important;')
+    expect(styles).not.toContain('background: color-mix(')
+    for (const color of [
+      '#f7f7f8', '#f5f6ff', '#f8f4ff', '#fffaee', '#fff2f4',
+      '#8d9daa', '#7c8dcc', '#9b83c4', '#c3a05a', '#c58390',
+    ]) {
+      expect(styles).toContain(color)
+    }
     expect(styles).not.toContain('callout-icon')
     expect(styles).not.toContain('mask-image')
     expect(styles).not.toMatch(/[ⓘ✦‼⚠⛔]/u)
@@ -113,6 +123,16 @@ describe('PDF export helpers', () => {
     expect(styles).not.toContain('.pdf-document .article .callout-info')
     expect(styles).not.toContain('.pdf-document .article .callout-success')
     expect(styles).not.toContain('.pdf-document .article .callout-danger')
+  })
+
+  it('adds a printable separator only below an expanded native details summary', () => {
+    const rule = __testing__.PDF_DOWNLOAD_STYLES.match(
+      /\.pdf-document \.article details\.markdown-container-details\[open\] > summary\.markdown-container-title \{([^}]+)\}/u,
+    )?.[1] ?? ''
+
+    expect(rule).toContain('margin-bottom: 0.5rem !important;')
+    expect(rule).toContain('padding-bottom: 0.5rem !important;')
+    expect(rule).toContain('border-bottom: 1px solid rgba(127, 127, 127, 0.16) !important;')
   })
 
   it('preserves automatic Flex items and supplies independent printable layout rules', () => {

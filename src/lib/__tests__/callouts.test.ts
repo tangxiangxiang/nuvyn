@@ -33,7 +33,7 @@ describe('GitHub-style Markdown Alerts', () => {
     expect(seenCloseMeta).toMatchObject({ fromOtherPlugin: true, callout: { type: 'NOTE' } })
   })
 
-  it('renders exactly the five canonical Alert types with Chinese titles', async () => {
+  it('renders exactly the five canonical Alert types as body-only cards', async () => {
     const html = await render([
       '> [!NOTE]',
       '> note',
@@ -55,13 +55,28 @@ describe('GitHub-style Markdown Alerts', () => {
     for (const type of ['note', 'tip', 'important', 'warning', 'caution']) {
       const alert = doc.querySelector(`.callout.callout-${type}`)
       expect(alert).not.toBeNull()
-      expect(alert?.querySelector('.callout-title')).not.toBeNull()
+      expect(alert?.children).toHaveLength(1)
+      expect(alert?.firstElementChild?.className).toBe('callout-content')
+      expect(alert?.querySelector('.callout-content > p')?.textContent).toBe(type)
+      expect(alert?.querySelector('.callout-title, .callout-title-text')).toBeNull()
       expect(alert?.querySelector('.callout-icon')).toBeNull()
     }
     expect(doc.querySelectorAll('.callout')).toHaveLength(5)
-    expect(Array.from(doc.querySelectorAll('.callout-title-text')).map((node) => node.textContent))
-      .toEqual(['Note', 'Tip', 'Important', 'Warning', 'Caution'])
   })
+
+  it.each(['NOTE', 'TIP', 'IMPORTANT', 'WARNING', 'CAUTION'])(
+    'keeps a marker-only %s Alert free of generated titles and empty paragraphs',
+    async (type) => {
+      const doc = new DOMParser().parseFromString(await render(`> [!${type}]`), 'text/html')
+      const alert = doc.querySelector(`.callout-${type.toLowerCase()}`)
+
+      expect(alert).not.toBeNull()
+      expect(alert?.children).toHaveLength(1)
+      expect(alert?.querySelector('.callout-content')?.children).toHaveLength(0)
+      expect(alert?.textContent?.trim()).toBe('')
+      expect(alert?.querySelector('.callout-title, .callout-title-text, p')).toBeNull()
+    },
+  )
 
   it('requires a marker-only canonical line and does not support custom titles', async () => {
     const canonical = new DOMParser().parseFromString(
@@ -73,7 +88,8 @@ describe('GitHub-style Markdown Alerts', () => {
       'text/html',
     )
 
-    expect(canonical.querySelector('.callout-warning .callout-title-text')?.textContent).toBe('Warning')
+    expect(canonical.querySelector('.callout-warning .callout-content')?.textContent?.trim()).toBe('Back up first.')
+    expect(canonical.querySelector('.callout-title, .callout-title-text')).toBeNull()
     expect(titled.querySelector('.callout')).toBeNull()
     expect(titled.querySelector('blockquote')?.textContent).toContain('[!WARNING] Database migration')
   })
@@ -127,6 +143,17 @@ describe('GitHub-style Markdown Alerts', () => {
     expect(content?.querySelectorAll(':scope > ul > li')).toHaveLength(2)
     expect(content?.textContent).toContain('First paragraph.')
     expect(content?.textContent).toContain('Second paragraph.')
+  })
+
+  it('preserves an author-supplied heading instead of hiding body content', async () => {
+    const html = await render('> [!NOTE]\n>\n> ## My heading\n>\n> **Note** is part of the body.')
+    const doc = new DOMParser().parseFromString(html, 'text/html')
+    const content = doc.querySelector('.callout-note .callout-content')
+
+    expect(content?.querySelector('h2')?.textContent).toBe('My heading')
+    expect(content?.querySelector('p strong')?.textContent).toBe('Note')
+    expect(content?.querySelector('p')?.textContent).toBe('Note is part of the body.')
+    expect(doc.querySelector('.callout-title, .callout-title-text')).toBeNull()
   })
 
   it('keeps rich Markdown and the render-scoped Wiki resolver inside an Alert', async () => {
@@ -214,7 +241,7 @@ describe('GitHub-style Markdown Alerts', () => {
     const alert = doc.querySelector('.callout-warning')
 
     expect(alert).not.toBeNull()
-    expect(alert?.querySelector('.callout-title-text')?.textContent).toBe('Warning')
+    expect(alert?.querySelector('.callout-title, .callout-title-text')).toBeNull()
     expect(alert?.querySelector('script, img')).toBeNull()
     expect(alert?.textContent).toContain('Safe text')
     expect(doc.querySelector('[onerror], [onclick], [onload]')).toBeNull()
@@ -230,7 +257,7 @@ describe('GitHub-style Markdown Alerts', () => {
     expect(doc.querySelector('.callout')).toBeNull()
   })
 
-  it('uses the Nuvyn pastel-card Alert visual contract', () => {
+  it('uses quote-style Alerts without changing the plain container surface', () => {
     const styles = readFileSync(resolve(process.cwd(), 'src/style.css'), 'utf8')
     const start = styles.indexOf('/* ---------- Nuvyn notice cards: Alerts + Markdown Containers')
     const end = styles.indexOf('/* Nuvyn code groups', start)
@@ -242,12 +269,22 @@ describe('GitHub-style Markdown Alerts', () => {
     expect(noticeStyles).not.toContain('--callout-color')
     expect(noticeStyles).not.toContain('--callout-fg-color')
     expect(noticeStyles).not.toContain('--callout-border-color')
-    expect(noticeStyles).not.toContain('border-left')
+    const alertStyles = noticeStyles.match(/\.article \.callout \{([^}]+)\}/u)?.[1] ?? ''
+    expect(alertStyles).toContain('border-left: 2px solid var(--notice-accent)')
+    expect(alertStyles).toContain('padding: 0.65rem 1rem')
+    expect(alertStyles).toContain('background: color-mix(in srgb, var(--notice-bg) 60%, transparent)')
+    expect(noticeStyles).toContain('--notice-accent: #8d9daa')
+    for (const [type, color] of [
+      ['tip', '#7c8dcc'], ['important', '#9b83c4'], ['warning', '#c3a05a'], ['caution', '#c58390'],
+    ]) {
+      expect(noticeStyles).toContain(`.article .callout-${type} { --notice-accent: ${color}; }`)
+    }
     expect(noticeStyles).toContain('--notice-bg')
     expect(noticeStyles).toContain('border-radius: 0.75rem')
     expect(noticeStyles).toContain('background: var(--notice-bg)')
     expect(noticeStyles).toContain('box-shadow: none')
     expect(noticeStyles).toContain('padding: 0.75rem 1rem')
+    expect(noticeStyles).toContain('border: 0')
     expect(noticeStyles).toContain('font-size: 0.875rem')
     expect(noticeStyles).toContain('.article .callout,')
     expect(noticeStyles).toContain('.article .markdown-container')

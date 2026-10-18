@@ -149,11 +149,17 @@ Normal containers render as fixed `<div>` structures. `details` renders native s
 
 The title is a separate inline token, not an HTML attribute string. This preserves ordinary safe inline Markdown and sends title HTML through the same final DOMPurify boundary.
 
-Default titles are the existing Nuvyn-style capitalized names:
+At the original MD-EXT-2 baseline, default titles were the Nuvyn-style capitalized names:
 
 ```text
 Info / Tip / Warning / Danger / Details
 ```
+
+The 2026-10-17 optional-title update supersedes that default: containers now
+render a title only for an explicitly supplied alias. An unnamed `details`
+renders its body directly as a non-collapsible card so the browser cannot
+synthesize a default "Details" label or leave its content inaccessible.
+Named `details` retains the native summary interaction and `{open}` behavior.
 
 Custom titles retain the complete title remainder, for example `::: danger STOP` and `::: tip **Custom** Tip`. No localization or generic attribute syntax was added.
 

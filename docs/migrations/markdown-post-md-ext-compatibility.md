@@ -16,15 +16,13 @@ Nuvyn now recognizes only the five exact, uppercase GitHub-style Alert markers:
 > text
 ```
 
-The rendered display titles remain localized:
+As of 2026-10-17, Alerts render as body-only cards without generated titles.
+The five markers still select their existing type colors in reading mode and
+PDF export. This presentation change does not rewrite stored Markdown.
 
-| Marker | Display title |
-| --- | --- |
-| `NOTE` | 注意 |
-| `TIP` | 提示 |
-| `IMPORTANT` | 重要 |
-| `WARNING` | 警告 |
-| `CAUTION` | 小心 |
+The 2026-10-18 presentation update gives Alerts a thin type-colored left border
+and softer background, following their blockquote syntax. Generated titles
+remain hidden, while ordinary quotes and colon-fenced containers are unchanged.
 
 The marker is case-sensitive and must be the only content on the first
 blockquote line. Custom titles and folded `+` / `-` forms are not supported.

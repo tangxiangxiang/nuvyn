@@ -1197,9 +1197,9 @@ main.container.auth-page-shell {
 .article blockquote > :last-child { margin-bottom: 0; }
 
 /* ---------- Nuvyn notice cards: Alerts + Markdown Containers ----------
-   Alerts and custom containers have different Markdown syntax, but they share
-   one quiet pastel-card surface. Type names are fixed by their parsers; no
-   author value is interpolated into CSS. */
+   Alerts extend the quiet quote surface; custom containers remain pastel
+   cards. Type names are fixed by their parsers; no author value is
+   interpolated into CSS. */
 .article .callout,
 .article .markdown-container {
   --notice-bg: #f1f2f4;
@@ -1215,6 +1215,16 @@ main.container.auth-page-shell {
   font-size: 0.875rem;
   line-height: 1.5;
 }
+.article .callout {
+  --notice-accent: #8d9daa;
+  border-left: 2px solid var(--notice-accent);
+  padding: 0.65rem 1rem;
+  background: color-mix(in srgb, var(--notice-bg) 60%, transparent);
+}
+.article .callout-tip { --notice-accent: #7c8dcc; }
+.article .callout-important { --notice-accent: #9b83c4; }
+.article .callout-warning { --notice-accent: #c3a05a; }
+.article .callout-caution { --notice-accent: #c58390; }
 .article .callout-note,
 .article blockquote,
 .article .markdown-container-info,
@@ -1236,7 +1246,6 @@ main.container.auth-page-shell {
 .article .markdown-container-danger {
   --notice-bg: #ffe9ec;
 }
-.article .callout-title,
 .article .markdown-container-title {
   margin: 0 0 0.35rem;
   color: var(--vs-text-1, var(--text-h));
@@ -1247,6 +1256,7 @@ main.container.auth-page-shell {
 .article .callout-content { color: inherit; }
 .article .callout-content > :first-child { margin-top: 0; }
 .article .callout-content > :last-child { margin-bottom: 0; }
+.article .markdown-container > :first-child,
 .article .markdown-container > .markdown-container-title + :not(.markdown-container-title) {
   margin-top: 0;
 }
@@ -1260,6 +1270,11 @@ main.container.auth-page-shell {
 }
 .article .markdown-container-details:not([open]) > summary.markdown-container-title {
   margin-bottom: 0;
+}
+.article details.markdown-container-details[open] > summary.markdown-container-title {
+  margin-bottom: 0.5rem;
+  padding-bottom: 0.5rem;
+  border-bottom: 1px solid rgba(127, 127, 127, 0.16);
 }
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme='light']) .article .callout-note,

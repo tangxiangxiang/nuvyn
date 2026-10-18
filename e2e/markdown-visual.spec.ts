@@ -10,7 +10,7 @@ const noticePair: Record<(typeof containerTypes)[number], (typeof alertTypes)[nu
   danger: 'caution',
   details: 'note',
 }
-const alertBackgrounds = {
+const noticeBackgrounds = {
   light: {
     note: 'rgb(241, 242, 244)',
     tip: 'rgb(238, 240, 255)',
@@ -26,7 +26,20 @@ const alertBackgrounds = {
     caution: 'rgb(53, 34, 38)',
   },
 } as const
-const alertTitles = ['Note', 'Tip', 'Important', 'Warning', 'Caution']
+const alertBorders = {
+  note: 'rgb(141, 157, 170)',
+  tip: 'rgb(124, 141, 204)',
+  important: 'rgb(155, 131, 196)',
+  warning: 'rgb(195, 160, 90)',
+  caution: 'rgb(197, 131, 144)',
+} as const
+const alertBodies = [
+  '强调用户在快速浏览文档时也不应忽略的重要信息。',
+  '有助于用户更顺利达成目标的建议性信息。',
+  '对用户达成目标至关重要的信息。',
+  '因为可能存在风险，所以需要用户立即关注的关键内容。',
+  '行为可能带来的负面影响。',
+]
 
 for (const theme of ['light', 'dark'] as const) {
   test(`${mode} ${theme} Markdown visual regression`, async ({ page }) => {
@@ -50,27 +63,43 @@ for (const theme of ['light', 'dark'] as const) {
       await expect(article.locator(`.markdown-container-${type}`)).toBeVisible()
     }
 
-    const alerts = await article.evaluate((root, values) => values.map((type) => {
+    const alerts = await article.evaluate((root, { types, palette }) => types.map((type) => {
       const callout = root.querySelector<HTMLElement>(`.callout-${type}`)
-      const title = callout?.querySelector<HTMLElement>('.callout-title')
+      const content = callout?.querySelector<HTMLElement>('.callout-content')
       const calloutStyle = callout ? getComputedStyle(callout) : null
+      const contentStyle = content ? getComputedStyle(content) : null
+      const probe = document.createElement('div')
+      probe.style.backgroundColor = `color-mix(in srgb, ${palette[type]} 60%, transparent)`
+      root.append(probe)
+      const expectedBackground = getComputedStyle(probe).backgroundColor
+      probe.remove()
       return {
         type,
-        title: title?.querySelector('.callout-title-text')?.textContent ?? '',
-        foreground: title ? getComputedStyle(title).color : '',
+        hasTitle: callout?.querySelector('.callout-title, .callout-title-text') !== null,
+        body: content?.textContent?.trim() ?? '',
+        foreground: contentStyle?.color ?? '',
         borderLeftWidth: calloutStyle?.borderLeftWidth ?? '',
+        borderLeftColor: calloutStyle?.borderLeftColor ?? '',
+        borderLeftStyle: calloutStyle?.borderLeftStyle ?? '',
         borderTopWidth: calloutStyle?.borderTopWidth ?? '',
+        borderRightWidth: calloutStyle?.borderRightWidth ?? '',
+        borderBottomWidth: calloutStyle?.borderBottomWidth ?? '',
         background: calloutStyle?.backgroundColor ?? '',
+        expectedBackground,
         radius: calloutStyle?.borderRadius ?? '',
         shadow: calloutStyle?.boxShadow ?? '',
         paddingTop: calloutStyle?.paddingTop ?? '',
         paddingLeft: calloutStyle?.paddingLeft ?? '',
-        fontSize: title ? getComputedStyle(title).fontSize : '',
-        fontWeight: title ? getComputedStyle(title).fontWeight : '',
-        lineHeight: title ? getComputedStyle(title).lineHeight : '',
+        fontSize: contentStyle?.fontSize ?? '',
+        fontWeight: contentStyle?.fontWeight ?? '',
+        lineHeight: contentStyle?.lineHeight ?? '',
+        topSpace: callout && content ? content.getBoundingClientRect().top - callout.getBoundingClientRect().top : null,
+        leftSpace: callout && content ? content.getBoundingClientRect().left - callout.getBoundingClientRect().left : null,
+        bodyHeight: content?.getBoundingClientRect().height ?? 0,
+        cardHeight: callout?.getBoundingClientRect().height ?? 0,
         hasIcon: callout?.querySelector('.callout-icon') !== null,
       }
-    }), alertTypes)
+    }), { types: alertTypes, palette: noticeBackgrounds[theme] })
 
     const containers = await article.evaluate((root, values) => values.map((type) => {
       const container = root.querySelector<HTMLElement>(`.markdown-container-${type}`)
@@ -95,19 +124,27 @@ for (const theme of ['light', 'dark'] as const) {
 
     expect(alerts).toHaveLength(5)
     alerts.forEach((alert, index) => {
-      const background = alertBackgrounds[theme][alert.type]
-      expect(alert.title).toBe(alertTitles[index])
+      expect(alert.hasTitle).toBe(false)
+      expect(alert.body).toBe(alertBodies[index])
       expect(alert.foreground).toBe(theme === 'light' ? 'rgb(31, 31, 31)' : 'rgb(212, 212, 212)')
-      expect(alert.background).toBe(background)
-      expect(alert.borderLeftWidth).toBe('0px')
+      expect(alert.background).toBe(alert.expectedBackground)
+      expect(alert.borderLeftWidth).toBe('2px')
+      expect(alert.borderLeftColor).toBe(alertBorders[alert.type])
+      expect(alert.borderLeftStyle).toBe('solid')
       expect(alert.borderTopWidth).toBe('0px')
+      expect(alert.borderRightWidth).toBe('0px')
+      expect(alert.borderBottomWidth).toBe('0px')
       expect(alert.radius).toBe('12px')
       expect(alert.shadow).toBe('none')
-      expect(alert.paddingTop).toBe('12px')
+      expect(Number.parseFloat(alert.paddingTop)).toBeCloseTo(10.4, 1)
       expect(alert.paddingLeft).toBe('16px')
       expect(alert.fontSize).toBe('14px')
-      expect(alert.fontWeight).toBe('700')
-      expect(Number.parseFloat(alert.lineHeight)).toBeCloseTo(19.6, 1)
+      expect(alert.fontWeight).toBe('400')
+      expect(Number.parseFloat(alert.lineHeight)).toBeCloseTo(21, 1)
+      expect(alert.topSpace).toBeCloseTo(10.4, 1)
+      expect(alert.leftSpace).toBeCloseTo(18, 1)
+      expect(alert.bodyHeight).toBeGreaterThan(0)
+      expect(alert.cardHeight).toBeCloseTo(alert.bodyHeight + 20.8, 1)
       expect(alert.hasIcon).toBe(false)
     })
 
@@ -115,17 +152,22 @@ for (const theme of ['light', 'dark'] as const) {
     containers.forEach((container) => {
       const alert = alerts.find((candidate) => candidate.type === noticePair[container.type])
       expect(alert).toBeDefined()
-      expect(container.background).toBe(alert?.background)
+      expect(container.background).toBe(noticeBackgrounds[theme][noticePair[container.type]])
       expect(container.borderLeftWidth).toBe('0px')
       expect(container.borderTopWidth).toBe('0px')
       expect(container.radius).toBe(alert?.radius)
       expect(container.shadow).toBe('none')
-      expect(container.paddingTop).toBe(alert?.paddingTop)
+      expect(container.paddingTop).toBe('12px')
       expect(container.paddingLeft).toBe(alert?.paddingLeft)
       expect(container.fontSize).toBe(alert?.fontSize)
-      expect(container.fontWeight).toBe(alert?.fontWeight)
+      expect(container.fontWeight).toBe('700')
       expect(Number.parseFloat(container.lineHeight)).toBeCloseTo(19.6, 1)
     })
+    const quote = article.locator(':scope > blockquote').first()
+    await expect(quote).toHaveCSS('border-left-width', '2px')
+    await expect(quote).toHaveCSS('border-left-color', 'rgb(141, 157, 170)')
+    await expect(quote).toHaveCSS('background-color', alerts[0]!.background)
+    await expect(quote).toHaveCSS('padding-left', '16px')
     const codeSurface = await article.evaluate((root) => {
       const pre = Array.from(root.querySelectorAll<HTMLElement>('pre.shiki'))
         .find((candidate) => candidate.textContent?.includes('metaFirst'))
@@ -192,15 +234,19 @@ for (const theme of ['light', 'dark'] as const) {
       const details = root.querySelector<HTMLDetailsElement>('.markdown-container-details')
       const summary = details?.querySelector<HTMLElement>('summary.markdown-container-title')
       if (!details || !summary) return null
-      const closedMarginBottom = getComputedStyle(summary).marginBottom
+      const readStyle = () => {
+        const style = getComputedStyle(summary)
+        return { margin: style.marginBottom, padding: style.paddingBottom, border: style.borderBottomWidth }
+      }
+      const closed = readStyle()
       details.open = true
-      const openMarginBottom = getComputedStyle(summary).marginBottom
+      const open = readStyle()
       details.open = false
-      return { closedMarginBottom, openMarginBottom }
+      return { closed, open }
     })
     expect(detailsSpacing).not.toBeNull()
-    expect(Number.parseFloat(detailsSpacing?.closedMarginBottom ?? '')).toBe(0)
-    expect(Number.parseFloat(detailsSpacing?.openMarginBottom ?? '')).toBeCloseTo(5.6, 1)
+    expect(detailsSpacing?.closed).toEqual({ margin: '0px', padding: '0px', border: '0px' })
+    expect(detailsSpacing?.open).toEqual({ margin: '8px', padding: '8px', border: '1px' })
 
     await expect(article.locator('.math-inline .katex')).toBeVisible()
     await expect(article.locator('.math-block .katex-display')).toBeVisible()
@@ -226,10 +272,14 @@ test('reading forced Alert theme overrides the operating-system color scheme', a
   await page.emulateMedia({ colorScheme: 'dark' })
   await page.addInitScript(() => localStorage.setItem('nuvyn.theme', 'light'))
   await page.goto('/__markdown-test?mode=reading')
-  const noteTitle = page.locator('.article.reading .callout-note .callout-title')
+  const noteContent = page.locator('.article.reading .callout-note .callout-content')
   const infoCard = page.locator('.article.reading .markdown-container-info')
-  await expect(noteTitle).toBeVisible()
-  await expect(noteTitle).toHaveCSS('color', 'rgb(31, 31, 31)')
+  await expect(noteContent).toBeVisible()
+  await expect(noteContent).toHaveCSS('color', 'rgb(31, 31, 31)')
+  await expect(noteContent.locator('..')).toHaveCSS('background-color', await page.locator('.article.reading > blockquote').first()
+    .evaluate((node) => getComputedStyle(node).backgroundColor))
+  await expect(noteContent.locator('..')).toHaveCSS('border-left-color', 'rgb(141, 157, 170)')
+  await expect(page.locator('.article.reading .callout-title')).toHaveCount(0)
   await expect(infoCard).toHaveCSS('background-color', 'rgb(241, 242, 244)')
   await expect(page.locator('html')).toHaveAttribute('data-theme', 'light')
 
@@ -238,13 +288,44 @@ test('reading forced Alert theme overrides the operating-system color scheme', a
     await forcedDarkPage.emulateMedia({ colorScheme: 'light' })
     await forcedDarkPage.addInitScript(() => localStorage.setItem('nuvyn.theme', 'dark'))
     await forcedDarkPage.goto('/__markdown-test?mode=reading')
-    const darkNoteTitle = forcedDarkPage.locator('.article.reading .callout-note .callout-title')
+    const darkNoteContent = forcedDarkPage.locator('.article.reading .callout-note .callout-content')
     const darkInfoCard = forcedDarkPage.locator('.article.reading .markdown-container-info')
-    await expect(darkNoteTitle).toBeVisible()
-    await expect(darkNoteTitle).toHaveCSS('color', 'rgb(212, 212, 212)')
+    await expect(darkNoteContent).toBeVisible()
+    await expect(darkNoteContent).toHaveCSS('color', 'rgb(212, 212, 212)')
+    await expect(darkNoteContent.locator('..')).toHaveCSS('background-color', await forcedDarkPage.locator('.article.reading > blockquote').first()
+      .evaluate((node) => getComputedStyle(node).backgroundColor))
+    await expect(darkNoteContent.locator('..')).toHaveCSS('border-left-color', 'rgb(141, 157, 170)')
+    await expect(forcedDarkPage.locator('.article.reading .callout-title')).toHaveCount(0)
     await expect(darkInfoCard).toHaveCSS('background-color', 'rgb(36, 38, 43)')
     await expect(forcedDarkPage.locator('html')).toHaveAttribute('data-theme', 'dark')
   } finally {
     await forcedDarkPage.close()
+  }
+})
+
+test('reading narrow Alerts retain quote borders without overflowing the content width', async ({ page }) => {
+  await page.setViewportSize({ width: 375, height: 812 })
+  await page.goto('/__markdown-test?mode=reading')
+  const article = page.locator('.article.reading')
+  await expect(article.locator('.callout')).toHaveCount(5)
+  const cards = await article.evaluate((root) => {
+    const bounds = root.getBoundingClientRect()
+    return Array.from(root.querySelectorAll<HTMLElement>('.callout')).map((card) => ({
+      left: card.getBoundingClientRect().left - bounds.left,
+      right: bounds.right - card.getBoundingClientRect().right,
+      width: card.getBoundingClientRect().width,
+      scrollWidth: card.scrollWidth,
+      clientWidth: card.clientWidth,
+      border: getComputedStyle(card).borderLeftWidth,
+      hasTitle: card.querySelector('.callout-title, .callout-title-text') !== null,
+    }))
+  })
+  for (const card of cards) {
+    expect(card.left).toBeGreaterThanOrEqual(0)
+    expect(card.right).toBeGreaterThanOrEqual(0)
+    expect(card.width).toBeGreaterThan(0)
+    expect(card.scrollWidth).toBeLessThanOrEqual(card.clientWidth)
+    expect(card.border).toBe('2px')
+    expect(card.hasTitle).toBe(false)
   }
 })

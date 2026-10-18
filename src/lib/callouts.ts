@@ -28,15 +28,6 @@ interface CalloutMarker {
    ordinary blockquotes. */
 const CALLOUT_MARKER_RE = /^\[!(NOTE|TIP|IMPORTANT|WARNING|CAUTION)\][ \t]*(?:\n|$)/
 
-function escapeHtml(value: string): string {
-  return value
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;')
-    .replace(/'/g, '&#39;')
-}
-
 function parseMarker(content: string): CalloutMarker | null {
   const match = CALLOUT_MARKER_RE.exec(content)
   if (!match) return null
@@ -96,7 +87,7 @@ function transformCallouts(state: StateCore): void {
     stripMarker(inline, marker)
     if (inline.children?.length === 0) {
       // A marker-only first paragraph would otherwise leave an empty <p>
-      // before the actual content (or an empty content block for a title-only
+      // before the actual content (or an empty content block for a marker-only
       // callout). Keep the remaining block tokens intact.
       tokens.splice(index + 1, 3)
     }
@@ -133,9 +124,6 @@ export function calloutPlugin(md: MarkdownIt): void {
         : self.renderToken(tokens, index, options)
     }
     return `<div class="callout callout-${meta.type.toLowerCase()}">\n`
-      + '<div class="callout-title">'
-      + `<span class="callout-title-text">${escapeHtml(meta.title)}</span>`
-      + '</div>\n'
       + '<div class="callout-content">\n'
   }
 

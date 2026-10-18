@@ -30,15 +30,11 @@ content inside continues to use normal Markdown.
 
 The supported markers are exactly `NOTE`, `TIP`, `IMPORTANT`, `WARNING`, and
 `CAUTION`. Markers are case-sensitive and must occupy the first line of the
-blockquote by themselves. Alert titles remain English regardless of the UI language:
-
-| Marker | Display title |
-| --- | --- |
-| `NOTE` | Note |
-| `TIP` | Tip |
-| `IMPORTANT` | Important |
-| `WARNING` | Warning |
-| `CAUTION` | Caution |
+blockquote by themselves. Alerts display only their body, without a generated
+type title or empty title row. They use the same thin left-border treatment as
+ordinary quotes, with a soft type-colored background and border. This applies
+to reading mode, light/dark themes, and PDF export. Ordinary quotes keep their
+existing style; colon-fenced containers remain borderless pastel cards.
 
 For example:
 
@@ -50,6 +46,36 @@ For example:
 Custom titles are not supported, and folded Alerts (`+` / `-` markers) are not
 enabled. Legacy, unknown, lowercase, titled, and folded forms remain ordinary
 blockquotes; Nuvyn does not silently convert them to canonical Alerts.
+
+## Custom containers
+
+Use `info`, `tip`, `warning`, `danger`, or `details` with a colon fence.
+Containers show a title only when you explicitly supply an alias after the
+type. Without an alias, only the body is displayed, with no default type
+label or empty title row:
+
+```md
+::: info
+This container has no title.
+:::
+
+::: warning Back up first
+This container displays the title "Back up first".
+:::
+```
+
+Aliases support safe inline Markdown, such as `::: tip **Useful** advice`.
+A `details` container needs an alias for its clickable disclosure title:
+`::: details Read more` starts closed, while `::: details Read more {open}`
+starts open. Without an alias, `details` displays its body directly as a
+non-collapsible card, including when only `{open}` is supplied. PDF export
+retains explicit aliases and expands named details without changing the reader.
+Expanded, named `details` show a faint separator below their title in reading
+mode and PDF export. The separator disappears when collapsed and is not added
+to untitled containers or other container types.
+
+Only these colon-fenced containers support aliases. GitHub-style Alerts above
+always display only their body; Flex layout syntax is unchanged.
 
 ## Inline table of contents
 

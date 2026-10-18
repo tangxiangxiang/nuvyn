@@ -3,11 +3,18 @@ import { expect, test } from './fixtures/auth'
 
 const slug = 'inbox/pdf-export-e2e'
 const printableAlertBackgrounds: Record<string, string> = {
-  'callout-note': 'rgb(241, 242, 244)',
-  'callout-tip': 'rgb(238, 240, 255)',
-  'callout-important': 'rgb(243, 237, 255)',
-  'callout-warning': 'rgb(255, 247, 227)',
-  'callout-caution': 'rgb(255, 233, 236)',
+  'callout-note': 'rgb(247, 247, 248)',
+  'callout-tip': 'rgb(245, 246, 255)',
+  'callout-important': 'rgb(248, 244, 255)',
+  'callout-warning': 'rgb(255, 250, 238)',
+  'callout-caution': 'rgb(255, 242, 244)',
+}
+const printableAlertBorders: Record<string, string> = {
+  'callout-note': 'rgb(141, 157, 170)',
+  'callout-tip': 'rgb(124, 141, 204)',
+  'callout-important': 'rgb(155, 131, 196)',
+  'callout-warning': 'rgb(195, 160, 90)',
+  'callout-caution': 'rgb(197, 131, 144)',
 }
 const printableContainerBackgrounds: Record<string, string> = {
   'markdown-container-info': 'rgb(241, 242, 244)',
@@ -30,16 +37,24 @@ type PdfSurfaceSnapshot = {
   calloutTypes: string[]
   calloutEvidence: Array<{
     type: string
-    title: string
+    hasTitle: boolean
+    body: string
+    foreground: string
     background: string
     borderWidth: string
+    borderColor: string
     borderTopWidth: string
     radius: string
     shadow: string
     paddingTop: string
     paddingLeft: string
+    fontSize: string
     fontWeight: string
     lineHeight: string
+    topSpace: number | null
+    leftSpace: number | null
+    bodyHeight: number
+    cardHeight: number
     hasIcon: boolean
   }>
   hasContainer: boolean
@@ -57,6 +72,9 @@ type PdfSurfaceSnapshot = {
     fontWeight: string
     lineHeight: string
     open: boolean | null
+    titleBorderWidth: string
+    titleBorderColor: string
+    titlePaddingBottom: string
   }>
   taskCheckboxCount: number
   checkedTaskCount: number
@@ -196,20 +214,29 @@ test('exports the Kitchen Sink with settled content from the file-tree menu', as
         calloutEvidence: Array.from(preparedArticle.querySelectorAll<HTMLElement>('.callout')).map((callout) => {
           const type = Array.from(callout.classList)
             .find((name) => name.startsWith('callout-') && name !== 'callout') ?? ''
-          const title = callout.querySelector<HTMLElement>('.callout-title')
+          const content = callout.querySelector<HTMLElement>('.callout-content')
           const calloutStyle = getComputedStyle(callout)
+          const contentStyle = content ? getComputedStyle(content) : null
           return {
             type,
-            title: title?.querySelector('.callout-title-text')?.textContent ?? '',
+            hasTitle: callout.querySelector('.callout-title, .callout-title-text') !== null,
+            body: content?.textContent?.trim() ?? '',
+            foreground: contentStyle?.color ?? '',
             background: calloutStyle.backgroundColor,
             borderWidth: calloutStyle.borderLeftWidth,
+            borderColor: calloutStyle.borderLeftColor,
             borderTopWidth: calloutStyle.borderTopWidth,
             radius: calloutStyle.borderRadius,
             shadow: calloutStyle.boxShadow,
             paddingTop: calloutStyle.paddingTop,
             paddingLeft: calloutStyle.paddingLeft,
-            fontWeight: title ? getComputedStyle(title).fontWeight : '',
-            lineHeight: title ? getComputedStyle(title).lineHeight : '',
+            fontSize: contentStyle?.fontSize ?? '',
+            fontWeight: contentStyle?.fontWeight ?? '',
+            lineHeight: contentStyle?.lineHeight ?? '',
+            topSpace: content ? content.getBoundingClientRect().top - callout.getBoundingClientRect().top : null,
+            leftSpace: content ? content.getBoundingClientRect().left - callout.getBoundingClientRect().left : null,
+            bodyHeight: content?.getBoundingClientRect().height ?? 0,
+            cardHeight: callout.getBoundingClientRect().height,
             hasIcon: callout.querySelector('.callout-icon') !== null,
           }
         }),
@@ -235,6 +262,9 @@ test('exports the Kitchen Sink with settled content from the file-tree menu', as
             fontWeight: title ? getComputedStyle(title).fontWeight : '',
             lineHeight: title ? getComputedStyle(title).lineHeight : '',
             open: container instanceof HTMLDetailsElement ? container.open : null,
+            titleBorderWidth: title ? getComputedStyle(title).borderBottomWidth : '',
+            titleBorderColor: title ? getComputedStyle(title).borderBottomColor : '',
+            titlePaddingBottom: title ? getComputedStyle(title).paddingBottom : '',
           }
         }),
         taskCheckboxCount: article.querySelectorAll('input.task-list-item-checkbox').length,
@@ -408,20 +438,32 @@ test('exports the Kitchen Sink with settled content from the file-tree menu', as
     'callout-warning',
     'callout-caution',
   ])
-  expect(snapshot.calloutEvidence.map((alert) => alert.title)).toEqual([
-    'Note', 'Tip', 'Important', 'Warning', 'Caution',
+  expect(snapshot.calloutEvidence.map((alert) => alert.body)).toEqual([
+    'This alert should retain a clear visual hierarchy in the PDF.',
+    'This tip should remain readable in the PDF.',
+    'This important information should remain visible in the PDF.',
+    'This warning should remain visually distinct in the PDF.',
+    'This caution should retain its semantic color in the PDF.',
   ])
   expect(snapshot.calloutEvidence).toHaveLength(5)
   for (const alert of snapshot.calloutEvidence) {
+    expect(alert.hasTitle).toBe(false)
+    expect(alert.foreground).toBe('rgb(32, 33, 36)')
     expect(alert.background).toBe(printableAlertBackgrounds[alert.type])
-    expect(alert.borderWidth).toBe('0px')
+    expect(alert.borderWidth).toBe('2px')
+    expect(alert.borderColor).toBe(printableAlertBorders[alert.type])
     expect(alert.borderTopWidth).toBe('0px')
     expect(alert.radius).toBe('12px')
     expect(alert.shadow).toBe('none')
-    expect(alert.fontWeight).toBe('700')
-    expect(alert.paddingTop).toBe('12px')
+    expect(alert.fontSize).toBe('14px')
+    expect(alert.fontWeight).toBe('400')
+    expect(Number.parseFloat(alert.paddingTop)).toBeCloseTo(10.4, 1)
     expect(alert.paddingLeft).toBe('16px')
-    expect(Number.parseFloat(alert.lineHeight)).toBeCloseTo(19.6, 1)
+    expect(Number.parseFloat(alert.lineHeight)).toBeCloseTo(21, 1)
+    expect(alert.topSpace).toBeCloseTo(10.4, 1)
+    expect(alert.leftSpace).toBeCloseTo(18, 1)
+    expect(alert.bodyHeight).toBeGreaterThan(0)
+    expect(alert.cardHeight).toBeCloseTo(alert.bodyHeight + 20.8, 1)
     expect(alert.hasIcon).toBe(false)
   }
   expect(snapshot.hasContainer).toBe(true)
@@ -446,6 +488,10 @@ test('exports the Kitchen Sink with settled content from the file-tree menu', as
     expect(container.paddingLeft).toBe('16px')
     expect(container.fontWeight).toBe('700')
     expect(Number.parseFloat(container.lineHeight)).toBeCloseTo(19.6, 1)
+    const isDetails = container.type === 'markdown-container-details'
+    expect(container.titleBorderWidth).toBe(isDetails ? '1px' : '0px')
+    expect(container.titlePaddingBottom).toBe(isDetails ? '8px' : '0px')
+    if (isDetails) expect(container.titleBorderColor).toBe('rgba(127, 127, 127, 0.16)')
   }
   expect(snapshot.containerEvidence.find((container) => container.type === 'markdown-container-details')?.open)
     .toBe(true)

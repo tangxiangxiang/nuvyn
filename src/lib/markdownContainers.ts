@@ -4,11 +4,11 @@ import { HTML_OPEN_CLOSE_TAG_RE } from 'markdown-it/lib/common/html_re.mjs'
 import type StateBlock from 'markdown-it/lib/rules_block/state_block.mjs'
 
 const CONTAINER_DEFINITIONS = {
-  info: { title: 'Info', tag: 'div' },
-  tip: { title: 'Tip', tag: 'div' },
-  warning: { title: 'Warning', tag: 'div' },
-  danger: { title: 'Danger', tag: 'div' },
-  details: { title: 'Details', tag: 'details' },
+  info: { tag: 'div' },
+  tip: { tag: 'div' },
+  warning: { tag: 'div' },
+  danger: { tag: 'div' },
+  details: { tag: 'details' },
   flex: { tag: 'div' },
 } as const
 
@@ -241,12 +241,10 @@ function parseOpening(state: StateBlock, line: number): ContainerOpening | null 
     open = true
   }
 
-  const defaultTitle = CONTAINER_DEFINITIONS[type].title
-
   return {
     markerLength,
     type,
-    title: title || defaultTitle,
+    title,
     open,
   }
 }
@@ -622,9 +620,13 @@ function nuvynContainerRule(
   }
 
   const definition = CONTAINER_DEFINITIONS[opening.type]
-  const openToken = state.push('nuvyn_container_open', definition.tag, 1)
+  // Native details without a summary synthesizes a visible "Details" title.
+  // An untitled container therefore displays its body directly; an explicit
+  // title supplies the summary and retains the native disclosure behavior.
+  const tag = opening.type === 'details' && !opening.title ? 'div' : definition.tag
+  const openToken = state.push('nuvyn_container_open', tag, 1)
   openToken.attrSet('class', `markdown-container markdown-container-${opening.type}`)
-  if (opening.type === 'details' && opening.open) openToken.attrSet('open', 'open')
+  if (tag === 'details' && opening.open) openToken.attrSet('open', 'open')
   openToken.map = [startLine, closeLine + 1]
   openToken.meta = {
     type: opening.type,
@@ -632,20 +634,22 @@ function nuvynContainerRule(
     open: opening.open,
   }
 
-  const titleTag = opening.type === 'details' ? 'summary' : 'div'
-  const titleOpen = state.push('nuvyn_container_title_open', titleTag, 1)
-  titleOpen.attrSet('class', 'markdown-container-title')
-  titleOpen.map = [startLine, startLine + 1]
-  pushInlineTitle(state, opening.title, startLine)
-  const titleClose = state.push('nuvyn_container_title_close', titleTag, -1)
-  titleClose.map = [startLine, startLine + 1]
+  if (opening.title) {
+    const titleTag = opening.type === 'details' ? 'summary' : 'div'
+    const titleOpen = state.push('nuvyn_container_title_open', titleTag, 1)
+    titleOpen.attrSet('class', 'markdown-container-title')
+    titleOpen.map = [startLine, startLine + 1]
+    pushInlineTitle(state, opening.title, startLine)
+    const titleClose = state.push('nuvyn_container_title_close', titleTag, -1)
+    titleClose.map = [startLine, startLine + 1]
+  }
 
   // Reuse MarkdownIt's current block state and rules for the body. This is
   // what keeps headings, callouts, math, WikiLinks, Shiki fences, Mermaid,
   // and MarkMap in the same document token stream.
   state.md.block.tokenize(state, startLine + 1, closeLine)
 
-  const closeToken = state.push('nuvyn_container_close', definition.tag, -1)
+  const closeToken = state.push('nuvyn_container_close', tag, -1)
   closeToken.map = [closeLine, closeLine + 1]
   closeToken.meta = {
     type: opening.type,

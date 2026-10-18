@@ -323,7 +323,7 @@ const PDF_DOWNLOAD_STYLES = `
   color: #4b5563 !important;
 }
 
-/* Resolve the shared Nuvyn notice-card palette at the printable boundary.
+/* Resolve Nuvyn notice surfaces at the printable boundary.
    Reader theme variables never leak into the printable document. */
 .pdf-document .article .callout,
 .pdf-document .article .markdown-container {
@@ -358,7 +358,32 @@ const PDF_DOWNLOAD_STYLES = `
 .pdf-document .article .markdown-container-danger {
   --notice-bg: #ffe9ec !important;
 }
-.pdf-document .article .callout-title,
+/* Preblend the reader's 60% quote tint over white for html2canvas, which
+   cannot parse color-mix(). Keep container colors and the reader theme intact. */
+.pdf-document .article .callout {
+  --notice-accent: #8d9daa !important;
+  padding: 0.65rem 1rem !important;
+  border-left: 2px solid var(--notice-accent) !important;
+}
+.pdf-document .article .callout-note {
+  --notice-bg: #f7f7f8 !important;
+}
+.pdf-document .article .callout-tip {
+  --notice-bg: #f5f6ff !important;
+  --notice-accent: #7c8dcc !important;
+}
+.pdf-document .article .callout-important {
+  --notice-bg: #f8f4ff !important;
+  --notice-accent: #9b83c4 !important;
+}
+.pdf-document .article .callout-warning {
+  --notice-bg: #fffaee !important;
+  --notice-accent: #c3a05a !important;
+}
+.pdf-document .article .callout-caution {
+  --notice-bg: #fff2f4 !important;
+  --notice-accent: #c58390 !important;
+}
 .pdf-document .article .markdown-container-title {
   margin: 0 0 0.35rem !important;
   color: #202124 !important;
@@ -371,11 +396,17 @@ const PDF_DOWNLOAD_STYLES = `
 .pdf-document .article .callout-content { color: inherit !important; }
 .pdf-document .article .callout-content > :first-child { margin-top: 0 !important; }
 .pdf-document .article .callout-content > :last-child { margin-bottom: 0 !important; }
+.pdf-document .article .markdown-container > :first-child,
 .pdf-document .article .markdown-container > .markdown-container-title + :not(.markdown-container-title) {
   margin-top: 0 !important;
 }
 .pdf-document .article .markdown-container > :last-child { margin-bottom: 0 !important; }
 .pdf-document .article .markdown-container-details > summary { cursor: default !important; }
+.pdf-document .article details.markdown-container-details[open] > summary.markdown-container-title {
+  margin-bottom: 0.5rem !important;
+  padding-bottom: 0.5rem !important;
+  border-bottom: 1px solid rgba(127, 127, 127, 0.16) !important;
+}
 
 .pdf-document .article .table-scroll {
   box-sizing: border-box;
