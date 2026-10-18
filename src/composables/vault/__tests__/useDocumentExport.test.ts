@@ -3,18 +3,24 @@ import { effectScope, ref } from 'vue'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { useDocumentExport } from '../useDocumentExport'
 import { downloadMarkdownDocument } from '../../../lib/documentExport'
+import type { DocumentExportSnapshot } from '../../../lib/documentExport'
+import { downloadHtmlDocument } from '../../../lib/htmlExport'
+import { advanceAuthSessionGeneration, captureAuthSessionGeneration, observeAuthSessionResponse } from '../../../lib/auth-session'
+
+vi.mock('../../../lib/htmlExport', () => ({ downloadHtmlDocument: vi.fn() }))
 
 vi.mock('../../../lib/documentExport', async (original) => ({
   ...await original<typeof import('../../../lib/documentExport')>(),
   downloadMarkdownDocument: vi.fn(),
 }))
-afterEach(() => vi.clearAllMocks())
+afterEach(() => { vi.clearAllMocks(); vi.useRealTimers() })
 
 function setup() {
   const options = {
     pdfBusy: ref(false),
     snapshot: vi.fn(async (path: string) => ({ path, raw: 'raw', title: 'Title', filename: 'a.md' })),
     exportPdf: vi.fn(async () => true), onBusy: vi.fn(), onError: vi.fn(),
+    exportHtml: vi.fn(async (_snapshot: DocumentExportSnapshot, _signal: AbortSignal) => '<!DOCTYPE html>'),
   }
   const scope = effectScope()
   const controller = scope.run(() => useDocumentExport(options))!
@@ -22,6 +28,85 @@ function setup() {
 }
 
 describe('Document export transactions', () => {
+  it('ignores an old session 401 while exporting in a newer authenticated generation', async () => {
+    const { options, scope, controller } = setup()
+    const oldGeneration = captureAuthSessionGeneration()
+    advanceAuthSessionGeneration()
+    let release!: (html: string) => void
+    options.exportHtml.mockImplementationOnce(() => new Promise((resolve) => { release = resolve }))
+    controller.request('inbox/a')
+    const pending = controller.run('html')
+    await Promise.resolve()
+    await Promise.resolve()
+    await observeAuthSessionResponse(new Response(JSON.stringify({ code: 'auth-session-required' }), { status: 401, headers: { 'content-type': 'application/json' } }), oldGeneration)
+    expect(controller.busy.value).toBe(true)
+    release('<!DOCTYPE html>')
+    await pending
+    expect(downloadHtmlDocument).toHaveBeenCalledOnce()
+    scope.stop()
+  })
+  it('does not download a timed-out packager result even if the packager resolves late', async () => {
+    vi.useFakeTimers()
+    const { options, scope, controller } = setup()
+    options.exportHtml.mockImplementationOnce(async () => { vi.advanceTimersByTime(45_000); return '<!DOCTYPE html>' })
+    controller.request('inbox/a')
+    await controller.run('html')
+    expect(downloadHtmlDocument).not.toHaveBeenCalled()
+    expect(options.onError).toHaveBeenCalledOnce()
+    expect(controller.busy.value).toBe(false)
+    expect(controller.target.value).toBe('inbox/a')
+    scope.stop()
+  })
+  it('uses the same exact-target source snapshot for HTML and closes after the guarded download', async () => {
+    const { options, scope, controller } = setup()
+    controller.request('archive/html-target')
+    await controller.run('html')
+    expect(options.snapshot).toHaveBeenCalledExactlyOnceWith('archive/html-target')
+    expect(options.exportHtml).toHaveBeenCalledWith(expect.objectContaining({ path: 'archive/html-target', raw: 'raw' }), expect.any(AbortSignal))
+    expect(downloadHtmlDocument).toHaveBeenCalledOnce()
+    expect(controller.target.value).toBeNull()
+    expect(controller.busy.value).toBe(false)
+    scope.stop()
+  })
+  it('aborts an in-flight HTML surface on cancellation and prevents its late download', async () => {
+    const { options, scope, controller } = setup()
+    let release!: (html: string) => void
+    options.exportHtml.mockImplementationOnce(() => new Promise((resolve) => { release = resolve }))
+    controller.request('inbox/a')
+    const pending = controller.run('html')
+    await Promise.resolve()
+    await Promise.resolve()
+    const signal = options.exportHtml.mock.calls[0]![1]
+    controller.cancel()
+    expect(signal.aborted).toBe(true)
+    release('<!DOCTYPE html>')
+    await pending
+    expect(downloadHtmlDocument).not.toHaveBeenCalled()
+    expect(controller.busy.value).toBe(false)
+    scope.stop()
+  })
+  it('clears busy and rejects an HTML result from a replaced authentication generation', async () => {
+    const { options, scope, controller } = setup()
+    options.exportHtml.mockImplementationOnce(async () => { advanceAuthSessionGeneration(); return '<!DOCTYPE html>' })
+    controller.request('inbox/a')
+    await controller.run('html')
+    expect(downloadHtmlDocument).not.toHaveBeenCalled()
+    expect(controller.busy.value).toBe(false)
+    expect(controller.target.value).toBeNull()
+    scope.stop()
+  })
+  it('keeps the HTML choice retryable after a packaging failure', async () => {
+    const { options, scope, controller } = setup()
+    options.exportHtml.mockRejectedValueOnce(new Error('missing image'))
+    controller.request('inbox/a')
+    await controller.run('html')
+    expect(options.onError).toHaveBeenCalledOnce()
+    expect(controller.target.value).toBe('inbox/a')
+    expect(controller.busy.value).toBe(false)
+    await controller.run('html')
+    expect(downloadHtmlDocument).toHaveBeenCalledOnce()
+    scope.stop()
+  })
   it('captures the requested non-active path and closes after success', async () => {
     const { options, scope, controller } = setup()
     controller.request('archive/target')

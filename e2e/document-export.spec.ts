@@ -139,7 +139,7 @@ test('export dialog supports Escape, restores tree focus and fits a mobile viewp
     await page.locator('.tree-context-menu').getByRole('button', { name: /^(Export…|导出…)$/u }).click()
     const dialog = page.getByRole('dialog')
     await expect(dialog).toBeVisible()
-    await expect(dialog.getByRole('radio')).toHaveCount(2)
+    await expect(dialog.getByRole('radio')).toHaveCount(3)
     const bounds = await dialog.boundingBox()
     expect(bounds!.x).toBeGreaterThanOrEqual(0)
     expect(bounds!.x + bounds!.width).toBeLessThanOrEqual(375)

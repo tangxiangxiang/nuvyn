@@ -1,6 +1,6 @@
 import { classifyDiaryPath } from '../../shared/diaryProtocol'
 
-export type DocumentExportFormat = 'markdown' | 'pdf'
+export type DocumentExportFormat = 'markdown' | 'html' | 'pdf'
 
 export interface DocumentExportSnapshot {
   readonly path: string

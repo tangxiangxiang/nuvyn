@@ -28,6 +28,8 @@ const STRINGS: Strings = {
   'document_export.format': { zh: '导出格式', en: 'Export format' },
   'document_export.markdown': { zh: 'Markdown (.md)', en: 'Markdown (.md)' },
   'document_export.pdf': { zh: 'PDF (.pdf)', en: 'PDF (.pdf)' },
+  'document_export.html': { zh: 'HTML (.html)', en: 'HTML (.html)' },
+  'document_export.html_description': { zh: '独立离线阅读文件，内嵌本地图片、字体和静态图表；不支持远程图片。', en: 'Standalone offline reading with embedded local images, fonts and static diagrams; remote images are not supported.' },
   'document_export.markdown_description': { zh: '原始 Markdown，保留编辑内容和 Nuvyn 扩展语法。', en: 'Original Markdown, preserving edits and Nuvyn extensions.' },
   'document_export.no_attachments': { zh: '图片、附件和其他引用文件不会被打包。', en: 'Images, attachments and other referenced files are not bundled.' },
   'document_export.pdf_description': { zh: '固定版式，适合打印和分享。', en: 'Fixed layout for printing and sharing.' },

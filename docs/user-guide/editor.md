@@ -14,9 +14,9 @@ Static SVG files are supported up to 8 MiB. SVG is validated on the server befor
 
 ### Export from File Tree
 
-Right-click an ordinary Note in the File Tree and choose **导出…** / **Export…**. Select **Markdown (.md)** or **PDF (.pdf)**, then choose **Export**. Folders do not have this action. Press Escape or Cancel to close the format chooser; focus returns to the selected tree item.
+Right-click an ordinary Note in the File Tree and choose **导出…** / **Export…**. Select **Markdown (.md)**, **HTML (.html)** or **PDF (.pdf)**, then choose **Export**. Markdown remains the default. Folders do not have this action. Press Escape or Cancel to close the format chooser; focus returns to the selected tree item.
 
-Document export is available only from the File Tree context menu. It does not add controls to the reading or editing surface. Managed Diary documents retain their existing **Export PDF** action and do not offer Markdown export; Diary access must remain unlocked during the export.
+Document export is available only from the File Tree context menu. It does not add controls to the reading or editing surface. Managed Diary documents retain their existing **Export PDF** action and do not offer Markdown or HTML export; Diary access must remain unlocked during the export.
 
 ### Markdown: original source
 
@@ -24,7 +24,21 @@ Markdown downloads a single UTF-8 `.md` file. It preserves the source text, incl
 
 The filename comes from the original file basename, not the document's display title. An existing `.md` extension is not duplicated. Unsafe filename characters are replaced, reserved device names are prefixed, and very long names are limited to 200 UTF-8 bytes before the extension without splitting Unicode characters.
 
-**Images, attachments, Include targets, Board scenes and other referenced files are not bundled.** This is not a Vault backup. Nuvyn-specific syntax may require Nuvyn or a compatible renderer. Offline self-contained HTML export is planned for V2.2 and is not available in this version.
+**Images, attachments, Include targets, Board scenes and other referenced files are not bundled in Markdown.** This is not a Vault backup. Nuvyn-specific syntax may require Nuvyn or a compatible renderer.
+
+### HTML: standalone offline reading
+
+HTML downloads one `.html` file, named after the original Note basename using the same filename safety rules as Markdown. Open the downloaded file directly in a browser; no Nuvyn session, server or CDN is required. The document always uses a responsive Light Theme, not PDF's A4 pagination.
+
+It preserves rendered headings and Frontmatter title handling, Flex, callouts/containers, syntax highlighting and line numbers, tables, footnotes and KaTeX. Code-group panels and Details are expanded in the exported copy. Include/Snippet content is expanded through the existing authenticated resolver. Mermaid/MarkMap become static SVG; Board references become static previews, not editable scenes.
+
+Supported authenticated local images, base64 image data URLs and KaTeX WOFF2 fonts are embedded. Image bytes are not resampled. SVG uses the same strict static validation policy as Note uploads. Repeated local image resources are read once per export. Internal Wiki/Vault links become readable non-navigation text; valid document anchors remain usable. Ordinary public HTTP(S) links may still be opened by the reader.
+
+Export fails if an essential image, Include/Snippet, formula, diagram or Board cannot be packaged safely. Remote images are not fetched for HTML packaging. Image-bearing MarkMap labels and Mermaid source containing external/resource URLs are currently rejected before widget mounting; use ordinary local Markdown images alongside the diagram. The result contains no executable scripts, interactive diagram toolbars or Nuvyn API resource links, and carries a restrictive offline CSP.
+
+Limits: 20 MiB per raster image, the existing 8 MiB static SVG limit, 128 distinct packaged resources including fonts, 32 diagram/Board widgets, 100,000 initial rendered elements, 64 MiB aggregate resource bytes and 64 MiB final UTF-8 HTML. Resource/widget waits are bounded to 15 seconds; the whole HTML transaction is bounded to 45 seconds. Large or incomplete documents fail without silently removing content. The existing Markdown Include size/depth limits also apply.
+
+Leaving the workspace, losing authentication or disposing the export cancels pending work. No draft is saved or editor model rebuilt by export. Retry remains available in the existing format chooser after a resource failure.
 
 ### PDF: rendered document
 
@@ -42,7 +56,7 @@ KaTeX, Mermaid and MarkMap are exported as their rendered/static result. Reader-
 
 ### Unsaved and closed documents
 
-For both formats, if the selected document is open and loaded successfully, export uses that document's current live editing buffer, including unsaved edits. You do not need to save first. Export does not force a save, change the dirty state, or create a Git commit. Each export captures one immutable source snapshot; later edits do not change an export already in progress.
+For all three formats, if the selected document is open and loaded successfully, export uses that document's current live editing buffer, including unsaved edits. You do not need to save first. Export does not force a save, change the dirty state, or create a Git commit. Each export captures one immutable source snapshot; later edits do not change an export already in progress.
 
 If the document is not open, File Tree export reads the authoritative document in the background. It does not open a visible tab or change the current workspace.
 

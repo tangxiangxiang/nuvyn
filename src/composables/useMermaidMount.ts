@@ -46,6 +46,7 @@ function decodeMountContent(value: string): string {
 export function useMermaidMount(
   articleEl: Ref<HTMLElement | null>,
   renderTheme?: MaybeRef<Theme | undefined>,
+  offlineExport = false,
 ) {
   const widgets = new Map<HTMLDivElement, MountedDiagram>()
 
@@ -60,6 +61,15 @@ export function useMermaidMount(
       const host = document.createElement('div')
       host.className = 'mermaid-widget-host'
       ph.replaceWith(host)
+      // Mermaid creates a temporary DOM during layout. Reject resource-bearing
+      // source before mounting an offline export, not after an external image
+      // has already been requested by that temporary DOM.
+      if (offlineExport && /(?:https?|ftp|data|blob):|\/\/|<\s*(?:img|image|iframe)\b|@import|url\(/iu.test(code)) {
+        const failure = document.createElement('span')
+        failure.className = 'markdown-resource-error'
+        host.append(failure)
+        continue
+      }
       const app = createApp(Mermaid, { code, renderTheme: unref(renderTheme) })
       app.mount(host)
       widgets.set(host, { host, app })

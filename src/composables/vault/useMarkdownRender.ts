@@ -29,6 +29,7 @@ import {
 import type { Resolver as WikiResolver } from '../../lib/wikiLinks'
 import { isManagedDiaryPath } from '../../../shared/diaryProtocol'
 import { captureDiarySessionGeneration, isDiarySessionGenerationCurrent } from '../diary/useDiaryAccessSession'
+import { HTML_EXPORT_LIMITS } from '../../lib/htmlExportResources'
 
 export interface Heading {
   id: string
@@ -154,7 +155,7 @@ export const __testing__ = { extractHeadings, stripTags }
 export function useMarkdownRender(
   source: Ref<string> | (() => string),
   resolver?: WikiResolver,
-  options: Omit<MarkdownRenderOptions, 'resolver' | 'signal'> = {},
+  options: Omit<MarkdownRenderOptions, 'resolver' | 'signal'> & { deferImages?: boolean } = {},
 ): MarkdownRender {
   const html = ref<string>('')
   const error = ref<string | null>(null)
@@ -185,7 +186,21 @@ export function useMarkdownRender(
       // HTML/TOC into the reader after the generation advanced; ordinary Note
       // renders retain their existing cancellation semantics.
       if (cancelled || (renderGeneration !== null && !isDiarySessionGenerationCurrent(renderGeneration))) return
-      html.value = rendered
+      if (options.deferImages) {
+        // The export surface must not let the browser resolve author image
+        // URLs before the offline packager checks provenance and permissions.
+        const inert = document.createElement('template')
+        inert.innerHTML = rendered
+        if (inert.content.querySelectorAll('img').length > HTML_EXPORT_LIMITS.resources
+          || inert.content.querySelectorAll('.mermaid-mount, .markmap-mount, .board-embed-mount').length > HTML_EXPORT_LIMITS.widgets
+          || inert.content.querySelectorAll('*').length > HTML_EXPORT_LIMITS.elements) throw new Error('HTML_EXPORT_COMPLEXITY')
+        for (const image of inert.content.querySelectorAll('img')) {
+          image.dataset.htmlImageSource = image.getAttribute('src') ?? ''
+          image.removeAttribute('src')
+          image.removeAttribute('srcset')
+        }
+        html.value = inert.innerHTML
+      } else html.value = rendered
       headings.value = extractHeadings(rendered)
       error.value = null
       ready.value = true

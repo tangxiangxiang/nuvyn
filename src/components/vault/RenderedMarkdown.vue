@@ -22,6 +22,7 @@ const props = withDefaults(defineProps<{
   resourceResolver?: MarkdownResourceResolver
   tag?: 'div' | 'article'
   renderTheme?: Theme
+  deferImages?: boolean
 }>(), { tag: 'div' })
 const emit = defineEmits<{
   'update:headings': [headings: Heading[]]
@@ -34,6 +35,7 @@ const { html, error, headings, ready } = useMarkdownRender(
   {
     sourcePath: props.sourcePath,
     resourceResolver: props.resourceResolver,
+    deferImages: props.deferImages,
   },
 )
 const articleEl = ref<HTMLElement | null>(null)
@@ -42,8 +44,8 @@ const toast = useToast()
 const copyButtons = new WeakMap<HTMLButtonElement, HTMLElement>()
 const vaultContext = useVaultContext()
 const router = inject(routerKey, null)
-useMarkmapMount(articleEl, toRef(props, 'renderTheme'))
-useMermaidMount(articleEl, toRef(props, 'renderTheme'))
+useMarkmapMount(articleEl, toRef(props, 'renderTheme'), props.deferImages)
+useMermaidMount(articleEl, toRef(props, 'renderTheme'), props.deferImages)
 useMathMount(articleEl)
 useCodeGroupMount(articleEl)
 useBoardEmbedMount(articleEl, toRef(props, 'renderTheme'))

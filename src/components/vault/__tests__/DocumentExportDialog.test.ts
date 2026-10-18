@@ -12,15 +12,15 @@ afterEach(() => {
 })
 
 describe('DocumentExportDialog', () => {
-  it.each(['zh', 'en'] as const)('offers only Markdown and PDF with attachment limits in %s', async (locale) => {
+  it.each(['zh', 'en'] as const)('offers Markdown, offline HTML and PDF with attachment limits in %s', async (locale) => {
     useI18n().setLocale(locale)
     const wrapper = mount(DocumentExportDialog, { props: { show: true, busy: false }, attachTo: document.body })
     await flushPromises()
     const dialog = document.querySelector('[role="dialog"]')!
     expect(dialog.querySelector('[role="radiogroup"]')).not.toBeNull()
-    expect(dialog.querySelectorAll('input[type="radio"]')).toHaveLength(2)
+    expect(dialog.querySelectorAll('input[type="radio"]')).toHaveLength(3)
     expect(dialog.textContent).toContain(locale === 'zh' ? '图片、附件和其他引用文件不会被打包。' : 'Images, attachments and other referenced files are not bundled.')
-    expect(dialog.textContent).not.toContain('HTML')
+    expect(dialog.textContent).toContain('HTML (.html)')
     const submit = wrapper.findAllComponents(NButton).find((button) => button.props('type') === 'primary')!
     await submit.trigger('click')
     expect(wrapper.emitted('export')).toEqual([['markdown']])

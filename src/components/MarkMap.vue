@@ -20,6 +20,8 @@ import { computed, ref, onMounted, onBeforeUnmount, watch } from 'vue'
 import { NButton } from 'naive-ui'
 import { useTheme, type Theme } from '../composables/useTheme'
 import { nuvynMarkmapSecurityPlugin } from '../lib/markmapSecurity'
+import { installOfflineMarkmapParser } from '../lib/offlineMarkmap'
+import { prepareShikiLanguages } from '../lib/shiki'
 import type { IMarkmapOptions } from 'markmap-view'
 import type { Transformer as MarkmapTransformer } from 'markmap-lib'
 
@@ -28,6 +30,7 @@ const props = defineProps<{
   content: string
   /** Optional local override used by isolated render surfaces such as PDF. */
   renderTheme?: Theme
+  offlineExport?: boolean
 }>()
 
 const { theme } = useTheme()
@@ -298,7 +301,13 @@ async function mountMarkmap() {
          will get its own mountMarkmap call from its own onMounted;
          this one is finished. */
       if (disposed || mountGeneration !== generation || !svg.isConnected) return
-      const transformer = new Transformer([...builtInPlugins, nuvynMarkmapSecurityPlugin])
+      const plugins = props.offlineExport ? builtInPlugins.filter((plugin) => !['katex', 'hljs'].includes(plugin.name)) : builtInPlugins
+      const transformer = new Transformer([...plugins, nuvynMarkmapSecurityPlugin])
+      if (props.offlineExport) {
+        installOfflineMarkmapParser(transformer.md)
+        await prepareShikiLanguages(transformer.md.parse(source, {}).filter((token) => token.type === 'fence').map((token) => token.info))
+        if (disposed || mountGeneration !== generation || !svg.isConnected) return
+      }
       let instance: MmInstance | null = null
       let retransformPending = false
       let initialDataPending = true
@@ -391,8 +400,8 @@ async function mountMarkmap() {
          author HTML with trusted KaTeX/highlight/plugin output, and a
          blanket sanitizer would remove KaTeX's layout styles. */
       const { styles, scripts } = transformer.getUsedAssets(features)
-      if (styles) loadCSS(styles)
-      if (scripts) loadJS(scripts, { getMarkmap: () => ({ Markmap, deriveOptions, refreshHook }) })
+      if (!props.offlineExport && styles) loadCSS(styles)
+      if (!props.offlineExport && scripts) loadJS(scripts, { getMarkmap: () => ({ Markmap, deriveOptions, refreshHook }) })
       if (!isCurrentMount()) return
       const created = Markmap.create(svg, {
         autoFit: true,

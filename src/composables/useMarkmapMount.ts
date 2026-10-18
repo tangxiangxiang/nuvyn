@@ -56,6 +56,7 @@ function decodeMountContent(value: string): string {
 export function useMarkmapMount(
   articleEl: Ref<HTMLElement | null>,
   renderTheme?: MaybeRef<Theme | undefined>,
+  offlineExport = false,
 ) {
   /* Tracked widgets keyed by their host div. The key lets us
      `app.unmount()` a widget when its host div leaves the DOM
@@ -74,7 +75,7 @@ export function useMarkmapMount(
       const host = document.createElement('div')
       host.className = 'markmap-widget-host'
       ph.replaceWith(host)
-      const app = createApp(MarkMap, { content, renderTheme: unref(renderTheme) })
+      const app = createApp(MarkMap, { content, renderTheme: unref(renderTheme), offlineExport })
       app.mount(host)
       widgets.set(host, { host, app })
     }

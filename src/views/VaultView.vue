@@ -108,6 +108,7 @@ import PdfExportSurface from '../components/vault/PdfExportSurface.vue'
 import DocumentExportDialog from '../components/vault/DocumentExportDialog.vue'
 import { useDocumentExport } from '../composables/vault/useDocumentExport'
 import { captureDocumentExportSnapshot } from '../lib/documentExport'
+import { useHtmlDocumentExport } from '../composables/vault/useHtmlDocumentExport'
 import RightRail from '../components/vault/RightRail.vue'
 import EmptyState from '../components/vault/EmptyState.vue'
 import ActivityBar from '../components/vault/ActivityBar.vue'
@@ -179,6 +180,7 @@ import {
 // Monaco is the heaviest client dependency. Load it only when edit mode
 // actually mounts an editor, keeping navigation/read-only startup lean.
 const EditorPane = defineAsyncComponent(() => import('../components/vault/EditorPane.vue'))
+const HtmlExportSurface = defineAsyncComponent(() => import('../components/vault/HtmlExportSurface.vue'))
 const editorPaneRef = ref<{
   chooseImage(): void
   revealText(text: string): boolean
@@ -2866,10 +2868,12 @@ function captureExportSource(path: string) {
   return captureDocumentExportSnapshot(path, { tabs: tabs.value, posts: posts.value, getPost })
 }
 
+const htmlExport = useHtmlDocumentExport()
 const documentExport = useDocumentExport({
   pdfBusy: pdfExportBusy,
   snapshot: captureExportSource,
   exportPdf: exportPdfDocument,
+  exportHtml: htmlExport.run,
   onBusy: () => toast.info(t('document_export.exporting')),
   onError: () => toast.error(t('document_export.failed')),
 })
@@ -2879,6 +2883,7 @@ const documentExport = useDocumentExport({
 const pdfWikiResolver = (ref: string, _anchor?: string, context?: { sourcePath?: string }) => {
   const allPaths = Array.from(linkIndex.value.paths)
   const sourcePath = context?.sourcePath?.replace(/\.md$/iu, '')
+    ?? htmlExport.request.value?.snapshot.path
     ?? pdfExportRequest.value?.path
     ?? activePath.value
     ?? ''
@@ -3388,6 +3393,16 @@ watch(isReadMode, async (reading) => {
       @external-local="activePath && resolveExternal(activePath, 'local')"
     />
 
+    <HtmlExportSurface
+      v-if="htmlExport.request.value"
+      :key="htmlExport.request.value.id"
+      :snapshot="htmlExport.request.value.snapshot"
+      :signal="htmlExport.request.value.signal"
+      :resolver="pdfWikiResolver"
+      :lang="locale"
+      @complete="htmlExport.complete"
+      @failed="htmlExport.failed"
+    />
     <DocumentExportDialog
       :show="documentExport.target.value !== null"
       :busy="documentExport.busy.value"

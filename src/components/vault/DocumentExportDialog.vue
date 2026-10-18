@@ -30,6 +30,10 @@ watch(() => props.show, (show) => { if (show) format.value = 'markdown' })
           <p class="document-export-description"><NText depth="3">{{ t('document_export.no_attachments') }}</NText></p>
         </div>
         <div>
+          <NRadio value="html">{{ t('document_export.html') }}</NRadio>
+          <p class="document-export-description"><NText depth="3">{{ t('document_export.html_description') }}</NText></p>
+        </div>
+        <div>
           <NRadio value="pdf">{{ t('document_export.pdf') }}</NRadio>
           <p class="document-export-description"><NText depth="3">{{ t('document_export.pdf_description') }}</NText></p>
         </div>
