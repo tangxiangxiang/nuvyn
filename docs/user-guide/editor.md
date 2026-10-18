@@ -10,15 +10,23 @@ Use the existing **Insert image** control, drag a local image into the editor, o
 
 Static SVG files are supported up to 8 MiB. SVG is validated on the server before storage and again when read, so scripts, event handlers, remote resources, animation, arbitrary HTML, and unsupported CSS are rejected. Common static vectors, text, internal gradients/clipping, and bounded Excalidraw WOFF2 fonts and raster embeds are supported. Excalidraw exports containing unsupported features such as SVG filters may be rejected; the file is not silently converted to PNG. Raw inline `<svg>` markup is still not allowed in Markdown.
 
-## PDF Export
+## Document Export
 
 ### Export from File Tree
 
-Right-click a Markdown document in the File Tree and choose **导出 PDF** / **Export PDF**. Folders do not have this action.
+Right-click an ordinary Note in the File Tree and choose **导出…** / **Export…**. Select **Markdown (.md)** or **PDF (.pdf)**, then choose **Export**. Folders do not have this action. Press Escape or Cancel to close the format chooser; focus returns to the selected tree item.
 
-PDF export is available only from the File Tree context menu. It does not add controls to the reading or editing surface.
+Document export is available only from the File Tree context menu. It does not add controls to the reading or editing surface. Managed Diary documents retain their existing **Export PDF** action and do not offer Markdown export; Diary access must remain unlocked during the export.
 
-### What gets exported
+### Markdown: original source
+
+Markdown downloads a single UTF-8 `.md` file. It preserves the source text, including Frontmatter, original line endings, Flex, Callouts, Mermaid/MarkMap fences, math, WikiLinks, Include/Snippet directives, image references and Board references. Export does not render, expand or reformat these constructs.
+
+The filename comes from the original file basename, not the document's display title. An existing `.md` extension is not duplicated. Unsafe filename characters are replaced, reserved device names are prefixed, and very long names are limited to 200 UTF-8 bytes before the extension without splitting Unicode characters.
+
+**Images, attachments, Include targets, Board scenes and other referenced files are not bundled.** This is not a Vault backup. Nuvyn-specific syntax may require Nuvyn or a compatible renderer. Offline self-contained HTML export is planned for V2.2 and is not available in this version.
+
+### PDF: rendered document
 
 Nuvyn renders the current Markdown document and downloads an A4 portrait PDF directly. The result is a semantic, print-optimized equivalent of Read Mode rather than a pixel-identical copy of the app. It includes, when present:
 
@@ -34,7 +42,7 @@ KaTeX, Mermaid and MarkMap are exported as their rendered/static result. Reader-
 
 ### Unsaved and closed documents
 
-If the document is open and has unsaved edits, PDF Export uses the current live editing buffer. You do not need to save first. Export does not force a save, change the dirty state, or create a Git commit.
+For both formats, if the selected document is open and loaded successfully, export uses that document's current live editing buffer, including unsaved edits. You do not need to save first. Export does not force a save, change the dirty state, or create a Git commit. Each export captures one immutable source snapshot; later edits do not change an export already in progress.
 
 If the document is not open, File Tree export reads the authoritative document in the background. It does not open a visible tab or change the current workspace.
 
@@ -56,9 +64,9 @@ The PDF uses A4 portrait pagination. Code and tables adapt to the printable widt
 
 ### Export status and failure recovery
 
-Only one PDF export can run at a time. Additional export requests are rejected until the current export finishes.
+Only one document export can run at a time. While exporting, duplicate submission is disabled. No additional export is queued.
 
-If an export fails, Nuvyn ends the transaction and removes its temporary export surface. The document and workspace remain available, and you can try the export again.
+If an export fails, Nuvyn ends the transaction and removes any temporary export surface. The format chooser remains available for retry. The document and workspace remain unchanged. The existing Diary PDF action retains its existing error handling.
 
 Each open document has its own workspace tab and unsaved buffer. Useful shortcuts include:
 

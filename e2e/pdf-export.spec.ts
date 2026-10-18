@@ -1,5 +1,6 @@
 import { promises as fs } from 'node:fs'
 import { expect, test } from './fixtures/auth'
+import { chooseDocumentExport } from './helpers/document-export'
 
 const slug = 'inbox/pdf-export-e2e'
 const printableAlertBackgrounds: Record<string, string> = {
@@ -412,7 +413,7 @@ test('exports the Kitchen Sink with settled content from the file-tree menu', as
     .then(() => page.evaluate(() => (
       (window as typeof window & { __pdfSurfaceSnapshot: PdfSurfaceSnapshot }).__pdfSurfaceSnapshot
     )))
-  const clickPromise = page.locator('.tree-context-menu button').filter({ hasText: /Export PDF|导出 PDF/ }).click()
+  const clickPromise = chooseDocumentExport(page, 'pdf')
   const [download, snapshot] = await Promise.all([
     downloadPromise,
     snapshotPromise,
@@ -619,7 +620,7 @@ title: Delayed PDF Image
     await row.click({ button: 'right' })
 
     const downloadPromise = page.waitForEvent('download')
-    await page.locator('.tree-context-menu button').filter({ hasText: /Export PDF|导出 PDF/ }).click()
+    await chooseDocumentExport(page, 'pdf')
 
     await imageRequestSeen
     await expect(page.locator('.pdf-export-surface')).toHaveCount(1)

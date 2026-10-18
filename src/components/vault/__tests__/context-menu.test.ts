@@ -102,15 +102,15 @@ describe('FileTree context menu', () => {
     const menu = document.querySelector('.tree-context-menu')
     expect(menu).not.toBeNull()
     expect(menu!.textContent).toContain('重命名')
-    expect(menu!.textContent).toContain('导出 PDF')
+    expect(menu!.textContent).toContain('导出…')
     expect(menu!.textContent).not.toContain('查看文件历史')
     expect(menu!.textContent).not.toContain('文档属性')
     expect(menu!.textContent).toContain('删除')
     const exportPdf = Array.from(menu!.querySelectorAll('button'))
-      .find((button) => button.textContent?.includes('导出 PDF')) as HTMLButtonElement
+      .find((button) => button.textContent?.includes('导出…')) as HTMLButtonElement
     exportPdf.click()
     await flushPromises()
-    expect(w.emitted('export-pdf')).toEqual([['inbox/hello']])
+    expect(w.emitted('export-document')).toEqual([['inbox/hello']])
 
     w.unmount()
   })
@@ -281,7 +281,7 @@ describe('FileTree context menu — Diary presentation guards', () => {
     expect(menu).not.toBeNull()
     expect(menu!.textContent).not.toContain('查看文件历史')
     expect(menu!.textContent).toContain('重命名')
-    expect(menu!.textContent).toContain('导出 PDF')
+    expect(menu!.textContent).toContain('导出…')
     expect(menu!.textContent).toContain('删除')
     w.unmount()
   })

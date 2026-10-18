@@ -1,4 +1,5 @@
 import { promises as fs } from 'node:fs'
+import { chooseDocumentExport } from './helpers/document-export'
 import type { APIRequestContext, Download, Page, TestInfo } from '@playwright/test'
 import { expect, test } from './fixtures/auth'
 
@@ -235,9 +236,7 @@ async function captureLongDocumentExport(
     .then(() => page.evaluate(() => (
       (window as LongDocumentSnapshotWindow).__pdfLongDocumentSnapshot
     )))
-  const clickPromise = page.locator('.tree-context-menu button')
-    .filter({ hasText: /Export PDF|导出 PDF/ })
-    .click()
+  const clickPromise = chooseDocumentExport(page, 'pdf')
 
   const [download, snapshot] = await Promise.all([
     downloadPromise,

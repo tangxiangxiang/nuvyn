@@ -1,4 +1,5 @@
 import { promises as fs } from 'node:fs'
+import { chooseDocumentExport } from './helpers/document-export'
 import type { APIRequestContext, Page, TestInfo } from '@playwright/test'
 import { expect, test } from './fixtures/auth'
 import { assertPdfCleanup, seedPdfDocument } from './helpers/pdf-export'
@@ -130,7 +131,7 @@ async function exportFixture(
     await expect(row).toBeVisible()
     await row.locator(':scope > .row-line').click({ button: 'right' })
     const downloadPromise = page.waitForEvent('download')
-    await page.locator('.tree-context-menu button').filter({ hasText: /Export PDF|导出 PDF/ }).click()
+    await chooseDocumentExport(page, 'pdf')
     const download = await downloadPromise
     const path = testInfo.outputPath('export.pdf')
     await download.saveAs(path)

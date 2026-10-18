@@ -68,7 +68,7 @@ const emit = defineEmits<{
   // into archive/ (the reserved root). It remains a convenient, explicit
   // workflow distinct from an ordinary drag/move operation.
   'archive-note': [path: string]
-  'export-pdf': [path: string]
+  'export-document': [path: string]
   focus: [path: string, kind: 'file' | 'folder']
 }>()
 
@@ -395,7 +395,7 @@ function activateRow() {
         <NButton v-if="canRenameRow" attr-type="button" text :bordered="false" @click="menuAction(() => emit('request-rename', node.path, node.kind))"><NIcon class="menu-icon" aria-hidden="true"><Pencil /></NIcon>{{ t('file_tree.rename') }}<kbd>F2</kbd></NButton>
         <NButton v-if="canArchive" attr-type="button" text :bordered="false" @click="menuAction(() => emit('archive-note', node.path))"><NIcon class="menu-icon" aria-hidden="true"><Archive /></NIcon>{{ t('file_tree.archive') }}</NButton>
         <div v-if="!isFolder" class="tree-menu-label">{{ t('file_tree.document') }}</div>
-        <NButton v-if="!isFolder" attr-type="button" text :bordered="false" @click="menuAction(() => emit('export-pdf', node.path))"><NIcon class="menu-icon" aria-hidden="true"><FileExport /></NIcon>{{ t('file_tree.export_pdf') }}</NButton>
+        <NButton v-if="!isFolder" attr-type="button" text :bordered="false" @click="menuAction(() => { treeItemRef?.focus({ preventScroll: true }); emit('export-document', node.path) })"><NIcon class="menu-icon" aria-hidden="true"><FileExport /></NIcon>{{ t(isManagedDiaryPath(node.path) ? 'file_tree.export_pdf' : 'file_tree.export_document') }}</NButton>
         <div v-if="canDeleteRow" class="tree-menu-label">{{ t('file_tree.danger') }}</div>
         <NButton v-if="canDeleteRow" attr-type="button" text :bordered="false" class="danger" @click="menuAction(() => emit('delete', node.path, node.kind))"><NIcon class="menu-icon" aria-hidden="true"><Trash /></NIcon>{{ t('file_tree.delete') }}<kbd>Delete</kbd></NButton>
       </div>
@@ -423,7 +423,7 @@ function activateRow() {
         @move="(src, folder, srcKind) => emit('move', src, folder, srcKind)"
         @create-in="(folder, kind) => emit('create-in', folder, kind)"
         @archive-note="(p) => emit('archive-note', p)"
-        @export-pdf="(p) => emit('export-pdf', p)"
+        @export-document="(p) => emit('export-document', p)"
         @focus="(p, kind) => emit('focus', p, kind)"
       />
     </ul>

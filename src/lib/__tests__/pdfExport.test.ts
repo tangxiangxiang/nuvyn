@@ -7,6 +7,7 @@ const pdfMocks = vi.hoisted(() => ({
   set: vi.fn(),
   from: vi.fn(),
   save: vi.fn(),
+  toPdf: vi.fn(),
 }))
 
 const shikiMocks = vi.hoisted(() => ({
@@ -38,7 +39,8 @@ describe('PDF export helpers', () => {
   --shiki-dark-bg: rgb(36, 41, 46);
 }`)
     pdfMocks.save.mockResolvedValue(undefined)
-    pdfMocks.from.mockReturnValue({ save: pdfMocks.save })
+    pdfMocks.toPdf.mockResolvedValue(undefined)
+    pdfMocks.from.mockReturnValue({ save: pdfMocks.save, toPdf: pdfMocks.toPdf })
     pdfMocks.set.mockReturnValue({ from: pdfMocks.from })
     pdfMocks.html2pdf.mockReturnValue({ set: pdfMocks.set })
   })
@@ -714,6 +716,32 @@ describe('PDF export helpers', () => {
 
     expect(group?.querySelector('h2')?.textContent).toBe('Wide Table')
     expect(group?.querySelector('.table-scroll table td')?.textContent).toBe('content')
+  })
+
+  it('revalidates lifecycle after asynchronous generation and before saving', async () => {
+    let generated = false
+    pdfMocks.toPdf.mockImplementationOnce(async () => { generated = true })
+    const beforeDownload = vi.fn(() => { expect(generated).toBe(true) })
+    pdfMocks.save.mockImplementationOnce(async () => { expect(beforeDownload).toHaveBeenCalledOnce() })
+    await downloadPdfDocument({ title: 'Current', articleHtml: '<article>source</article>', beforeDownload })
+    expect(pdfMocks.toPdf).toHaveBeenCalledOnce()
+    expect(pdfMocks.save).toHaveBeenCalledOnce()
+    expect(document.querySelector('.pdf-download-host')).toBeNull()
+  })
+
+  it('does not save generated decrypted content after its session is invalidated', async () => {
+    let finish!: () => void
+    pdfMocks.toPdf.mockImplementationOnce(() => new Promise<void>((resolve) => { finish = resolve }))
+    let current = true
+    const pending = downloadPdfDocument({
+      title: 'Private', articleHtml: '<article>private source</article>',
+      beforeDownload: () => { if (!current) throw new Error('DIARY_SESSION_INVALIDATED') },
+    })
+    current = false
+    finish()
+    await expect(pending).rejects.toThrow('DIARY_SESSION_INVALIDATED')
+    expect(pdfMocks.save).not.toHaveBeenCalled()
+    expect(document.querySelector('.pdf-download-host')).toBeNull()
   })
 
   it('removes the temporary render surface when PDF generation fails', async () => {

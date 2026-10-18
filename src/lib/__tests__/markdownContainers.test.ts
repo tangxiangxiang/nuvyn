@@ -829,6 +829,7 @@ describe('custom container Shiki preparation', () => {
     expect(loadLanguage).toHaveBeenCalledTimes(1)
     expect(codeToHtml).toHaveBeenCalledTimes(1)
     expect(html).toContain('markdown-container-info')
-    expect(html).toContain('class="shiki"')
+    const doc = new DOMParser().parseFromString(html, 'text/html')
+    expect(doc.querySelector('.markdown-container-info pre.shiki')?.getAttribute('data-language')).toBe('js')
   })
 })

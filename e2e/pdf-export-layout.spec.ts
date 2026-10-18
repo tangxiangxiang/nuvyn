@@ -1,4 +1,5 @@
 import { promises as fs } from 'node:fs'
+import { chooseDocumentExport } from './helpers/document-export'
 import { expect, test } from './fixtures/auth'
 
 const slug = 'inbox/pdf-export-layout-e2e'
@@ -186,7 +187,7 @@ test('exports wide and oversized content without horizontal overflow', async ({ 
       .then(() => page.evaluate(() => (
         (window as typeof window & { __pdfLayoutSnapshot: PdfLayoutSnapshot }).__pdfLayoutSnapshot
       )))
-    const clickPromise = page.locator('.tree-context-menu button').filter({ hasText: /Export PDF|导出 PDF/ }).click()
+    const clickPromise = chooseDocumentExport(page, 'pdf')
     const [download, snapshot] = await Promise.all([
       downloadPromise,
       snapshotPromise,

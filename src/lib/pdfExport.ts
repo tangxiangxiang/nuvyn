@@ -7,6 +7,8 @@ export interface PdfDownloadOptions {
   title: string
   /** Already-prepared article HTML from the rendered reading surface. */
   articleHtml: string
+  /** Revalidate the caller's lifecycle after asynchronous PDF generation. */
+  beforeDownload?: () => void
 }
 
 const A4_PAGE_WIDTH_MM = 210
@@ -1314,6 +1316,10 @@ export async function downloadPdfDocument(options: PdfDownloadOptions): Promise<
     }
     const worker = html2pdf().set(pdfOptions).from(surface.root)
 
+    if (options.beforeDownload) {
+      await worker.toPdf()
+      options.beforeDownload()
+    }
     await worker.save()
   } finally {
     surface.host.remove()

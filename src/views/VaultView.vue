@@ -105,6 +105,9 @@ import TagPanel from '../components/vault/TagPanel.vue'
 import TagManagementPanel from '../components/vault/TagManagementPanel.vue'
 import ReadingPane from '../components/vault/ReadingPane.vue'
 import PdfExportSurface from '../components/vault/PdfExportSurface.vue'
+import DocumentExportDialog from '../components/vault/DocumentExportDialog.vue'
+import { useDocumentExport } from '../composables/vault/useDocumentExport'
+import { captureDocumentExportSnapshot } from '../lib/documentExport'
 import RightRail from '../components/vault/RightRail.vue'
 import EmptyState from '../components/vault/EmptyState.vue'
 import ActivityBar from '../components/vault/ActivityBar.vue'
@@ -2857,6 +2860,19 @@ const pdfExportRequest = shallowRef<PdfExportRequest | null>(null)
 const pdfExportBusy = ref(false)
 let pdfExportSequence = 0
 let pdfRenderWaiter: PdfRenderWaiter | null = null
+let exportDisposed = false
+
+function captureExportSource(path: string) {
+  return captureDocumentExportSnapshot(path, { tabs: tabs.value, posts: posts.value, getPost })
+}
+
+const documentExport = useDocumentExport({
+  pdfBusy: pdfExportBusy,
+  snapshot: captureExportSource,
+  exportPdf: exportPdfDocument,
+  onBusy: () => toast.info(t('document_export.exporting')),
+  onError: () => toast.error(t('document_export.failed')),
+})
 
 // A PDF export may target a document other than the active tab. Resolve
 // wiki-links relative to that target instead of borrowing activePath.
@@ -2944,60 +2960,55 @@ function onPdfExportRendered(article: HTMLElement | null): void {
   pdfRenderWaiter.resolve(article)
 }
 
-async function exportPdfDocument(path: string): Promise<void> {
+async function exportPdfDocument(path: string): Promise<boolean> {
   if (pdfExportBusy.value) {
     toast.info(t('file_tree.exporting_pdf'))
-    return
+    return false
   }
 
   pdfExportBusy.value = true
   const id = ++pdfExportSequence
   const sessionGeneration = captureDiarySessionGeneration()
   const managed = classifyDiaryPath(path.replace(/\.md$/, '')) === 'managed'
-  try {
-    if (managed && !diaryAccess.isUnlocked.value) {
+  const assertCurrent = () => {
+    if (exportDisposed || id !== pdfExportSequence) throw new Error('DOCUMENT_EXPORT_CANCELLED')
+    if (managed && (!diaryAccess.isUnlocked.value || !isDiarySessionGenerationCurrent(sessionGeneration))) {
       throw new Error('DIARY_SESSION_INVALIDATED')
     }
-    const liveTab = tabs.value.find((tab) => tab.path === path)
-    const summary = posts.value.find((post) => post.path === path)
-    let raw = ''
-    let title = liveTab?.title || summary?.title || ''
-
-    // Prefer the live workspace buffer so a right-click export does not
-    // silently discard unsaved edits in an already-open document.
-    if (liveTab && !liveTab.loading && !liveTab.loadError) {
-      raw = liveTab.raw
-    } else {
-      const post = await getPost(path)
-      if (managed && !isDiarySessionGenerationCurrent(sessionGeneration)) throw new Error('DIARY_SESSION_INVALIDATED')
-      raw = post.raw
-      title = post.metadata?.title?.trim() || title
-    }
-
-    if (managed && !isDiarySessionGenerationCurrent(sessionGeneration)) throw new Error('DIARY_SESSION_INVALIDATED')
+  }
+  try {
+    assertCurrent()
+    const { raw, title } = await captureExportSource(path)
+    assertCurrent()
     const request: PdfExportRequest = { id, path, raw, title, sessionGeneration }
     const article = await waitForPdfArticle(request)
-    if (managed && !isDiarySessionGenerationCurrent(sessionGeneration)) throw new Error('DIARY_SESSION_INVALIDATED')
+    assertCurrent()
     await waitForPdfWidgets(article)
-    if (managed && !isDiarySessionGenerationCurrent(sessionGeneration)) throw new Error('DIARY_SESSION_INVALIDATED')
+    assertCurrent()
     await waitForPdfImages(article)
-    if (managed && !isDiarySessionGenerationCurrent(sessionGeneration)) throw new Error('DIARY_SESSION_INVALIDATED')
+    assertCurrent()
     const label = resolvePdfDocumentLabel({ raw, documentTitle: title, documentPath: path })
     await downloadPdfDocument({
       title: label,
       articleHtml: preparePdfArticleHtml(article),
+      beforeDownload: assertCurrent,
     })
+    return true
   } catch (error) {
-    if (error instanceof Error && error.message === 'DIARY_SESSION_INVALIDATED') return
+    if (exportDisposed || id !== pdfExportSequence) return false
+    if (error instanceof Error && (error.message === 'DIARY_SESSION_INVALIDATED' || error.message === 'DOCUMENT_EXPORT_CANCELLED')) return false
     toast.error(t(
       error instanceof Error && (error.message === 'PDF_RENDER_TIMEOUT' || error.message === 'PDF_WIDGET_TIMEOUT')
         ? 'file_tree.export_not_ready'
         : 'file_tree.export_failed',
     ))
+    return false
   } finally {
     if (pdfRenderWaiter?.id === id) pdfRenderWaiter = null
-    pdfExportRequest.value = null
-    pdfExportBusy.value = false
+    if (pdfExportSequence === id) {
+      pdfExportRequest.value = null
+      pdfExportBusy.value = false
+    }
   }
 }
 
@@ -3005,6 +3016,7 @@ async function exportPdfDocument(path: string): Promise<void> {
 // surface subscribes to its synchronous generation fence so a lock/logout
 // clears decrypted holders before late network/render work can publish again.
 const stopDiaryTeardown = subscribeDiaryTeardown(() => {
+  documentExport.cancel()
   clearManagedDiaryWorkspace()
   draftPersistence.clearSensitiveState()
   draftRecovery.clearSensitiveState()
@@ -3029,6 +3041,12 @@ const stopDiaryTeardown = subscribeDiaryTeardown(() => {
 })
 onBeforeUnmount(() => {
   stopDiaryTeardown()
+  exportDisposed = true
+  pdfExportSequence += 1
+  pdfRenderWaiter?.reject(new Error('DOCUMENT_EXPORT_CANCELLED'))
+  pdfRenderWaiter = null
+  pdfExportRequest.value = null
+  pdfExportBusy.value = false
   // Keep ordinary document metadata available to the retained App-level
   // search host while moving between Vault, Ledger, and Board. Auth logout
   // clears the source centrally; a still-authenticated route change does not
@@ -3116,7 +3134,7 @@ watch(isReadMode, async (reading) => {
       @update:filter="onFilesFilterEdited"
       @select="openFileTreeDocument"
       @refresh="refresh"
-      @export-pdf="exportPdfDocument"
+      @export-document="documentExport.request"
     />
     <TagPanel
       v-else-if="tagPanelVisible"
@@ -3368,6 +3386,13 @@ watch(isReadMode, async (reading) => {
       @external-diff="showExternalDiff"
       @external-disk="activePath && resolveExternal(activePath, 'disk')"
       @external-local="activePath && resolveExternal(activePath, 'local')"
+    />
+
+    <DocumentExportDialog
+      :show="documentExport.target.value !== null"
+      :busy="documentExport.busy.value"
+      @close="documentExport.close"
+      @export="documentExport.run"
     />
 
     <PdfExportSurface

@@ -23,6 +23,17 @@ type Locale = 'zh' | 'en'
 type Strings = Record<string, Record<Locale, string>>
 
 const STRINGS: Strings = {
+  'file_tree.export_document': { zh: '导出…', en: 'Export…' },
+  'document_export.title': { zh: '导出文档', en: 'Export document' },
+  'document_export.format': { zh: '导出格式', en: 'Export format' },
+  'document_export.markdown': { zh: 'Markdown (.md)', en: 'Markdown (.md)' },
+  'document_export.pdf': { zh: 'PDF (.pdf)', en: 'PDF (.pdf)' },
+  'document_export.markdown_description': { zh: '原始 Markdown，保留编辑内容和 Nuvyn 扩展语法。', en: 'Original Markdown, preserving edits and Nuvyn extensions.' },
+  'document_export.no_attachments': { zh: '图片、附件和其他引用文件不会被打包。', en: 'Images, attachments and other referenced files are not bundled.' },
+  'document_export.pdf_description': { zh: '固定版式，适合打印和分享。', en: 'Fixed layout for printing and sharing.' },
+  'document_export.export': { zh: '导出', en: 'Export' },
+  'document_export.exporting': { zh: '导出中…', en: 'Exporting…' },
+  'document_export.failed': { zh: '文档导出失败，请重试。', en: 'Document export failed. Please try again.' },
   'attachments.trash.title': { zh: '回收站', en: 'Trash' },
   'attachments.trash.active': { zh: '活动附件', en: 'Active attachments' },
   'attachments.trash.quarantine': { zh: '移入回收站', en: 'Move to trash' },

@@ -1,6 +1,7 @@
 import { promises as fs } from 'node:fs'
 import type { APIRequestContext, Download, Page, TestInfo } from '@playwright/test'
 import { expect } from '@playwright/test'
+import { chooseDocumentExport } from './document-export'
 
 export type PdfWidgetSnapshot = {
   state: string | null
@@ -321,9 +322,7 @@ export async function captureFileTreePdfExport(
     .then(() => page.evaluate(() => (
       (window as PdfExportWindow).__pdfExportSnapshot
     )))
-  const clickPromise = page.locator('.tree-context-menu button')
-    .filter({ hasText: /Export PDF|导出 PDF/ })
-    .click()
+  const clickPromise = chooseDocumentExport(page, 'pdf')
 
   const [download, snapshot] = await Promise.all([
     downloadPromise,
