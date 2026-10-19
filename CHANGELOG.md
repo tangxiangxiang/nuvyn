@@ -3,6 +3,31 @@
 All notable changes to Nuvyn are documented in this file. Entries dated before
 the Nuvyn brand baseline may refer to Nuvyn as the historical product name.
 
+## Nuvyn v0.1.0-alpha.9 — 2026-10-19
+
+Changes since `v0.1.0-alpha.8`.
+
+### Document Export
+
+- Added Markdown export for a single ordinary Note, preserving its original Markdown and preferring the current unsaved editor buffer. Markdown remains the editable/source-oriented format and does not bundle referenced assets.
+- Added self-contained HTML export for offline reading, with supported local images and fonts embedded and Markdown presentation rendered as static content. PDF remains available for fixed-page printing and layout.
+- HTML export does not include other Notes, a full Vault backup, or interactive diagram runtimes. Managed Diary retains its existing PDF-only export; bulk export, ZIP bundles, and Vault backup are not included.
+
+### Note & Markdown
+
+- Refined Markdown quote, Alert, and container presentation, and added quick copying from code-block language labels.
+- Improved Flex content pagination in PDF export while keeping the existing Flex authoring syntax.
+
+### Reliability & Security
+
+- Hardened HTML export so supported SVG resources are embedded from the existing sanitizer's normalized bytes, and element-count limits are checked after asynchronous widgets and final DOM construction.
+- HTML export fails rather than silently dropping unsupported or unavailable resources. Remote images and some complex diagram resources are not supported; Safari's native system-download behavior still needs manual verification.
+
+### Migration & Deployment
+
+- No database migration or persistent schema change was added since `v0.1.0-alpha.8`.
+- HTML is a static, self-contained document, not a complete Vault backup. Back up the Vault and SQLite data volume consistently before upgrading; an image-only rollback is not safe after a database migration.
+
 ## Nuvyn v0.1.0-alpha.8 — 2026-10-15
 
 Changes since `v0.1.0-alpha.7`.
