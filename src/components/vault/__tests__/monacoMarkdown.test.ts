@@ -152,10 +152,47 @@ describe('Monaco Markdown helpers', () => {
 
   it('reports common English typos and spacing outside code fences', () => {
     expect(writingDiagnostics('The teh value , failed.  \n```text\nteh ,\n```')).toEqual([
-      expect.objectContaining({ line: 1, message: 'Trailing whitespace' }),
       expect.objectContaining({ line: 1, message: 'Possible typo: teh → the' }),
       expect.objectContaining({ line: 1, message: 'Remove the space before “,”' }),
     ])
+  })
+
+  it('recognizes Markdown hard breaks without hiding other trailing whitespace', () => {
+    const trailingWhitespace = (line: string): boolean =>
+      writingDiagnostics(line).some((item) => item.message === 'Trailing whitespace')
+
+    expect(trailingWhitespace('正文  ')).toBe(false)
+    expect(trailingWhitespace('正文   ')).toBe(false)
+    expect(trailingWhitespace('正文 ')).toBe(true)
+    expect(trailingWhitespace('   ')).toBe(true)
+    expect(trailingWhitespace('正文\t')).toBe(true)
+    expect(trailingWhitespace('正文 \t ')).toBe(true)
+    expect(trailingWhitespace('正文\t  ')).toBe(true)
+  })
+
+  it('keeps hard-break handling consistent across line endings and code fences', () => {
+    const lf = 'The teh value.  \n正文 \n```text\ncode  \n```'
+    const crlf = lf.replace(/\n/g, '\r\n')
+    const lfDiagnostics = writingDiagnostics(lf)
+    const crlfDiagnostics = writingDiagnostics(crlf)
+
+    expect(crlfDiagnostics).toEqual(lfDiagnostics)
+    expect(lfDiagnostics).toContainEqual(expect.objectContaining({
+      line: 1,
+      message: 'Possible typo: teh → the',
+    }))
+    expect(lfDiagnostics).not.toContainEqual(expect.objectContaining({
+      line: 1,
+      message: 'Trailing whitespace',
+    }))
+    expect(lfDiagnostics).toContainEqual(expect.objectContaining({
+      line: 2,
+      message: 'Trailing whitespace',
+    }))
+    expect(lfDiagnostics).not.toContainEqual(expect.objectContaining({
+      line: 4,
+      message: 'Trailing whitespace',
+    }))
   })
 
   it('reports Chinese-Latin spacing and ASCII punctuation but ignores inline code', () => {

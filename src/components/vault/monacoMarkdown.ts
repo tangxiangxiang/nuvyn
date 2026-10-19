@@ -317,7 +317,14 @@ export function writingDiagnostics(markdown: string): WritingDiagnostic[] {
     if (fenced) return
     const visible = line.replace(/`[^`\n]*`/g, (code) => ' '.repeat(code.length))
     const trailing = /\s+$/.exec(line)
-    if (trailing) out.push({ line: index + 1, startColumn: trailing.index + 1, endColumn: line.length + 1, message: 'Trailing whitespace' })
+    const isMarkdownHardBreak = Boolean(
+      trailing
+      && /\S/.test(line.slice(0, trailing.index))
+      && /^ {2,}$/.test(trailing[0]),
+    )
+    if (trailing && !isMarkdownHardBreak) {
+      out.push({ line: index + 1, startColumn: trailing.index + 1, endColumn: line.length + 1, message: 'Trailing whitespace' })
+    }
     for (const match of visible.matchAll(/\b(teh|recieve|seperate|occured|definately|adress|goverment|untill|wich|becuase)\b/gi)) {
       const word = match[0].toLowerCase()
       out.push({ line: index + 1, startColumn: (match.index ?? 0) + 1, endColumn: (match.index ?? 0) + match[0].length + 1, message: `Possible typo: ${match[0]} → ${COMMON_TYPOS[word]}` })
