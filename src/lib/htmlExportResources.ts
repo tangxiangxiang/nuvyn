@@ -54,13 +54,14 @@ export function auditStaticCss(css: string, fonts = false): void {
 }
 
 /** Uploaded, data-URL and Board SVG all use the server\'s unchanged policy. */
-export function auditImageSvg(bytes: Uint8Array): void {
-  sanitizeStaticNoteSvg(bytes)
+export function auditImageSvg(bytes: Uint8Array): Uint8Array {
+  return sanitizeStaticNoteSvg(bytes)
 }
 
-export function validateImage(bytes: Uint8Array, mime: string): void {
-  if (mime === 'image/svg+xml') auditImageSvg(bytes)
-  else if (detectNoteImageFormat(bytes)?.mimeType !== mime) exportError('IMAGE_MIME')
+export function validateImage(bytes: Uint8Array, mime: string): Uint8Array {
+  if (mime === 'image/svg+xml') return auditImageSvg(bytes)
+  if (detectNoteImageFormat(bytes)?.mimeType !== mime) exportError('IMAGE_MIME')
+  return bytes
 }
 
 export function decodeImageDataUrl(url: string): { bytes: Uint8Array; mime: string } {
@@ -68,8 +69,8 @@ export function decodeImageDataUrl(url: string): { bytes: Uint8Array; mime: stri
   if (!match || match[2].length > HTML_EXPORT_LIMITS.resourceBytes * 4 / 3 + 4) exportError('INVALID_DATA_IMAGE')
   const binary = atob(match[2])
   const bytes = Uint8Array.from(binary, (c) => c.charCodeAt(0))
-  validateImage(bytes, match[1])
-  return { bytes, mime: match[1] }
+  if (bytes.length > HTML_EXPORT_LIMITS.resourceBytes) exportError('RESOURCE_SIZE')
+  return { bytes: validateImage(bytes, match[1]), mime: match[1] }
 }
 
 export function localImageUrl(source: string, boardPreview: boolean): string {
@@ -127,7 +128,7 @@ export function createHtmlResourceReader(signal: AbortSignal) {
             chunks.push(part.value)
           }
         } finally { await reader.cancel().catch(() => {}); reader.releaseLock() }
-        const bytes = new Uint8Array(length)
+        let bytes: Uint8Array = new Uint8Array(length)
         let offset = 0
         for (const chunk of chunks) { bytes.set(chunk, offset); offset += chunk.length }
         if (font) {
@@ -136,7 +137,11 @@ export function createHtmlResourceReader(signal: AbortSignal) {
           const face = new FontFace('NuvynExportValidation', new Uint8Array(bytes).buffer)
           await abortableExport(face.load(), controller.signal)
         } else {
-          validateImage(bytes, mime)
+          bytes = validateImage(bytes, mime)
+          // The stream budget bounded the input; also account for the exact
+          // normalized bytes cached, decoded and embedded in the output.
+          total += bytes.length - length
+          if (bytes.length > HTML_EXPORT_LIMITS.resourceBytes || total > HTML_EXPORT_LIMITS.totalBytes) exportError('RESOURCE_SIZE')
           await assertImageDecodes(bytes, mime, controller.signal)
         }
         return { bytes, mime }

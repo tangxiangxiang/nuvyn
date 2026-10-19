@@ -6,6 +6,7 @@ import { expect, test } from './fixtures/auth'
 import { createDoc, gotoVaultReady, openDoc } from './helpers/edit-program'
 import { chooseDocumentExport } from './helpers/document-export'
 import type { Page } from '@playwright/test'
+import { sanitizeStaticNoteSvg } from '../shared/noteSvg'
 
 async function openMenu(page: Page, path: string) {
   const row = page.locator(`[data-tree-key="file:${path}"]`)
@@ -28,6 +29,15 @@ test('downloads self-contained HTML and reads the actual file offline at desktop
   const svgUpload = await request.post('/api/note/images', { headers: { Origin: process.env.NUVYN_PUBLIC_ORIGIN! }, multipart: { image: { name: 'original.svg', mimeType: 'image/svg+xml', buffer: Buffer.from('<svg xmlns="http://www.w3.org/2000/svg" width="240" height="120"><rect width="240" height="120" rx="12" fill="#6270AC"/><text x="20" y="70" fill="white" font-size="24">Original SVG</text></svg>') } } })
   expect(svgUpload.status()).toBe(201)
   const svgResource = await svgUpload.json()
+  // Serve a valid but deliberately noncanonical SVG at the existing image
+  // boundary, rather than relying on the already-normalized upload response.
+  const rawSvg = Buffer.from(`<?xml version="1.0" encoding="utf-8"?><!-- export normalization -->\n<svg xmlns="http://www.w3.org/2000/svg" width="240" height="120"><rect width="240" height="120" rx="12" style="fill: #6270AC; opacity: 1"/><text x="20" y="70" fill="white" font-size="24">Original SVG</text></svg>`)
+  const normalizedSvg = Buffer.from(sanitizeStaticNoteSvg(rawSvg))
+  expect(normalizedSvg.equals(rawSvg)).toBe(false)
+  await page.route('**/api/markdown-resources?*', async (route) => {
+    if (new URL(route.request().url()).searchParams.get('path') === svgResource.path) await route.fulfill({ contentType: 'image/svg+xml', body: rawSvg })
+    else await route.continue()
+  })
   const boardResponse = await request.post('/api/board', { data: { title: 'Offline Board' } })
   expect(boardResponse.status()).toBe(201)
   const boardId = (await boardResponse.json()).metadata.id
@@ -79,6 +89,11 @@ test('downloads self-contained HTML and reads the actual file offline at desktop
     expect(html).not.toContain('/api/')
     expect(html).not.toContain('<script')
     expect(html).toContain('data:font/woff2;base64,')
+    const embeddedSvg = await page.evaluate((output) => new DOMParser().parseFromString(output, 'text/html').querySelector('img[alt="A"]')?.getAttribute('src'), html)
+    expect(embeddedSvg).toMatch(/^data:image\/svg\+xml;base64,/u)
+    const exportedSvg = Buffer.from(embeddedSvg!.split(',')[1], 'base64')
+    expect(exportedSvg.equals(normalizedSvg)).toBe(true)
+    expect(exportedSvg.equals(rawSvg)).toBe(false)
     // WebKit's transport-level offline emulation rejects even file:// with
     // an internal navigation error (independently reproduced). Block every
     // HTTP(S) request there; Chromium additionally uses the offline flag.
@@ -130,6 +145,44 @@ test('downloads self-contained HTML and reads the actual file offline at desktop
     await request.delete(`/api/posts/${includePath}`)
     await request.delete(`/api/board/${boardId}`)
     await unlink(snippet)
+  }
+})
+
+test('asynchronous DOM complexity fails cleanly and the same chooser can export a normal document afterward', async ({ page, request }) => {
+  // Lower only the test module's shared cap to keep this regression small;
+  // production still uses 100,000 and its exact value is checked by unit tests.
+  await page.route('**/src/lib/htmlExportResources.ts*', async (route) => {
+    const response = await route.fetch()
+    const source = await response.text()
+    const cap = /elements:\s*(?:100_000|100000|1e5)\b/u
+    expect(source).toMatch(cap)
+    await route.fulfill({ response, body: source.replace(cap, 'elements: 100') })
+  })
+  const path = `inbox/html-complexity-${randomUUID().slice(0,8)}`
+  const normal = `${path}-retry`
+  await createDoc(request, path, '# Complex\n\n```mermaid\nflowchart LR\n' + Array.from({ length: 12 }, (_, index) => `N${index}[Node ${index}] --> N${index + 1}`).join('\n') + '\n```', [])
+  await createDoc(request, normal, '# Normal retry\n\nComplete body', [])
+  const downloads: string[] = []
+  page.on('download', (download) => downloads.push(download.suggestedFilename()))
+  try {
+    await gotoVaultReady(page)
+    await openMenu(page, path)
+    await chooseDocumentExport(page, 'html')
+    await expect(page.getByText(/Document export failed|文档导出失败/u)).toBeVisible()
+    expect(downloads).toEqual([])
+    await expect(page.locator('.html-export-surface')).toHaveCount(0)
+    await expect(page.getByRole('dialog').getByRole('button', { name: /^(Export|导出)$/u })).toBeEnabled()
+    await page.getByRole('dialog').getByRole('button', { name: /^(Cancel|取消)$/u }).click()
+    await openMenu(page, normal)
+    const pending = page.waitForEvent('download')
+    await chooseDocumentExport(page, 'html')
+    const download = await pending
+    expect(await readFile((await download.path())!, 'utf8')).toContain('Complete body')
+    await expect(page.locator('.html-export-surface')).toHaveCount(0)
+    expect(downloads).toHaveLength(1)
+  } finally {
+    await request.delete(`/api/posts/${path}`)
+    await request.delete(`/api/posts/${normal}`)
   }
 })
 

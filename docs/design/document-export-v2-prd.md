@@ -148,7 +148,7 @@ HTML 仍需单独实现静态 SVG/Board 快照、本地图片与字体内嵌、�
 - `HtmlExportSurface` 按需加载，使用现有 `RenderedMarkdown` / `useMarkdownRender` 在独立、真实宽度、Light Theme 离屏面渲染，不触碰 Reader/Monaco，也不强制保存或打开目标 Tab。
 - HTML 使用自己的响应式阅读样式和显式变量。仅按结构选取现有受控 Flex/通知卡片规则，并复用 Shiki 规则及其可信 token CSS；没有把整个应用 CSS 或 PDF/A4 分页规则复制进文件。
 - `staticDocumentSnapshot.ts` 提取既有 Mermaid/MarkMap 静态规范化和 Code Group 展开助手。PDF 继续使用原来的入口、参数、图片策略、命名和分页；HTML 不调用 `preparePdfArticleHtml()`。HTML 的 MarkMap 另按真实图形包围盒收紧 viewBox，避免手机上保留大块交互画布空白。
-- 普通图片在插入离屏 DOM 前放入 inert template 并移除活动 `src`；之后只接受规范化且受认证的 `/api/markdown-resources?kind=image&path=…`、安全 base64 data URL、当前 Board 预览 Blob。拒绝远程图片，不主动下载任意 URL。按规范资源 URL 去重、串行读取、校验 MIME/签名及实际解码，保留原始图片字节。
+- 普通图片在插入离屏 DOM 前放入 inert template 并移除活动 `src`；之后只接受规范化且受认证的 `/api/markdown-resources?kind=image&path=…`、安全 base64 data URL、当前 Board 预览 Blob。拒绝远程图片，不主动下载任意 URL。按规范资源 URL 去重、串行读取、校验 MIME/签名及实际解码；位图保留原始字节，SVG 使用现有安全规范化结果（见下文 Hardening 记录）。
 - SVG 校验核心从 `server/noteSvg.ts` 提取到 `shared/noteSvg.ts`：规则与限制不变，只将 Buffer 字节操作改为标准 Uint8Array/TextEncoder/DataView。服务端原路径继续以 Buffer 包装并重新导出同一错误类。HTML 中的本地、data URL、Board SVG 全部使用同一策略，没有新增较宽松的上传 SVG 白名单。
 - 已渲染 Mermaid/MarkMap 的 SVG 单独进行结构审计，保留受控的 XHTML 富标签、MathML 和静态图形；只复制必要的生成绘制样式，移除脚本、动画、交互工具栏和运行时元数据。上传 SVG 不因此获得 foreignObject 权限。
 - HTML 导出专用 MarkMap 使用既有解析器、应用本地 KaTeX/Shiki，关闭该分支的 CDN 插件自动加载；Reader/PDF 原插件链不变。KaTeX CSS 中的 WOFF2 字体读取自已捆绑的可信资源并全部内嵌，离线不访问 `/assets/`。
@@ -163,7 +163,7 @@ HTML 仍需单独实现静态 SVG/Board 快照、本地图片与字体内嵌、�
 | 单图片 | 沿用 20 MiB；SVG 沿用 8 MiB 静态策略 |
 | 资源数 | 每次 128 个不同资源，包含字体 |
 | 异步图表/Board | 初始渲染前最多 32 个 |
-| 初始渲染元素 | 最多 100,000 个 |
+| 初始、异步完成后及静态化元素 | 分别最多 100,000 个 |
 | 资源字节总量 / 最终文件 | 分别最多 64 MiB / 64 MiB UTF-8 |
 | 单资源及 widget 等待 | 最多 15 秒 |
 | HTML 总事务 | 最多 45 秒，包含源快照与渲染 |
@@ -208,3 +208,22 @@ Include/Snippet 继续受已有 256/512 KiB 单资源、2 MiB 展开、8 层深�
 - `npm run test:e2e -- --config=playwright.pdf-compat.config.ts --project=webkit`：21 项通过、0 失败，覆盖 HTML 11 项、Markdown 4 项及既有 PDF/Flex 6 项。未增加测试 timeout、retries 或跳过。
 - 两个浏览器均验证真正下载的独立文件、阻断 HTTP(S) 后的资源完整性，以及 1440/768/375px 几何。人工检查 Chromium/WebKit 截图，确认静态 MarkMap 公式在对应节点旁、代码底色、Board、SVG 和 Flex 响应式正常；这不替代真实 Safari 真机验收。
 - 验证为上述本地任务，不代表整个 GitHub Actions CI、NAS 部署或真实系统下载行为已经验收。
+
+### V2.2 Hardening：SVG 输出与最终 DOM（2026-10-19）
+
+- 基线 `5cf4720`。修正 HTML 资源校验曾丢弃 `sanitizeStaticNoteSvg()` 返回值的问题：本地 API 图片、Data URL 和 Board Blob SVG 统一使用规范化字节进行解码、缓存及 Data URL 内嵌；重复 URL 仍只读取一次。文章审计与下载前复检也将规范化结果写回对应图片属性，避免另一个验证后仍输出原始 SVG 的出口。
+- 位图继续保留通过签名与解码验证的原始字节，不重绘、不转码、不缩放。流式读取仍限制原始输入，并按规范化后的最终资源字节更新总量；单资源、SVG、资源数及最终文件大小上限不提高。
+- 保留原初始 Markdown 检查；`waitForHtmlWidgets()` 完成后、克隆前，静态图表替换/Code Group 展开后，以及最终序列化前检查同一个 `HTML_EXPORT_LIMITS.elements`。下载前再检查 HTML 重解析的文章，覆盖浏览器解析自动补入元素的情况。取消信号在进入这些构建阶段前生效。
+- 超限沿用现有失败提示和清理/重试事务，不删除内容以绕过限制。测试用小型 DOM 和仅测试环境降低的同一上限构造边界，避免反复创建十万个元素。
+- 生产改动仅在 `htmlExport.ts` 与 `htmlExportResources.ts`；未修改 SVG 白名单、共享 Sanitizer、服务端上传/读取、Markdown/Flex Parser、Reader、PDF、Board、Diary、Ledger 或数据库。
+- 新增单元覆盖规范化实际字节、三入口和缓存、PNG/JPEG 原始字节、危险 SVG、初始/异步/静态化/重解析复杂度及取消/重试清理。HTML 浏览器测试解码真正下载文件中的 SVG 与共享 Sanitizer 结果逐字节比较，并验证异步图表超限后可以再次正常导出。
+
+#### Hardening 验证记录
+
+- `npm run typecheck`、`npm run build`、`git diff --check`：通过；构建保留上一版已有的第三方注释、包体积及浏览器外置模块提示。
+- `npm run test:unit -- --maxWorkers=1`：允许本地 IPC/服务监听的环境中，351 文件通过，5240 项通过、9 项既有跳过、0 失败（共 5249 项）。首次沙箱运行是 348 文件通过、3 文件失败，5219 项通过、21 项失败、9 项跳过；失败均为本地服务或 `tsx` IPC 的 `listen EPERM`，原命令在允许对应权限后完整复验通过，未修改业务或测试断言来绕过。
+- `npm run test:unit -- src/lib/__tests__/htmlExport.test.ts --maxWorkers=1`：45 项通过（原 32 项，新增 13 项），无失败或跳过。
+- `npm run test:e2e -- e2e/html-export.spec.ts e2e/document-export.spec.ts e2e/document-export-diary.spec.ts e2e/pdf-export.spec.ts e2e/pdf-export-flex.spec.ts --project=chromium`：26 项通过（HTML 12、Markdown 4、Diary PDF 3、PDF/Flex 7），0 失败。
+- `npm run test:e2e -- --config=playwright.pdf-compat.config.ts --project=webkit`：22 项通过（HTML 12、Markdown 4、PDF/Flex 6），0 失败。包含真实下载 SVG 字节比对和离线 file:// 回归；复核 WebKit 375px 截图。未新增跳过、retries 或延长 timeout。
+- `npm run test:history-integration`：5 文件、183 项通过；`npm run test:recovery-integration`：在允许本地 IPC 的环境复验后 5 文件、198 项通过。恢复集成首次在沙箱运行时为 163 通过、35 失败，错误为 `tsx` 创建 IPC 管道的 `listen EPERM`；未修改测试或恢复逻辑。
+- 真实 macOS/iOS Safari 的系统下载行为仍需人工验收；前述 MarkMap 图片标签、Mermaid URL 保守预检及既有 WebKit PDF 日志边界不变。本次未部署，也不代表整套 CI 已再次运行。

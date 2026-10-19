@@ -8,6 +8,11 @@ import { auditStaticCss, bytesDataUrl, checkExportSignal, createHtmlResourceRead
 
 export const HTML_EXPORT_CSP = "default-src 'none'; script-src 'none'; connect-src 'none'; img-src data:; font-src data:; style-src 'unsafe-inline'; object-src 'none'; frame-src 'none'; base-uri 'none'; form-action 'none'"
 
+function assertHtmlExportElementLimit(root: Element, signal?: AbortSignal): void {
+  if (signal) checkExportSignal(signal)
+  if (root.querySelectorAll('*').length > HTML_EXPORT_LIMITS.elements) exportError('COMPLEXITY')
+}
+
 export function waitForHtmlWidgets(article: HTMLElement, signal: AbortSignal): Promise<void> {
   return new Promise((resolve, reject) => {
     const observer = new MutationObserver(check)
@@ -97,7 +102,8 @@ export function auditHtmlArticle(root: HTMLElement): void {
       if (name === 'style') { auditStaticCss(`x{${attr.value}}`); continue }
       if (name === 'src') {
         if (el.localName !== 'img') exportError('UNSAFE_SOURCE')
-        decodeImageDataUrl(attr.value)
+        const image = decodeImageDataUrl(attr.value)
+        el.setAttribute(attr.name, bytesDataUrl(image.bytes, image.mime))
         continue
       }
       if (name === 'href') {
@@ -111,7 +117,11 @@ export function auditHtmlArticle(root: HTMLElement): void {
           el.setAttribute('rel', 'noopener noreferrer')
           continue
         }
-        if (el.localName === 'image' && href.startsWith('data:')) { decodeImageDataUrl(href); continue }
+        if (el.localName === 'image' && href.startsWith('data:')) {
+          const image = decodeImageDataUrl(href)
+          el.setAttribute(attr.name, bytesDataUrl(image.bytes, image.mime))
+          continue
+        }
         el.removeAttribute(attr.name)
         continue
       }
@@ -134,6 +144,7 @@ export async function buildHtmlDocument(options: {
   if (!canExportMarkdownDocument(snapshot.path)) exportError('NOT_ALLOWED')
   checkExportSignal(signal)
   await waitForHtmlWidgets(article, signal)
+  assertHtmlExportElementLimit(article, signal)
   const clone = article.cloneNode(true) as HTMLElement
   prepareStaticCodeGroups(clone)
   clone.querySelectorAll('button, .mermaid-toolbar-area, .markmap-toolbar-area').forEach((el) => el.remove())
@@ -151,6 +162,7 @@ export async function buildHtmlDocument(options: {
       unwrapStandaloneFenceWidget(host)
     }
   }
+  assertHtmlExportElementLimit(clone, signal)
   const reader = createHtmlResourceReader(signal)
   // Sequential, deduplicated reads bound peak memory and in-flight requests.
   for (const image of clone.querySelectorAll<HTMLImageElement>('img')) {
@@ -196,6 +208,7 @@ export async function buildHtmlDocument(options: {
   if (/<\/style/iu.test(style.textContent)) exportError('UNSAFE_CSS')
   doc.head.append(title, style)
   doc.body.append(clone)
+  assertHtmlExportElementLimit(clone, signal)
   const result = '<!DOCTYPE html>\n' + doc.documentElement.outerHTML
   if (new TextEncoder().encode(result).length > HTML_EXPORT_LIMITS.totalBytes) exportError('DOCUMENT_SIZE')
   return result
@@ -216,6 +229,7 @@ export function downloadHtmlDocument(snapshot: DocumentExportSnapshot, html: str
     if (node.localName === 'meta' && node.hasAttribute('http-equiv') && node.getAttribute('http-equiv') !== 'Content-Security-Policy') exportError('INVALID_DOCUMENT')
     if (node.localName === 'style') auditStaticCss(node.textContent ?? '', true)
   }
+  assertHtmlExportElementLimit(article)
   auditHtmlArticle(article as HTMLElement)
   const url = URL.createObjectURL(new Blob(['<!DOCTYPE html>\n' + checked.documentElement.outerHTML], { type: 'text/html;charset=utf-8' }))
   const anchor = document.createElement('a')
