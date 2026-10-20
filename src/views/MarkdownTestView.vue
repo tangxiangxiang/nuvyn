@@ -171,7 +171,7 @@ Footnote reference.[^1]
 <template>
   <div class="vault markdown-test-view">
     <div class="reading-slot">
-      <ReadingPane :raw="sample" :resolver="resolveLink" />
+      <ReadingPane :raw="sample" :resolver="resolveLink" folding-enabled />
     </div>
   </div>
 </template>

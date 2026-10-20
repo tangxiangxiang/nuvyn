@@ -1256,6 +1256,46 @@ main.container.auth-page-shell {
   line-height: 1.4;
 }
 .article .callout-content { color: inherit; }
+/* Trusted Reader-only controls. No wrappers around Markdown/Flex children. */
+.article .nuvyn-fold-hidden { display: none !important; }
+.article .nuvyn-fold-host { position: relative; }
+.article .nuvyn-fold-toggle {
+  position: absolute;
+  inset-inline-start: -28px;
+  top: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 1lh;
+  padding: 0;
+  margin: 0;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--text-dim, #888);
+  font: inherit;
+  vertical-align: middle;
+  cursor: pointer;
+}
+.article .nuvyn-fold-toggle::before { content: '›'; font: 22px/1 var(--sans, sans-serif); transform: rotate(90deg); }
+.article .nuvyn-fold-toggle[aria-expanded='false']::before { transform: none; }
+.article .nuvyn-fold-toggle:focus-visible { outline: 2px solid var(--accent, #6977b7); outline-offset: 1px; }
+@media (hover: hover) and (pointer: fine) {
+  .article .nuvyn-fold-toggle { opacity: 0; transition: opacity 120ms ease; }
+  .article .nuvyn-fold-host:hover > .nuvyn-fold-toggle,
+  .article .nuvyn-fold-toggle:focus-visible { opacity: 1; }
+  .vault .monaco-host .margin-view-overlays:not(:hover) :is(.codicon-folding-collapsed, .codicon-folding-manual-collapsed) { opacity: 0; }
+}
+@media (hover: none), (pointer: coarse) {
+  .vault .monaco-host .margin-view-overlays :is(.codicon-folding-expanded, .codicon-folding-manual-expanded) { opacity: 1; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .article .nuvyn-fold-toggle { transition: none; }
+}
+@media (pointer: coarse) {
+  .article .nuvyn-fold-toggle { width: 28px; min-height: 36px; }
+}
 .article .callout-content > :first-child { margin-top: 0; }
 .article .callout-content > :last-child { margin-bottom: 0; }
 .article .markdown-container > :first-child,
@@ -5194,7 +5234,7 @@ body:has(.ledger-detail-sheet-card) .n-modal-mask {
   min-width: 0;
   min-height: 0;
   overflow: auto;
-  padding: 40px 24px 80px;
+  padding: 24px 24px 80px;
   box-sizing: border-box;
 }
 /* Single-column centered article. The page-nav (TOC) is now a

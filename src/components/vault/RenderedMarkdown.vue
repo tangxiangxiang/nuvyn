@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { inject, nextTick, ref, toRef, watch } from 'vue'
+import { inject, nextTick, onBeforeUnmount, ref, toRef, watch } from 'vue'
 import { routerKey } from 'vue-router'
 import { useMarkdownRender, type Heading } from '../../composables/vault/useMarkdownRender'
 import { useMarkmapMount } from '../../composables/useMarkmapMount'
@@ -14,6 +14,8 @@ import type { MarkdownResourceResolver } from '../../lib/markdownResources'
 import { copyTextToClipboard } from './workspaceTabActions'
 import { useI18n } from '../../composables/useI18n'
 import { useToast } from '../../composables/useToast'
+import { enhanceMarkdownFolding, revealMarkdownTarget, type ReaderFolding } from '../../lib/markdownReaderFolding'
+import { MARKDOWN_FOLDING_LIMIT } from '../../lib/markdownFolding'
 
 const props = withDefaults(defineProps<{
   raw: string
@@ -23,6 +25,8 @@ const props = withDefaults(defineProps<{
   tag?: 'div' | 'article'
   renderTheme?: Theme
   deferImages?: boolean
+  /** Only the interactive reader enables folding; export surfaces stay inert. */
+  foldingEnabled?: boolean
 }>(), { tag: 'div' })
 const emit = defineEmits<{
   'update:headings': [headings: Heading[]]
@@ -44,6 +48,20 @@ const toast = useToast()
 const copyButtons = new WeakMap<HTMLButtonElement, HTMLElement>()
 const vaultContext = useVaultContext()
 const router = inject(routerKey, null)
+let folding: ReaderFolding | null = null
+let foldedRoot: HTMLElement | null = null
+let foldedHtml: string | null = null
+let foldedPath: string | undefined
+const foldingLabels = () => ({
+  expand: t('ai.tool_expand'), collapse: t('ai.tool_collapse'),
+})
+function clearFolding() {
+  folding?.dispose()
+  folding = null
+  foldedRoot = null
+  foldedHtml = null
+}
+onBeforeUnmount(clearFolding)
 useMarkmapMount(articleEl, toRef(props, 'renderTheme'), props.deferImages)
 useMermaidMount(articleEl, toRef(props, 'renderTheme'), props.deferImages)
 useMathMount(articleEl)
@@ -51,12 +69,15 @@ useCodeGroupMount(articleEl)
 useBoardEmbedMount(articleEl, toRef(props, 'renderTheme'))
 
 watch(headings, (value) => emit('update:headings', value), { immediate: true })
-watch([ready, html, articleEl, locale], async ([isReady]) => {
+watch([ready, html, articleEl, locale, () => props.foldingEnabled, () => props.sourcePath], async ([isReady], _previous, onCleanup) => {
+  let cancelled = false
+  onCleanup(() => { cancelled = true })
   // useMarkdownRender is asynchronous. articleEl is mounted once with an
   // empty html ref before the current Markdown source finishes rendering;
   // emitting that transient node made PDF export snapshot a blank article.
   if (!isReady) return
   await nextTick()
+  if (cancelled) return
   for (const pre of articleEl.value?.querySelectorAll<HTMLElement>('pre.shiki[data-language]') ?? []) {
     const code = pre.querySelector<HTMLElement>(':scope > code')
     if (!code) continue
@@ -74,11 +95,34 @@ watch([ready, html, articleEl, locale], async ([isReady]) => {
     button.title = t('editor.copy_code')
     button.setAttribute('aria-label', `${t('editor.copy_code')} (${pre.dataset.language})`)
   }
+  const root = articleEl.value
+  if (!props.foldingEnabled || props.raw.length >= MARKDOWN_FOLDING_LIMIT || !root) clearFolding()
+  else if (foldedRoot !== root || foldedHtml !== html.value || foldedPath !== props.sourcePath) {
+    clearFolding()
+    folding = enhanceMarkdownFolding(root, foldingLabels())
+    foldedRoot = root
+    foldedHtml = html.value
+    foldedPath = props.sourcePath
+  } else folding?.updateLabels(foldingLabels())
   emit('rendered', articleEl.value)
 }, { flush: 'post', immediate: true })
 
 async function onArticleClick(event: MouseEvent) {
   if (event.button !== 0) return
+  const localAnchor = (event.target as Element | null)?.closest<HTMLAnchorElement>('a[href^="#"]')
+  if (localAnchor && articleEl.value) {
+    if (event.ctrlKey || event.metaKey || event.shiftKey || event.altKey) return
+    let id: string
+    try { id = decodeURIComponent(localAnchor.hash.slice(1)) } catch { return }
+    const target = Array.from(articleEl.value.querySelectorAll<HTMLElement>('[id]')).find((el) => el.id === id)
+    if (target) {
+      event.preventDefault()
+      revealMarkdownTarget(articleEl.value, target)
+      target.scrollIntoView({ block: 'start' })
+      if (history.replaceState) history.replaceState(history.state, '', `#${encodeURIComponent(id)}`)
+    }
+    return
+  }
   const button = (event.target as HTMLElement | null)?.closest<HTMLButtonElement>('button.nuvyn-code-copy')
   const code = button && copyButtons.get(button)
   if (button && code) {

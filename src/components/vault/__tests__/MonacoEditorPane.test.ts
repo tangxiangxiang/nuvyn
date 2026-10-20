@@ -69,6 +69,7 @@ const mocks = vi.hoisted(() => {
     getLayoutInfo: vi.fn(() => ({ height: 500 })),
     layout: vi.fn(),
     setScrollTop: vi.fn(),
+    setPosition: vi.fn(),
     revealLineInCenter: vi.fn(),
     getVisibleRanges: vi.fn(() => [{ startLineNumber: 1, endLineNumber: 20 }]),
     getModel: vi.fn(() => model),
@@ -145,6 +146,7 @@ vi.mock('monaco-editor/esm/vs/editor/editor.api.js', () => ({
     TrackedRangeStickiness: { NeverGrowsWhenTypingAtEdges: 1 },
   },
   languages: {
+    registerFoldingRangeProvider: vi.fn(() => ({ dispose: vi.fn() })),
     CompletionItemKind: { Reference: 1, Keyword: 2, Snippet: 3 },
     CompletionItemInsertTextRule: { InsertAsSnippet: 4 },
     registerCompletionItemProvider: vi.fn((_language: string, provider: any) => {
@@ -199,6 +201,7 @@ vi.mock('monaco-editor/esm/vs/editor/editor.api.js', () => ({
   MarkerSeverity: { Hint: 1 },
 }))
 vi.mock('monaco-editor/esm/vs/basic-languages/markdown/markdown.contribution.js', () => ({}))
+vi.mock('monaco-editor/esm/vs/editor/contrib/folding/browser/folding.js', () => ({}))
 vi.mock('monaco-editor/esm/vs/editor/editor.worker?worker', () => ({ default: class WorkerStub {} }))
 vi.mock('../../../lib/api', () => ({ getPost: mocks.getPost }))
 vi.mock('../../../lib/noteImages', async (importOriginal) => {
@@ -1327,6 +1330,7 @@ describe('Monaco EditorPane', () => {
     const wrapper = mount(EditorPane, { props: { modelValue: raw, path: 'notes/target' } })
 
     await expect((wrapper.vm as any).revealAnchor('stable-id-2')).resolves.toBe(true)
+    expect(mocks.editor.setPosition).toHaveBeenCalledWith({ lineNumber: 2, column: 1 })
     expect(mocks.editor.revealLineInCenter).toHaveBeenCalledWith(2)
     expect(mocks.model.getValue()).toBe(raw)
     expect(mocks.editor.focus).not.toHaveBeenCalled()

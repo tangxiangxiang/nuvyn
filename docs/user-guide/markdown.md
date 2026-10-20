@@ -17,6 +17,48 @@ Nuvyn renders Markdown with `markdown-it` and supports the core syntax plus:
 - Mermaid and Markmap fences.
 - live Board embeds.
 
+## Structural folding
+
+In edit mode, use Monaco's native gutter chevrons to fold headings (H1–H6)
+and fenced code. Other structures rely on Monaco's existing behavior, without
+dedicated Nuvyn folding rules. Native Fold All, Unfold All and Fold Level commands are available.
+ATX and Setext headings follow the same hierarchy: a section ends at the next
+heading of the same or higher level, within its enclosing container.
+
+On desktop, folding chevrons appear when hovering over the corresponding
+heading/block (or Monaco gutter). Reader controls also appear on keyboard
+focus; touch devices keep controls visible. Revealing controls does not move
+the content.
+
+In reading mode, only section headings receive chevrons. A leading H1 is
+treated as the document title and has no folding control; later H1 sections
+and H2–H6 can fold until the next same/higher heading in their container.
+Lists, quotes, code, layouts, Callouts, images, tables, diagrams and Board
+previews receive no independent fold controls. Details and Code Group retain
+their existing interactions. Fold buttons support Tab, Enter and Space,
+including on touch devices.
+
+Nested states are independent: expanding a parent does not unfold its children.
+TOC links, internal anchors and Wiki-link anchor navigation reveal the necessary
+ancestors before scrolling. The full H2–H4 outline remains available; hidden
+headings do not participate in scroll tracking. Editor search/anchor reveals
+also unfold the hidden ancestors of the destination.
+
+Folding changes only the view. It does not change text, task values, saves or
+history. Reader state is memory-only and resets when its document/surface is
+remounted, including a mode switch, rename, close or Diary lock. Editor folding
+uses the existing Monaco view-state lifecycle independently of Reader state.
+PDF and HTML exports use separate, fully expanded render surfaces; Markdown
+export remains the original source.
+
+Boundaries: no extra disclosure is added to native Details or to Flex itself;
+Code Group keeps its tabs and individual code panels can fold. Sections inside
+a container stop at that container's boundary. A one-line item with no child
+content has no item disclosure. Monaco can represent only one fold at any
+start line, so an enclosing list/quote takes precedence over a first item or
+heading starting on that same line. Documents at or above 500,000 characters
+retain the large-document protection and do not receive structural folding.
+
 ## Callouts
 
 Nuvyn supports five GitHub-style Alerts. A canonical marker at the start of a

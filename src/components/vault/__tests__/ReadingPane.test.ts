@@ -316,6 +316,25 @@ describe('ReadingPane scroll-spy', () => {
     expect(tocActiveId.value).toBe('')
   })
 
+  it('keeps hidden headings in the TOC but excludes them from scroll tracking after folding', async () => {
+    const { pane, headingEls } = setupFixture([
+      { id: 'visible', text: 'Visible', level: 2 },
+      { id: 'hidden', text: 'Hidden', level: 3 },
+    ])
+    await nextTick()
+    setRect(pane, 100)
+    setScrollState(pane, 800, 400, 1200)
+    headingEls[1].hidden = true
+    pane.dispatchEvent(new Event('nuvyn-fold-change'))
+    await nextTick()
+    expect(tocHeadings.value.map((heading) => heading.id)).toEqual(['visible', 'hidden'])
+    expect(tocActiveId.value).toBe('visible')
+    headingEls[1].hidden = false
+    pane.dispatchEvent(new Event('nuvyn-fold-change'))
+    await nextTick()
+    expect(tocActiveId.value).toBe('hidden')
+  })
+
   it('does not expose PDF export UI', () => {
     const { wrapper } = setupFixture([])
     expect(wrapper.find('[data-testid="reading-export-pdf"]').exists()).toBe(false)

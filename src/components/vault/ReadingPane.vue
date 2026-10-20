@@ -15,6 +15,7 @@ import type { Heading } from '../../composables/vault/useMarkdownRender'
 import { useVaultTocState } from '../../composables/vault/useTocState'
 import type { Resolver as WikiResolver } from '../../lib/wikiLinks'
 import type { MarkdownResourceResolver } from '../../lib/markdownResources'
+import { revealMarkdownTarget } from '../../lib/markdownReaderFolding'
 
 const { tocHeadings, tocActiveId, tocScrollTo } = useVaultTocState()
 
@@ -24,6 +25,7 @@ const props = defineProps<{
   resolver?: WikiResolver
   sourcePath?: string
   resourceResolver?: MarkdownResourceResolver
+  foldingEnabled?: boolean
 }>()
 const emit = defineEmits<{
   rendered: [path: string | null, el: HTMLElement | null]
@@ -73,7 +75,7 @@ function getHeadingEls(): HTMLElement[] {
   const out: HTMLElement[] = []
   for (const h of headings.value) {
     const el = articleEl.value.querySelector<HTMLElement>(`#${cssEscape(h.id)}`)
-    if (el) out.push(el)
+    if (el && !el.closest('[hidden],details:not([open])')) out.push(el)
   }
   return out
 }
@@ -107,6 +109,7 @@ function isScrolledToBottom(container: HTMLElement): boolean {
    handler route through this so the freeze window and the
    bottom-edge rule apply consistently. */
 function updateActiveHeading(els: HTMLElement[]) {
+  els = els.filter((el) => !el.closest('[hidden],details:not([open])'))
   if (Date.now() < freezeActiveUntil) return
   const pane = readingPaneEl.value
   if (!pane || els.length === 0) return
@@ -123,6 +126,12 @@ function updateActiveHeading(els: HTMLElement[]) {
    same updater on every scroll tick fills that gap. */
 function onReadingPaneScroll() {
   updateActiveHeading(getHeadingEls())
+}
+
+function onFoldingChange() {
+  freezeActiveUntil = 0
+  attachObserver()
+  onReadingPaneScroll()
 }
 
 /* Build the observer once the article is in the DOM and the headings
@@ -159,6 +168,7 @@ function revealAnchor(id: string, isCurrent: () => boolean = () => true): boolea
   if (!isCurrent() || !articleEl.value) return false
   const target = articleEl.value.querySelector<HTMLElement>(`#${cssEscape(id)}`)
   if (!target) return false
+  revealMarkdownTarget(articleEl.value, target)
   freezeActiveUntil = Date.now() + 800
   tocActiveId.value = id
   const pane = readingPaneEl.value
@@ -218,7 +228,7 @@ watch(() => props.raw, () => {
 </script>
 
 <template>
-  <div ref="readingPaneEl" class="reading-pane" @scroll.passive="onReadingPaneScroll">
+  <div ref="readingPaneEl" class="reading-pane" @scroll.passive="onReadingPaneScroll" @nuvyn-fold-change="onFoldingChange" @toggle.capture="onFoldingChange">
     <div v-if="isEmpty" class="reading-empty">
       未打开文件。在侧栏选一个或按 <kbd>⌘P</kbd> 新建。
     </div>
@@ -230,6 +240,7 @@ watch(() => props.raw, () => {
           :source-path="sourcePath"
           :resource-resolver="resourceResolver"
           tag="article"
+          :folding-enabled="foldingEnabled"
           @update:headings="headings = $event"
           @rendered="onArticleRendered"
         />

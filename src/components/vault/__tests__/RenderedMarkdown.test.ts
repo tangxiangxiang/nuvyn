@@ -127,3 +127,43 @@ describe('RenderedMarkdown link navigation', () => {
     wrapper.unmount()
   })
 })
+
+describe('RenderedMarkdown folding isolation', () => {
+  it('leaves default/static render surfaces fully expanded and free of folding controls', async () => {
+    const wrapper = mountMarkdown('## A\nbody\n\n```ts\nconst a = 1\n```')
+    await flushPromises()
+    expect(wrapper.findAll('.nuvyn-fold-toggle')).toHaveLength(0)
+    expect(wrapper.findAll('[hidden]')).toHaveLength(0)
+    expect(wrapper.text()).toContain('body')
+    wrapper.unmount()
+  })
+
+  it('cleans old state on document changes and restores content when folding is disabled', async () => {
+    const wrapper = mountMarkdown('## A\nbody')
+    await wrapper.setProps({ foldingEnabled: true, sourcePath: 'inbox/a' })
+    await flushPromises()
+    await wrapper.get('h2 > .nuvyn-fold-toggle').trigger('click')
+    expect(wrapper.get('p').attributes('hidden')).toBeDefined()
+    await wrapper.setProps({ raw: '## B\nnew body', sourcePath: 'inbox/b' })
+    await flushPromises()
+    expect(wrapper.get('h2 > .nuvyn-fold-toggle').attributes('aria-expanded')).toBe('true')
+    expect(wrapper.get('p').attributes('hidden')).toBeUndefined()
+    await wrapper.get('h2 > .nuvyn-fold-toggle').trigger('click')
+    await wrapper.setProps({ foldingEnabled: false })
+    await flushPromises()
+    expect(wrapper.findAll('.nuvyn-fold-toggle')).toHaveLength(0)
+    expect(wrapper.get('p').attributes('hidden')).toBeUndefined()
+    wrapper.unmount()
+  })
+
+  it('keeps code copying functional without adding code folding controls', async () => {
+    const wrapper = mountMarkdown('```ts\nconst a = 1\n```')
+    await wrapper.setProps({ foldingEnabled: true })
+    await flushPromises()
+    expect(wrapper.findAll('pre > .nuvyn-fold-toggle')).toHaveLength(0)
+    expect(wrapper.get('pre > code').attributes('hidden')).toBeUndefined()
+    await wrapper.get('.nuvyn-code-copy').trigger('click')
+    expect(copyTextToClipboard).toHaveBeenLastCalledWith('const a = 1\n')
+    wrapper.unmount()
+  })
+})

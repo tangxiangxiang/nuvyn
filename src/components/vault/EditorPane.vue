@@ -2,6 +2,7 @@
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import * as monaco from 'monaco-editor/esm/vs/editor/editor.api.js'
 import 'monaco-editor/esm/vs/basic-languages/markdown/markdown.contribution.js'
+import 'monaco-editor/esm/vs/editor/contrib/folding/browser/folding.js'
 import EditorWorker from 'monaco-editor/esm/vs/editor/editor.worker?worker'
 import { acquireMarkdownModel } from './monacoModels'
 import { registerEditorPasteHandler } from './editorPasteRegistry'
@@ -1066,6 +1067,8 @@ onMounted(() => {
     lineNumbersMinChars: 3,
     glyphMargin: false,
     folding: !isLargeDocument.value,
+    foldingStrategy: 'auto',
+    showFoldingControls: 'mouseover',
     fontFamily: preferences.fontFamily.value.trim() || 'var(--mono)',
     fontSize: preferences.fontSize.value,
     lineHeight: preferences.lineHeight.value,
@@ -1407,6 +1410,9 @@ async function revealAnchor(anchor: string, isCurrent: () => boolean = () => tru
     || targetModel.getValue() !== targetRaw
     || !isCurrent()
   ) return false
+  // Moving the selection lets Monaco's FoldingController reveal just the
+  // hidden ancestors of the destination (also used by Find/revealText).
+  targetEditor.setPosition({ lineNumber, column: 1 })
   targetEditor.revealLineInCenter(lineNumber)
   return true
 }

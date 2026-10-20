@@ -3300,6 +3300,7 @@ watch(isReadMode, async (reading) => {
         >
           <ReadingPane
             ref="readingPaneRef"
+            folding-enabled
             :raw="activeTab.raw"
             :resolver="wikiResolver"
             :source-path="activeTab.path"
