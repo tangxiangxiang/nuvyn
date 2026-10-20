@@ -50,6 +50,7 @@ export function enhanceMarkdownFolding(root: HTMLElement, initialLabels: Folding
   const byButton = new WeakMap<HTMLElement, Fold>()
   const hiddenBy = new Map<HTMLElement, Set<Fold>>()
   const originalHidden = new Map<HTMLElement, boolean>()
+  const addedClasses = new Map<HTMLElement, Set<string>>()
   const addedIds = new Map<HTMLElement, string>()
   const plans: Array<{ host: HTMLElement; targets: HTMLElement[]; label: string }> = []
   const headingLevel = (el: Element) => /^H[1-6]$/.test(el.tagName) ? Number(el.tagName[1]) : 0
@@ -57,6 +58,17 @@ export function enhanceMarkdownFolding(root: HTMLElement, initialLabels: Folding
   const summary = (el: HTMLElement) => el.textContent?.trim().replace(/\s+/g, ' ').slice(0, 80) ?? ''
   function plan(host: HTMLElement, targets: HTMLElement[], label: string) {
     if (targets.length) plans.push({ host, targets, label })
+  }
+
+  function setFoldingClass(element: HTMLElement, name: string, enabled: boolean) {
+    if (enabled && !element.classList.contains(name)) {
+      element.classList.add(name)
+      let added = addedClasses.get(element)
+      if (!added) addedClasses.set(element, added = new Set())
+      added.add(name)
+    } else if (!enabled && addedClasses.get(element)?.delete(name)) {
+      element.classList.remove(name)
+    }
   }
 
   // Sections are sibling ranges. A heading inside a Flex child, quote or
@@ -78,7 +90,6 @@ export function enhanceMarkdownFolding(root: HTMLElement, initialLabels: Folding
     fold.button.setAttribute('aria-expanded', String(!fold.collapsed))
     const label = fold.label
     fold.button.setAttribute('aria-label', `${fold.collapsed ? labels.expand : labels.collapse}: ${label}`)
-    fold.button.title = fold.button.getAttribute('aria-label')!
   }
   function setCollapsed(fold: Fold, collapsed: boolean) {
     fold.collapsed = collapsed
@@ -92,9 +103,9 @@ export function enhanceMarkdownFolding(root: HTMLElement, initialLabels: Folding
       if (collapsed) owners.add(fold)
       else owners.delete(fold)
       target.hidden = Boolean(originalHidden.get(target) || owners.size)
-      target.classList.toggle('nuvyn-fold-hidden', owners.size > 0)
+      setFoldingClass(target, 'nuvyn-fold-hidden', owners.size > 0)
     }
-    fold.host.classList.toggle('nuvyn-fold-collapsed', collapsed)
+    setFoldingClass(fold.host, 'nuvyn-fold-collapsed', collapsed)
     updateButton(fold)
   }
   for (const { host, targets, label } of plans) {
@@ -114,7 +125,7 @@ export function enhanceMarkdownFolding(root: HTMLElement, initialLabels: Folding
     const fold: Fold = { host, targets, label, button, collapsed: false }
     folds.push(fold)
     byButton.set(button, fold)
-    host.classList.add('nuvyn-fold-host')
+    setFoldingClass(host, 'nuvyn-fold-host', true)
     host.prepend(button)
     updateButton(fold)
   }
@@ -146,15 +157,15 @@ export function enhanceMarkdownFolding(root: HTMLElement, initialLabels: Folding
       root.removeEventListener('click', onClick)
       for (const fold of folds) {
         fold.button.remove()
-        fold.host.classList.remove('nuvyn-fold-host', 'nuvyn-fold-collapsed')
       }
       for (const [target, hidden] of originalHidden) {
         target.hidden = hidden
-        target.classList.remove('nuvyn-fold-hidden')
       }
+      for (const [element, classes] of addedClasses) element.classList.remove(...classes)
       for (const [target, id] of addedIds) if (target.id === id) target.removeAttribute('id')
       hiddenBy.clear()
       originalHidden.clear()
+      addedClasses.clear()
       addedIds.clear()
       folds.length = 0
       if (readers.get(root) === controller) readers.delete(root)

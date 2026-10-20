@@ -1257,11 +1257,11 @@ main.container.auth-page-shell {
 }
 .article .callout-content { color: inherit; }
 /* Trusted Reader-only controls. No wrappers around Markdown/Flex children. */
-.article .nuvyn-fold-hidden { display: none !important; }
+.article .nuvyn-fold-hidden[hidden] { display: none !important; }
 .article .nuvyn-fold-host { position: relative; }
 .article .nuvyn-fold-toggle {
   position: absolute;
-  inset-inline-start: -28px;
+  inset-inline-start: -22px;
   top: 0;
   display: inline-flex;
   align-items: center;

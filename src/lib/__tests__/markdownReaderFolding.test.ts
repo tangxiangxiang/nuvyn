@@ -158,4 +158,56 @@ describe('Reader structural folding', () => {
     expect(root.querySelector('p')!.id).toBe('')
     expect(root.querySelector('h2')!.id).toBe('section')
   })
+
+  it('preserves authored classes through nested folding and disposal', async () => {
+    const { root, folding } = await fixture([
+      '## Parent', '', '### Child', '',
+      '<div id="authored" class="nuvyn-fold-hidden custom">Visible authored content</div>', '',
+      '<div id="initially-hidden" class="custom">Initially hidden</div>', '',
+      '## After', 'last',
+    ].join('\n'))
+    const parent = root.querySelector('#parent')!
+    const child = root.querySelector('#child')!
+    const authored = root.querySelector<HTMLElement>('#authored')!
+    const hidden = root.querySelector<HTMLElement>('#initially-hidden')!
+    hidden.hidden = true
+    expect(authored.hidden).toBe(false)
+    expect(authored.classList.contains('nuvyn-fold-hidden')).toBe(true)
+    button(child).click()
+    button(parent).click()
+    button(parent).click()
+    expect(authored.hidden).toBe(true)
+    button(child).click()
+    expect(authored.hidden).toBe(false)
+    expect(authored.className).toBe('nuvyn-fold-hidden custom')
+    expect(hidden.hidden).toBe(true)
+    button(parent).click()
+    folding.dispose()
+    expect(authored.hidden).toBe(false)
+    expect(authored.className).toBe('nuvyn-fold-hidden custom')
+    expect(hidden.hidden).toBe(true)
+    expect(hidden.className).toBe('custom')
+    expect(root.querySelector('.nuvyn-fold-toggle')).toBeNull()
+    expect(child.id).toBe('child')
+  })
+
+  it('removes only controller-owned classes, states and IDs', async () => {
+    const { root, folding } = await fixture([
+      '<h2 id="authored-heading" class="custom nuvyn-fold-host nuvyn-fold-collapsed">Heading</h2>',
+      '', 'body',
+    ].join('\n'))
+    const heading = root.querySelector('h2')!
+    const body = root.querySelector('p')!
+    button(heading).click()
+    expect(body.classList.contains('nuvyn-fold-hidden')).toBe(true)
+    button(heading).click()
+    expect(heading.classList.contains('nuvyn-fold-collapsed')).toBe(true)
+    button(heading).click()
+    folding.dispose()
+    expect(heading.className).toBe('custom nuvyn-fold-host nuvyn-fold-collapsed')
+    expect(body.hidden).toBe(false)
+    expect(body.classList.contains('nuvyn-fold-hidden')).toBe(false)
+    expect(body.id).toBe('')
+    expect(heading.id).toBe('authored-heading')
+  })
 })

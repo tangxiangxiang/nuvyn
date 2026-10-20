@@ -69,15 +69,19 @@ useCodeGroupMount(articleEl)
 useBoardEmbedMount(articleEl, toRef(props, 'renderTheme'))
 
 watch(headings, (value) => emit('update:headings', value), { immediate: true })
-watch([ready, html, articleEl, locale, () => props.foldingEnabled, () => props.sourcePath], async ([isReady], _previous, onCleanup) => {
+watch([ready, html, articleEl, error, locale, () => props.foldingEnabled, () => props.sourcePath], async ([isReady], _previous, onCleanup) => {
   let cancelled = false
   onCleanup(() => { cancelled = true })
+  // Invalidate unavailable/disabled surfaces even while a render is pending.
+  // Keep a still-valid controller during ordinary asynchronous rendering.
+  if (!articleEl.value || error.value || !props.foldingEnabled
+    || (foldedRoot && foldedRoot !== articleEl.value)) clearFolding()
   // useMarkdownRender is asynchronous. articleEl is mounted once with an
   // empty html ref before the current Markdown source finishes rendering;
   // emitting that transient node made PDF export snapshot a blank article.
   if (!isReady) return
   await nextTick()
-  if (cancelled) return
+  if (cancelled || !ready.value) return
   for (const pre of articleEl.value?.querySelectorAll<HTMLElement>('pre.shiki[data-language]') ?? []) {
     const code = pre.querySelector<HTMLElement>(':scope > code')
     if (!code) continue

@@ -237,7 +237,8 @@ test('375px Reader restores Flex, Mermaid, MarkMap and Code Group without replac
 })
 
 test('HTML and PDF export use fresh expanded surfaces while Reader content remains folded', async ({ page, request }) => {
-  const path = await setup(page, request)
+  const exportSource = source.replace('Parent body', 'Parent body\n\n<div id="export-authored" class="nuvyn-fold-hidden custom">EXPORT_AUTHORED_CONTENT</div>')
+  const path = await setup(page, request, exportSource)
   try {
     await page.getByTestId('view-toggle').click()
     const article = page.locator('.reading-pane .article')
@@ -251,14 +252,20 @@ test('HTML and PDF export use fresh expanded surfaces while Reader content remai
     expect(html).toContain('CHILD_COMPLETE_CONTENT')
     expect(html).toContain('OTHER_COMPLETE_CONTENT')
     expect(html).not.toContain('nuvyn-fold-toggle')
-    expect(html).not.toContain('nuvyn-fold-hidden')
+    const offline = await page.context().newPage()
+    await offline.setContent(html)
+    await expect(offline.locator('#export-authored')).toBeVisible()
+    await expect(offline.locator('#export-authored')).toHaveClass('nuvyn-fold-hidden custom')
+    await expect(offline.locator('.nuvyn-fold-hidden[hidden]')).toHaveCount(0)
+    await offline.close()
     // Observe the actual independent PDF article before it is captured.
     await page.evaluate(() => {
       (window as any).__foldPdf = null
       const observer = new MutationObserver(() => {
         const surface = document.querySelector('.pdf-export-surface article')
         if (surface?.textContent?.includes('CHILD_COMPLETE_CONTENT')) {
-          (window as any).__foldPdf = { controls: surface.querySelectorAll('.nuvyn-fold-toggle').length, hidden: surface.querySelectorAll('[hidden]').length, text: surface.textContent }
+          const authored = surface.querySelector('#export-authored')!
+          ;(window as any).__foldPdf = { controls: surface.querySelectorAll('.nuvyn-fold-toggle').length, hidden: surface.querySelectorAll('[hidden]').length, text: surface.textContent, authoredDisplay: getComputedStyle(authored).display, authoredClass: authored.className }
           observer.disconnect()
         }
       })
@@ -269,7 +276,30 @@ test('HTML and PDF export use fresh expanded surfaces while Reader content remai
     await chooseDocumentExport(page, 'pdf')
     const bytes = await readFile((await (await pdfDownload).path())!)
     expect(bytes.subarray(0, 5).toString()).toBe('%PDF-')
-    expect(await page.evaluate(() => (window as any).__foldPdf)).toEqual({ controls: 0, hidden: 0, text: expect.stringContaining('CHILD_COMPLETE_CONTENT') })
+    expect(await page.evaluate(() => (window as any).__foldPdf)).toEqual({ controls: 0, hidden: 0, text: expect.stringContaining('CHILD_COMPLETE_CONTENT'), authoredDisplay: 'block', authoredClass: 'nuvyn-fold-hidden custom' })
     await expect(article.getByText('CHILD_COMPLETE_CONTENT', { exact: true })).toBeHidden()
+  } finally { await request.delete(`/api/posts/${path}`) }
+})
+
+test('authored folding class stays visible and survives section collapse and mode changes', async ({ page, request }) => {
+  const body = '# Title\n\n## Section\n\n<div class="nuvyn-fold-hidden custom" id="authored-fold-class">AUTHORED_VISIBLE_CONTENT</div>\n\n## After\nlast'
+  const path = await setup(page, request, body)
+  try {
+    await page.getByTestId('view-toggle').click()
+    const article = page.locator('.reading-pane .article')
+    const content = article.locator('#authored-fold-class')
+    const toggle = article.locator('#section > .nuvyn-fold-toggle')
+    await expect(content).toBeVisible()
+    await toggle.click()
+    await expect(content).toBeHidden()
+    await toggle.click()
+    await expect(content).toBeVisible()
+    await expect(content).toHaveClass('nuvyn-fold-hidden custom')
+    await toggle.click()
+    await page.getByTestId('view-toggle').click()
+    await expect(page.locator('.monaco-editor')).toBeVisible()
+    await page.getByTestId('view-toggle').click()
+    await expect(content).toBeVisible()
+    await expect(content).toHaveClass('nuvyn-fold-hidden custom')
   } finally { await request.delete(`/api/posts/${path}`) }
 })
