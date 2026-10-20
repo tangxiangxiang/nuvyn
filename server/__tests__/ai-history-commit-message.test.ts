@@ -147,6 +147,29 @@ describeHistoryIntegration('POST /api/ai/commit-message History boundary', () =>
     expect(commitMessageMock).not.toHaveBeenCalled()
   })
 
+  it('accepts a single-file diff larger than the previous per-file prompt limit', async () => {
+    await write('long-note.md', 'x'.repeat(12_000))
+
+    const response = await call({ paths: ['long-note.md'], language: 'en' })
+
+    expect(response.status).toBe(200)
+    const request = commitMessageMock.mock.calls[0]?.[0] as {
+      changes: Array<{ path: string; diff: string }>
+    }
+    expect(request.changes).toEqual([
+      { path: 'long-note.md', diff: `+${'x'.repeat(12_000)}`, changeKind: 'added' },
+    ])
+  })
+
+  it('still rejects a single-file diff above the expanded per-file prompt limit', async () => {
+    await write('large-diff.md', 'x'.repeat(16_000))
+
+    const response = await call({ paths: ['large-diff.md'], language: 'en' })
+
+    expect(response.status).toBe(413)
+    expect(commitMessageMock).not.toHaveBeenCalled()
+  })
+
   it('applies the same budget to a deleted historical blob', async () => {
     await write('large.md', 'x'.repeat(256 * 1024 + 1))
     await historyGit.addAndCommit(root, ['large.md'], 'large')
