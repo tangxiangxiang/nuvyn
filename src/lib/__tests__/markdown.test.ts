@@ -247,17 +247,17 @@ describe('markdown render()', () => {
     expect(doc.querySelector('.math-block')).not.toBeNull()
   })
 
-  it('preserves task-list labels and checkbox state after sanitization', async () => {
-    const html = await render('- [x] Done\n- [ ] Todo')
+  it('preserves readonly task-list labels, nested layout and all checkbox states after sanitization', async () => {
+    const html = await render('- [x] Done\n- [ ] Todo\n- [X] Uppercase done\n  - [ ] Nested todo\n- Ordinary item')
     const doc = new DOMParser().parseFromString(html, 'text/html')
     const items = Array.from(doc.querySelectorAll('li.task-list-item'))
     const inputs = Array.from(doc.querySelectorAll<HTMLInputElement>('input.task-list-item-checkbox'))
     const labels = Array.from(doc.querySelectorAll('label'))
 
     expect(doc.querySelector('ul.contains-task-list')).not.toBeNull()
-    expect(items).toHaveLength(2)
-    expect(inputs).toHaveLength(2)
-    expect(labels).toHaveLength(2)
+    expect(items).toHaveLength(4)
+    expect(inputs).toHaveLength(4)
+    expect(labels).toHaveLength(4)
     expect(inputs[0].type).toBe('checkbox')
     expect(inputs[0].checked).toBe(true)
     expect(inputs[0].hasAttribute('checked')).toBe(true)
@@ -265,7 +265,11 @@ describe('markdown render()', () => {
     expect(inputs[1].hasAttribute('checked')).toBe(false)
     expect(inputs[0].closest('label')).toBe(labels[0])
     expect(inputs[1].closest('label')).toBe(labels[1])
-    expect(items.every((item) => item.classList.contains('enabled'))).toBe(true)
+    expect(inputs.map((input) => input.checked)).toEqual([true, false, true, false])
+    expect(inputs.every((input) => input.disabled)).toBe(true)
+    expect(items.every((item) => !item.classList.contains('enabled'))).toBe(true)
+    expect(doc.querySelectorAll('ul ul.contains-task-list')).toHaveLength(1)
+    expect(Array.from(doc.querySelectorAll('li:not(.task-list-item)')).map((item) => item.textContent)).toEqual(['Ordinary item'])
   })
 
   it('leaves [^id] literal when no matching definition exists', async () => {

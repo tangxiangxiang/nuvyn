@@ -17,6 +17,33 @@ Nuvyn renders Markdown with `markdown-it` and supports the core syntax plus:
 - Mermaid and Markmap fences.
 - live Board embeds.
 
+Headings, lists, quotes and code fences are ordinary Markdown. Task lists,
+tables and footnotes are common extensions, though support varies between
+Markdown readers. Flex, Code Group, Snippet/Include, Board references and
+`@/` resource paths require Nuvyn's rendering support.
+
+Markdown export preserves the original source, including extension markers;
+it does not bundle referenced resources. HTML and PDF export provide static
+presentations. They do not preserve every Reader interaction, such as Code
+Group tabs, editable diagrams or live Board updates.
+
+## Task lists
+
+Write task states in Monaco's edit mode:
+
+```md
+- [ ] Not finished
+- [x] Finished
+- [X] Also finished
+  - [ ] Nested task
+```
+
+Reader checkboxes display these states and are disabled. Clicking a checkbox
+or its label, tapping it, or pressing Space cannot edit or save the task.
+Change `[ ]` to `[x]` (or back) in the Markdown source, then return to Reader
+to see the new state. Preview, HTML and PDF also display the source's task
+states without offering task editing.
+
 ## Structural folding
 
 In edit mode, use Monaco's native gutter chevrons to fold headings (H1–H6)
@@ -51,12 +78,9 @@ uses the existing Monaco view-state lifecycle independently of Reader state.
 PDF and HTML exports use separate, fully expanded render surfaces; Markdown
 export remains the original source.
 
-Boundaries: no extra disclosure is added to native Details or to Flex itself;
-Code Group keeps its tabs and individual code panels can fold. Sections inside
-a container stop at that container's boundary. A one-line item with no child
-content has no item disclosure. Monaco can represent only one fold at any
-start line, so an enclosing list/quote takes precedence over a first item or
-heading starting on that same line. Documents at or above 500,000 characters
+Boundaries: no extra disclosure is added to native Details or Flex;
+Code Group keeps its tabs without independent panel folding. Sections inside
+a container stop at that container's boundary. Documents at or above 500,000 characters
 retain the large-document protection and do not receive structural folding.
 
 ## Callouts
@@ -121,6 +145,223 @@ to untitled containers or other container types.
 Only these colon-fenced containers support aliases. GitHub-style Alerts above
 always display only their body; Flex layout syntax is unchanged.
 
+As a writing convention, use GitHub Alerts for short reminders, cautions and
+warnings. Use `info`/`tip`/`warning`/`danger` containers for a more substantial
+explanation, knowledge card or process description. Use Details for supporting
+material the reader should deliberately expand. These are suggestions, not
+additional syntax rules.
+
+## Code fences and metadata
+
+Start with a language identifier after the opening backticks:
+
+````md
+```java
+System.out.println("Hello");
+```
+````
+
+Supported languages receive syntax highlighting; unknown languages fall back
+to readable plain code. A code block's language label also copies its code
+when clicked or keyboard-activated.
+
+Line numbers are off by default. Use `:line-numbers` to start at 1,
+`:line-numbers=10` to start at 10, or `:no-line-numbers` to turn them off.
+The starting number must be an integer from 1 to 100,000. Modifiers may follow
+the language directly or be separated by spaces. A later valid line-number
+modifier takes precedence.
+
+Use `{2,4-5}` to highlight lines 2, 4 and 5. These are one-based positions in
+the code block, regardless of the displayed starting line number. Lists of
+positive line numbers and inclusive ranges are supported, with no spaces
+inside the braces. `[example.ts]` supplies a display label for a Code Group
+member; on an ordinary standalone fence it does not add a filename header.
+
+````md
+```ts:line-numbers=10 {2,4-5} [example.ts]
+const first = 1
+const second = 2
+const third = 3
+const fourth = 4
+const fifth = 5
+```
+
+```ts:no-line-numbers
+const answer = 42
+```
+````
+
+Diff and Focus use source annotations inside a code comment, rather than
+fence-info parameters. Use the comment syntax for the language being shown:
+
+````md
+```ts
+const oldValue = 1 // [!code --]
+const newValue = 2 // [!code ++]
+```
+
+```ts
+const context = "background"
+const important = 1 // [!code focus:2]
+const alsoImportant = 2
+```
+
+```ts
+const important = 1 // [!code highlight]
+```
+````
+
+`[!code ++]` and `[!code --]` mark added/deleted lines. `[!code focus]`
+focuses one line; `[!code focus:N]` focuses that line and the following lines,
+for a total of `N` (1–1,000). `[!code highlight]` highlights one line.
+Recognized notation markers are removed from the displayed code.
+
+For example, `{3-1}`, `{0}` and `:line-numbers=0` are invalid fence metadata;
+they do not erase the code or grant arbitrary CSS styling. `[!code highlight:2]`
+is not supported and stays literal code text. `focus` and `diff` are not
+fence-info switches. Special diagram fences must use exactly `mermaid` or
+`markmap`, without labels or other metadata, to mount a diagram.
+
+## Code Group
+
+Use `::: code-group`, followed only by labeled, closed code fences and blank
+lines, then a closing `:::`:
+
+````md
+::: code-group
+
+```java [Java]
+System.out.println("Hello");
+```
+
+```python [Python]
+print("Hello")
+```
+
+:::
+````
+
+One or more code blocks are accepted; every member needs a nonempty `[Label]`.
+Labels may contain spaces and Unicode text. Members accept the same valid
+language, line-number and line-highlight metadata described above, as well as
+the supported source annotations. Ordinary paragraphs and unlabeled code
+blocks cannot be members. The opening delimiter can have more than three
+colons; its closing delimiter must have at least as many, with no title or
+other parameters on either delimiter.
+
+Reader initially shows the first member. Click a tab or use the arrow keys,
+Home and End while a tab has focus to choose another member. Invalid or
+unclosed groups fall back to ordinary Markdown, retaining their code rather
+than silently dropping it. HTML and PDF export show every member in source
+order, each with its label, instead of exporting only the active tab.
+
+## Snippets
+
+A Snippet reads an existing UTF-8 text file and displays selected code. Put
+the directive on a line of its own, outside code fences, code spans and HTML
+blocks. For a Note at `guides/page.md`, this reads
+`guides/examples/hello.ts`:
+
+```md
+<<< ./examples/hello.ts
+```
+
+Choose source lines with a one-based, inclusive range. Multiple ranges are
+joined in the supplied order; `{3,}` means line 3 through the end:
+
+```md
+<<< ./examples/hello.ts{2-4}
+<<< ./examples/hello.ts{1,3-4}
+<<< ./examples/hello.ts{3,}
+```
+
+To select a named region, place matching markers in the referenced file:
+
+```ts
+// #region greeting
+export function greet() {
+  return "Hello"
+}
+// #endregion greeting
+```
+
+```md
+<<< ./examples/hello.ts#greeting
+```
+
+Region marker lines are excluded. Missing, unbalanced or mismatched regions
+fail the reference. Use either a region or line ranges for a clear selection;
+if both are supplied, region selection takes precedence.
+
+The language is inferred from the file extension. You can explicitly provide
+a language and line-number modifier inside braces, followed by an optional
+label after a space:
+
+```md
+<<< ./examples/hello.ts{2-4 typescript:line-numbers=10} [Greeting]
+```
+
+The label becomes code-fence metadata (a tab label when used in a valid Code
+Group), not a separate standalone title. Snippet modifiers support language
+and `:line-numbers`, `:line-numbers=N`, `:no-line-numbers`; they do not accept
+arbitrary fence metadata. For example, `{3-}` is not an open-ended range.
+
+Relative paths resolve from the document containing the directive, including
+an included document. `../` may walk up within the Vault; `@/examples/hello.ts`
+starts at the Vault root. Paths are Vault resources, not host filesystem paths
+or remote URLs. They cannot escape the Vault or use hidden path segments,
+spaces, query strings, backslashes or non-ASCII filenames. Each path segment
+starts with an ASCII letter/digit and otherwise uses letters, digits, `.`,
+`_` or `-`. Existing access controls also apply.
+
+Supported Snippet file extensions are:
+
+```text
+.ts .tsx .js .jsx .mjs .cjs .vue .css .scss .less .html .xml .json
+.yaml .yml .toml .sql .py .java .go .rs .rb .php .sh .bash .zsh .fish
+.c .h .cc .cpp .hh .hpp .cs .kt .kts .swift .dart .lua .r .txt
+```
+
+The selected code is limited to 256 KiB; the server also bounds the source
+file read. Missing, inaccessible, binary or invalid UTF-8 files, invalid
+ranges and other reference errors display `Unable to load Markdown resource.`
+in place of that reference. A Snippet follows the saved resource when the
+Note renders again; pasted code is instead a fixed copy in the Note's source.
+
+## Include
+
+Include expands another Markdown file as document content, rather than
+showing its source as a code block. Put this comment on its own line:
+
+```md
+<!--@include: ./parts/intro.md-->
+```
+
+For `guides/page.md`, the target is `guides/parts/intro.md`. An Include inside
+that file resolves its own relative references from `guides/parts/intro.md`.
+For a Vault-root reference, use:
+
+```md
+<!--@include: @/shared/intro.md-->
+```
+
+Only `.md` files are accepted. The same Vault path and access restrictions
+as Snippets apply. The included file contributes raw Markdown body content;
+it is not opened as a separate Note with a separate frontmatter-title pass.
+Prefer body-only fragments. Its headings share the containing document's
+anchor allocation; H2–H4 appear in the same TOC, and duplicate IDs are
+disambiguated. Relative Note links and local images retain the included file
+as their source location. They still use Nuvyn's Wiki-link resolution and
+authenticated image pipeline; Include does not copy or upload attachments.
+
+At most 8 nested Include levels are allowed. Cycles, missing/inaccessible
+files, invalid selections and size-limit failures show the same resource
+error placeholder at the failing reference. Each included selection is
+limited to 512 KiB, and expanded Markdown is limited to 2 MiB overall.
+Include has no language, line-number or label parameters. A directive written
+inside a code fence or code span stays literal, as does one inside a larger
+HTML block.
+
 ## Inline table of contents
 
 Nuvyn does not provide an inline `[[toc]]` Markdown extension. The document's
@@ -169,6 +410,32 @@ Use Wiki links or relative Markdown links:
 Known targets navigate inside the vault. Missing Wiki targets are styled as missing. Links inside inline or fenced code are not indexed.
 
 When renaming a file or folder, Nuvyn can update incoming Wiki and Markdown references. The Links panel shows both outgoing links and backlinks for the current note.
+
+### Explicit heading anchors
+
+Automatic anchors are derived from heading text: text is lowercased, ASCII
+letters/digits and Chinese characters are retained, and other runs become
+hyphens. Use an explicit ID when a stable link should survive wording changes:
+
+```md
+## 数据库事务 {#database-transaction}
+
+[Jump to this section](#database-transaction)
+[[inbox/java-guide#database-transaction]]
+```
+
+The `{#id}` suffix must be the final text in the heading, separated from the
+heading text by whitespace. The ID must start with an ASCII letter and be
+1–128 characters long; remaining characters may be ASCII letters/digits, `.`,
+`_`, `:`, or `-`. The suffix is removed from the displayed title. Duplicate
+IDs are disambiguated (for example, `database-transaction-2`); use unique IDs
+when authoring cross-note links.
+
+TOC entries and local/Wiki anchors use the final allocated ID. Invalid forms,
+such as `## Title {#123}` or `## Title{#stable}`, stay visible as heading text
+and use the automatic anchor. Escaping the opening brace also keeps the
+marker literal. Changing an existing explicit ID can break links from other
+Notes, so update incoming references when renaming anchors.
 
 ## Diagrams
 

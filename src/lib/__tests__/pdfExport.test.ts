@@ -411,6 +411,20 @@ describe('PDF export helpers', () => {
     }
   })
 
+  it('prepares readonly tasks for static painting without mutating Reader states or nesting', () => {
+    const article = document.createElement('article')
+    article.innerHTML = '<ul class="contains-task-list"><li><label><input class="task-list-item-checkbox" type="checkbox" disabled>Pending</label><ul><li><label><input class="task-list-item-checkbox" type="checkbox" disabled checked>Done</label></li></ul></li></ul>'
+    const before = article.innerHTML
+    const exported = document.createElement('article')
+    exported.innerHTML = preparePdfArticleHtml(article)
+    const inputs = Array.from(exported.querySelectorAll<HTMLInputElement>('input'))
+    expect(inputs.map((input) => input.checked)).toEqual([false, true])
+    expect(inputs.every((input) => !input.disabled && input.getAttribute('aria-disabled') === 'true' && input.tabIndex === -1)).toBe(true)
+    expect(exported.querySelectorAll('ul ul input')).toHaveLength(1)
+    expect(article.innerHTML).toBe(before)
+    expect(Array.from(article.querySelectorAll<HTMLInputElement>('input'), (input) => input.disabled)).toEqual([true, true])
+  })
+
   it('expands generated details only in the PDF clone and preserves reader state', () => {
     const article = document.createElement('article')
     article.className = 'article reading'

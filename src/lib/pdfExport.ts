@@ -937,6 +937,15 @@ function clonePdfNode(node: Node): Node {
 export function preparePdfArticleHtml(article: HTMLElement): string {
   const clone = clonePdfNode(article) as HTMLElement
 
+  // WebKit/html2canvas can stall on native disabled task inputs. This clone
+  // is only painted into a static PDF; keep its state but exclude it from
+  // keyboard interaction without changing Reader's disabled controls.
+  for (const input of clone.querySelectorAll<HTMLInputElement>('input.task-list-item-checkbox:disabled')) {
+    input.disabled = false
+    input.setAttribute('aria-disabled', 'true')
+    input.tabIndex = -1
+  }
+
   preparePdfCodeGroups(clone)
 
   // Details are interactive in the reader, but PDF is a complete document

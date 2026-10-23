@@ -392,8 +392,8 @@ async function getMd(): Promise<MarkdownIt> {
         return renderFence(str, info)
       },
     })
-      // 任务列表: - [ ] / - [x], 启用 disabled 属性让 checkbox 在 preview 中可点(只是视觉,不会真保存)
-      .use(taskLists, { enabled: true, label: true, lineNumber: false })
+      // Task states come from Markdown; Reader/preview do not write them back.
+      .use(taskLists, { enabled: false, label: true, lineNumber: false })
       // 标题锚点:给 h2/h3/h4 加 id,锚点样式由 .article 下的样式处理
       .use(anchor, {
         slugifyWithState: slugifyHeadingWithState,
