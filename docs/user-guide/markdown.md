@@ -44,6 +44,15 @@ Snippet and Include paths must refer to real files in your Vault; inserting
 the template does not create those files. See their syntax sections below
 for details and resource restrictions.
 
+## Syntax hints
+
+Monaco provides non-blocking hints for some Nuvyn extension syntax: Flex
+parameters, closed Code Group structures, and Snippet / Include directive
+formatting. Hints never change your Markdown automatically. Incomplete or
+ambiguous syntax may be left unchecked; no hint does not mean the entire
+document has been validated. Missing resources, permissions and other loading
+failures are runtime errors, not these editor syntax hints.
+
 ## Task lists
 
 Write task states in Monaco's edit mode:

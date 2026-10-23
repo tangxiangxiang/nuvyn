@@ -11,6 +11,7 @@ import { resolveWikiTarget } from '../../../shared/linkResolve'
 import { getPost } from '../../lib/api'
 import { parseDoc } from '../../lib/frontmatter'
 import { findMarkdownHeadingSourceLine } from '../../composables/vault/useMarkdownRender'
+import { markdownSyntaxDiagnostics, MARKDOWN_SYNTAX_LIMIT } from '../../lib/markdownSyntaxDiagnostics'
 import { useEditorPreferences } from '../../composables/vault/useEditorPreferences'
 import { useI18n } from '../../composables/useI18n'
 import { useToast } from '../../composables/useToast'
@@ -826,8 +827,35 @@ watch(() => [props.zenModeAvailable, props.zenMode], syncZenModeActions, { flush
 
 rebuildLinkIndex()
 
+let syntaxSource: string | null = null
+
+function clearSyntaxMarkers() {
+  if (model) monaco.editor.setModelMarkers(model, 'nuvyn-syntax', [])
+  syntaxSource = null
+}
+
+function refreshSyntaxMarkers() {
+  if (!model || composing) return
+  if (model.getValueLength() >= MARKDOWN_SYNTAX_LIMIT) {
+    clearSyntaxMarkers()
+    return
+  }
+  const source = model.getValue()
+  if (source === syntaxSource) return
+  monaco.editor.setModelMarkers(model, 'nuvyn-syntax', markdownSyntaxDiagnostics(source).map((item) => ({
+    severity: monaco.MarkerSeverity.Hint,
+    message: item.message,
+    startLineNumber: item.line,
+    endLineNumber: item.line,
+    startColumn: item.startColumn,
+    endColumn: item.endColumn,
+  })))
+  syntaxSource = source
+}
+
 function refreshMarkdownDecorations() {
   if (!editor || !model) return
+  refreshSyntaxMarkers()
   if (isLargeDocument.value) {
     decorationIds = editor.deltaDecorations(decorationIds, [])
     monaco.editor.setModelMarkers(model, 'nuvyn-writing', [])
@@ -1131,6 +1159,7 @@ onMounted(() => {
       Number.POSITIVE_INFINITY,
     )
     fenceStateCache.invalidateFrom(Number.isFinite(firstAffectedLine) ? firstAffectedLine : 1)
+    if (model && model.getValueLength() >= MARKDOWN_SYNTAX_LIMIT) clearSyntaxMarkers()
     scheduleMarkdownDecorations()
     if (suppressChange || composing || !model) return
     emit('update:modelValue', model.getValue())
@@ -1187,6 +1216,7 @@ onMounted(() => {
   editor.onDidCompositionStart(() => { composing = true })
   editor.onDidCompositionEnd(() => {
     composing = false
+    scheduleMarkdownDecorations()
     resetFocusWidthChord()
     if (!suppressChange && model) emit('update:modelValue', model.getValue())
   })
@@ -1305,6 +1335,8 @@ watch(() => props.allowImageInsertion, (allowed) => {
 
 watch(() => props.path, (nextPath, previousPath) => {
   if (!editor) return
+  clearSyntaxMarkers()
+  if (decorationTimer) clearTimeout(decorationTimer)
   if (showAttachmentPicker.value) cancelAttachmentPicker()
   imageEditorGeneration += 1
   saveViewState(previousPath)
@@ -1345,6 +1377,7 @@ watch(() => props.linkTargets, () => {
 
 onBeforeUnmount(() => {
   mounted = false
+  clearSyntaxMarkers()
   imageEditorGeneration += 1
   if (filePickerIntent) releaseImageInsertionIntent(filePickerIntent)
   filePickerIntent = null

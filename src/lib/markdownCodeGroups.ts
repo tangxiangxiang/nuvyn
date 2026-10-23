@@ -83,7 +83,7 @@ function parseCodeGroupOpening(state: StateBlock, line: number): CodeGroupOpenin
   return { markerLength }
 }
 
-function readCodeGroupMembers(
+export function readCodeGroupMembers(
   state: StateBlock,
   bodyStart: number,
   bodyEnd: number,

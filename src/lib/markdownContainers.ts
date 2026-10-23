@@ -70,7 +70,10 @@ const FLEX_CONTENT = [
   'start', 'end', 'flex-start', 'flex-end', 'center',
   'space-between', 'space-around', 'space-evenly', ...FLEX_SAFE_POSITIONS,
 ] as const
-const FLEX_GAPS = [0, 4, 8, 12, 16, 24, 32] as const
+export const FLEX_GAPS = [0, 4, 8, 12, 16, 24, 32] as const
+// Optional source-analysis budget. Reader parses do not provide it, so their
+// delimiter matching and fallback behavior remain unchanged.
+export const MARKDOWN_BLOCK_SCAN_BUDGET = Symbol('markdownBlockScanBudget')
 const FLEX_BASES = ['auto', '0', '25%', '33.33%', '50%', '66.67%', '75%', '100%'] as const
 const FLEX_SELF = [
   'auto', 'stretch', ...FLEX_SELF_POSITIONS, 'baseline', ...FLEX_SAFE_SELF_POSITIONS,
@@ -126,7 +129,7 @@ function parseAttributes(source: string): Map<string, string> | null {
   return attributes
 }
 
-function parseFlexOptions(source: string): FlexContainerOptions | null {
+export function parseFlexOptions(source: string): FlexContainerOptions | null {
   const attributes = parseAttributes(source)
   if (!attributes) return null
   const allowed = new Set([
@@ -487,8 +490,10 @@ export function findClosingLine(
   nestedMode: 'shorter' | 'nested' = 'shorter',
 ): number {
   let inParagraph = false
+  const budget = state.env?.[MARKDOWN_BLOCK_SCAN_BUDGET] as { remaining: number } | undefined
 
   for (let line = bodyStart; line < endLine; line += 1) {
+    if (budget && budget.remaining-- <= 0) throw new Error('Markdown source scan budget exceeded')
     // The current container close is structural syntax owned by this scan. It
     // remains eligible even when the preceding body line is paragraph text.
     const closing = parseClosing(state, line)

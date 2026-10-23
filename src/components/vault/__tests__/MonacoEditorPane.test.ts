@@ -22,6 +22,7 @@ const mocks = vi.hoisted(() => {
     uri: { toString: () => 'nuvyn://vault/test' },
     value: '',
     getValue: vi.fn(() => model.value),
+    getValueLength: vi.fn(() => model.value.length),
     setValue: vi.fn((value: string) => { model.value = value; changeListeners.forEach((fn) => fn()) }),
     getValueInRange: vi.fn((range?: { startLineNumber: number; startColumn: number; endLineNumber: number; endColumn: number }) => {
       if (!range || range.startLineNumber !== 1 || range.endLineNumber !== 1) return model.value
@@ -115,6 +116,7 @@ const mocks = vi.hoisted(() => {
     editor,
     defineTheme: vi.fn(),
     setTheme: vi.fn(),
+    setModelMarkers: vi.fn<(model: unknown, owner: string, markers: unknown[]) => void>(),
     completionDispose: vi.fn(),
     hoverDispose: vi.fn(),
     getPost: vi.fn(),
@@ -142,7 +144,7 @@ vi.mock('monaco-editor/esm/vs/editor/editor.api.js', () => ({
       }
       return mocks.editor
     }),
-    setModelMarkers: vi.fn(),
+    setModelMarkers: mocks.setModelMarkers,
     TrackedRangeStickiness: { NeverGrowsWhenTypingAtEdges: 1 },
   },
   languages: {
@@ -214,6 +216,7 @@ import AttachmentPickerDialog from '../AttachmentPickerDialog.vue'
 import { resetMarkdownModelsForTesting } from '../monacoModels'
 import { parseDoc } from '../../../lib/frontmatter'
 import { useToast } from '../../../composables/useToast'
+import { useEditorPreferences } from '../../../composables/vault/useEditorPreferences'
 
 describe('Monaco EditorPane', () => {
   function registeredActions() {
@@ -1404,5 +1407,103 @@ describe('Monaco EditorPane', () => {
     const create = (await import('monaco-editor/esm/vs/editor/editor.api.js')).editor.create as any
     expect(create.mock.calls.at(-1)?.[1]).toMatchObject({ folding: false })
     wrapper.unmount()
+  })
+
+  const invalidFlex = '::: flex gap=7\n\nContent\n\n:::'
+  const syntaxCalls = () => mocks.setModelMarkers.mock.calls.filter((call) => call[1] === 'nuvyn-syntax')
+  const syntaxMarkers = () => syntaxCalls().at(-1)?.[2]
+
+  it('sets accurate independent syntax hints without edits or model update events', () => {
+    const wrapper = mount(EditorPane, { props: { modelValue: invalidFlex, path: 'inbox/syntax' } })
+    expect(syntaxMarkers()).toEqual([{
+      severity: 1, message: 'Flex 的 gap=7 不受支持。允许值：0、4、8、12、16、24、32。',
+      startLineNumber: 1, endLineNumber: 1, startColumn: 10, endColumn: 15,
+    }])
+    expect(mocks.setModelMarkers.mock.calls.some((call) => call[1] === 'nuvyn-writing')).toBe(true)
+    expect(wrapper.emitted('update:modelValue')).toBeUndefined()
+    expect(mocks.editor.executeEdits).not.toHaveBeenCalled()
+    wrapper.unmount()
+    expect(syntaxMarkers()).toEqual([])
+  })
+
+  it('debounces content changes and clears hints after a valid edit or external update', async () => {
+    vi.useFakeTimers()
+    const wrapper = mount(EditorPane, { props: { modelValue: invalidFlex, path: 'inbox/syntax-update' } })
+    const initialCount = syntaxCalls().length
+    mocks.model.setValue(invalidFlex.replace('gap=7', 'gap=16'))
+    await wrapper.setProps({ modelValue: invalidFlex.replace('gap=7', 'gap=16') })
+    expect(syntaxCalls()).toHaveLength(initialCount)
+    await vi.advanceTimersByTimeAsync(120)
+    expect(syntaxMarkers()).toEqual([])
+    const emitted = wrapper.emitted('update:modelValue')?.length
+    await wrapper.setProps({ modelValue: invalidFlex })
+    await vi.advanceTimersByTimeAsync(120)
+    expect(syntaxMarkers()).toHaveLength(1)
+    expect(wrapper.emitted('update:modelValue')).toHaveLength(emitted!)
+    wrapper.unmount()
+  })
+
+  it('clears the previous model and cancels pending refresh on a document switch', async () => {
+    vi.useFakeTimers()
+    const wrapper = mount(EditorPane, { props: { modelValue: invalidFlex, path: 'inbox/syntax-a' } })
+    mocks.model.setValue(invalidFlex)
+    const count = syntaxCalls().length
+    await wrapper.setProps({ path: 'inbox/syntax-b', modelValue: 'Valid document' })
+    expect(syntaxCalls().slice(count).map((call) => call[2])).toEqual([[], []])
+    await vi.advanceTimersByTimeAsync(120)
+    expect(syntaxMarkers()).toEqual([])
+    wrapper.unmount()
+  })
+
+  it('keeps syntax independent of typography and does not reparse on scroll', async () => {
+    vi.useFakeTimers()
+    const preferences = useEditorPreferences()
+    const previous = preferences.typography.value
+    const wrapper = mount(EditorPane, { props: { modelValue: invalidFlex, path: 'inbox/syntax-preference' } })
+    const count = syntaxCalls().length
+    try {
+      preferences.typography.value = false
+      await nextTick()
+      expect(syntaxMarkers()).toHaveLength(1)
+      expect(mocks.setModelMarkers.mock.calls.filter((call) => call[1] === 'nuvyn-writing').at(-1)?.[2]).toEqual([])
+      mocks.scrollListeners.forEach((listener) => listener({ scrollTopChanged: true, scrollLeftChanged: false }))
+      await vi.advanceTimersByTimeAsync(120)
+      expect(syntaxCalls()).toHaveLength(count)
+    } finally {
+      wrapper.unmount()
+      preferences.typography.value = previous
+    }
+  })
+
+  it('clears oversized models immediately and resumes on shrink', async () => {
+    vi.useFakeTimers()
+    const wrapper = mount(EditorPane, { props: { modelValue: invalidFlex, path: 'inbox/syntax-size' } })
+    mocks.model.setValue(`${invalidFlex}\n${'x'.repeat(500_000)}`)
+    expect(syntaxMarkers()).toEqual([])
+    await vi.advanceTimersByTimeAsync(120)
+    expect(syntaxMarkers()).toEqual([])
+    mocks.model.setValue(invalidFlex)
+    await vi.advanceTimersByTimeAsync(120)
+    expect(syntaxMarkers()).toHaveLength(1)
+    wrapper.unmount()
+  })
+
+  it('waits for composition to end and leaves no diagnostic timer on unmount', async () => {
+    vi.useFakeTimers()
+    const wrapper = mount(EditorPane, { props: { modelValue: 'Valid', path: 'inbox/syntax-ime' } })
+    mocks.compositionStartListeners.forEach((listener) => listener())
+    mocks.model.setValue(invalidFlex)
+    await vi.advanceTimersByTimeAsync(120)
+    expect(syntaxMarkers()).toEqual([])
+    expect(wrapper.emitted('update:modelValue')).toBeUndefined()
+    mocks.compositionEndListeners.forEach((listener) => listener())
+    await vi.advanceTimersByTimeAsync(120)
+    expect(syntaxMarkers()).toHaveLength(1)
+    mocks.model.setValue(invalidFlex)
+    wrapper.unmount()
+    const count = syntaxCalls().length
+    await vi.advanceTimersByTimeAsync(500)
+    expect(syntaxCalls()).toHaveLength(count)
+    expect(syntaxMarkers()).toEqual([])
   })
 })
