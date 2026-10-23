@@ -78,6 +78,11 @@ export const MARKDOWN_SLASH_COMMANDS: readonly MarkdownSlashCommand[] = [
     // The inserted colon is handled by the same Markdown completion provider.
     command: { id: 'editor.action.triggerSuggest', title: 'Trigger Emoji completion' },
   },
+  { label: 'flex', detail: 'Flex 布局', insertText: '::: flex direction=row gap=16\n\n${1:First item}\n\n${2:Second item}\n\n:::\n$0' },
+  { label: 'code-group', detail: '代码组', insertText: '::: code-group\n\n```java [Java]\n${1:System.out.println("Hello");}\n```\n\n```python [Python]\n${2:print("Hello")}\n```\n\n:::\n$0' },
+  { label: 'details', detail: '折叠详情', insertText: '::: details ${1:Read more}\n\n${2:Details content}\n\n:::\n$0' },
+  { label: 'snippet', detail: '引用代码文件', insertText: '<<< ${1:./example.ts}\n$0' },
+  { label: 'include', detail: '引入 Markdown', insertText: '<!--@include: ${1:./part.md}-->\n$0' },
 ] as const
 
 export interface EmojiCompletionContext {

@@ -921,6 +921,8 @@ const completionProvider: monaco.languages.CompletionItemProvider = {
         suggestions: filterMarkdownSlashCommands(slash[1]).map((command) => ({
           label: command.label,
           detail: command.detail,
+          // The replacement range includes '/', so Monaco must filter on it too.
+          filterText: `/${command.label} /${command.detail}`,
           kind: monaco.languages.CompletionItemKind.Snippet,
           insertText: command.insertText,
           insertTextRules: monaco.languages.CompletionItemInsertTextRule.InsertAsSnippet,
@@ -1227,6 +1229,7 @@ onMounted(() => {
       id,
       label,
       keybindings: [keybinding],
+      keybindingContext: '!inSnippetMode && !suggestWidgetVisible',
       run(instance) {
         if (!model) return
         const selection = instance.getSelection()

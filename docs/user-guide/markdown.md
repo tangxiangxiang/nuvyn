@@ -27,6 +27,23 @@ it does not bundle referenced resources. HTML and PDF export provide static
 presentations. They do not preserve every Reader interaction, such as Code
 Group tabs, editable diagrams or live Board updates.
 
+## Slash Commands
+
+At the start of a blank line in Monaco edit mode, type `/` and select a template
+from the completion menu (existing indentation is kept).
+Search by its English name or Chinese description. Use Tab / Shift+Tab to move
+between placeholders, then Tab past the last placeholder to finish.
+
+- `/flex`: two independent content blocks in a row, with the default mobile stacking.
+- `/code-group`: Java and Python code blocks with labeled tabs.
+- `/details`: a closed details block with an editable title and body.
+- `/snippet`: `<<< ./example.ts` with an editable file path.
+- `/include`: `<!--@include: ./part.md-->` with an editable Markdown path.
+
+Snippet and Include paths must refer to real files in your Vault; inserting
+the template does not create those files. See their syntax sections below
+for details and resource restrictions.
+
 ## Task lists
 
 Write task states in Monaco's edit mode:

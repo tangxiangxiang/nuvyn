@@ -825,6 +825,36 @@ describe('Monaco EditorPane', () => {
     wrapper.unmount()
   })
 
+  it.each(['flex', 'code-group', 'details', 'snippet', 'include'])('offers /%s with a range replacing the entire slash, not indentation', async (label) => {
+    const value = `  /${label}`
+    const wrapper = mount(EditorPane, { props: { modelValue: value, path: `inbox/slash-${label}` } })
+    const provider = mocks.completionProviders.at(-1)
+    const count = mocks.completionProviders.length
+    const result = await provider.provideCompletionItems(mocks.model, { lineNumber: 1, column: value.length + 1 })
+    expect(result.suggestions).toHaveLength(1)
+    const item = result.suggestions[0]
+    expect(item).toMatchObject({
+      label, kind: 3, insertTextRules: 4,
+      range: { startLineNumber: 1, startColumn: 3, endLineNumber: 1, endColumn: value.length + 1 },
+    })
+    expect(item.insertText).toContain('${1:')
+    expect(item.filterText).toBe(`/${label} /${item.detail}`)
+    expect(item.insertText.endsWith('\n$0')).toBe(true)
+    await provider.provideCompletionItems(mocks.model, { lineNumber: 1, column: value.length + 1 })
+    expect(mocks.completionProviders).toHaveLength(count)
+    wrapper.unmount()
+  })
+
+  it('leaves Tab and Shift+Tab to Monaco while a snippet or suggestion is active', () => {
+    const wrapper = mount(EditorPane, { props: { modelValue: '', path: 'inbox/snippet-tabs' } })
+    for (const id of ['nuvyn.markdown-indent', 'nuvyn.markdown-outdent']) {
+      expect(mocks.editor.addAction).toHaveBeenCalledWith(expect.objectContaining({
+        id, keybindingContext: '!inSnippetMode && !suggestWidgetVisible',
+      }))
+    }
+    wrapper.unmount()
+  })
+
   it('offers ranked Emoji snippets from the existing Markdown provider', async () => {
     const wrapper = mount(EditorPane, { props: { modelValue: ':smi', path: 'inbox/emoji' } })
     const provider = mocks.completionProviders.at(-1)
