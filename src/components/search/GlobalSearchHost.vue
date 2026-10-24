@@ -56,7 +56,7 @@ function commit(result: SearchResult): void {
       } else {
         clearSearchReveal()
       }
-      void router.push({ name: 'vault-doc', params: { pathMatch: path.split('/') } })
+      void router.push({ name: 'vault-doc', params: { pathMatch: path.split('/') }, state: { nuvynTabMode: 'preview' } })
     }
     return
   }

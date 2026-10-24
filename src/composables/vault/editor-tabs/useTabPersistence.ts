@@ -42,10 +42,11 @@ export function readPersistedTabs(vaultId: string): PersistedTabs | null {
 
 function writePersistedTabs(tabs: Tab[], active: string | null, vaultId: string) {
   try {
+    const pinned = tabs.filter((tab) => tab.mode !== 'preview')
     const data: PersistedTabs = {
       v: 1,
-      paths: tabs.map((t) => t.path).slice(0, TAB_PERSIST_MAX),
-      active,
+      paths: pinned.map((t) => t.path).slice(0, TAB_PERSIST_MAX),
+      active: pinned.some((tab) => tab.path === active) ? active : null,
     }
     writeStorageKey(storageKey(vaultId), JSON.stringify(data))
   } catch { /* persistence is best-effort */ }

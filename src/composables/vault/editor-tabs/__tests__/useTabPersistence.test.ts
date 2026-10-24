@@ -24,6 +24,20 @@ describe('useTabPersistence', () => {
     expect(localStorage.getItem('nuvyn:tabs:v1')).toBeNull()
   })
 
+  it('keeps v1 compatibility and persists only pinned/legacy tabs', () => {
+    localStorage.setItem('nuvyn:tabs:v1:test-vault', JSON.stringify({ v: 1, paths: ['old-a', 'old-b'], active: 'old-b' }))
+    expect(readPersistedTabs('test-vault')).toEqual({ v: 1, paths: ['old-a', 'old-b'], active: 'old-b' })
+    const tabs = ref([makeEmptyTab('old-a'), { ...makeEmptyTab('preview'), mode: 'preview' as const }, makeEmptyTab('old-b')])
+    const active = ref<string | null>('preview')
+    const persistence = useTabPersistence(tabs, active, 'test-vault')
+    persistence.persist()
+    expect(readPersistedTabs('test-vault')).toEqual({ v: 1, paths: ['old-a', 'old-b'], active: null })
+    tabs.value[1]!.mode = 'pinned'
+    persistence.persist()
+    expect(readPersistedTabs('test-vault')).toEqual({ v: 1, paths: ['old-a', 'preview', 'old-b'], active: 'preview' })
+    persistence.dispose()
+  })
+
   it('flushes on dispose and prevents a trailing debounce from overwriting a newer owner', async () => {
     const tabs = ref([makeEmptyTab('a')])
     const activePath = ref<string | null>('a')

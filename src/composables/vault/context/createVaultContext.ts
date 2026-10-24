@@ -16,6 +16,7 @@ export function createVaultContext(options: {
   activePath: Ref<string | null>
   activeTab: ComputedRef<Tab | null>
   openPost: (path: string) => Promise<void>
+  openPreviewPost?: (path: string) => Promise<void>
   /**
    * Synchronous capture of the active workspace tab's AI context
    * (Edit-10.2). Delegated to without caching: every `ai.capture()`
@@ -43,7 +44,7 @@ export function createVaultContext(options: {
           ? requestLinkNavigation({ path, anchor })
           : null
         try {
-          await options.openPost(path)
+          await (options.openPreviewPost ?? options.openPost)(path)
         } finally {
           if (intent && options.activePath.value !== path) consumeLinkNavigation(intent.id)
         }

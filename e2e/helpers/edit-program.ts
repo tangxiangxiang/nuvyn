@@ -295,7 +295,11 @@ export async function openDoc(page: Page, slug: string) {
     await page.locator(`[data-tree-key="folder:${folder}"]`).click()
     await expect(row).toBeVisible({ timeout: 5000 })
   }
-  await row.click()
+  // This helper opens a retained working document. Browsing-only tests use a
+  // single row-line click explicitly; Note now reserves that gesture for preview.
+  const line = row.locator(':scope > .row-line')
+  if (slug.startsWith('diary/')) await line.click()
+  else await line.dblclick()
   await page.locator(`[data-tab-id="${slug}"]`).waitFor({ state: 'visible' })
   await page.locator('.editor-pane .monaco-editor .view-lines').first().waitFor({ state: 'visible' })
 }

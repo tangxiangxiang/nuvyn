@@ -414,7 +414,7 @@ const authoritativeVaultId = requireVaultId()
 let lifecycleCreateFile: DocumentLifecycle['createFile'] | null = null
 const {
   tree, treeLoading, treeError, vaultId, posts, tabs, activePath, activeTab, activeSize,
-  refresh, applyPostSummary, openPost: openEditorPost, closeTab: closeEditorTab,
+  refresh, applyPostSummary, openPost: openEditorPost, closeTab: closeEditorTab, pinTab: pinEditorTab,
   confirmCloseMany: confirmCloseEditorTabs,
   closeManyConfirmed: closeManyEditorTabsConfirmed,
   selectTab: selectEditorTab, onEditorChange, applyRecoveredDraft, doSaveNow, resolveExternal,
@@ -445,6 +445,9 @@ const {
   authorizeDocumentPath: authorizeDiaryDocumentPath,
   isDiaryAccessReady: () => diaryAccess.isUnlocked.value,
   singleManagedDiaryDocument: true,
+  onPreviewReplaced: (from, to) => {
+    workspaceTabOrder.value = migrateWorkspaceTabIds(workspaceTabOrder.value, [{ from, to }])
+  },
 })
 
 watch([activeScope, activePath], ([scope, path]) => {
@@ -675,6 +678,7 @@ const vaultContext = createVaultContext({
   activePath,
   activeTab,
   openPost,
+  openPreviewPost: (path) => openPost(path, { mode: 'preview' }),
   captureAiContext: () => captureWorkspaceAiContext(),
   lifecycle: documentLifecycle,
 })
@@ -1319,6 +1323,7 @@ const naturalWorkspaceTabs = computed<WorkspaceTab[]>(() => [
     title: tab.title || tab.path,
     save: deriveDocumentSavePresentation(tab),
     kind: 'document' as const,
+    mode: tab.mode,
     documentPath: tab.path,
   })),
   ...historyComparisons.comparisons.value.map((comparison) => ({
@@ -1429,7 +1434,7 @@ async function reorderWorkspaceTabs(request: WorkspaceTabReorderRequest): Promis
   }
 }
 
-async function openPost(path: string, options: { refresh?: boolean } = {}): Promise<void> {
+async function openPost(path: string, options: import('../components/vault/tabs').OpenPostOptions = {}): Promise<void> {
   if (linkNavigationIntent.value && linkNavigationIntent.value.path !== path) clearLinkNavigation()
   recoveryTabs.deactivate()
   historyComparisons.deactivate()
@@ -1493,7 +1498,7 @@ function closeMobileDiaryNavigation(): void {
   void nextTick(() => vaultRef.value?.focus())
 }
 
-async function openFileTreeDocument(path: string): Promise<void> {
+async function openFileTreeDocument(path: string, mode?: import('../components/vault/tabs').TabMode): Promise<void> {
   if (isDiaryScope.value && classifyDiaryPath(path) === 'managed') {
     const activeDocument = activeTab.value
     if (
@@ -1522,7 +1527,7 @@ async function openFileTreeDocument(path: string): Promise<void> {
     if (activePath.value === path) closeMobileDiaryNavigation()
     return
   }
-  await openPost(path)
+  await openPost(path, { mode: mode ?? 'pinned', reusePreview: mode === 'pinned' })
 }
 
 async function selectWorkspaceTab(id: string, focusViewer = true): Promise<void> {
@@ -3148,7 +3153,7 @@ watch(isReadMode, async (reading) => {
       :selected-tag="selectedTag"
       :path="activePath"
       @select="selectTag"
-      @open="openPost"
+      @open="(path: string) => openPost(path, { mode: 'preview' })"
     />
     <HistoryPanel
       v-else-if="historyPanelVisible"
@@ -3204,6 +3209,7 @@ watch(isReadMode, async (reading) => {
         :tabs="workspaceTabs"
         :active-path="activeWorkspaceTabId"
         @select="selectWorkspaceTab"
+        @pin="pinEditorTab"
         @close="closeWorkspaceTab"
         @close-many="closeManyWorkspaceTabs"
         @copy-path="copyWorkspaceTabPath"

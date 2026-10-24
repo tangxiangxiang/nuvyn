@@ -2,7 +2,8 @@
 // composables under editor-tabs/; this module preserves the VaultView API and
 // wires lifecycle, persistence restore, command-palette creation, and cleanup.
 
-import { onBeforeUnmount, onMounted } from 'vue'
+import { onBeforeUnmount, onMounted, watch } from 'vue'
+import type { OpenPostOptions } from '../../components/vault/tabs'
 import { createPost, type PostSummary } from '../../lib/api'
 import { classifyDiaryPath } from '../../../shared/diaryProtocol'
 import { useToast } from '../useToast'
@@ -14,7 +15,7 @@ import { useEditorShortcuts } from './editor-tabs/useEditorShortcuts'
 import { useRouteSync } from './editor-tabs/useRouteSync'
 import { useExternalFileChanges } from './editor-tabs/useExternalFileChanges'
 import { useDiskFileChanges } from './editor-tabs/useDiskFileChanges'
-import { requiresCloseConfirmation, useTabWorkspace } from './editor-tabs/useTabWorkspace'
+import { previewHasUnsafeState, requiresCloseConfirmation, useTabWorkspace } from './editor-tabs/useTabWorkspace'
 import { useDocumentSave } from './editor-tabs/useDocumentSave'
 import type { VaultFileChanges } from './context/fileChanges'
 import {
@@ -61,6 +62,7 @@ export function useEditorTabs(opts: {
   onDiaryAccessCancelled?: (path: string) => void
   /** Keep only one canonical managed Diary document open in this workspace. */
   singleManagedDiaryDocument?: boolean
+  onPreviewReplaced?: (from: string, to: string) => void
 }) {
   const toast = useToast()
   const { confirm } = useConfirm()
@@ -93,10 +95,45 @@ export function useEditorTabs(opts: {
     renameOpenDocuments,
     removeOpenDocuments,
     setPersist,
+    pinTab,
+    dispose: disposeTabWorkspace,
   } = useTabWorkspace({
     confirm,
     toastError: toast.error,
     toastInfo: toast.info,
+    onPreviewReplaced: opts.onPreviewReplaced,
+    async preparePreviewClose(tab) {
+      const path = tab.path
+      const release = opts.mutationLock?.acquire(toMutationPaths([path])) ?? null
+      if (opts.mutationLock && !release) return null
+      let barrier: Awaited<ReturnType<typeof prepareDocumentClose>> | null = null
+      try {
+        barrier = await prepareDocumentClose([path])
+        if (previewHasUnsafeState(tab) || draftPersistence.hasPendingWrites()) {
+          barrier.rollback()
+          release?.()
+          return null
+        }
+        // Never delete a recovery family merely to make room for a preview.
+        // Loading placeholders have no local body; loaded documents must prove
+        // that no primary/conflict/unsupported family is awaiting resolution.
+        if (!tab.loading && !tab.loadError) {
+          if (!tab.documentId || (await draftStore.probeDraftFamily(vaultId.value, tab.documentId)).status !== 'none') {
+            barrier.rollback()
+            release?.()
+            return null
+          }
+        }
+        return {
+          commit() { barrier!.commit(); release?.() },
+          rollback() { barrier!.rollback(); release?.() },
+        }
+      } catch {
+        barrier?.rollback()
+        release?.()
+        return null
+      }
+    },
   })
 
   // Build persistence on top of the workspace's tab set, then bind
@@ -110,8 +147,9 @@ export function useEditorTabs(opts: {
   } = useTabPersistence(tabs, activePath, opts.vaultId)
   setPersist(persistOpenTabs)
 
+  const draftStore = opts.draftStore ?? createDraftStore()
   const draftPersistence = opts.draftPersistence ?? createUnsavedDraftPersistence({
-    store: opts.draftStore ?? createDraftStore(),
+    store: draftStore,
     // Defense in depth: if a caller ever omits the production
     // persistence (VaultView always supplies it), the fallback must
     // still carry the authoritative by-stable-identity server
@@ -123,8 +161,8 @@ export function useEditorTabs(opts: {
   const {
     scheduleSave,
     doSave,
-    onEditorChange,
-    applyRecoveredDraft,
+    onEditorChange: changeDocument,
+    applyRecoveredDraft: recoverDocumentDraft,
     handleBeforeUnload,
     doSaveNow,
     prepareHistoryCommit,
@@ -147,6 +185,23 @@ export function useEditorTabs(opts: {
     draftPersistence,
     draftVaultId: () => vaultId.value,
   })
+
+  function onEditorChange(path: string, value: string): void {
+    const tab = tabs.value.find((candidate) => candidate.path === path)
+    if (tab && value !== tab.raw) pinTab(path)
+    changeDocument(path, value)
+  }
+
+  function applyRecoveredDraft(input: Parameters<typeof recoverDocumentDraft>[0]) {
+    pinTab(input.draft.documentPath)
+    return recoverDocumentDraft(input)
+  }
+
+  watch(() => tabs.value.map((tab) => [tab.path, tab.saveStatus, tab.savingRevision, tab.externalRaw, tab.externalKind]), () => {
+    for (const tab of tabs.value) {
+      if (tab.mode === 'preview' && previewHasUnsafeState(tab)) pinTab(tab.path)
+    }
+  }, { flush: 'sync' })
 
   // The single managed Diary policy owns navigation authority. A newer
   // explicit workspace action invalidates every older async Diary open.
@@ -424,7 +479,7 @@ export function useEditorTabs(opts: {
 
   async function openAuthorizedPost(
     path: string,
-    openOptions: { refresh?: boolean } = {},
+    openOptions: OpenPostOptions = {},
     existingIntent?: number,
   ): Promise<void> {
     const intent = existingIntent ?? beginNavigationIntent()
@@ -442,7 +497,7 @@ export function useEditorTabs(opts: {
       }
     }
     if (!isCurrentNavigationIntent(intent)) return
-    await openWorkspacePost(path, openOptions)
+    await openWorkspacePost(path, { ...openOptions, isCurrent: () => !disposed && isCurrentNavigationIntent(intent) })
   }
 
   function removeOpenWorkspaceDocuments(paths: readonly string[]): void {
@@ -573,7 +628,7 @@ export function useEditorTabs(opts: {
     prepareWorkspaceRename: opts.prepareWorkspaceRename,
   })
 
-  const { routePath } = useRouteSync({
+  const { routePath, initialMode } = useRouteSync({
     activePath,
     openPost: openAuthorizedPost,
     // Non-empty route changes are handed to openAuthorizedPost, which captures
@@ -680,7 +735,7 @@ export function useEditorTabs(opts: {
     }
 
     if (initialRoutePath && isCurrentNavigationIntent(initialNavigationIntent)) {
-      await openAuthorizedPost(initialRoutePath, {}, initialNavigationIntent)
+      await openAuthorizedPost(initialRoutePath, initialMode ? { mode: initialMode } : {}, initialNavigationIntent)
       if (disposed) return
     }
     // Subscribe to the file-change bus so AI tool writes/deletes/
@@ -692,6 +747,8 @@ export function useEditorTabs(opts: {
 
   onBeforeUnmount(() => {
     disposed = true
+    beginNavigationIntent()
+    disposeTabWorkspace()
     stopFileChangeSubscription?.()
     stopFileChangeSubscription = null
     window.removeEventListener('beforeunload', handleBeforeUnload)
@@ -718,6 +775,7 @@ export function useEditorTabs(opts: {
     refresh,
     applyPostSummary,
     openPost: openAuthorizedPost,
+    pinTab,
     closeTab,
     closeMany,
     confirmCloseMany,

@@ -6,6 +6,7 @@ import type { TreeNode, PostSummary } from '../../lib/api'
 import { parseTagQuery, type TagQuery } from '../../lib/tags'
 import { projectFileTree } from './fileTreeProjection'
 import TreeRow from './TreeRow.vue'
+import type { TabMode } from './tabs'
 import { useConfirm } from '../../composables/useConfirm'
 import { usePrompt } from '../../composables/usePrompt'
 import { useToast } from '../../composables/useToast'
@@ -37,7 +38,7 @@ const props = withDefaults(defineProps<{
   exactPathFilterActionLabel: null,
 })
 const emit = defineEmits<{
-  select: [path: string]
+  select: [path: string, mode?: TabMode]
   refresh: []
   // archive-note is self-contained inside FileTree: handler calls
   // patchPost + emit('refresh') + (optionally) emit('select'). VaultView
@@ -265,7 +266,7 @@ function onTreeKeydown(e: KeyboardEvent) {
     else if (item.parentKey) target = visibleItems.value.find(({ node: candidate }) => nodeKey(candidate) === item.parentKey)
   } else if (e.key === 'Enter') {
     if (node.kind === 'folder') toggle(node.path)
-    else emit('select', node.path)
+    else emit('select', node.path, 'pinned')
   } else if (e.key === 'F2') {
     void onRequestRename(node.path, node.kind)
   } else if (e.key === 'Delete') {
@@ -474,11 +475,11 @@ function filePaths(n: TreeNode): string[] {
 }
 
 // --- row event handlers ---
-async function onSelect(p: string) {
+async function onSelect(p: string, mode?: TabMode) {
   // A row click is an explicit selection intent even when this path is also
   // the workspace's currentPath. A Recovery/Diff surface can share that path
   // while the formal document is inactive; the workspace owns reuse/no-op.
-  emit('select', p)
+  emit('select', p, mode)
 }
 async function onToggle(p: string) { toggle(p) }
 

@@ -30,6 +30,21 @@ function tab(path: string, raw: string): Tab {
 }
 
 describe('Vault context', () => {
+  it('routes browsing links through the optional preview opener while keeping explicit opens pinned', async () => {
+    const openPost = vi.fn(async () => {})
+    const preview = vi.fn(async () => {})
+    const tabs = ref<Tab[]>([])
+    const context = createVaultContext({
+      vaultId: ref('vault'), tabs, activePath: ref(null), activeTab: computed(() => null),
+      fileChanges: createVaultFileChanges(), openPost, openPreviewPost: preview,
+      captureAiContext: () => ({ status: 'none' }),
+    })
+    await context.editor.openPost('inbox/work')
+    await context.editor.openLink('inbox/browse')
+    expect(openPost).toHaveBeenCalledExactlyOnceWith('inbox/work')
+    expect(preview).toHaveBeenCalledExactlyOnceWith('inbox/browse')
+    context.dispose()
+  })
   it('creates a fresh one-shot navigation intent for every anchored link click', async () => {
     clearLinkNavigation()
     const activePath = ref<string | null>('notes/source')

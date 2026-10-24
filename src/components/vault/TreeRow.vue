@@ -21,6 +21,7 @@ import {
 } from '../../../shared/archiveProtocol'
 import { classifyDiaryPath, isManagedDiaryPath } from '../../../shared/diaryProtocol'
 import type { MatchInfo } from './FileTree.vue'
+import type { TabMode } from './tabs'
 import { nuvynBoardDragMime, readDataTransfer } from '../../technicalNamespace'
 
 const PATH_MIME = nuvynBoardDragMime('path')
@@ -49,7 +50,7 @@ const props = withDefaults(defineProps<{
 })
 
 const emit = defineEmits<{
-  select: [path: string]
+  select: [path: string, mode?: TabMode]
   toggle: [path: string]
   // `kind` is carried alongside `oldPath` / `path` so the parent can pick the
   // exact TreeNode from the (path-keyed) server tree. When a file and a
@@ -283,10 +284,14 @@ function focusTreeItemAfterActivation() {
   treeItemRef.value?.focus({ preventScroll: true })
 }
 
-function activateRow() {
+function activateRow(event?: MouseEvent) {
   if (isFolder.value) emit('toggle', props.node.path)
-  else emit('select', props.node.path)
+  else emit('select', props.node.path, event?.detail === 0 ? 'pinned' : 'preview')
   focusTreeItemAfterActivation()
+}
+
+function pinRow() {
+  if (!isFolder.value) emit('select', props.node.path, 'pinned')
 }
 
 </script>
@@ -330,6 +335,7 @@ function activateRow() {
     <div
       class="row-line"
       @click="activateRow"
+      @dblclick.stop="pinRow"
     >
       <span
         v-if="isFolder"
@@ -415,7 +421,7 @@ function activateRow() {
         :show-path-hint="showPathHint"
         :compact="compact"
         :duplicate-titles="duplicateTitles"
-        @select="(p) => emit('select', p)"
+        @select="(p, mode) => emit('select', p, mode)"
         @toggle="(p) => emit('toggle', p)"
         @rename="(oldP, n, kind) => emit('rename', oldP, n, kind)"
         @request-rename="(p, kind) => emit('request-rename', p, kind)"

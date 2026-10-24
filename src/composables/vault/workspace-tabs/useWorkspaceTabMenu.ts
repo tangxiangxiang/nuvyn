@@ -11,6 +11,7 @@ import type { WorkspaceTab } from '../../../components/vault/tabs'
 import { focusConnectedElement } from './useWorkspaceTabFocus'
 
 export type WorkspaceTabMenuAction =
+  | 'pin'
   | 'close'
   | 'close-others'
   | 'close-left'
@@ -20,6 +21,7 @@ export type WorkspaceTabMenuAction =
   | 'reveal-in-tree'
 
 export type WorkspaceTabMenuIntent =
+  | { type: 'pin', id: string }
   | { type: 'close', id: string }
   | { type: 'close-many', ids: string[] }
   | { type: 'copy-path', path: string }
@@ -84,6 +86,8 @@ export function useWorkspaceTabMenu({
   const canCloseLeft = computed(() => leftIds.value.length > 0)
   const canCloseRight = computed(() => rightIds.value.length > 0)
   const items = computed<WorkspaceTabMenuItem[]>(() => [
+    ...(targetTab.value?.kind === 'document' && targetTab.value.mode === 'preview'
+      ? [{ action: 'pin' as const, disabled: false }] : []),
     { action: 'close', disabled: false },
     { action: 'close-others', disabled: !canCloseOthers.value },
     { action: 'close-left', disabled: !canCloseLeft.value },
@@ -258,6 +262,10 @@ export function useWorkspaceTabMenu({
   function snapshotIntent(
     action: WorkspaceTabMenuAction,
   ): WorkspaceTabMenuIntent | null {
+    if (action === 'pin') {
+      return targetTab.value?.kind === 'document' && targetTab.value.mode === 'preview'
+        ? { type: 'pin', id: targetTab.value.id } : null
+    }
     if (action === 'close') {
       return targetId.value ? { type: 'close', id: targetId.value } : null
     }

@@ -48,6 +48,9 @@ import { useEditorTabs, __setVaultIdForTesting, resetTabPersistenceForTesting } 
 import EditorTabs from '../../../components/vault/EditorTabs.vue'
 import { deriveDocumentSavePresentation } from '../editor-tabs/savePresentation'
 import { createVaultFileChanges, type VaultFileChanges } from '../context/fileChanges'
+import { createDraftStore, createMemoryDraftBackend } from '../draft-recovery/draftStore'
+import type { DraftConflictRecord, UnsavedDraft } from '../draft-recovery/draftTypes'
+import type { OpenPostOptions, TabMode } from '../../../components/vault/tabs'
 import { useI18n } from '../../useI18n'
 import type { PostDetail, PostSummary, TreeNode } from '../../../lib/api'
 import {
@@ -73,7 +76,8 @@ function makeRouter() {
 interface Harness {
   unmount: () => void
   fileChanges: VaultFileChanges
-  openPost: (p: string) => Promise<void>
+  openPost: (p: string, options?: OpenPostOptions) => Promise<void>
+  pinTab: (p: string) => boolean
   closeTab: (p: string) => Promise<boolean>
   closeMany: (paths: string[]) => Promise<boolean>
   selectTab: (p: string) => void
@@ -96,6 +100,7 @@ interface Harness {
   tree: Ref<TreeNode[]>
   tabs: Ref<{
     path: string
+    mode?: TabMode
     title: string
     raw: string
     originalRaw: string
@@ -300,6 +305,87 @@ function findTreeFile(nodes: readonly TreeNode[], path: string): Extract<TreeNod
 // --- tests -----------------------------------------------------------------
 
 describe('useEditorTabs', () => {
+  function previewFixture() {
+    const paths = ['inbox/a', 'inbox/b']
+    vi.stubGlobal('fetch', stubFetch({
+      'GET /api/tree': () => treeFor(...paths.map((path) => postSummary(path))),
+      'GET /api/posts': () => paths.map((path) => postSummary(path)),
+      ...Object.fromEntries(paths.map((path) => [`GET /api/posts/${path}`, () => ({
+        ...postDetail(path), metadata: { id: path, path, title: path, tags: [], summary: '', mood: null, createdAt: 1, updatedAt: 1 },
+      })])),
+    }))
+    return createDraftStore({ backend: createMemoryDraftBackend() })
+  }
+
+  it('replaces only proved-clean previews, pins synchronously before edits, and never unpins after Undo', async () => {
+    const store = previewFixture()
+    const h = await setup({ draftStore: store })
+    await h.openPost('inbox/a', { mode: 'preview', refresh: false })
+    await h.openPost('inbox/b', { mode: 'preview', refresh: false })
+    expect(h.tabs.value.map((tab) => [tab.path, tab.mode])).toEqual([['inbox/b', 'preview']])
+    h.onEditorChange('inbox/b', 'local edit')
+    expect(h.tabs.value[0]?.mode).toBe('pinned')
+    expect(h.tabs.value[0]?.saveStatus).toBe('dirty')
+    h.onEditorChange('inbox/b', 'inbox/b')
+    expect(h.tabs.value[0]?.mode).toBe('pinned')
+    await h.openPost('inbox/a', { mode: 'preview', refresh: false })
+    expect(h.tabs.value).toHaveLength(2)
+  })
+
+  it('retains a clean-looking preview when the recovery family cannot be proved empty', async () => {
+    const store = previewFixture()
+    vi.spyOn(store, 'probeDraftFamily').mockResolvedValue({ status: 'failed' })
+    const h = await setup({ draftStore: store })
+    await h.openPost('inbox/a', { mode: 'preview', refresh: false })
+    await h.openPost('inbox/b', { mode: 'preview', refresh: false })
+    expect(h.tabs.value.map((tab) => [tab.path, tab.mode])).toEqual([['inbox/a', 'pinned'], ['inbox/b', 'preview']])
+  })
+
+  it.each(['primary', 'conflict'] as const)('retains a preview with an unresolved %s draft without deleting recovery data', async (channel) => {
+    const store = previewFixture()
+    const h = await setup({ draftStore: store })
+    await h.openPost('inbox/a', { mode: 'preview', refresh: false })
+    const draft: UnsavedDraft = {
+      version: 1, vaultId: 'test-vault', documentId: 'inbox/a', documentPath: 'inbox/a',
+      content: 'unresolved recovery', baseContentHash: 'base', baseModifiedAt: 1,
+      createdAt: 1, updatedAt: 2,
+    }
+    const conflict: DraftConflictRecord = {
+      ...draft, conflictId: 'preview-recovery', origin: 'delete-conflict',
+      crossContextUpdatedAt: 1, recordedAt: 2,
+    }
+    if (channel === 'primary') expect((await store.saveDraft(draft)).status).toBe('saved')
+    else expect((await store.saveConflictDraft(conflict)).status).toBe('saved')
+    await h.openPost('inbox/b', { mode: 'preview', refresh: false })
+    expect(h.tabs.value.map((tab) => [tab.path, tab.mode])).toEqual([['inbox/a', 'pinned'], ['inbox/b', 'preview']])
+    if (channel === 'primary') expect(await store.getDraft('test-vault', 'inbox/a')).toEqual(draft)
+    else expect(await store.listConflictDrafts('test-vault')).toEqual([conflict])
+  })
+
+  it('consumes search browsing intent once, then reloads the current URL as a pinned document', async () => {
+    const store = previewFixture()
+    const { harness, router } = await mountWithRouter({ draftStore: store }, '/vault/inbox/a', (router) => {
+      const history = router.options.history
+      history.replace(history.location, { ...history.state, nuvynTabMode: 'preview' })
+    })
+    expect(harness.tabs.value.map((tab) => [tab.path, tab.mode])).toEqual([['inbox/a', 'preview']])
+    expect(router.options.history.state.nuvynTabMode).toBeNull()
+    harness.unmount()
+    const reopened = await setup({ draftStore: store }, '/vault/inbox/a')
+    expect(reopened.tabs.value.map((tab) => [tab.path, tab.mode])).toEqual([['inbox/a', 'pinned']])
+  })
+
+  it('reuses the preview slot for search navigation within the mounted workspace', async () => {
+    const store = previewFixture()
+    const { harness, router } = await mountWithRouter({ draftStore: store })
+    await harness.openPost('inbox/a', { mode: 'preview', refresh: false })
+    await flushPromises()
+    await router.push({ path: '/vault/inbox/b', state: { nuvynTabMode: 'preview' } })
+    await flushPromises()
+    expect(harness.tabs.value.map((tab) => [tab.path, tab.mode])).toEqual([['inbox/b', 'preview']])
+    expect(router.options.history.state.nuvynTabMode).toBeNull()
+  })
+
   beforeEach(() => {
     useI18n().setLocale('zh')
     toastCalls.length = 0

@@ -2567,6 +2567,7 @@ main.container.auth-page-shell {
   color: var(--vs-text-1);
 }
 .tab.diff .tab-title { color: var(--vs-text-2); }
+.tab.preview .tab-title { font-style: italic; }
 .tab.diff.active .tab-title { color: var(--vs-text-1); }
 
 .history-diff-header {

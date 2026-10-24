@@ -208,7 +208,8 @@ export function deriveTabUiPresentation(
       fullPath,
       statusText,
       statusKind: tab.save ? statusKindFor(tab.save.status) : 'none',
-      ariaLabel: buildAriaLabel(displayTitle, filenameLabel, statusText, t),
+      ariaLabel: buildAriaLabel(displayTitle, filenameLabel, statusText, t)
+        + (tab.mode === 'preview' ? t('workspace_tab.aria_separator') + t('workspace_tab.preview') : ''),
     }
   }
   if (tab.kind === 'recovery') {

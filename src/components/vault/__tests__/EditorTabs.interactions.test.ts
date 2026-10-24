@@ -68,6 +68,30 @@ class TestDataTransfer {
 }
 
 describe('EditorTabs interaction wiring', () => {
+  it.each(['zh', 'en'] as const)('exposes pin only for previews, via double-click and keyboard context menu (%s)', async (locale) => {
+    useI18n().setLocale(locale)
+    const wrapper = mount(EditorTabs, {
+      props: { tabs: [makeTab('a', { mode: 'preview' }), makeTab('b', { mode: 'pinned' }), makeTab('diff:a', { kind: 'diff' })], activePath: 'a' },
+      attachTo: document.body,
+    })
+    const row = wrapper.get('[data-tab-id="a"]')
+    expect(row.classes()).toContain('preview')
+    expect(row.attributes('aria-label')).toContain(locale === 'zh' ? '临时预览' : 'Temporary preview')
+    await row.trigger('dblclick')
+    expect(wrapper.emitted('pin')).toEqual([['a']])
+    await row.trigger('keydown', { key: 'F10', shiftKey: true })
+    await flushPromises()
+    expect(menuButtons()[0]?.textContent).toBe(locale === 'zh' ? '固定标签' : 'Pin Tab')
+    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }))
+    await flushPromises()
+    expect(wrapper.emitted('pin')).toEqual([['a'], ['a']])
+    await openPointerMenu(wrapper, 'b')
+    expect(menuButtons().some((button) => /固定标签|Pin Tab/.test(button.textContent ?? ''))).toBe(false)
+    await wrapper.get('[data-tab-id="b"]').trigger('dblclick')
+    await wrapper.get('[data-tab-id="diff:a"]').trigger('dblclick')
+    expect(wrapper.emitted('pin')).toHaveLength(2)
+  })
+
   it('renders the menu contract and maps menu intents to component emits', async () => {
     const tabs = [
       makeTab('a'),

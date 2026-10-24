@@ -2,9 +2,10 @@ import { computed, ref, toRaw } from 'vue'
 import { useRouter } from 'vue-router'
 import { getPost, getTree, listPosts, type PostDetail, type PostSummary, type TreeNode } from '../../../lib/api'
 import { disposeMarkdownModel, renameMarkdownModel } from '../../../components/vault/monacoModelRegistry'
-import type { Tab } from '../../../components/vault/tabs'
+import type { OpenPostOptions, Tab } from '../../../components/vault/tabs'
 import { makeEmptyTab, pathToUrl, TAB_HARD_LIMIT, TAB_SOFT_LIMIT } from './tabState'
 import { useI18n } from '../../useI18n'
+import { scopeRootsFor } from '../../../../shared/scopeProtocol'
 import {
   applyPostSummaryToWorkspace,
   createLocalPostPatchTracker,
@@ -19,6 +20,22 @@ export function requiresCloseConfirmation(tab: Tab): boolean {
     || ['error', 'offline'].includes(tab.saveStatus)
 }
 
+export function isNoteTabPath(path: string): boolean {
+  return ![...scopeRootsFor('diary'), ...scopeRootsFor('ledger')]
+    .some((root) => path === root || path.startsWith(`${root}/`))
+}
+
+export function previewHasUnsafeState(tab: Tab): boolean {
+  return requiresCloseConfirmation(tab)
+    || ['dirty', 'saving'].includes(tab.saveStatus)
+    || tab.externalKind != null
+}
+
+export interface PreviewCloseBarrier {
+  commit: () => void
+  rollback: () => void
+}
+
 export function useTabWorkspace(options: {
   confirm: (message: string) => Promise<boolean>
   toastError: (message: string) => void
@@ -31,6 +48,8 @@ export function useTabWorkspace(options: {
    * returned in the API.
    */
   persist?: () => void
+  preparePreviewClose?: (tab: Tab) => Promise<PreviewCloseBarrier | null>
+  onPreviewReplaced?: (from: string, to: string) => void
 }) {
   const { t } = useI18n()
   const router = useRouter()
@@ -44,6 +63,9 @@ export function useTabWorkspace(options: {
   const tabs = ref<Tab[]>([])
   const activePath = ref<string | null>(null)
   let refreshRequestId = 0
+  let openGeneration = 0
+  let disposed = false
+  let previewPreparation: Promise<unknown> = Promise.resolve()
   const localPostPatches = createLocalPostPatchTracker()
   // The workspace holds an internal mutable slot for the persister.
   // Callers can swap it later (see `setPersist` in the API) — needed
@@ -71,11 +93,19 @@ export function useTabWorkspace(options: {
   /** Persist immediately. Best-effort — if persist is not bound
    *  (e.g. unit tests that don't care), this is a no-op. */
   function flushPersist(): void {
-    persistRef?.()
+    if (!disposed) persistRef?.()
   }
 
   function setPersist(persist: () => void): void {
     persistRef = persist
+  }
+
+  function pinTab(path: string): boolean {
+    const tab = tabs.value.find((candidate) => candidate.path === path)
+    if (!tab || tab.mode !== 'preview' || !isNoteTabPath(path)) return false
+    tab.mode = 'pinned'
+    flushPersist()
+    return true
   }
 
   function applyPostDetail(tab: Tab, post: PostDetail): void {
@@ -90,6 +120,7 @@ export function useTabWorkspace(options: {
 
   function makeLoadedTab(path: string, post: PostDetail): Tab {
     const tab = makeEmptyTab(path)
+    if (isNoteTabPath(path)) tab.mode = 'pinned'
     applyPostDetail(tab, post)
     return tab
   }
@@ -243,56 +274,88 @@ export function useTabWorkspace(options: {
    * array — the caller must NOT resurrect it.
    */
   function liveTabFor(plainTab: Tab): Tab | null {
+    if (disposed) return null
     const live = tabs.value.find((candidate) => toRaw(candidate) === plainTab)
     return live ?? null
   }
 
-  async function openPost(path: string, openOptions: { refresh?: boolean; activate?: boolean } = {}) {
-    const existing = tabs.value.find((tab) => tab.path === path)
-    if (existing) {
-      if (openOptions.activate !== false) {
-        activePath.value = path
-        navigateTo(path)
-      }
-      return
-    }
-    if (tabs.value.length >= TAB_HARD_LIMIT) {
-      options.toastError(t('editor.tab_limit', { count: TAB_HARD_LIMIT }))
-      return
-    }
-    if (tabs.value.length >= TAB_SOFT_LIMIT) {
-      options.toastInfo(t('editor.many_tabs'))
-    }
-    const plainTab = makeEmptyTab(path)
-    tabs.value.push(plainTab)
-    if (openOptions.activate !== false) {
-      activePath.value = path
-      navigateTo(path)
-    }
+  async function populateTab(plainTab: Tab, path: string): Promise<void> {
     try {
       const post = await loadPostDetached(path)
-      // Race guard: the user may have closed this tab while getPost
-      // was in flight. If so, drop the populated data — the watcher
-      // debounce will not have caught this yet, so we also persist
-      // synchronously. We compare against the plain object identity,
-      // not a Proxy field read, because Vue wraps array elements in
-      // a Proxy only on read.
       const live = liveTabFor(plainTab)
-      if (!live) {
-        flushPersist()
-        return
-      }
-      // Must go through the proxy so dependent computeds recompute.
+      if (!live) return
+      // A rename changes the request's address, not its ownership. Reload the
+      // current address rather than applying the old path's body/metadata.
+      if (live.path !== path) return populateTab(plainTab, live.path)
       applyPostDetail(live, post)
     } catch (error) {
       const live = liveTabFor(plainTab)
-      if (!live) {
-        flushPersist()
-        return
-      }
+      if (!live) return
+      if (live.path !== path) return populateTab(plainTab, live.path)
       live.loadError = (error as Error).message
       live.loading = false
     }
+  }
+
+  async function openPost(path: string, openOptions: OpenPostOptions = {}) {
+    if (disposed) return
+    const generation = ++openGeneration
+    const current = () => !disposed && generation === openGeneration && (openOptions.isCurrent?.() ?? true)
+    const mode = openOptions.mode === 'preview' && isNoteTabPath(path) ? 'preview' : 'pinned'
+    const existing = tabs.value.find((tab) => tab.path === path)
+    if (existing) {
+      if (mode === 'pinned') pinTab(path)
+      activePath.value = path
+      navigateTo(path)
+      return
+    }
+    let replacement: Tab | null = null
+    let barrier: PreviewCloseBarrier | null = null
+    if (isNoteTabPath(path) && (mode === 'preview' || openOptions.reusePreview)) {
+      const preview = tabs.value.find((tab) => tab.mode === 'preview' && isNoteTabPath(tab.path))
+      if (preview) {
+        const previousPath = preview.path
+        if (!previewHasUnsafeState(preview)) {
+          const preparation = previewPreparation.then(() => (
+            current() && tabs.value.includes(preview) && preview.mode === 'preview'
+              ? options.preparePreviewClose?.(preview) ?? null
+              : null
+          ))
+          previewPreparation = preparation.catch(() => {})
+          try { barrier = await preparation } catch { /* retain on uncertainty */ }
+        }
+        if (!current()) { barrier?.rollback(); return }
+        if (tabs.value.includes(preview) && preview.path === previousPath && preview.mode === 'preview') {
+          if (barrier && !previewHasUnsafeState(preview)) replacement = preview
+          else pinTab(preview.path)
+        } else if (tabs.value.includes(preview) && preview.mode === 'preview') {
+          pinTab(preview.path)
+        }
+        if (!replacement) { barrier?.rollback(); barrier = null }
+      }
+    }
+    if (!current()) { barrier?.rollback(); return }
+    if (!replacement && tabs.value.length >= TAB_HARD_LIMIT) {
+      options.toastError(t('editor.tab_limit', { count: TAB_HARD_LIMIT }))
+      return
+    }
+    if (!replacement && tabs.value.length >= TAB_SOFT_LIMIT) {
+      options.toastInfo(t('editor.many_tabs'))
+    }
+    const plainTab = makeEmptyTab(path)
+    if (isNoteTabPath(path)) plainTab.mode = mode
+    if (replacement) {
+      const index = tabs.value.indexOf(replacement)
+      tabs.value.splice(index, 1, plainTab)
+      disposeMarkdownModel(replacement.path)
+      options.onPreviewReplaced?.(replacement.path, path)
+      barrier!.commit()
+    } else tabs.value.push(plainTab)
+    activePath.value = path
+    navigateTo(path)
+    flushPersist()
+    await populateTab(plainTab, path)
+    if (!liveTabFor(plainTab)) return
     flushPersist()
     if (openOptions.refresh !== false) await refresh()
   }
@@ -300,6 +363,7 @@ export function useTabWorkspace(options: {
   async function restoreOneTab(path: string): Promise<boolean> {
     if (tabs.value.find((tab) => tab.path === path)) return true
     const plainTab = makeEmptyTab(path)
+    if (isNoteTabPath(path)) plainTab.mode = 'pinned'
     tabs.value.push(plainTab)
     flushPersist()
     try {
@@ -418,6 +482,7 @@ export function useTabWorkspace(options: {
   }
 
   function selectTab(path: string) {
+    openGeneration += 1
     if (path === activePath.value) return
     const tab = tabs.value.find((candidate) => candidate.path === path)
     if (!tab) return
@@ -476,6 +541,8 @@ export function useTabWorkspace(options: {
     refresh,
     applyPostSummary,
     openPost,
+    pinTab,
+    dispose: () => { disposed = true; openGeneration += 1; refreshRequestId += 1 },
     loadPostDetached,
     attachLoadedPost,
     replaceTabsWithLoadedPost,

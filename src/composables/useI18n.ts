@@ -1046,6 +1046,8 @@ const STRINGS: Strings = {
   'history.vault_git_unavailable': { zh: '知识库 Git 不可用', en: 'Vault git unavailable' },
   'history.initializing': { zh: '正在初始化知识库…', en: 'Initializing vault…' },
   'workspace_tab.close': { zh: '关闭', en: 'Close' },
+  'workspace_tab.pin': { zh: '固定标签', en: 'Pin Tab' },
+  'workspace_tab.preview': { zh: '临时预览', en: 'Temporary preview' },
   'workspace_tab.close_named': { zh: '关闭 {name}', en: 'Close {name}' },
   'workspace_tab.close_others': { zh: '关闭其它', en: 'Close Others' },
   'workspace_tab.close_left': { zh: '关闭左侧', en: 'Close to the Left' },

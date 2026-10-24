@@ -29,6 +29,7 @@ const props = withDefaults(defineProps<{
 })
 const emit = defineEmits<{
   select: [path: string]
+  pin: [path: string]
   close: [path: string]
   'close-many': [paths: string[]]
   'copy-path': [path: string]
@@ -153,6 +154,7 @@ function moveTabByKeyboard(tab: WorkspaceTab, direction: -1 | 1): void {
 // --- right-click / keyboard context menu ---
 const tabsInput = computed<readonly WorkspaceTab[]>(() => props.tabs)
 const menuLabelKeys: Record<WorkspaceTabMenuAction, string> = {
+  pin: 'workspace_tab.pin',
   close: 'workspace_tab.close',
   'close-others': 'workspace_tab.close_others',
   'close-left': 'workspace_tab.close_left',
@@ -163,7 +165,8 @@ const menuLabelKeys: Record<WorkspaceTabMenuAction, string> = {
 }
 
 function emitMenuIntent(intent: WorkspaceTabMenuIntent): void {
-  if (intent.type === 'close') emit('close', intent.id)
+  if (intent.type === 'pin') emit('pin', intent.id)
+  else if (intent.type === 'close') emit('close', intent.id)
   else if (intent.type === 'close-many') emit('close-many', intent.ids)
   else if (intent.type === 'copy-path') emit('copy-path', intent.path)
   else emit('reveal-in-tree', intent.path)
@@ -211,6 +214,7 @@ function onContextMenu(e: MouseEvent, path: string) {
         :key="t.id"
         role="tab"
         :data-tab-id="t.id"
+        :data-tab-mode="t.kind === 'document' ? t.mode : undefined"
         :data-save-status="t.kind === 'document' ? t.save.status : undefined"
         :data-status-kind="tabPresentations[i].statusKind"
         :tabindex="t.id === activePath ? 0 : -1"
@@ -224,6 +228,7 @@ function onContextMenu(e: MouseEvent, path: string) {
         :class="{
           active: t.id === activePath,
           diff: t.kind === 'diff',
+          preview: t.kind === 'document' && t.mode === 'preview',
           'save-in-flight': t.kind === 'document' && t.save.inFlight,
           'save-attention': t.kind === 'document' && t.save.attention,
           dragging: draggedId === t.id,
@@ -231,6 +236,7 @@ function onContextMenu(e: MouseEvent, path: string) {
           'drop-after': dropTargetId === t.id && dropPosition === 'after',
         }"
         @click="onTabClick(t)"
+        @dblclick="t.kind === 'document' && t.mode === 'preview' && !($event.target as HTMLElement).closest('.tab-close') && emit('pin', t.id)"
         @auxclick.middle="() => emit('close', t.id)"
         @contextmenu="onContextMenu($event, t.id)"
         @keydown="onTabKeydown($event, t)"
@@ -290,7 +296,7 @@ function onContextMenu(e: MouseEvent, path: string) {
         @click.stop
       >
         <template v-for="(item, index) in menuItems" :key="item.action">
-          <div v-if="index === 5" role="separator" />
+          <div v-if="item.action === 'copy-path'" role="separator" />
           <NButton
             attr-type="button"
             text

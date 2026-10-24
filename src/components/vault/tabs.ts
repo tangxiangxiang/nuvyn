@@ -2,9 +2,21 @@ import type { DocumentSavePresentation } from '../../composables/vault/editor-ta
 
 export type SaveStatus = 'idle' | 'dirty' | 'saving' | 'saved' | 'error' | 'offline' | 'external'
 export type ExternalChangeKind = 'modified' | 'deleted' | 'unreadable'
+export type TabMode = 'preview' | 'pinned'
+
+export interface OpenPostOptions {
+  refresh?: boolean
+  mode?: TabMode
+  /** Explicit tree open may keep the preview slot while pinning its target. */
+  reusePreview?: boolean
+  /** Navigation authority, checked after preparing a preview replacement. */
+  isCurrent?: () => boolean
+}
 
 export interface Tab {
   path: string
+  /** Absent on legacy/special-workspace documents; treated as pinned. */
+  mode?: TabMode
   /** Stable server metadata identity. Draft persistence must not substitute path. */
   documentId?: string | null
   title: string
@@ -36,5 +48,6 @@ export interface WorkspaceTab {
   title: string
   save: DocumentSavePresentation
   kind: 'document' | 'diff' | 'recovery'
+  mode?: TabMode
   documentPath?: string | null
 }

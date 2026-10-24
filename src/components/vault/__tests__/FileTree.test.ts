@@ -177,11 +177,32 @@ describe('FileTree', () => {
     const row = wrapper.get('[data-tree-key="file:inbox/draft"]')
     await wrapper.setProps({ currentPath: 'inbox/draft' })
 
-    await row.get('.row-line').trigger('click')
+    row.get('.row-line').element.dispatchEvent(new MouseEvent('click', { bubbles: true, detail: 1 }))
+    await wrapper.vm.$nextTick()
 
     expect(document.activeElement).toBe(row.element)
     expect(row.attributes('tabindex')).toBe('0')
-    expect(wrapper.emitted('select')).toEqual([['inbox/draft']])
+    expect(wrapper.emitted('select')).toEqual([['inbox/draft', 'preview']])
+    wrapper.unmount()
+  })
+
+  it('keeps click/double-click ordering explicit and pins keyboard Enter activation', async () => {
+    const wrapper = mount(FileTree, {
+      props: { tree: TREE, currentPath: null },
+      attachTo: document.body,
+    })
+    await wrapper.get('[data-tree-key="folder:inbox"] .row-line').trigger('click')
+    const row = wrapper.get('[data-tree-key="file:inbox/draft"]')
+    const line = row.get('.row-line').element
+    for (const [type, detail] of [['click', 1], ['click', 2], ['dblclick', 2]] as const) {
+      line.dispatchEvent(new MouseEvent(type, { bubbles: true, detail }))
+    }
+    await wrapper.vm.$nextTick()
+    await row.trigger('keydown', { key: 'Enter' })
+    expect(wrapper.emitted('select')).toEqual([
+      ['inbox/draft', 'preview'], ['inbox/draft', 'preview'],
+      ['inbox/draft', 'pinned'], ['inbox/draft', 'pinned'],
+    ])
     wrapper.unmount()
   })
 
