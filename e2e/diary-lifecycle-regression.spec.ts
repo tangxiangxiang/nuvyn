@@ -186,9 +186,11 @@ async function openNote(page: Page, path: string): Promise<void> {
   // The filename button is intentionally hidden when the note title is the
   // filename. Activate the row's visible line so this helper exercises the
   // same FileTree selection path regardless of title presentation.
-  await row.locator('.row-line').click()
+  // These lifecycle checks retain the Note across reloads and scope changes.
+  await row.locator('.row-line').dblclick()
   await expect(page).toHaveURL(new RegExp(`/vault/${path.replace('/', '\\/')}(?:[?#]|$)`))
   await expect(page.locator(`[role="tab"][data-tab-id="${path}"]`)).toHaveAttribute('aria-selected', 'true')
+  await expect(page.locator(`[role="tab"][data-tab-id="${path}"]`)).toHaveAttribute('data-tab-mode', 'pinned')
 }
 
 async function selectTab(page: Page, path: string): Promise<void> {

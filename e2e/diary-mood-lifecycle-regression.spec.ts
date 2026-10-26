@@ -1220,10 +1220,14 @@ test('refresh, deep link, and browser Back/Forward preserve Diary scope ownershi
     // Build a real generic history sequence and traverse it. The existing
     // scope owner restores Diary rather than presenting a Note route as active.
     await selectScope(page, 'note')
+    // Scope selection saves Diary before asynchronously replacing the route.
+    // Finish that transition before creating the browser history entries.
+    await expect(page.locator('.scope-chip').filter({ hasText: 'note' })).toHaveAttribute('aria-pressed', 'true')
+    await expect(page).toHaveURL(/\/vault(?:[?#]|$)/)
     await page.goto(`/vault/${notePath}`)
     await expect(page.locator(`[role="tab"][data-tab-id="${notePath}"]`)).toHaveAttribute('aria-selected', 'true')
     await page.goto(`/vault/${path}`)
-    await expect(page.locator(`[role="tab"][data-tab-id="${path}"]`)).toHaveAttribute('aria-selected', 'true')
+    await assertNativeReader(page, date, customQuery)
     await expect(page.locator(`[role="tab"][data-tab-id="${path}"]`)).toHaveCount(1)
 
     await page.goBack()
@@ -1235,6 +1239,9 @@ test('refresh, deep link, and browser Back/Forward preserve Diary scope ownershi
     await expect.poll(() => page.evaluate(() => localStorage.getItem('nuvyn.file-tree.filter')))
       .toBe(customQuery)
 
+    // Unlock/bootstrap can still be handing off the document after tab
+    // selection. Wait for the reader before starting the next navigation.
+    await assertNativeReader(page, date, customQuery)
     await page.goForward()
     await assertNativeReader(page, date, customQuery)
     await expect(page.locator(`[role="tab"][data-tab-id="${path}"]`)).toHaveCount(1)

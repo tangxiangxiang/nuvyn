@@ -62,8 +62,10 @@ async function openNote(page: Page, path: string): Promise<void> {
     await folder.locator('.row-line').click()
   }
   await expect(row).toBeVisible()
-  await row.locator('.row-line').click()
+  // Retention across navigation requires a pinned Note, not a preview.
+  await row.locator('.row-line').dblclick()
   await expect(page).toHaveURL(new RegExp(`/vault/${path.replace('/', '\\/')}(?:[?#]|$)`))
+  await expect(page.locator(`[role="tab"][data-tab-id="${path}"]`)).toHaveAttribute('data-tab-mode', 'pinned')
 }
 
 test.beforeEach(async ({ page }) => {
