@@ -139,9 +139,17 @@ describe('unified document sidebar', () => {
     const wrapper = mountPanel()
     await wrapper.find('a[href="#definition"]').trigger('click')
     expect(tocScrollTo.value).toHaveBeenCalledWith('definition')
+    expect(wrapper.emitted('toc-navigate')).toEqual([[]])
     await wrapper.setProps({ activeTab: 'links' })
     await wrapper.find('.stub-link').trigger('click')
     expect(wrapper.emitted('link-navigate')).toEqual([['archive/target']])
+  })
+
+  it('does not dismiss navigation before the reader has a scroll target', async () => {
+    tocScrollTo.value = null
+    const wrapper = mountPanel()
+    await wrapper.find('a[href="#definition"]').trigger('click')
+    expect(wrapper.emitted('toc-navigate')).toBeUndefined()
   })
 
   it('renders the shared metadata form in the fourth tab', async () => {

@@ -28,6 +28,59 @@ describe('useVaultLayout', () => {
 
   afterEach(() => localStorage.clear())
 
+  it('shares mutually exclusive tablet drawers without persisting desktop changes', async () => {
+    const tablet = ref(false)
+    const owner = setup({ noteTablet: tablet })
+    const navbar = setup().layout
+    owner.layout.sidePanelWidth.value = 310
+    owner.layout.rightRailWidth.value = 440
+    owner.layout.selectPanel('tags')
+    await nextTick()
+    const stored = localStorage.getItem(STORAGE_KEY)
+    const columns = owner.layout.vaultStyle.value.gridTemplateColumns
+    tablet.value = true
+    expect(navbar.leftSidebarVisible.value).toBe(false)
+    expect(navbar.rightRailVisible.value).toBe(false)
+    expect(owner.layout.vaultStyle.value.gridTemplateColumns).toBe('minmax(0, 1fr)')
+    navbar.toggleSidePanel()
+    expect(owner.layout.tabletDrawer.value).toBe('left')
+    owner.layout.selectPanel('history')
+    expect(owner.layout.activePanel.value).toBe('history')
+    navbar.toggleRightRail()
+    owner.layout.rightRailTab.value = 'properties'
+    expect(owner.layout.tabletDrawer.value).toBe('right')
+    expect(navbar.leftSidebarVisible.value).toBe(false)
+    navbar.closeTabletDrawer()
+    await nextTick()
+    expect(localStorage.getItem(STORAGE_KEY)).toBe(stored)
+    tablet.value = false
+    expect(owner.layout.rightRailTab.value).toBe('toc')
+    expect(owner.layout.activePanel.value).toBe('tags')
+    expect(owner.layout.vaultStyle.value.gridTemplateColumns).toBe(columns)
+    tablet.value = true
+    expect(navbar.tabletDrawer.value).toBeNull()
+    owner.wrapper.unmount()
+    expect(navbar.noteTablet.value).toBe(false)
+  })
+
+  it('preserves collapsed desktop panels and clears drawers on scope or viewport exit', () => {
+    const tablet = ref(false)
+    const { layout } = setup({ noteTablet: tablet })
+    layout.leftSidebarCollapsed.value = true
+    layout.rightRailCollapsed.value = true
+    tablet.value = true
+    layout.toggleSidePanel()
+    expect(layout.leftSidebarVisible.value).toBe(true)
+    expect(layout.leftSidebarCollapsed.value).toBe(true)
+    layout.toggleRightRail()
+    expect(layout.rightRailVisible.value).toBe(true)
+    expect(layout.rightRailCollapsed.value).toBe(true)
+    tablet.value = false
+    expect(layout.tabletDrawer.value).toBeNull()
+    expect(layout.leftSidebarVisible.value).toBe(false)
+    expect(layout.rightRailVisible.value).toBe(false)
+  })
+
   it('starts with one visible 380px right rail on the TOC tab', () => {
     const { layout } = setup()
     expect(layout.rightRailTab.value).toBe('toc')

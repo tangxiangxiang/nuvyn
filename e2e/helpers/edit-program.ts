@@ -251,7 +251,8 @@ export async function createDoc(
  */
 export async function waitForVaultReady(page: Page) {
   await expect(page.locator('.vault')).toBeVisible({ timeout: VAULT_READY_TIMEOUT_MS })
-  await expect(page.locator('.activity-bar .ab-btn').first()).toBeVisible({ timeout: VAULT_READY_TIMEOUT_MS })
+  // Tablet Note starts with navigation closed; its toolbar remains available.
+  await expect(page.getByTestId('left-panel-toggle')).toBeVisible({ timeout: VAULT_READY_TIMEOUT_MS })
 }
 
 /**

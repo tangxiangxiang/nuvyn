@@ -4,6 +4,8 @@ import { useMediaQuery, useStorage } from '@vueuse/core'
 import { useRoute, useRouter } from 'vue-router'
 import { useShortcutDisplay } from '../composables/useShortcutDisplay'
 import { useVaultLayout } from '../composables/vault/useVaultLayout'
+import { workspaceNoteTabletQuery } from '../lib/workspace'
+import { useFocusTrap } from '../composables/useFocusTrap'
 import { useZenMode } from '../composables/vault/useZenMode'
 import { useSplitterDrag } from '../composables/vault/useSplitterDrag'
 import { useToast } from '../composables/useToast'
@@ -202,6 +204,8 @@ const sidebarLayoutVisible = ref(true)
 const statusBarLayoutVisible = ref(true)
 const activityBarLayoutVisible = ref(true)
 const forceSidePanelLayoutOpen = ref(false)
+const noteTabletLayout = ref(false)
+const isTabletViewport = useMediaQuery(workspaceNoteTabletQuery)
 const isMobileDiaryViewport = useMediaQuery('(max-width: 600px)')
 const editorFocusWidthKey = NUVYN_BROWSER_STORAGE_KEYS.editorFocusWidth
 const fileTreeFilterKey = NUVYN_BROWSER_STORAGE_KEYS.fileTreeFilter
@@ -241,9 +245,12 @@ const {
   vaultStyle,
   selectPanel,
   rightRailTab,
-  rightRailCollapsed,
+  rightRailVisible,
+  tabletDrawer,
+  closeTabletDrawer,
   workspaceRightPanelAvailable,
 } = useVaultLayout({
+  noteTablet: noteTabletLayout,
   sidebarVisible: sidebarLayoutVisible,
   activityBarVisible: activityBarLayoutVisible,
   forceSidePanelOpen: forceSidePanelLayoutOpen,
@@ -259,7 +266,6 @@ const { startDrag } = useSplitterDrag({
 })
 
 /* The unified rail remains available in edit and read modes. */
-const rightRailVisible = computed(() => workspaceRightPanelAvailable.value && !rightRailCollapsed.value)
 // Side-panel filters are temporary view state. Keep the Files value here so
 // switching to Tags or History can unmount FileTree without losing it.
 const filesFilter = useStorage(fileTreeFilterKey, '')
@@ -1440,6 +1446,9 @@ async function openPost(path: string, options: import('../components/vault/tabs'
   historyComparisons.deactivate()
   workingTreeDiffs.deactivate()
   await openEditorPost(path, options)
+  if (noteTabletLayout.value && activePath.value === path && !activeTab.value?.loading && !activeTab.value?.loadError) {
+    closeTabletDrawer()
+  }
 }
 
 async function openDiaryDatePost(
@@ -2236,6 +2245,48 @@ const workspaceSidebarVisible = computed(() => (
   && !isDiaryCalendarVisible.value
   && !zenModeActive.value
 ))
+watch([isTabletViewport, activeScope, workspaceSidebarVisible], ([tablet, scope, visible]) => {
+  noteTabletLayout.value = tablet && scope === 'note' && visible
+}, { immediate: true, flush: 'sync' })
+
+const tabletLeftRef = ref<HTMLElement | null>(null)
+const tabletRightRef = ref<HTMLElement | null>(null)
+const tabletFocusTrap = useFocusTrap()
+watch(tabletDrawer, async (drawer, previous) => {
+  if (!drawer) {
+    if (previous) await tabletFocusTrap.deactivate()
+    return
+  }
+  // Capture the actual NavBar trigger before the panel takes keyboard focus.
+  // Safari does not consistently focus a button when it is tapped.
+  document.querySelector<HTMLElement>(drawer === 'left' ? '[data-testid="left-panel-toggle"]' : '.right-rail-toggle')?.focus()
+  tabletFocusTrap.activate()
+  await nextTick()
+  if (tabletDrawer.value !== drawer) return
+  const root = drawer === 'left' ? tabletLeftRef.value : tabletRightRef.value
+  const modal = document.activeElement?.closest('[aria-modal="true"]')
+  if (modal && !root?.contains(modal)) return
+  root?.querySelector<HTMLElement>('button, input, [tabindex="0"]')?.focus()
+}, { flush: 'sync' })
+
+function onTabletDrawerKeydown(event: KeyboardEvent): void {
+  if (!tabletDrawer.value || event.defaultPrevented) return
+  // Teleported search/confirm/access dialogs own their own keyboard scope.
+  const root = tabletDrawer.value === 'left' ? tabletLeftRef.value : tabletRightRef.value
+  if (!(event.target instanceof Element)) return
+  const insideDrawer = Boolean(root?.contains(event.target))
+  const onTrigger = Boolean(event.target.closest('.left-panel-toggle, .right-rail-toggle'))
+  if (!insideDrawer && !onTrigger) return
+  if (event.key === 'Escape') {
+    event.preventDefault()
+    event.stopPropagation()
+    closeTabletDrawer()
+  } else if (event.key === 'Tab' && insideDrawer) {
+    tabletFocusTrap.onTab(() => root, event)
+  }
+}
+onMounted(() => document.addEventListener('keydown', onTabletDrawerKeydown))
+onBeforeUnmount(() => document.removeEventListener('keydown', onTabletDrawerKeydown))
 const workspaceLeftSidebarVisible = computed(() => workspaceSidebarVisible.value && leftSidebarVisible.value)
 const workspaceActivityBarVisible = computed(() => (
   workspaceLeftSidebarVisible.value && !isDiaryScope.value
@@ -3089,17 +3140,13 @@ watch(isReadMode, async (reading) => {
   <div
     ref="vaultRef"
     class="vault"
-    :class="{ 'is-read': isReadMode, 'is-zen-mode': zenModeActive, 'right-rail-open': rightRailVisible, 'side-panel-open': sidePanelOpen, 'diary-calendar-mode': isDiaryCalendarVisible, 'diary-native-document-mode': isOrdinaryManagedDiaryDocumentActive }"
+    :class="{ 'is-read': isReadMode, 'is-zen-mode': zenModeActive, 'right-rail-open': rightRailVisible, 'side-panel-open': sidePanelOpen, 'diary-calendar-mode': isDiaryCalendarVisible, 'diary-native-document-mode': isOrdinaryManagedDiaryDocumentActive, 'note-tablet-mode': noteTabletLayout }"
     :data-zen-mode="zenModeActive ? 'true' : 'false'"
     tabindex="0"
     :style="vaultStyle"
     @keydown="onVaultKeydown"
   >
-    <ActivityBar
-      v-if="workspaceActivityBarVisible"
-      :active-panel="activePanel"
-      @select-panel="selectActivityPanel"
-    />
+    <div v-if="tabletDrawer" class="note-tablet-backdrop" data-testid="note-tablet-backdrop" aria-hidden="true" @click="closeTabletDrawer" />
 
     <SettingsModal
       :open="settingsOpen"
@@ -3133,64 +3180,78 @@ watch(isReadMode, async (reading) => {
       @manage="openRecoveryManagement"
     />
 
-    <FileTree
-      v-if="filesPanelVisible"
-      ref="fileTreeRef"
-      :filter="filesFilter"
-      :tree="tree"
-      :posts="posts"
-      :current-path="activePath"
-      :exact-path-filter="diaryExactPathFilter"
-      @update:filter="onFilesFilterEdited"
-      @select="openFileTreeDocument"
-      @refresh="refresh"
-      @export-document="documentExport.request"
-    />
-    <TagPanel
-      v-else-if="tagPanelVisible"
-      v-model:filter="tagsFilter"
-      :posts="posts"
-      :selected-tag="selectedTag"
-      :path="activePath"
-      @select="selectTag"
-      @open="(path: string) => openPost(path, { mode: 'preview' })"
-    />
-    <HistoryPanel
-      v-else-if="historyPanelVisible"
-      :history="history"
-      :commit="historyCommit"
-      :withdraw="historyWithdraw"
-      :file-history="sidebarFileHistory"
-      :posts="posts"
-      :active-diff-path="activeWorkingTreeDiff?.documentPath ? `${activeWorkingTreeDiff.documentPath}.md` : null"
-      @show-all-history="showAllHistory"
-      @open-revision="openHistoryComparison"
-      @compare-revision="onHistoryFileAction($event, 'compare')"
-      @restore-revision="onHistoryFileAction($event, 'restore')"
-      @open-diff="openWorkingTreeDiff"
-    />
-    <DraftRecoveryCenter
-      v-else-if="recoveryPanelVisible"
-      :records="recoveryManagement.records.value"
-      :items="draftRecovery.items.value"
-      :capacity="recoveryManagement.capacity.value"
-      :unsupported-count="recoveryManagement.unsupportedCount.value"
-      :selected-ids="recoveryManagement.selectedIds.value"
-      :protected-ids="recoveryManagement.protectedIds.value"
-      :loading="recoveryManagement.loading.value"
-      :error="recoveryManagement.error.value"
-      :show-back="isDiaryScope"
-      @refresh="refreshRecoveryCenter"
-      @delete-selected="deleteSelectedRecovery"
-      @toggle="recoveryManagement.toggleSelected"
-      @open="(id) => openRecoveryView(id, 'content')"
-      @retry="retryManagedRecovery"
-      @delete="deleteManagedRecovery"
-      @back="diaryRecoveryCenterVisible = false"
-    />
+    <div
+      ref="tabletLeftRef"
+      class="workspace-left-navigation"
+      v-show="!noteTabletLayout || tabletDrawer === 'left'"
+      :role="noteTabletLayout && tabletDrawer === 'left' ? 'dialog' : undefined"
+      :aria-label="noteTabletLayout ? t('nav.left_panel_open') : undefined"
+      @keydown="onTabletDrawerKeydown"
+    >
+      <ActivityBar
+        v-if="workspaceActivityBarVisible"
+        :active-panel="activePanel"
+        @select-panel="selectActivityPanel"
+      />
+      <FileTree
+        v-if="filesPanelVisible"
+        ref="fileTreeRef"
+        :filter="filesFilter"
+        :tree="tree"
+        :posts="posts"
+        :current-path="activePath"
+        :exact-path-filter="diaryExactPathFilter"
+        @update:filter="onFilesFilterEdited"
+        @select="openFileTreeDocument"
+        @refresh="refresh"
+        @export-document="documentExport.request"
+      />
+      <TagPanel
+        v-else-if="tagPanelVisible"
+        v-model:filter="tagsFilter"
+        :posts="posts"
+        :selected-tag="selectedTag"
+        :path="activePath"
+        @select="selectTag"
+        @open="(path: string) => openPost(path, { mode: 'preview' })"
+      />
+      <HistoryPanel
+        v-else-if="historyPanelVisible"
+        :history="history"
+        :commit="historyCommit"
+        :withdraw="historyWithdraw"
+        :file-history="sidebarFileHistory"
+        :posts="posts"
+        :active-diff-path="activeWorkingTreeDiff?.documentPath ? `${activeWorkingTreeDiff.documentPath}.md` : null"
+        @show-all-history="showAllHistory"
+        @open-revision="openHistoryComparison"
+        @compare-revision="onHistoryFileAction($event, 'compare')"
+        @restore-revision="onHistoryFileAction($event, 'restore')"
+        @open-diff="openWorkingTreeDiff"
+      />
+      <DraftRecoveryCenter
+        v-else-if="recoveryPanelVisible"
+        :records="recoveryManagement.records.value"
+        :items="draftRecovery.items.value"
+        :capacity="recoveryManagement.capacity.value"
+        :unsupported-count="recoveryManagement.unsupportedCount.value"
+        :selected-ids="recoveryManagement.selectedIds.value"
+        :protected-ids="recoveryManagement.protectedIds.value"
+        :loading="recoveryManagement.loading.value"
+        :error="recoveryManagement.error.value"
+        :show-back="isDiaryScope"
+        @refresh="refreshRecoveryCenter"
+        @delete-selected="deleteSelectedRecovery"
+        @toggle="recoveryManagement.toggleSelected"
+        @open="(id) => openRecoveryView(id, 'content')"
+        @retry="retryManagedRecovery"
+        @delete="deleteManagedRecovery"
+        @back="diaryRecoveryCenterVisible = false"
+      />
+    </div>
 
     <div
-      v-if="workspaceLeftSidebarVisible && sidePanelOpen"
+      v-if="workspaceLeftSidebarVisible && sidePanelOpen && !noteTabletLayout"
       class="splitter"
       role="separator"
       aria-orientation="vertical"
@@ -3357,31 +3418,39 @@ watch(isReadMode, async (reading) => {
     </section>
 
     <div
-      v-if="workspaceSidebarVisible && rightRailVisible"
+      v-if="workspaceSidebarVisible && rightRailVisible && !noteTabletLayout"
       class="splitter splitter-toc"
       role="separator"
       aria-orientation="vertical"
       :title="t('vault.resize_right_rail')"
       @pointerdown="startDrag(vaultRef!, 'rightRail', $event)"
     />
-    <RightRail
-      v-if="workspaceSidebarVisible && workspaceRightPanelAvailable"
-      v-show="rightRailVisible"
-      class="right-rail-slot"
-      :path="metadataPath"
-      :posts="posts"
-      :active-tab="rightRailTab"
-      :is-read-mode="isReadMode"
-      :file-history="rightRailFileHistory"
-      :metadata-context="metadataContext"
-      :metadata-readonly="metadataReadonly"
-      :summary-source="metadataSummaryContent"
-      @update:active-tab="rightRailTab = $event"
-      @link-navigate="openLinkedDocument"
-      @metadata-saved="onMetadataSaved"
-      @switch-to-read="switchToReadMode"
-      @open-history-revision="openHistoryComparison"
-    />
+    <div ref="tabletRightRef" class="workspace-right-navigation"
+      v-show="!noteTabletLayout || tabletDrawer === 'right'"
+      :role="noteTabletLayout && tabletDrawer === 'right' ? 'dialog' : undefined"
+      :aria-label="noteTabletLayout ? t('nav.right_rail_open') : undefined"
+      @keydown="onTabletDrawerKeydown"
+    >
+      <RightRail
+        v-if="workspaceSidebarVisible && workspaceRightPanelAvailable"
+        v-show="rightRailVisible"
+        class="right-rail-slot"
+        :path="metadataPath"
+        :posts="posts"
+        :active-tab="rightRailTab"
+        :is-read-mode="isReadMode"
+        :file-history="rightRailFileHistory"
+        :metadata-context="metadataContext"
+        :metadata-readonly="metadataReadonly"
+        :summary-source="metadataSummaryContent"
+        @update:active-tab="rightRailTab = $event"
+        @link-navigate="openLinkedDocument"
+        @metadata-saved="onMetadataSaved"
+        @switch-to-read="switchToReadMode"
+        @open-history-revision="openHistoryComparison"
+        @toc-navigate="noteTabletLayout && closeTabletDrawer()"
+      />
+    </div>
 
     <StatusBar
       v-if="statusBarLayoutVisible"

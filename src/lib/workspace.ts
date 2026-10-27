@@ -23,6 +23,7 @@ export const workspaceNavigationAvailability = {
 
 /** Keep the nav's responsive behavior on Diary's existing 600px boundary. */
 export const workspaceMobileNavigationQuery = '(max-width: 600px)'
+export const workspaceNoteTabletQuery = '(min-width: 601px) and (max-width: 1199px)'
 
 export function isWorkspaceNavigationAvailable(
   workspace: WorkspaceNavigationKey,

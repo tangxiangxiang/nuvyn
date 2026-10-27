@@ -9,6 +9,20 @@ import { useI18n } from '../../../composables/useI18n'
 const post: PostSummary = { path: 'inbox/redis', title: 'Redis', created: '', updated: '', tags: [], summary: '', size: 0, mtime: 1 }
 const secondPost: PostSummary = { path: 'inbox/river', title: 'River', created: '', updated: '', tags: [], summary: '', size: 0, mtime: 1 }
 
+it('keeps Escape dismissal when the global host owns the opening shortcut', async () => {
+  const wrapper = mount(CommandPalette, { props: { posts: [], keyboardShortcut: false } })
+  document.dispatchEvent(new KeyboardEvent('keydown', { key: 'p', ctrlKey: true, bubbles: true }))
+  await flushPromises()
+  expect(document.body.querySelector('.palette')).toBeNull()
+  ;(wrapper.vm as unknown as { show: () => void }).show()
+  await flushPromises()
+  expect(document.body.querySelector('.palette')).not.toBeNull()
+  document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))
+  await flushPromises()
+  expect(document.body.querySelector('.palette')).toBeNull()
+  wrapper.unmount()
+})
+
 describe('CommandPalette Chinese copy', () => {
   beforeEach(() => { useI18n().setLocale('zh'); dispose(); vi.stubGlobal('fetch', vi.fn(async () => ({ ok: true, json: async () => ({ content: '' }) }))) })
   afterEach(() => { vi.unstubAllGlobals(); dispose(); document.body.innerHTML = '' })

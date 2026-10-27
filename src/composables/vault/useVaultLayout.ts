@@ -39,6 +39,8 @@ export interface VaultLayout {
 }
 
 export interface UseVaultLayoutOptions {
+  /** Note-only presentation owner; drawers never enter the stored layout. */
+  noteTablet?: Readonly<Ref<boolean>>
   /**
    * Whether the workspace chrome should reserve its left activity/sidebar
    * tracks. Calendar Home passes its presentation state here so the layout
@@ -99,6 +101,11 @@ const _sidePanelWidth = ref(DEFAULTS.sidePanelWidth)
 const _rightRailTab = ref<RightRailTab>(DEFAULTS.rightRailTab)
 const _rightRailWidth = ref(DEFAULTS.rightRailWidth)
 const _rightRailCollapsed = ref(DEFAULTS.rightRailCollapsed)
+let _noteTabletSource: Readonly<Ref<boolean>> | null = null
+const _noteTabletVersion = ref(0)
+const _tabletDrawer = ref<'left' | 'right' | null>(null)
+const _tabletPanel = ref<ActivePanel>('files')
+const _tabletRightTab = ref<RightRailTab>('toc')
 
 /* Hydration guard. The first useVaultLayout() call (which is the
    VaultView's) is the one that owns the storage round-trip — it reads
@@ -113,6 +120,11 @@ let _hydrated = false
    left in place; it's harmless in the next mount because it re-runs
    once and reattaches. */
 export function __resetVaultLayoutState(): void {
+  _noteTabletSource = null
+  _noteTabletVersion.value++
+  _tabletDrawer.value = null
+  _tabletPanel.value = 'files'
+  _tabletRightTab.value = 'toc'
   _hydrated = false
   _forceSidePanelOpenSource = null
   _forceSidePanelOpenVersion.value += 1
@@ -126,6 +138,25 @@ export function __resetVaultLayoutState(): void {
 }
 
 export function useVaultLayout(options: UseVaultLayoutOptions = {}) {
+  if (options.noteTablet) {
+    const owner = options.noteTablet
+    _noteTabletSource = owner
+    _noteTabletVersion.value++
+    onScopeDispose(() => {
+      if (_noteTabletSource === owner) {
+        _noteTabletSource = null
+        _noteTabletVersion.value++
+        _tabletDrawer.value = null
+      }
+    })
+  }
+  const noteTablet = computed(() => {
+    _noteTabletVersion.value
+    return _noteTabletSource?.value ?? false
+  })
+  watch(noteTablet, () => { _tabletDrawer.value = null }, { flush: 'sync' })
+  const tabletDrawer = computed(() => noteTablet.value ? _tabletDrawer.value : null)
+  function closeTabletDrawer(): void { _tabletDrawer.value = null }
   const { workspaceRightPanelAvailable } = useScopeFilter()
   const sidebarVisible = options.sidebarVisible ?? ref(true)
   const activityBarVisible = options.activityBarVisible ?? ref(true)
@@ -225,7 +256,7 @@ export function useVaultLayout(options: UseVaultLayoutOptions = {}) {
   /* Exposed as a top-level ref so the template can use it for the
      side-splitter's v-show. */
   const sidePanelOpen = computed(() =>
-    !_leftSidebarCollapsed.value && (
+    noteTablet.value ? tabletDrawer.value === 'left' : !_leftSidebarCollapsed.value && (
       forceSidePanelOpen.value ||
       _activePanel.value === 'files' ||
       _activePanel.value === 'tags' ||
@@ -234,14 +265,33 @@ export function useVaultLayout(options: UseVaultLayoutOptions = {}) {
     ),
   )
   const leftSidebarCollapsed: Ref<boolean> = _leftSidebarCollapsed
-  const leftSidebarVisible = computed(() => sidebarVisible.value && !leftSidebarCollapsed.value)
-  const activePanel: Ref<ActivePanel> = _activePanel
+  const leftSidebarVisible = computed(() => sidebarVisible.value && (noteTablet.value
+    ? tabletDrawer.value === 'left' : !leftSidebarCollapsed.value))
+  const activePanel = computed({
+    get: () => noteTablet.value ? _tabletPanel.value : _activePanel.value,
+    set: (panel: ActivePanel) => {
+      if (noteTablet.value) _tabletPanel.value = panel
+      else _activePanel.value = panel
+    },
+  })
   const sidePanelWidth: Ref<number> = _sidePanelWidth
-  const rightRailTab: Ref<RightRailTab> = _rightRailTab
+  const rightRailTab = computed({
+    get: () => noteTablet.value ? _tabletRightTab.value : _rightRailTab.value,
+    set: (tab: RightRailTab) => {
+      if (noteTablet.value) _tabletRightTab.value = tab
+      else _rightRailTab.value = tab
+    },
+  })
   const rightRailWidth: Ref<number> = _rightRailWidth
   const rightRailCollapsed: Ref<boolean> = _rightRailCollapsed
+  const rightRailVisible = computed(() => workspaceRightPanelAvailable.value && (noteTablet.value
+    ? tabletDrawer.value === 'right' : !rightRailCollapsed.value))
 
   const vaultStyle = computed(() => {
+    if (noteTablet.value) return {
+      gridTemplateColumns: 'minmax(0, 1fr)',
+      gridTemplateRows: statusBarVisible.value ? 'minmax(0, 1fr) 24px' : 'minmax(0, 1fr)',
+    }
     // Rows: editor-area (fills), optionally followed by a 24px status-bar
     // that spans the full width. Empty workspaces omit that row so the
     // editor surface can use the recovered height. Columns vary depending
@@ -286,6 +336,11 @@ export function useVaultLayout(options: UseVaultLayoutOptions = {}) {
   // have to assume a particular ref name or be the owner of the DOM node.
 
   function selectPanel(panel: SidePanel) {
+    if (noteTablet.value) {
+      _tabletPanel.value = panel
+      _tabletDrawer.value = 'left'
+      return
+    }
     // Keyboard shortcuts and other programmatic panel selections should
     // restore the left workspace if it was collapsed from the NavBar.
     if (leftSidebarCollapsed.value) {
@@ -304,6 +359,10 @@ export function useVaultLayout(options: UseVaultLayoutOptions = {}) {
   }
 
   function toggleSidePanel() {
+    if (noteTablet.value) {
+      _tabletDrawer.value = tabletDrawer.value === 'left' ? null : 'left'
+      return
+    }
     if (forceSidePanelOpen.value) {
       leftSidebarCollapsed.value = !leftSidebarCollapsed.value
       return
@@ -319,10 +378,18 @@ export function useVaultLayout(options: UseVaultLayoutOptions = {}) {
 
   function toggleRightRail() {
     if (!workspaceRightPanelAvailable.value) return
+    if (noteTablet.value) {
+      _tabletDrawer.value = tabletDrawer.value === 'right' ? null : 'right'
+      return
+    }
     rightRailCollapsed.value = !rightRailCollapsed.value
   }
 
   return {
+    noteTablet,
+    tabletDrawer,
+    closeTabletDrawer,
+    rightRailVisible,
     activePanel,
     sidePanelOpen,
     leftSidebarCollapsed,

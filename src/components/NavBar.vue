@@ -328,7 +328,7 @@ function onScopeClick(scope: ScopeKey): void {
    state; the three tabs inside the rail own tab selection. Keeping those
    responsibilities separate means collapsing the rail never changes the
    user's selected tab. */
-const { leftSidebarCollapsed, leftSidebarVisible, rightRailCollapsed, workspaceRightPanelAvailable, toggleSidePanel, toggleRightRail } = useVaultLayout()
+const { leftSidebarVisible, rightRailVisible, noteTablet, workspaceRightPanelAvailable, toggleSidePanel, toggleRightRail } = useVaultLayout()
 
 const showBrandConstellation = ref(false)
 const brandVirtueModeActive = ref(false)
@@ -944,7 +944,7 @@ onBeforeUnmount(() => {
 
 <template>
   <header
-    :class="['navbar', { 'is-vault': isVault, 'is-workspace': isWorkspace, 'ledger-nav-mode': isLedger, 'board-nav-mode': isBoard, 'diary-calendar-mode': isVault && activeScope === 'diary', 'is-zen-transitioning': props.zenModeTransitioning }]"
+    :class="['navbar', { 'is-vault': isVault, 'is-workspace': isWorkspace, 'ledger-nav-mode': isLedger, 'board-nav-mode': isBoard, 'diary-calendar-mode': isVault && activeScope === 'diary', 'is-zen-transitioning': props.zenModeTransitioning, 'note-tablet-nav': isVault && noteTablet }]"
     :inert="props.logoutBusy || undefined"
     :aria-busy="props.logoutBusy || undefined"
   >
@@ -1064,7 +1064,7 @@ onBeforeUnmount(() => {
           :bordered="false"
           :title="t(leftSidebarVisible ? 'nav.left_panel_close' : 'nav.left_panel_open')"
           :aria-label="t(leftSidebarVisible ? 'nav.left_panel_close' : 'nav.left_panel_open')"
-          :aria-pressed="!leftSidebarCollapsed"
+          :aria-pressed="leftSidebarVisible"
           data-testid="left-panel-toggle"
           @click="toggleSidePanel"
         >
@@ -1077,9 +1077,9 @@ onBeforeUnmount(() => {
           size="small"
           quaternary
           :bordered="false"
-          :title="t(rightRailCollapsed ? 'nav.right_rail_open' : 'nav.right_rail_close')"
-          :aria-label="t(rightRailCollapsed ? 'nav.right_rail_open' : 'nav.right_rail_close')"
-          :aria-pressed="!rightRailCollapsed"
+          :title="t(rightRailVisible ? 'nav.right_rail_close' : 'nav.right_rail_open')"
+          :aria-label="t(rightRailVisible ? 'nav.right_rail_close' : 'nav.right_rail_open')"
+          :aria-pressed="rightRailVisible"
           @click="toggleRightRail"
         >
           <NIcon class="right-rail-toggle-icon" aria-hidden="true"><LayoutSidebarRightExpand /></NIcon>

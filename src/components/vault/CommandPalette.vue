@@ -85,13 +85,13 @@ function onGlobalKey(e: KeyboardEvent) { if (open.value) trap.onTab(() => docume
 watch(query, refresh)
 watch(() => props.posts, () => { if (open.value) void refresh() }, { deep: false })
 onMounted(() => {
-  if (props.keyboardShortcut !== false) document.addEventListener('keydown', onKey)
+  document.addEventListener('keydown', onKey)
   document.addEventListener('keydown', onGlobalKey)
 })
 onBeforeUnmount(() => {
   providerUnsubscribers.forEach((unsubscribe) => unsubscribe())
   providerUnsubscribers = []
-  if (props.keyboardShortcut !== false) document.removeEventListener('keydown', onKey)
+  document.removeEventListener('keydown', onKey)
   document.removeEventListener('keydown', onGlobalKey)
 })
 defineExpose({ show, hide, refresh })

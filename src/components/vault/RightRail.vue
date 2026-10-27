@@ -52,6 +52,7 @@ const emit = defineEmits<{
   'update:activeTab': [tab: RightRailTab]
   'switch-to-read': []
   'open-history-revision': [selection: HistoryRevisionSelection]
+  'toc-navigate': []
 }>()
 
 // Keep the rail outline compact while matching the rendered h2-h4 TOC.
@@ -114,7 +115,9 @@ watch(
 )
 
 function onTocClick(id: string) {
-  tocScrollTo.value?.(id)
+  if (!tocScrollTo.value) return
+  tocScrollTo.value(id)
+  emit('toc-navigate')
 }
 
 function onLinkNavigate(p: string, anchor?: string) {

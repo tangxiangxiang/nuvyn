@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref } from 'vue'
+import { computed, nextTick, ref, watch } from 'vue'
 import { NButton } from 'naive-ui'
 import { useI18n } from '../../composables/useI18n'
 import type { WorkspaceTab } from './tabs'
@@ -47,6 +47,12 @@ const tabPresentations = computed<TabUiPresentation[]>(() =>
 
 const tabsRef = ref<HTMLElement | null>(null)
 const tabIds = computed(() => props.tabs.map((t) => t.id))
+watch(() => props.activePath, async (path) => {
+  await nextTick()
+  const active = Array.from(tabsRef.value?.querySelectorAll<HTMLElement>('[data-tab-id]') ?? [])
+    .find((tab) => tab.dataset.tabId === path)
+  active?.scrollIntoView?.({ block: 'nearest', inline: 'nearest' })
+}, { immediate: true })
 const { focusTab } = useWorkspaceTabFocus({ container: tabsRef })
 
 const {

@@ -1426,6 +1426,77 @@ main.container.auth-page-shell {
 }
 
 /* Vault: 3-pane layout */
+.workspace-left-navigation,
+.workspace-right-navigation { display: contents; }
+
+/* Only Note's tablet presentation removes the persistent sidebar tracks. */
+.vault.note-tablet-mode {
+  --navbar-h: 49px; /* 48px touch row plus its existing 1px border. */
+  position: relative;
+  min-width: 0;
+  overflow: hidden;
+  height: calc(100dvh - var(--navbar-h, 56px));
+}
+.note-tablet-mode .note-tablet-backdrop {
+  position: absolute;
+  inset: 0;
+  z-index: 30;
+  background: rgb(0 0 0 / 0.32);
+}
+.note-tablet-mode > .workspace-left-navigation,
+.note-tablet-mode > .workspace-right-navigation {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  z-index: 31;
+  min-width: 0;
+  background: var(--vs-bg-1);
+  box-shadow: 0 4px 24px rgb(0 0 0 / 0.24);
+  overscroll-behavior: contain;
+}
+.note-tablet-mode > .workspace-left-navigation {
+  left: 0;
+  display: grid;
+  grid-template-columns: 44px minmax(0, 1fr);
+  width: min(380px, 85vw);
+}
+.note-tablet-mode > .workspace-right-navigation {
+  right: 0;
+  display: flex;
+  width: min(420px, 85vw);
+}
+.note-tablet-mode .workspace-left-navigation > :not(.activity-bar),
+.note-tablet-mode .workspace-right-navigation > .right-rail {
+  width: 100%;
+  min-width: 0;
+  min-height: 0;
+}
+.note-tablet-mode .activity-bar .ab-btn { width: 44px; min-height: 44px; }
+.vault.note-tablet-mode .file-tree .row-line { min-height: 40px; }
+.note-tablet-mode .editor-area { grid-template-rows: 44px minmax(0, 1fr); }
+.note-tablet-mode .editor-area.is-empty { grid-template-rows: minmax(0, 1fr); }
+.note-tablet-mode .editor-tabs-shell,
+.note-tablet-mode .tab { height: 44px; }
+.note-tablet-mode .tabs { flex-wrap: nowrap; overscroll-behavior-x: contain; }
+.note-tablet-mode .reading-pane { padding: 24px clamp(20px, 4vw, 48px) 64px; overflow-x: hidden; }
+.note-tablet-mode .article { overflow-wrap: anywhere; }
+.note-tablet-mode .article :where(pre, .table-scroll, .nuvyn-flex, .markmap-widget-host, .mermaid-widget-host) {
+  max-width: 100%;
+  overflow-x: auto;
+  overscroll-behavior-x: contain;
+}
+.note-tablet-mode .article :where(img, video, svg) { max-width: 100%; }
+.note-tablet-mode .article :where(.nuvyn-code-group-tab, summary) { min-height: 40px; }
+.navbar.note-tablet-nav .navbar-inner { gap: 10px; }
+.navbar.note-tablet-nav .nav-actions { gap: 2px; }
+.navbar.note-tablet-nav .nav-actions .n-button { min-width: 40px; min-height: 40px; }
+.navbar.note-tablet-nav .navbar-inner { min-height: 48px; }
+@media (min-width: 601px) and (max-width: 899px) {
+  .navbar.note-tablet-nav :where(.brand-wordmark, .scope-chip-label, .workspace-board-link-label) { display: none; }
+  .navbar.note-tablet-nav .nav-workspace-link { min-width: 40px; min-height: 40px; padding: 0 8px; }
+  .navbar.note-tablet-nav .workspace-navigation { gap: 2px; }
+}
+
 .vault {
   display: grid;
   grid-template-rows: 1fr;
@@ -1575,7 +1646,9 @@ main.container.auth-page-shell {
   }
 
   .vault.diary-native-document-mode > .file-tree,
-  .vault.diary-native-document-mode > .recovery-center {
+  .vault.diary-native-document-mode > .recovery-center,
+  .vault.diary-native-document-mode > .workspace-left-navigation > .file-tree,
+  .vault.diary-native-document-mode > .workspace-left-navigation > .recovery-center {
     position: absolute;
     inset: 0 auto 24px 0;
     width: min(280px, 85vw);
@@ -5485,13 +5558,17 @@ body:has(.ledger-detail-sheet-card) .n-modal-mask {
 .vault > .activity-bar,
 .vault > .file-tree,
 .vault > .tag-panel,
+.vault > .workspace-left-navigation > .activity-bar,
+.vault > .workspace-left-navigation > .file-tree,
+.vault > .workspace-left-navigation > .tag-panel,
 .vault > .splitter {
   background: var(--bg);
   overflow: hidden;
   display: flex;
   flex-direction: column;
 }
-.vault > .activity-bar { overflow: visible; }
+.vault > .activity-bar,
+.vault > .workspace-left-navigation > .activity-bar { overflow: visible; }
 
 .preview { max-width: 100%; }
 .render-error {

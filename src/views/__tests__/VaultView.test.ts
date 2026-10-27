@@ -1,8 +1,13 @@
-import { readFileSync } from 'node:fs'
+import { readFileSync as readSourceFile } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import { describe, expect, it, vi } from 'vitest'
 import { applyMetadataToPostSummary } from '../metadataPostSummary'
 import { handleDiaryHomeKeydown } from '../diaryHomeKeyboard'
+
+// Source wiring assertions should have identical meaning in LF/CRLF checkouts.
+function readFileSync(path: string, encoding: 'utf8'): string {
+  return readSourceFile(path, encoding).replace(/\r\n/g, '\n')
+}
 
 function keyboardEvent(
   key: string,
@@ -855,7 +860,8 @@ describe('VaultView D3.2 Diary surface wiring', () => {
     expect(source).toContain('watch([isOrdinaryManagedDiaryDocumentActive, isMobileDiaryViewport]')
     expect(source).toContain("'diary-native-document-mode': isOrdinaryManagedDiaryDocumentActive")
     expect(source).toContain('closeMobileDiaryNavigation()')
-    expect(source).toContain('workspaceRightPanelAvailable.value && !rightRailCollapsed.value')
+    expect(source).toContain('rightRailVisible,')
+    expect(source).toContain('tabletDrawer,')
     expect(styles).toContain('grid-template-columns: minmax(0, 1fr) !important')
     expect(styles).not.toMatch(/\.vault\.diary-native-document-mode[^}]*grid-template-columns:\s*40px/)
   })
