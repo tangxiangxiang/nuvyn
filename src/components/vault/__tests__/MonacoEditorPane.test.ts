@@ -12,6 +12,7 @@ const mocks = vi.hoisted(() => {
   const compositionEndListeners: Array<() => void> = []
   const keyDownListeners: Array<(event: any) => void> = []
   const scrollListeners: Array<(event: { scrollTopChanged: boolean; scrollLeftChanged: boolean }) => void> = []
+  const layoutListeners: Array<(event: { height: number }) => void> = []
   const mouseDownListeners: Array<(event: any) => void> = []
   const completionProviders: Array<any> = []
   const decorations = new Map<string, any>()
@@ -68,6 +69,9 @@ const mocks = vi.hoisted(() => {
     getScrollHeight: vi.fn(() => 1000),
     getScrollTop: vi.fn(() => 250),
     getLayoutInfo: vi.fn(() => ({ height: 500 })),
+    onDidLayoutChange: vi.fn((fn: (event: { height: number }) => void) => { layoutListeners.push(fn) }),
+    getScrolledVisiblePosition: vi.fn(() => ({ top: 0, left: 0, height: 22 })),
+    revealPosition: vi.fn(),
     layout: vi.fn(),
     setScrollTop: vi.fn(),
     setPosition: vi.fn(),
@@ -106,6 +110,7 @@ const mocks = vi.hoisted(() => {
     compositionEndListeners,
     keyDownListeners,
     scrollListeners,
+    layoutListeners,
     mouseDownListeners,
     completionProviders,
     decorations,
@@ -125,6 +130,7 @@ const mocks = vi.hoisted(() => {
 
 vi.mock('monaco-editor/esm/vs/editor/editor.api.js', () => ({
   editor: {
+    ScrollType: { Immediate: 0 },
     defineTheme: mocks.defineTheme,
     setTheme: mocks.setTheme,
     createModel: vi.fn((value: string) => { mocks.model.value = value; return mocks.model }),
@@ -260,6 +266,7 @@ describe('Monaco EditorPane', () => {
     mocks.compositionEndListeners.length = 0
     mocks.keyDownListeners.length = 0
     mocks.scrollListeners.length = 0
+    mocks.layoutListeners.length = 0
     mocks.mouseDownListeners.length = 0
     mocks.editorNode = null
     vi.clearAllMocks()
@@ -661,7 +668,7 @@ describe('Monaco EditorPane', () => {
     mocks.model.value = 'changed'
     mocks.changeListeners.forEach((fn) => fn())
     await wrapper.vm.$nextTick()
-    expect(wrapper.emitted('update:modelValue')).toEqual([['changed']])
+    expect(wrapper.emitted('update:modelValue')).toEqual([['changed', 'inbox/test']])
     wrapper.unmount()
   })
 
@@ -852,7 +859,7 @@ describe('Monaco EditorPane', () => {
     const wrapper = mount(EditorPane, { props: { modelValue: '', path: 'inbox/snippet-tabs' } })
     for (const id of ['nuvyn.markdown-indent', 'nuvyn.markdown-outdent']) {
       expect(mocks.editor.addAction).toHaveBeenCalledWith(expect.objectContaining({
-        id, keybindingContext: '!inSnippetMode && !suggestWidgetVisible',
+        id, keybindingContext: '!inSnippetMode && !suggestWidgetVisible && !inComposition',
       }))
     }
     wrapper.unmount()
@@ -1223,7 +1230,7 @@ describe('Monaco EditorPane', () => {
       .map(([options]) => options)
       .find((options) => options.id === 'nuvyn.markdown-enter')
 
-    expect(action).toMatchObject({ keybindingContext: '!suggestWidgetVisible' })
+    expect(action).toMatchObject({ keybindingContext: '!suggestWidgetVisible && !inComposition' })
     wrapper.unmount()
   })
 
@@ -1379,7 +1386,76 @@ describe('Monaco EditorPane', () => {
     expect(wrapper.emitted('update:modelValue')).toBeUndefined()
     mocks.compositionEndListeners.forEach((fn) => fn())
     await wrapper.vm.$nextTick()
-    expect(wrapper.emitted('update:modelValue')).toEqual([['中文输入']])
+    expect(wrapper.emitted('update:modelValue')).toEqual([['中文输入', 'inbox/chinese']])
+    wrapper.unmount()
+  })
+
+  it('preserves tablet composition against props updates and deduplicates its final notification', async () => {
+    const wrapper = mount(EditorPane, { props: { modelValue: 'start', path: 'inbox/ime', tabletEditing: true } })
+    mocks.compositionStartListeners.forEach((fn) => fn())
+    mocks.model.value = 'start拼音'
+    mocks.changeListeners.forEach((fn) => fn())
+    await wrapper.setProps({ modelValue: 'external' })
+    expect(mocks.model.value).toBe('start拼音')
+    expect(wrapper.emitted('update:modelValue')).toBeUndefined()
+    expect(wrapper.emitted('composition-edited')).toEqual([['inbox/ime']])
+    mocks.model.value = 'start中文'
+    mocks.compositionEndListeners.forEach((fn) => fn())
+    mocks.compositionEndListeners.forEach((fn) => fn())
+    expect(wrapper.emitted('update:modelValue')).toEqual([['start中文', 'inbox/ime']])
+    wrapper.unmount()
+  })
+
+  it('commits unsynchronized tablet input to its source document on blur or teardown', () => {
+    const wrapper = mount(EditorPane, { props: { modelValue: '', path: 'inbox/source', tabletEditing: true } })
+    mocks.compositionStartListeners.forEach((fn) => fn())
+    mocks.model.value = '不能丢失'
+    mocks.changeListeners.forEach((fn) => fn())
+    mocks.blurListeners.forEach((fn) => fn())
+    expect(wrapper.emitted('update:modelValue')).toEqual([['不能丢失', 'inbox/source']])
+    wrapper.unmount()
+  })
+
+  it('retains a pending tablet composition when unmounted without a browser end event', () => {
+    const wrapper = mount(EditorPane, { props: { modelValue: '', path: 'inbox/source', tabletEditing: true } })
+    mocks.compositionStartListeners.forEach((fn) => fn())
+    mocks.model.value = '未结束'
+    wrapper.unmount()
+    expect(wrapper.emitted('update:modelValue')).toEqual([['未结束', 'inbox/source']])
+  })
+
+  it('reveals only an obscured focused caret when the tablet editor shrinks', () => {
+    const wrapper = mount(EditorPane, { props: { modelValue: '', path: 'inbox/layout', tabletEditing: true } })
+    mocks.editor.getScrolledVisiblePosition.mockReturnValue({ top: 400, left: 0, height: 22 })
+    mocks.editor.hasTextFocus.mockReturnValue(true)
+    mocks.layoutListeners.forEach((fn) => fn({ height: 300 }))
+    expect(mocks.editor.revealPosition).toHaveBeenCalledTimes(1)
+    mocks.editor.hasTextFocus.mockReturnValue(false)
+    mocks.layoutListeners.forEach((fn) => fn({ height: 200 }))
+    mocks.editor.hasTextFocus.mockReturnValue(true)
+    mocks.editor.getScrolledVisiblePosition.mockReturnValue({ top: 10, left: 0, height: 22 })
+    mocks.layoutListeners.forEach((fn) => fn({ height: 100 }))
+    mocks.layoutListeners.forEach((fn) => fn({ height: 500 }))
+    expect(mocks.editor.revealPosition).toHaveBeenCalledTimes(1)
+    expect(mocks.editor.setSelection).not.toHaveBeenCalled()
+    wrapper.unmount()
+  })
+
+  it('keeps a late composition result owned by its source after active document selection changes', () => {
+    const documents: Record<string, string> = { 'inbox/source': '', 'inbox/destination': 'untouched' }
+    let active = 'inbox/source'
+    const wrapper = mount(EditorPane, { props: {
+      modelValue: '', path: active, tabletEditing: true,
+      'onUpdate:modelValue': (value: string, source?: string) => { documents[source ?? active] = value },
+    } })
+    mocks.compositionStartListeners.forEach((fn) => fn())
+    mocks.model.value = 'zhongwen'
+    mocks.changeListeners.forEach((fn) => fn())
+    expect(documents['inbox/source']).toBe('')
+    active = 'inbox/destination'
+    mocks.model.value = '中文'
+    mocks.compositionEndListeners.forEach((fn) => fn())
+    expect(documents).toEqual({ 'inbox/source': '中文', 'inbox/destination': 'untouched' })
     wrapper.unmount()
   })
 

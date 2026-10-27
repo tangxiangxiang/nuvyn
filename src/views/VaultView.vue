@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { ref, inject, shallowRef, watch, computed, defineAsyncComponent, onBeforeUnmount, onMounted, nextTick } from 'vue'
 import { useMediaQuery, useStorage } from '@vueuse/core'
-import { useRoute, useRouter } from 'vue-router'
+import { onBeforeRouteLeave, onBeforeRouteUpdate, useRoute, useRouter } from 'vue-router'
 import { useShortcutDisplay } from '../composables/useShortcutDisplay'
 import { useVaultLayout } from '../composables/vault/useVaultLayout'
 import { workspaceNoteTabletQuery } from '../lib/workspace'
@@ -82,6 +82,7 @@ import {
 } from '../composables/diary/useDiaryAccessSession'
 import { DiaryAccessContextKey } from '../composables/diary/diaryAccessContext'
 import { AppShellContextKey } from '../composables/appShellContext'
+import { useTabletEditorViewport } from '../composables/vault/useTabletEditorViewport'
 import { localCivilToday } from '../components/diary/diaryCalendarAdapter'
 import {
   classifyDiaryPath,
@@ -186,9 +187,12 @@ const EditorPane = defineAsyncComponent(() => import('../components/vault/Editor
 const HtmlExportSurface = defineAsyncComponent(() => import('../components/vault/HtmlExportSurface.vue'))
 const editorPaneRef = ref<{
   chooseImage(): void
+  finishComposition(): void
   revealText(text: string): boolean
   revealAnchor(anchor: string, isCurrent?: () => boolean): boolean | Promise<boolean>
 } | null>(null)
+onBeforeRouteLeave(() => { editorPaneRef.value?.finishComposition() })
+onBeforeRouteUpdate(() => { editorPaneRef.value?.finishComposition() })
 const openWorkspaceDocumentsRef = ref<InstanceType<typeof OpenWorkspaceDocuments> | null>(null)
 const readingPaneRef = ref<{
   revealAnchor(anchor: string, isCurrent?: () => boolean): boolean | Promise<boolean>
@@ -1484,6 +1488,7 @@ function navigateToAttachmentReference(
 }
 
 function openEditorLink(target: { path: string; anchor?: string }): void {
+  editorPaneRef.value?.finishComposition()
   openLinkedDocument(target.path, target.anchor)
 }
 
@@ -1510,6 +1515,7 @@ function closeMobileDiaryNavigation(): void {
 }
 
 async function openFileTreeDocument(path: string, mode?: import('../components/vault/tabs').TabMode): Promise<void> {
+  editorPaneRef.value?.finishComposition()
   if (isDiaryScope.value && classifyDiaryPath(path) === 'managed') {
     const activeDocument = activeTab.value
     if (
@@ -1542,6 +1548,7 @@ async function openFileTreeDocument(path: string, mode?: import('../components/v
 }
 
 async function selectWorkspaceTab(id: string, focusViewer = true): Promise<void> {
+  editorPaneRef.value?.finishComposition()
   if (recoveryTabs.tabs.value.some((recovery) => recovery.tabId === id)) {
     historyComparisons.deactivate()
     workingTreeDiffs.deactivate()
@@ -1605,6 +1612,7 @@ function focusAfterWorkspaceTabChange(): void {
 }
 
 async function closeWorkspaceTab(id: string): Promise<boolean> {
+  if (id === activePath.value) editorPaneRef.value?.finishComposition()
   const result = await closeWorkspaceTabState(id, {
     workspaceTabs: workspaceTabs.value,
     activeId: activeWorkspaceTabId.value,
@@ -1639,6 +1647,7 @@ async function closeWorkspaceTab(id: string): Promise<boolean> {
 }
 
 async function closeManyWorkspaceTabs(ids: string[]): Promise<void> {
+  if (activePath.value && ids.includes(activePath.value)) editorPaneRef.value?.finishComposition()
   const result = await closeManyWorkspaceTabState(ids, {
     workspaceTabs: workspaceTabs.value,
     activeId: activeWorkspaceTabId.value,
@@ -1957,6 +1966,17 @@ const canInsertNoteImage = computed(() => Boolean(
   && !isReadMode.value
   && !specialWorkspaceSurfaceActive.value
 ))
+const tabletEditing = computed(() => noteTabletLayout.value && canInsertNoteImage.value)
+useTabletEditorViewport(vaultRef, computed(() => tabletEditing.value && !tabletDrawer.value && !settingsOpen.value))
+const chooseTabletImage = () => {
+  if (tabletEditing.value) editorPaneRef.value?.chooseImage()
+}
+watch([tabletEditing, editorPaneRef], ([enabled, pane]) => {
+  if (appShell?.noteTabletImageCommand) appShell.noteTabletImageCommand.value = enabled && pane ? chooseTabletImage : null
+}, { immediate: true, flush: 'sync' })
+onBeforeUnmount(() => {
+  if (appShell?.noteTabletImageCommand?.value === chooseTabletImage) appShell.noteTabletImageCommand.value = null
+})
 const isManagedDiaryDocumentActive = computed(() => (
   isDiaryScope.value && classifyDiaryPath(activePath.value ?? '') === 'managed'
 ))
@@ -3167,6 +3187,7 @@ watch(isReadMode, async (reading) => {
     class="vault"
     :class="{ 'is-read': isReadMode, 'is-zen-mode': zenModeActive, 'right-rail-open': rightRailVisible, 'side-panel-open': sidePanelOpen, 'diary-calendar-mode': isDiaryCalendarVisible, 'diary-native-document-mode': isOrdinaryManagedDiaryDocumentActive, 'note-tablet-mode': noteTabletLayout }"
     :data-zen-mode="zenModeActive ? 'true' : 'false'"
+    :data-tablet-editing="tabletEditing ? 'true' : undefined"
     tabindex="0"
     :style="vaultStyle"
     @keydown="onVaultKeydown"
@@ -3361,8 +3382,10 @@ watch(isReadMode, async (reading) => {
             :zen-mode-available="canUseZenMode"
             :zen-mode="zenModeActive"
             :allow-image-insertion="canInsertNoteImage"
+            :tablet-editing="tabletEditing"
             :link-targets="editorLinkTargets"
-            @update:model-value="(val: string) => onEditorChange(activeTab!.path, val)"
+            @update:model-value="(val: string, path: string) => onEditorChange(path, val)"
+            @composition-edited="pinEditorTab"
             @open-link="openEditorLink"
             @create-link="createMissingWikiNote"
             @toggle-view-mode="viewModeApi?.toggle()"

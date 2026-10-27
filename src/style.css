@@ -1479,6 +1479,10 @@ main.container.auth-page-shell {
 .note-tablet-mode .tab { height: 44px; }
 .note-tablet-mode .tabs { flex-wrap: nowrap; overscroll-behavior-x: contain; }
 .note-tablet-mode .reading-pane { padding: 24px clamp(20px, 4vw, 48px) 64px; overflow-x: hidden; }
+.vault.note-tablet-mode[data-tablet-editing="true"] {
+  height: min(calc(100dvh - var(--navbar-h, 56px)), var(--note-tablet-visible-height, 100dvh));
+}
+.note-tablet-mode .monaco-host { overscroll-behavior-y: contain; }
 .note-tablet-mode .article { overflow-wrap: anywhere; }
 .note-tablet-mode .article :where(pre, .table-scroll, .nuvyn-flex, .markmap-widget-host, .mermaid-widget-host) {
   max-width: 100%;

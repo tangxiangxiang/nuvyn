@@ -41,6 +41,7 @@ const diaryAccess = useDiaryAccessSession()
 const { active: zenModeActive, exit: exitZenMode } = useZenMode()
 const { activeScope, selectScope } = useScopeFilter()
 const settingsRequestTick = ref(0)
+const noteTabletImageCommand = ref<(() => void) | null>(null)
 const ledgerSettingsOpen = ref(false)
 const diaryCalendarVisible = ref(false)
 const diaryBackCommand = ref<(() => void | Promise<void>) | null>(null)
@@ -77,6 +78,7 @@ function onOpenSearch(): void {
 
 provide(AppShellContextKey, {
   settingsRequestTick,
+  noteTabletImageCommand,
   diaryCalendarVisible,
   diaryBackCommand,
   diaryAnalysisExportCommand,

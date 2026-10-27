@@ -6,6 +6,7 @@ import {
   Calendar,
   Edit,
   Eye,
+  Photo,
   LayoutSidebarLeftExpand,
   LayoutSidebarRightExpand,
   Lock,
@@ -1036,6 +1037,18 @@ onBeforeUnmount(() => {
             <Sun v-if="themeIcon === 'sun'" />
             <Moon v-else />
           </NIcon>
+        </NButton>
+        <NButton
+          v-if="isVault && noteTablet && appShell?.noteTabletImageCommand?.value"
+          quaternary
+          size="small"
+          :bordered="false"
+          :aria-label="t('editor.insert_image')"
+          :title="t('editor.insert_image')"
+          data-testid="tablet-insert-image"
+          @click="appShell?.noteTabletImageCommand?.value?.()"
+        >
+          <NIcon aria-hidden="true"><Photo /></NIcon>
         </NButton>
         <NButton
           v-if="isVault && !isLedger && viewModeApi && isVaultDocumentVisible && !isDiaryCalendarVisible"

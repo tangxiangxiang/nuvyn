@@ -177,7 +177,8 @@ describe('VaultView editor tab wiring', () => {
 
     expect(editorPane).toBeDefined()
     expect(editorPane).toContain(':key="activeTab.path"')
-    expect(editorPane).toContain('onEditorChange(activeTab!.path, val)')
+    expect(editorPane).toContain('onEditorChange(path, val)')
+    expect(editorPane).toContain('(val: string, path: string)')
     expect(editorPane).not.toContain('activePath!')
   })
 

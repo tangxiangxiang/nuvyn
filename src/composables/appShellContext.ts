@@ -10,6 +10,8 @@ export interface AppShellContext {
   readonly settingsRequestTick: Readonly<Ref<number>>
   /** Open the single App-level search surface from global chrome. */
   readonly openGlobalSearch?: () => void
+  /** Capability owned by the active Note tablet editor. */
+  readonly noteTabletImageCommand?: Ref<(() => void) | null>
   /**
    * The Vault-owned Calendar Home is rendered below the global navbar, so the
    * shell exposes its resolved visibility for chrome that lives above the

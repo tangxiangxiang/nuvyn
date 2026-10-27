@@ -55,6 +55,7 @@ const props = defineProps<{
   zenModeAvailable?: boolean
   zenMode?: boolean
   allowImageInsertion?: boolean
+  tabletEditing?: boolean
   linkTargets?: EditorLinkTarget[]
 }>()
 const preferences = useEditorPreferences()
@@ -62,13 +63,14 @@ const { t } = useI18n()
 const toast = useToast()
 const isLargeDocument = computed(() => props.modelValue.length >= 500_000)
 const emit = defineEmits<{
-  'update:modelValue': [value: string]
+  'update:modelValue': [value: string, path: string]
   'open-link': [target: { path: string; anchor?: string }]
   'create-link': [ref: string]
   'toggle-view-mode': []
   'toggle-focus-width': []
   'toggle-zen-mode': []
   'exit-zen-mode': []
+  'composition-edited': [path: string]
 }>()
 
 const host = ref<HTMLDivElement | null>(null)
@@ -107,6 +109,35 @@ type ImageUploadBatch = {
 const imageUploadBatches = new Map<number, ImageUploadBatch>()
 let rememberLinkCommand: string | null = null
 let composing = false
+let compositionEdited = false
+let lastNotifiedValue = props.modelValue
+
+function notifyModelValue(): void {
+  if (suppressChange || !model) return
+  const value = model.getValue()
+  if (props.tabletEditing && value === lastNotifiedValue) return
+  lastNotifiedValue = value
+  emit('update:modelValue', value, props.path)
+}
+
+function finishTabletComposition(): void {
+  if (!composing || !model) return
+  composing = false
+  const value = model.getValue()
+  if (!suppressChange && value !== lastNotifiedValue) {
+    lastNotifiedValue = value
+    // The parent may already be selecting another document during teardown.
+    emit('update:modelValue', value, props.path)
+  }
+  scheduleMarkdownDecorations()
+}
+
+function onTabletOutsidePointer(event: PointerEvent): void {
+  if (!props.tabletEditing || !composing || event.composedPath().includes(host.value!)) return
+  const active = document.activeElement
+  if (active instanceof HTMLElement && host.value?.contains(active)) active.blur()
+  finishTabletComposition()
+}
 let zenToggleAction: { dispose: () => void } | null = null
 let focusWidthChordPending = false
 let focusWidthChordTimer: ReturnType<typeof setTimeout> | null = null
@@ -855,6 +886,7 @@ function refreshSyntaxMarkers() {
 
 function refreshMarkdownDecorations() {
   if (!editor || !model) return
+  if (props.tabletEditing && composing) return
   refreshSyntaxMarkers()
   if (isLargeDocument.value) {
     decorationIds = editor.deltaDecorations(decorationIds, [])
@@ -936,7 +968,7 @@ function isInsideFencedCode(currentModel: monaco.editor.ITextModel, lineNumber: 
 const completionProvider: monaco.languages.CompletionItemProvider = {
   triggerCharacters: ['[', '`', '/', ':'],
   async provideCompletionItems(currentModel, position, context) {
-    if (currentModel !== model) return { suggestions: [] }
+    if (currentModel !== model || (props.tabletEditing && composing)) return { suggestions: [] }
     const before = currentModel.getValueInRange({
       startLineNumber: position.lineNumber,
       startColumn: 1,
@@ -1161,8 +1193,12 @@ onMounted(() => {
     fenceStateCache.invalidateFrom(Number.isFinite(firstAffectedLine) ? firstAffectedLine : 1)
     if (model && model.getValueLength() >= MARKDOWN_SYNTAX_LIMIT) clearSyntaxMarkers()
     scheduleMarkdownDecorations()
+    if (!suppressChange && composing && props.tabletEditing && model && !compositionEdited && model.getValue() !== lastNotifiedValue) {
+      compositionEdited = true
+      emit('composition-edited', props.path)
+    }
     if (suppressChange || composing || !model) return
-    emit('update:modelValue', model.getValue())
+    notifyModelValue()
   })
   for (const [id, label, keybinding, wrap] of [
     ['nuvyn.markdown-bold', 'Toggle bold', monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyB, MARKDOWN_WRAPS.bold],
@@ -1213,12 +1249,12 @@ onMounted(() => {
       emit('toggle-view-mode')
     },
   })
-  editor.onDidCompositionStart(() => { composing = true })
+  editor.onDidCompositionStart(() => { composing = true; compositionEdited = false })
   editor.onDidCompositionEnd(() => {
     composing = false
     scheduleMarkdownDecorations()
     resetFocusWidthChord()
-    if (!suppressChange && model) emit('update:modelValue', model.getValue())
+    notifyModelValue()
   })
   focusWidthChordListener = editor.onKeyDown(onFocusWidthChordKeydown)
   editor.onDidBlurEditorWidget(resetFocusWidthChord)
@@ -1229,13 +1265,24 @@ onMounted(() => {
     if (isLargeDocument.value) return
     scheduleMarkdownDecorations()
   })
+  let previousHeight = editor.getLayoutInfo().height
+  editor.onDidLayoutChange((layout) => {
+    const shrank = layout.height < previousHeight
+    previousHeight = layout.height
+    if (!props.tabletEditing || !shrank || !editor?.hasTextFocus()) return
+    const position = editor.getPosition()
+    const caret = position && editor.getScrolledVisiblePosition(position)
+    if (caret && (caret.top < 0 || caret.top + caret.height > layout.height)) {
+      editor.revealPosition(position!, monaco.editor.ScrollType.Immediate)
+    }
+  })
   editor.addAction({
     id: 'nuvyn.markdown-enter',
     label: 'Continue Markdown list',
     keybindings: [monaco.KeyCode.Enter],
-    keybindingContext: '!suggestWidgetVisible',
+    keybindingContext: '!suggestWidgetVisible && !inComposition',
     run(instance) {
-      if (!model) return
+      if (!model || composing) return
       const selection = instance.getSelection()
       if (!selection) return
       const position = selection.getPosition()
@@ -1259,7 +1306,7 @@ onMounted(() => {
       id,
       label,
       keybindings: [keybinding],
-      keybindingContext: '!inSnippetMode && !suggestWidgetVisible',
+      keybindingContext: '!inSnippetMode && !suggestWidgetVisible && !inComposition',
       run(instance) {
         if (!model) return
         const selection = instance.getSelection()
@@ -1313,17 +1360,27 @@ onMounted(() => {
   pasteHandler = onMarkdownLinkPaste
   host.value.addEventListener('paste', pasteHandler, true)
   syncImagePasteHandler()
-  editor.onDidBlurEditorWidget(() => saveViewState())
+  editor.onDidBlurEditorWidget(() => {
+    if (props.tabletEditing) finishTabletComposition()
+    saveViewState()
+  })
   themeObserver = new MutationObserver(() => monaco.editor.setTheme(activeTheme()))
   themeObserver.observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme'] })
 })
 
 watch(() => props.modelValue, (value) => {
+  if (props.tabletEditing && composing) return
   if (!model || model.getValue() === value) return
+  lastNotifiedValue = value
   suppressChange = true
   model.setValue(value)
   suppressChange = false
 })
+watch(() => props.tabletEditing, (enabled, wasEnabled) => {
+  if (wasEnabled && !enabled) finishTabletComposition()
+  if (enabled) document.addEventListener('pointerdown', onTabletOutsidePointer, true)
+  else document.removeEventListener('pointerdown', onTabletOutsidePointer, true)
+}, { immediate: true, flush: 'sync' })
 
 watch(() => props.allowImageInsertion, () => {
   syncImagePasteHandler()
@@ -1376,6 +1433,8 @@ watch(() => props.linkTargets, () => {
 })
 
 onBeforeUnmount(() => {
+  if (props.tabletEditing) finishTabletComposition()
+  document.removeEventListener('pointerdown', onTabletOutsidePointer, true)
   mounted = false
   clearSyntaxMarkers()
   imageEditorGeneration += 1
@@ -1454,6 +1513,7 @@ async function revealAnchor(anchor: string, isCurrent: () => boolean = () => tru
 }
 
 defineExpose({
+  finishComposition: () => { if (props.tabletEditing) finishTabletComposition() },
   focus: () => editor?.focus(),
   chooseImage,
   revealText,
