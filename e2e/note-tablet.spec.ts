@@ -11,6 +11,19 @@ test.use({ hasTouch: true })
 const left = (page: Page) => page.getByTestId('left-panel-toggle')
 const right = (page: Page) => page.locator('.right-rail-toggle')
 const tab = (page: Page, path: string) => page.locator(`[role="tab"][data-tab-id="${path}"]`)
+const openDocuments = (page: Page) => page.getByTestId('open-workspace-documents')
+const openDocument = (page: Page, path: string) => page.locator(`[data-workspace-document-id="${path}"]`)
+
+async function ensureLeftDrawerOpen(page: Page) {
+  if (await left(page).getAttribute('aria-pressed') !== 'true') await left(page).tap()
+  await expect(page.locator('.file-tree')).toBeVisible()
+}
+
+async function expandOpenDocuments(page: Page) {
+  const toggle = openDocuments(page).locator('.open-workspace-documents-toggle')
+  if (await toggle.getAttribute('aria-expanded') !== 'true') await toggle.tap()
+  await expect(openDocuments(page).locator('.open-workspace-document').first()).toBeVisible()
+}
 
 async function seed(request: APIRequestContext) {
   const id = randomUUID().slice(0, 8)
@@ -35,7 +48,13 @@ async function seed(request: APIRequestContext) {
 
 async function read(page: Page, path: string) {
   await page.goto(`/vault/${path}`)
-  await expect(tab(page, path)).toHaveAttribute('aria-selected', 'true')
+  const width = page.viewportSize()!.width
+  if (width > 600 && width < 1200) {
+    await expect(page.locator('.editor-tabs-shell')).toHaveCount(0)
+    await expect(page.locator('.editor-area')).toHaveClass(/is-no-tab-strip/)
+  } else {
+    await expect(tab(page, path)).toHaveAttribute('aria-selected', 'true')
+  }
   // Mobile direct routes remain accessible through their existing controls;
   // they intentionally retain the pre-tablet sidebar policy.
   if (page.viewportSize()!.width <= 600) {
@@ -61,11 +80,17 @@ for (const [width, height] of [[390, 844], [600, 900], [601, 900], [768, 1024], 
       await expect(page.locator('.workspace-board-link')).toHaveCount(width! <= 600 ? 0 : 1)
       if (width! > 600 && width! < 1200) {
         await expect(page.locator('.vault')).toHaveClass(/note-tablet-mode/)
+        await expect(page.locator('.editor-tabs-shell')).toHaveCount(0)
+        const editorArea = await page.locator('.editor-area').boundingBox()
+        const content = await page.locator('.reading-content').boundingBox()
+        expect(content?.y).toBe(editorArea?.y)
         await expect(left(page)).toHaveAttribute('aria-pressed', 'false')
         await expect(right(page)).toHaveAttribute('aria-pressed', 'false')
         const before = await page.locator('.editor-area').boundingBox()
         await left(page).tap()
         await expect(page.locator('.file-tree')).toBeVisible()
+        await expect(openDocuments(page)).toBeVisible()
+        await expect(openDocuments(page).locator('.open-workspace-documents-toggle')).toHaveAttribute('aria-expanded', 'false')
         expect((await page.locator('.editor-area').boundingBox())?.width).toBe(before?.width)
         await right(page).tap()
         await expect(left(page)).toHaveAttribute('aria-pressed', 'false')
@@ -122,18 +147,24 @@ for (const viewport of [{ width: 768, height: 1024 }, { width: 1024, height: 768
       expect(await page.locator('.table-scroll').evaluate((el) => el.scrollWidth > el.clientWidth)).toBe(true)
       await page.locator('.reading-pane').evaluate((el) => { el.scrollTop = 0 })
       await page.getByRole('link', { name: 'Next note', exact: true }).tap()
-      await expect(tab(page, f.paths[1]!)).toHaveAttribute('data-tab-mode', 'preview')
       await expect(page.locator('.reading-pane #destination')).toBeInViewport()
-      await tab(page, f.paths[1]!).focus()
-      await page.keyboard.press('Shift+F10')
-      await page.getByRole('menuitem', { name: /固定标签|Pin Tab/ }).click()
-      await expect(tab(page, f.paths[1]!)).toHaveAttribute('data-tab-mode', 'pinned')
+      await ensureLeftDrawerOpen(page)
+      await expandOpenDocuments(page)
+      await expect(openDocument(page, f.paths[1]!)).toHaveAttribute('data-tab-mode', 'preview')
+      await openDocument(page, f.paths[1]!).locator('.open-workspace-document-select').tap()
+      await expect(left(page)).toHaveAttribute('aria-pressed', 'false')
+      await expect(page.locator('.reading-pane h1')).toHaveText('Second note')
+      await ensureLeftDrawerOpen(page)
+      await expandOpenDocuments(page)
+      await openDocument(page, f.paths[1]!).getByRole('button', { name: /固定|Pin/ }).tap()
+      await expect(openDocument(page, f.paths[1]!)).toHaveAttribute('data-tab-mode', 'pinned')
+      await left(page).tap()
       await left(page).tap()
       await page.locator('.file-tree .search-input').fill(f.paths[0]!.split('/').at(-1)!)
       const row = page.locator(`[data-tree-key="file:${f.paths[0]}"]`)
       if (!await row.isVisible()) await page.locator('[data-tree-key="folder:inbox"] > .row-line').tap()
       await row.locator('.row-line').tap()
-      await expect(tab(page, f.paths[0]!)).toHaveAttribute('aria-selected', 'true')
+      await expect(page.locator('.reading-pane h1')).toHaveText('Tablet reading')
       await expect(left(page)).toHaveAttribute('aria-pressed', 'false')
       await page.getByTestId('view-toggle').tap()
       await expect(page.locator('.monaco-host')).toBeVisible()
@@ -157,16 +188,15 @@ for (const viewport of [{ width: 768, height: 1024 }, { width: 1024, height: 768
   })
 }
 
-test('tablet tab strip scrolls across nine retained notes and search stays above the drawer', async ({ page, request }) => {
+test('tablet manages nine retained notes from Open documents and search stays above the drawer', async ({ page, request }) => {
   test.setTimeout(60_000)
-  await page.setViewportSize({ width: 768, height: 1024 })
+  await page.setViewportSize({ width: 1440, height: 900 })
   const paths: string[] = []
   const id = randomUUID().slice(0, 8)
   try {
     for (let i = 0; i < 9; i++) await createDoc(request, `inbox/tablet-tabs-${id}-${i}`, `# Tablet ${i}`, paths)
     await read(page, paths[0]!)
     for (const path of paths.slice(1)) {
-      await left(page).tap()
       const row = page.locator(`[data-tree-key="file:${path}"]`)
       if (!await row.isVisible()) await page.locator('[data-tree-key="folder:inbox"] > .row-line').tap()
       await row.locator('.row-line').tap()
@@ -176,19 +206,33 @@ test('tablet tab strip scrolls across nine retained notes and search stays above
       await page.getByRole('menuitem', { name: /固定标签|Pin Tab/ }).click()
       await expect(tab(page, path)).toHaveAttribute('data-tab-mode', 'pinned')
     }
-    expect(await page.locator('.tabs').evaluate((el) => el.scrollWidth > el.clientWidth)).toBe(true)
-    await expect(tab(page, paths[8]!)).toBeInViewport()
-    await page.locator('.tabs').evaluate((el) => { el.scrollLeft = 0 })
-    await tab(page, paths[0]!).tap()
+    await expect(page.locator('.editor-tabs-shell [data-tab-id]')).toHaveCount(9)
+    await page.setViewportSize({ width: 768, height: 1024 })
+    await expect(page.locator('.vault')).toHaveClass(/note-tablet-mode/)
+    await expect(page.locator('.editor-tabs-shell')).toHaveCount(0)
+    await ensureLeftDrawerOpen(page)
+    await expandOpenDocuments(page)
+    await expect(openDocuments(page).locator('.open-workspace-document')).toHaveCount(9)
+    await expect(openDocuments(page).locator('.open-workspace-documents-count')).toHaveText('9')
+    await openDocument(page, paths[0]!).locator('.open-workspace-document-select').tap()
+    await expect(left(page)).toHaveAttribute('aria-pressed', 'false')
     await expect(page.locator('.reading-pane h1')).toHaveText('Tablet 0')
-    await expect(tab(page, paths[0]!)).toBeInViewport()
-    await left(page).tap()
+    await ensureLeftDrawerOpen(page)
+    await expandOpenDocuments(page)
+    await openDocument(page, paths[1]!).getByRole('button', { name: /关闭|Close/ }).tap()
+    await expect(openDocuments(page).locator('.open-workspace-document')).toHaveCount(8)
+    await openDocument(page, paths[0]!).getByRole('button', { name: /关闭|Close/ }).tap()
+    await expect(page.locator('.reading-pane h1')).not.toHaveText('Tablet 0')
+    await expect(openDocuments(page).locator('.open-workspace-document')).toHaveCount(7)
     await page.locator('.nav-search').tap()
     await expect(page.locator('.palette')).toBeVisible()
     await page.keyboard.press('Escape')
     await expect(page.locator('.palette')).toHaveCount(0)
     await expect(left(page)).toHaveAttribute('aria-pressed', 'true')
     await left(page).tap()
+    await page.setViewportSize({ width: 1440, height: 900 })
+    await expect(page.locator('.editor-tabs-shell')).toHaveCount(1)
+    await expect(page.locator('.editor-tabs-shell [data-tab-id]')).toHaveCount(7)
     await noPageOverflow(page)
   } finally { for (const path of paths) await request.delete(`/api/posts/${path}`) }
 })

@@ -521,18 +521,21 @@ describe('VaultView editor tab wiring', () => {
     expect(openComparison!.indexOf('focusViewer()')).toBeLessThan(openComparison!.indexOf('await request'))
   })
 
-  it('hands focus to the active tab after closing a non-active workspace tab', () => {
+  it('restores focus without targeting a hidden workspace tab strip', () => {
     const source = readFileSync(fileURLToPath(new URL('../VaultView.vue', import.meta.url)), 'utf8')
     const closeOne = source.match(/async function closeWorkspaceTab[\s\S]*?\n}/)?.[0]
     const closeMany = source.match(/async function closeManyWorkspaceTabs[\s\S]*?\n}/)?.[0]
+    const focusAfterChange = source.match(/function focusAfterWorkspaceTabChange[\s\S]*?\n}/)?.[0]
 
     for (const handler of [closeOne, closeMany]) {
       expect(handler).toBeDefined()
       expect(handler).toContain('if (!result.activeWillClose)')
-      expect(handler).toContain('const activeId = activeWorkspaceTabId.value')
-      expect(handler).toContain('editorTabsRef.value?.focusTab(activeId)')
-      expect(handler).toContain('vaultRef.value?.focus()')
+      expect(handler).toContain('focusAfterWorkspaceTabChange()')
     }
+    expect(focusAfterChange).toContain('activeId && workspaceTabStripVisible.value')
+    expect(focusAfterChange).toContain('editorTabsRef.value?.focusTab(activeId)')
+    expect(focusAfterChange).toContain('openWorkspaceDocumentsRef.value?.focusToggle()')
+    expect(focusAfterChange).toContain('vaultRef.value?.focus()')
   })
 
   it('maps all tab kinds through one stable workspace order and persists only documents', () => {
@@ -1019,7 +1022,8 @@ describe('Diary Single Document Policy', () => {
     expect(source).toContain('activeWorkingTreeDiff.value')
     expect(source).toContain('activeDraftRecovery.value')
     expect(stripPolicy).toContain('!specialWorkspaceSurfaceActive.value')
-    expect(source).toContain('v-show="workspaceTabStripVisible"')
+    expect(source).toContain('v-if="workspaceTabs.length > 0 && workspaceTabStripVisible"')
+    expect(source).toContain('if (noteTabletLayout.value) return false')
     expect(source).toContain("'is-no-tab-strip': !workspaceTabStripVisible")
     expect(styles).toContain('.editor-area.is-no-tab-strip {\n  grid-template-rows: minmax(0, 1fr);')
   })

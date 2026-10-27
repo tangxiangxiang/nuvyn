@@ -95,6 +95,7 @@ import { handleDiaryHomeKeydown } from './diaryHomeKeyboard'
 import { createDiaryShortcutChord, isDiaryShortcutBlocked, isDiaryTextEntryContext } from './diaryShortcutChord'
 import { createZenModeChord } from './zenModeChord'
 import FileTree from '../components/vault/FileTree.vue'
+import OpenWorkspaceDocuments from '../components/vault/OpenWorkspaceDocuments.vue'
 import { projectFileTree } from '../components/vault/fileTreeProjection'
 import {
   downloadDiaryAnalysisExport,
@@ -188,6 +189,7 @@ const editorPaneRef = ref<{
   revealText(text: string): boolean
   revealAnchor(anchor: string, isCurrent?: () => boolean): boolean | Promise<boolean>
 } | null>(null)
+const openWorkspaceDocumentsRef = ref<InstanceType<typeof OpenWorkspaceDocuments> | null>(null)
 const readingPaneRef = ref<{
   revealAnchor(anchor: string, isCurrent?: () => boolean): boolean | Promise<boolean>
 } | null>(null)
@@ -1571,9 +1573,35 @@ async function selectWorkspaceTab(id: string, focusViewer = true): Promise<void>
     selectEditorTab(id)
     if (focusViewer) {
       await nextTick()
-      editorTabsRef.value?.focusTab(id)
+      if (workspaceTabStripVisible.value) editorTabsRef.value?.focusTab(id)
     }
   }
+}
+
+async function selectOpenWorkspaceDocument(id: string): Promise<void> {
+  await selectWorkspaceTab(id, false)
+  closeTabletDrawer()
+}
+
+async function closeOpenWorkspaceDocument(id: string): Promise<void> {
+  if (!(await closeWorkspaceTab(id))) return
+  if (!workspaceTabStripVisible.value && noteTabletLayout.value && tabletDrawer.value === 'left') {
+    await nextTick()
+    openWorkspaceDocumentsRef.value?.focusToggle()
+  }
+}
+
+function focusAfterWorkspaceTabChange(): void {
+  const activeId = activeWorkspaceTabId.value
+  if (activeId && workspaceTabStripVisible.value) {
+    editorTabsRef.value?.focusTab(activeId)
+    return
+  }
+  if (!workspaceTabStripVisible.value && noteTabletLayout.value && tabletDrawer.value === 'left') {
+    openWorkspaceDocumentsRef.value?.focusToggle()
+    return
+  }
+  vaultRef.value?.focus()
 }
 
 async function closeWorkspaceTab(id: string): Promise<boolean> {
@@ -1591,9 +1619,7 @@ async function closeWorkspaceTab(id: string): Promise<boolean> {
   if (!result.closed) return false
   if (!result.activeWillClose) {
     await nextTick()
-    const activeId = activeWorkspaceTabId.value
-    if (activeId) editorTabsRef.value?.focusTab(activeId)
-    else vaultRef.value?.focus()
+    focusAfterWorkspaceTabChange()
     return true
   }
   if (!result.fallbackId) {
@@ -1602,13 +1628,13 @@ async function closeWorkspaceTab(id: string): Promise<boolean> {
       await router.replace('/vault')
     }
     await nextTick()
-    vaultRef.value?.focus()
+    focusAfterWorkspaceTabChange()
     return true
   }
 
   await selectWorkspaceTab(result.fallbackId, false)
   await nextTick()
-  editorTabsRef.value?.focusTab(result.fallbackId)
+  focusAfterWorkspaceTabChange()
   return true
 }
 
@@ -1628,9 +1654,7 @@ async function closeManyWorkspaceTabs(ids: string[]): Promise<void> {
   if (!result.closed) return
   if (!result.activeWillClose) {
     await nextTick()
-    const activeId = activeWorkspaceTabId.value
-    if (activeId) editorTabsRef.value?.focusTab(activeId)
-    else vaultRef.value?.focus()
+    focusAfterWorkspaceTabChange()
     return
   }
   if (!result.fallbackId) {
@@ -1639,12 +1663,12 @@ async function closeManyWorkspaceTabs(ids: string[]): Promise<void> {
       await router.replace('/vault')
     }
     await nextTick()
-    vaultRef.value?.focus()
+    focusAfterWorkspaceTabChange()
     return
   }
   await selectWorkspaceTab(result.fallbackId, false)
   await nextTick()
-  editorTabsRef.value?.focusTab(result.fallbackId)
+  focusAfterWorkspaceTabChange()
 }
 
 async function copyWorkspaceTabPath(path: string): Promise<void> {
@@ -1963,6 +1987,7 @@ const isDiaryCalendarVisible = computed(() => (
 const workspaceTabStripVisible = computed(() => {
   if (zenModeActive.value) return false
   if (workspaceTabs.value.length === 0 || isDiaryPresentationPrimary.value) return false
+  if (noteTabletLayout.value) return false
   return !(isDiaryScope.value
     && (isDiaryDocumentMode.value || isManagedDiaryDocumentActive.value)
     && !specialWorkspaceSurfaceActive.value)
@@ -3205,7 +3230,18 @@ watch(isReadMode, async (reading) => {
         @select="openFileTreeDocument"
         @refresh="refresh"
         @export-document="documentExport.request"
-      />
+      >
+        <template v-if="noteTabletLayout" #workspace-documents>
+          <OpenWorkspaceDocuments
+            ref="openWorkspaceDocumentsRef"
+            :tabs="workspaceTabs"
+            :active-id="activeWorkspaceTabId"
+            @select="selectOpenWorkspaceDocument"
+            @pin="pinEditorTab"
+            @close="closeOpenWorkspaceDocument"
+          />
+        </template>
+      </FileTree>
       <TagPanel
         v-else-if="tagPanelVisible"
         v-model:filter="tagsFilter"
@@ -3264,8 +3300,7 @@ watch(isReadMode, async (reading) => {
       :class="{ 'is-read': isReadMode, 'is-empty': workspaceTabs.length === 0, 'is-diary-home': isDiaryCalendarVisible, 'is-no-tab-strip': !workspaceTabStripVisible }"
     >
       <EditorTabs
-        v-if="workspaceTabs.length > 0"
-        v-show="workspaceTabStripVisible"
+        v-if="workspaceTabs.length > 0 && workspaceTabStripVisible"
         ref="editorTabsRef"
         :tabs="workspaceTabs"
         :active-path="activeWorkspaceTabId"

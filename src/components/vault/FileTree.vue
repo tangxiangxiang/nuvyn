@@ -803,6 +803,7 @@ async function onCreateIn(folder: string, kind: 'file' | 'folder') {
         >×</NButton>
       </div>
     </header>
+    <slot name="workspace-documents" />
     <ul v-if="topLevel.length" class="tree" role="tree">
       <TreeRow
         v-for="node in topLevel"

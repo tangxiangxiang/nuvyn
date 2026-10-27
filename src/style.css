@@ -3773,6 +3773,130 @@ body:has(.ledger-detail-sheet-card) .n-modal-mask {
   outline: 2px solid var(--vs-focus-border, var(--accent));
   outline-offset: 1px;
 }
+
+.vault .file-tree .open-workspace-documents {
+  flex: 0 0 auto;
+  min-width: 0;
+  border-bottom: 1px solid var(--vs-border);
+}
+.vault .file-tree .open-workspace-documents-toggle {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  min-height: 44px;
+  padding: 0 12px;
+  border: 0;
+  background: var(--vs-bg-1);
+  color: var(--vs-text-1);
+  text-align: left;
+  font: inherit;
+  cursor: pointer;
+}
+.vault .file-tree .open-workspace-documents-toggle:hover,
+.vault .file-tree .open-workspace-documents-toggle:focus-visible {
+  background: var(--vs-bg-3);
+}
+.vault .file-tree .open-workspace-documents-count {
+  min-width: 1.5em;
+  margin-left: auto;
+  color: var(--vs-text-2);
+  text-align: center;
+  font-size: 0.9em;
+  font-variant-numeric: tabular-nums;
+}
+.vault .file-tree .open-workspace-documents-chevron {
+  color: var(--vs-text-2);
+  transform: rotate(0deg);
+  transition: transform 120ms ease;
+}
+.vault .file-tree .open-workspace-documents-chevron.expanded {
+  transform: rotate(180deg);
+}
+.vault .file-tree .open-workspace-documents-list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  max-height: min(36vh, 320px);
+  overflow-y: auto;
+  margin: 0;
+  padding: 4px 6px 8px;
+  list-style: none;
+  overscroll-behavior: contain;
+}
+.vault .file-tree .open-workspace-document {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 40px;
+  min-width: 0;
+  border-radius: 4px;
+}
+.vault .file-tree .open-workspace-document.preview {
+  grid-template-columns: minmax(0, 1fr) 40px 40px;
+}
+.vault .file-tree .open-workspace-document.active {
+  background: var(--vs-active-bg);
+}
+.vault .file-tree .open-workspace-document-select {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  align-items: flex-start;
+  gap: 2px;
+  min-width: 0;
+  min-height: 48px;
+  padding: 5px 8px 5px 12px;
+  border: 0;
+  background: transparent;
+  color: var(--vs-text-1);
+  text-align: left;
+  font: inherit;
+  cursor: pointer;
+}
+.vault .file-tree .open-workspace-document-select:hover,
+.vault .file-tree .open-workspace-document-select:focus-visible {
+  background: var(--vs-hover-bg);
+}
+.vault .file-tree .open-workspace-document-title {
+  width: 100%;
+  overflow: hidden;
+  font-size: 0.92em;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.vault .file-tree .open-workspace-document-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 8px;
+  color: var(--vs-text-2);
+  font-size: 0.78em;
+  line-height: 1.25;
+}
+.vault .file-tree .open-workspace-document-status[data-kind="dirty"],
+.vault .file-tree .open-workspace-document-status[data-kind="error"],
+.vault .file-tree .open-workspace-document-status[data-kind="offline"],
+.vault .file-tree .open-workspace-document-status[data-kind="external"] {
+  color: var(--vs-warning, #c78b30);
+}
+.vault .file-tree .open-workspace-document-action {
+  align-self: center;
+  justify-self: center;
+  width: 40px;
+  height: 40px;
+  padding: 0;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--vs-text-2);
+  font: inherit;
+  font-size: 20px;
+  line-height: 1;
+  cursor: pointer;
+}
+.vault .file-tree .open-workspace-document-action:hover,
+.vault .file-tree .open-workspace-document-action:focus-visible {
+  background: var(--vs-hover-bg);
+  color: var(--vs-text-1);
+}
 .vault .file-tree header .search-icon,
 .vault .tag-panel .tag-filter-icon {
   flex-shrink: 0;
