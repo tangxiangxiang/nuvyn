@@ -132,27 +132,35 @@ test('global search previews documents and refresh retains the route document', 
 test.describe('touch preview operations', () => {
   test.use({ viewport: { width: 768, height: 1024 }, hasTouch: true })
 
-  test('tap previews and the existing context menu provides explicit pinning', async ({ page, request }) => {
+  test('tap previews and Open documents provides explicit pinning without a tab strip', async ({ page, request }) => {
     const f = await fixture(request)
     try {
       await gotoVaultReady(page)
       await (await row(page, f.paths.a)).tap()
-      await expect(tab(page, f.paths.a)).toHaveAttribute('data-tab-mode', 'preview')
       await expect(host(page)).toBeVisible()
-      // Exercise the menu's touch activation, not a synthetic double tap.
-      // Native OS long-press delivery of contextmenu remains a device check.
-      await tab(page, f.paths.a).evaluate((el) => {
-        const rect = el.getBoundingClientRect()
-        el.dispatchEvent(new MouseEvent('contextmenu', {
-          bubbles: true, cancelable: true, clientX: rect.left + 10, clientY: rect.bottom,
-        }))
-      })
-      await expect(page.getByRole('menu')).toBeInViewport()
-      await page.getByRole('menuitem', { name: /固定标签|Pin Tab/ }).tap()
-      await expect(tab(page, f.paths.a)).toHaveAttribute('data-tab-mode', 'pinned')
+      await page.getByTestId('left-panel-toggle').tap()
+      const documents = page.getByTestId('open-workspace-documents')
+      const expandDocuments = async () => {
+        const toggle = documents.locator('.open-workspace-documents-toggle')
+        if (await toggle.getAttribute('aria-expanded') !== 'true') await toggle.tap()
+      }
+      await expandDocuments()
+      const document = (path: string) => documents.locator(`[data-workspace-document-id="${path}"]`)
+      await expect(document(f.paths.a)).toHaveAttribute('data-tab-mode', 'preview')
+      await document(f.paths.a).getByRole('button', { name: /固定|Pin/ }).tap()
+      await expect(document(f.paths.a)).toHaveAttribute('data-tab-mode', 'pinned')
       await (await row(page, f.paths.b)).tap()
-      await expect(tab(page, f.paths.b)).toHaveAttribute('data-tab-mode', 'preview')
-      await expect(noteTabs(page)).toHaveCount(2)
+      await expect(host(page)).toBeVisible()
+      await expect(page.locator('.monaco-editor .view-lines')).toContainText('Beta')
+      await page.getByTestId('left-panel-toggle').tap()
+      await expandDocuments()
+      await expect(document(f.paths.b)).toHaveAttribute('data-tab-mode', 'preview')
+      await expect(document(f.paths.a)).toHaveAttribute('data-tab-mode', 'pinned')
+      await expect(documents.locator('[data-workspace-document-id]')).toHaveCount(2)
+      await expect(page.locator('.editor-tabs-shell')).toHaveCount(0)
+      const editorArea = await page.locator('.editor-area').boundingBox()
+      const editorPane = await page.locator('.editor-pane').boundingBox()
+      expect(editorPane?.y).toBe(editorArea?.y)
     } finally { await f.cleanup() }
   })
 })

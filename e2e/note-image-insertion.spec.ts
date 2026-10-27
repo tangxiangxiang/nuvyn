@@ -70,6 +70,18 @@ async function dispatchImageDrop(
 
 async function openNoteImagePickerFromContextMenu(page: import('@playwright/test').Page): Promise<void> {
   const editor = page.locator('.editor-pane .monaco-editor').first()
+  // Monaco updates the cursor DOM on an animation frame. A right-click at
+  // its old rectangle can move the caret back into the document title.
+  await expect.poll(() => page.locator('.monaco-host').evaluate((element) => {
+    const instance = (element as any).__vueParentComponent.setupState.editor
+    const position = instance.getPosition()
+    const expected = instance.getScrolledVisiblePosition(position)
+    const cursor = element.querySelector('.cursors-layer .cursor')?.getBoundingClientRect()
+    if (!expected || !cursor) return false
+    const bounds = instance.getDomNode().getBoundingClientRect()
+    return Math.abs(cursor.left - bounds.left - expected.left) <= 1
+      && Math.abs(cursor.top - bounds.top - expected.top) <= 1
+  })).toBe(true)
   const cursor = editor.locator('.cursors-layer .cursor').first()
   const cursorBounds = await cursor.boundingBox()
   expect(cursorBounds).not.toBeNull()
@@ -602,6 +614,7 @@ test('selects an image, supports undo/redo, renders after reload, and tracks its
     const markdown = /!\[Architecture\s+Screenshot\]\(@\/attachments\/images\/[0-9a-f-]{36}\.png\)/iu
     await expect(editor.locator('.view-lines')).toContainText(markdown)
     const insertedRaw = await waitForSavedRaw(request, notePath, 'Architecture Screenshot')
+    expect(insertedRaw).toMatch(/^# Image insertion\n/)
     const uploadedPath = imagePathFromMarkdown(insertedRaw)
     uploadedPaths.push(uploadedPath)
     expect(insertedRaw).toContain('Keep this paragraph intact.')

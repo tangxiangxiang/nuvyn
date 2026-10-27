@@ -228,7 +228,24 @@ test('Attachment Manager lists real sources, filters, refreshes, and preserves t
   }
 })
 
-test('Attachment Manager remains reachable in desktop, tablet, and short mobile viewports', async ({ page, request }) => {
+test('Attachment Manager remains reachable in desktop, tablet, and short mobile viewports', async ({ page, request }, testInfo) => {
+  const geometry: unknown[] = []
+  async function recordGeometry(stage: string) {
+    const snapshot = await page.evaluate(() => {
+      const selectors = ['.vault', '.editor-area', '.monaco-host', '.monaco-editor', '.settings-backdrop', '.settings-modal', '.settings-detail', '.tabs']
+      return {
+        innerWidth: window.innerWidth, documentWidth: document.documentElement.scrollWidth, bodyWidth: document.body.scrollWidth, scrollX: window.scrollX,
+        elements: Object.fromEntries(selectors.map((selector) => {
+          const element = document.querySelector<HTMLElement>(selector)
+          if (!element) return [selector, null]
+          const rect = element.getBoundingClientRect()
+          const style = getComputedStyle(element)
+          return [selector, { x: rect.x, y: rect.y, width: rect.width, right: rect.right, scrollWidth: element.scrollWidth, clientWidth: element.clientWidth, overflowX: style.overflowX, position: style.position, gridTemplateColumns: style.gridTemplateColumns }]
+        })),
+      }
+    })
+    geometry.push({ stage, ...snapshot })
+  }
   const runId = randomUUID()
   const notePath = `inbox/attachment-layout-${runId}`
   const filenames = Array.from({ length: 35 }, (_, index) => `attachment-layout-${runId.slice(0, 8)}-${String(index + 1).padStart(2, '0')}.txt`)
@@ -264,12 +281,30 @@ test('Attachment Manager remains reachable in desktop, tablet, and short mobile 
     ]) {
       await settings.getByRole('button', { name: /关闭|Close/ }).click()
       await expect(settings).toHaveCount(0)
+      await recordGeometry(`${viewport.label}: closed before resize`)
       await page.setViewportSize({ width: viewport.width, height: viewport.height })
+      await recordGeometry(`${viewport.label}: closed after resize`)
+      // setViewportSize can resolve before matchMedia's change event updates
+      // the Vue layout and Monaco's ResizeObserver. Compare the modal with
+      // the settled closed workspace, not the previous tablet presentation.
+      if (viewport.width > 600 && viewport.width < 1200) {
+        await expect(page.locator('.vault')).toHaveClass(/note-tablet-mode/)
+      } else {
+        await expect(page.locator('.vault')).not.toHaveClass(/note-tablet-mode/)
+      }
+      await expect.poll(() => page.locator('.monaco-host').evaluate((host) => {
+        const editor = host.querySelector('.monaco-editor')!
+        // Monaco's ElementSizeObserver clamps both dimensions to at least 5px.
+        return Math.abs(editor.getBoundingClientRect().width - Math.max(5, host.getBoundingClientRect().width))
+      })).toBeLessThanOrEqual(1)
+      await recordGeometry(`${viewport.label}: closed layout settled`)
       const baselineDocumentOverflow = await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth)
       await page.locator('[data-testid="account-button"]').click()
       await page.locator('[data-testid="account-settings"]').click()
+      await recordGeometry(`${viewport.label}: settings opened`)
       await page.locator('.settings-modal').getByRole('button', { name: /存储与附件|Storage & attachments/ }).click()
       await expect(settings.locator('.attachment-resource-row')).toHaveCount(30)
+      await recordGeometry(`${viewport.label}: manager opened`)
       const detailScroller = settings.locator('.settings-detail')
       await detailScroller.evaluate((element) => { element.scrollTop = 0 })
 
@@ -314,6 +349,7 @@ test('Attachment Manager remains reachable in desktop, tablet, and short mobile 
         return rect.top >= 0 && rect.bottom <= window.innerHeight
       })
       expect(lastRowReachable, `${viewport.label}: last item on the current page can be brought into view`).toBe(true)
+      await recordGeometry(`${viewport.label}: list scrolled`)
 
       const nextPage = settings.getByRole('button', { name: /下一页附件|Next attachment page/ })
       await expect(nextPage).toBeEnabled()
@@ -326,6 +362,7 @@ test('Attachment Manager remains reachable in desktop, tablet, and short mobile 
       const details = settings.locator('.attachment-detail-panel')
       await details.scrollIntoViewIfNeeded()
       await expect(details).toContainText(filenames[34]!)
+      await recordGeometry(`${viewport.label}: detail selected`)
       const detailHeading = details.locator('.attachment-detail-heading')
       await detailHeading.scrollIntoViewIfNeeded()
       const detailReachable = await detailHeading.evaluate((element) => {
@@ -380,7 +417,11 @@ test('Attachment Manager remains reachable in desktop, tablet, and short mobile 
       await previousPage.click()
       await expect(settings.locator('.attachment-resource-row')).toHaveCount(30)
     }
+    await settings.getByRole('button', { name: /关闭|Close/ }).click()
+    await expect(settings).toHaveCount(0)
+    await recordGeometry('final settings closed')
   } finally {
+    await testInfo.attach('attachment-layout-geometry', { body: JSON.stringify(geometry, null, 2), contentType: 'application/json' })
     if (noteCreated) await request.delete(`/api/posts/${notePath}`).catch(() => {})
     await Promise.all(absolutePaths.map((filePath) => fs.rm(filePath, { force: true })))
     await request.post('/api/attachments/refresh').catch(() => {})

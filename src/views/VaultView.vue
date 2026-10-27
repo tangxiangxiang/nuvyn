@@ -3300,7 +3300,8 @@ watch(isReadMode, async (reading) => {
       :class="{ 'is-read': isReadMode, 'is-empty': workspaceTabs.length === 0, 'is-diary-home': isDiaryCalendarVisible, 'is-no-tab-strip': !workspaceTabStripVisible }"
     >
       <EditorTabs
-        v-if="workspaceTabs.length > 0 && workspaceTabStripVisible"
+        v-if="workspaceTabs.length > 0 && !noteTabletLayout"
+        v-show="workspaceTabStripVisible"
         ref="editorTabsRef"
         :tabs="workspaceTabs"
         :active-path="activeWorkspaceTabId"
