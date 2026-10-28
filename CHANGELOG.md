@@ -3,6 +3,45 @@
 All notable changes to Nuvyn are documented in this file. Entries dated before
 the Nuvyn brand baseline may refer to Nuvyn as the historical product name.
 
+## Nuvyn v0.1.0-alpha.10 — 2026-10-28
+
+Changes since `v0.1.0-alpha.9`.
+
+### Note Editing & Markdown
+
+- Recognize two or more trailing ASCII spaces after Markdown text as a valid hard break, while retaining diagnostics for a single space, whitespace-only lines, tabs and mixed trailing whitespace.
+- Added lightweight, bounded syntax hints for Markdown extensions and resource-reference formats without changing source text or resolving resources during editing.
+- Extended Slash Commands with Flex, Code Group, Details, Include and code-file snippet templates using Monaco's existing snippet navigation.
+- Added Markdown source folding and heading-based Reader section folding, with nested state, TOC/anchor auto-expansion and complete HTML/PDF exports. Refined Reader spacing and folding controls, and isolated folding styles and controller cleanup from author HTML and failed renders.
+- Made rendered task checkboxes read-only while retaining editable Markdown source, and expanded the Markdown user guide.
+
+### Note Workspace
+
+- Added temporary Preview and retained Pinned Note tabs. Opening another preview reuses the temporary slot; double-click, explicit Pin and the first real edit retain a document.
+- Kept save errors, conflicts, drafts and in-flight requests behind the existing preview-replacement and close protections. Document navigation and delayed editor updates retain their source-document identity.
+- Persist only retained documents in the existing Tab Persistence v1 format; temporary previews are not restored as retained tabs merely because they were visited.
+
+### Note Tablet
+
+- Added a responsive Note reading layout for 601–1199px viewports, with single-column content and temporary left/right navigation drawers that preserve desktop layout preferences.
+- Replaced the tablet tab strip with a single-document presentation and a collapsed Open documents list for selecting, pinning and closing documents, including Diff and Recovery surfaces.
+- Adapted the existing Monaco editor to measured Visual Viewport changes, preserving the editor and Model during layout changes and revealing an obscured focused caret only when the editor shrinks.
+- Added Chinese IME synchronization safeguards, early retention of edited previews and source-path-aware updates across document navigation, without introducing a second editor or draft store.
+- Added a touch-accessible image button in the existing tablet Note editing navbar, reusing the attachment picker, tracked insertion ranges, upload validation and cross-document fallback.
+- Chromium touch simulation and Playwright WebKit regressions cover the tablet flows. Real iPad Safari and Android tablet acceptance is still pending, including system keyboards, Chinese candidate selection, native selection/clipboard, photo/file cancellation, split-screen, external keyboards and Apple Pencil. Browser automation is not real-device verification.
+
+### Reliability
+
+- Restored Diary's existing hidden-but-mounted Tab lifecycle while keeping the Note tablet tab strip unmounted, and aligned Note/Diary navigation, Preview/Pin and image-insertion E2E tests with the current interaction contracts.
+- Verified Attachment Manager at desktop, tablet and short phone sizes using settled workspace geometry; opening settings does not add horizontal overflow beyond the existing closed-workspace baseline.
+- Increased the per-file AI commit-message diff allowance from 8,000 to 16,000 characters while retaining the total prompt and other resource limits.
+
+### Migration & Deployment
+
+- No new SQLite migration or server-side persistence schema/protocol change was added since `v0.1.0-alpha.9`. Tab Persistence remains v1 and existing v1 records remain readable; the retained-tab behavior is described above.
+- Back up the complete Vault, including `.git` and hidden `.nuvyn` state, together with the SQLite data volume at one consistent point before upgrading. Include WAL/SHM files as applicable and preserve any external master key separately.
+- The release image is selected by Git Tag; the package version remains `0.0.0`. NAS rollout and real-device acceptance remain manual operations.
+
 ## Nuvyn v0.1.0-alpha.9 — 2026-10-19
 
 Changes since `v0.1.0-alpha.8`.
