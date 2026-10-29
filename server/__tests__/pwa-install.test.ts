@@ -22,6 +22,36 @@ describe('PWA install foundation', () => {
     expect(html).toContain('rel="apple-touch-icon"')
   })
 
+  it('ships real PNG icons at the declared sizes', () => {
+    const manifest = JSON.parse(readPublic('manifest.webmanifest'))
+    for (const [src, size, purpose] of [
+      ['/pwa-192.png', 192, 'any'],
+      ['/pwa-512.png', 512, 'any'],
+      ['/pwa-maskable-512.png', 512, 'maskable'],
+    ] as const) {
+      const icon = manifest.icons.find((entry: { src: string }) => entry.src === src)
+      expect(icon).toEqual({
+        src,
+        sizes: `${size}x${size}`,
+        type: 'image/png',
+        purpose,
+      })
+      const data = readFileSync(`public${src}`)
+      expect([...data.subarray(0, 8)]).toEqual([137, 80, 78, 71, 13, 10, 26, 10])
+      expect(data.toString('ascii', 12, 16)).toBe('IHDR')
+      expect(data.readUInt32BE(16)).toBe(size)
+      expect(data.readUInt32BE(20)).toBe(size)
+    }
+
+    const appleIcon = readFileSync('public/apple-touch-icon.png')
+    expect([...appleIcon.subarray(0, 8)]).toEqual([137, 80, 78, 71, 13, 10, 26, 10])
+    expect(appleIcon.readUInt32BE(16)).toBe(180)
+    expect(appleIcon.readUInt32BE(20)).toBe(180)
+    expect(readFileSync('index.html', 'utf8')).toContain(
+      '<link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png" />',
+    )
+  })
+
   it('intercepts hashed assets but never user data or navigation', () => {
     const listeners = new Map<string, (event: any) => void>()
     const cache = {
