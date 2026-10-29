@@ -21,26 +21,9 @@ FROM node:22-bookworm-slim AS deps
 
 # better-sqlite3 走 node-gyp 时需要的原生工具链。
 # 不装这几个，`npm ci` 在尝试装可选依赖时会失败。
-# 顺手把 apt 源换成阿里云镜像：默认的 deb.debian.org 在国内极慢，
-# 单这一步就要 10+ 分钟。换回官方源只需把镜像 URL 改回 https://deb.debian.org。
-# 用 for 循环覆盖所有可能的 apt 源文件位置（新 deb822 格式和老 one-line 格式都试），
-# 之前只 sed /etc/apt/sources.list 和 *.sources 时碰到其它位置会静默失败。
-# 分隔符用 # 而不是 |：GNU sed 的 s-命令不会跳过 (deb|security) 里的 |，
-# 会把它当成结束分隔符，模式就被截断了。
-# 源用 http 而非 https：bookworm-slim 不带 ca-certificates，HTTPS 校验过不去；
-# 包有 GPG 签名，apt 验签不靠 TLS，构建期用 HTTP 是安全的。
 # sharing=locked 防止并发构建写到同一缓存造成损坏。
 RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
     --mount=type=cache,target=/var/lib/apt,sharing=locked \
-    set -e; \
-    for f in /etc/apt/sources.list \
-             /etc/apt/sources.list.d/debian.sources \
-             /etc/apt/sources.list.d/*.list \
-             /etc/apt/sources.list.d/*.sources; do \
-        if [ -f "$f" ]; then \
-            sed -i -E 's#https?://(deb|security)\.debian\.org#http://mirrors.aliyun.com#g' "$f"; \
-        fi; \
-    done; \
     apt-get update \
  && apt-get install -y --no-install-recommends python3 make g++ ca-certificates
 
@@ -80,18 +63,8 @@ FROM node:22-bookworm-slim AS runtime
 # `spawn('git', ...)` 调 git 子命令(rev-parse / log / show / add / commit /
 # checkout),不在 runtime 装 git 的话 history 路由会全部 503 (`GitUnavailableError`)。
 # bookworm-slim 上 git 包 ~21MB,换来 history 功能完整可用,值得。
-# 同上：apt 源换成阿里云镜像，覆盖所有可能的源文件位置。
 RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
     --mount=type=cache,target=/var/lib/apt,sharing=locked \
-    set -e; \
-    for f in /etc/apt/sources.list \
-             /etc/apt/sources.list.d/debian.sources \
-             /etc/apt/sources.list.d/*.list \
-             /etc/apt/sources.list.d/*.sources; do \
-        if [ -f "$f" ]; then \
-            sed -i -E 's#https?://(deb|security)\.debian\.org#http://mirrors.aliyun.com#g' "$f"; \
-        fi; \
-    done; \
     apt-get update \
  && apt-get install -y --no-install-recommends tini ca-certificates git
 
