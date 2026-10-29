@@ -240,6 +240,7 @@ describe('SettingsModal', () => {
     expect(document.body.textContent).toContain('配置')
 
     const provider = wrapper.getComponent(NSelect)
+    expect(provider.props('to')).toBe('.settings-backdrop')
     expect(provider.props('options')).toEqual([
       { value: 'anthropic', label: 'Anthropic' },
       { value: 'openai', label: 'OpenAI' },

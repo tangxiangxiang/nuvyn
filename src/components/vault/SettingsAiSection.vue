@@ -163,6 +163,7 @@ function onProviderChange(value: string | number | null) {
               :aria-label="t('settings.provider')"
               :value="activeProvider"
               :options="providerOptions"
+              to=".settings-backdrop"
               size="medium"
               :disabled="loading || saving"
               @update:value="onProviderChange"
