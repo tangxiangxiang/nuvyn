@@ -4,6 +4,8 @@
 // components import them from this file.
 import type { AiLiveContextSnapshot } from '../composables/vault/aiLiveContext'
 import { authFetch } from './auth-session'
+import type { AiProfile, AiProfileInput, AiProfileList } from '../../shared/aiProfiles'
+export type { AiProfile, AiProfileInput, AiProfileList } from '../../shared/aiProfiles'
 
 export interface Session {
   id: number
@@ -248,6 +250,29 @@ export async function setActiveSessionId(sessionId: number | null): Promise<numb
 
 export async function getAiSettings(): Promise<AiSettings> {
   return jsonOrThrow<AiSettings>(await authFetch('/api/ai/settings', { method: 'GET' }))
+}
+
+export async function getAiProfiles(signal?: AbortSignal): Promise<AiProfileList> {
+  return jsonOrThrow(await authFetch('/api/ai/profiles', { signal }))
+}
+export async function retryAiProfileMigration(signal?: AbortSignal): Promise<AiProfileList> {
+  return jsonOrThrow(await authFetch('/api/ai/profiles/retry-migration', { method: 'POST', signal }))
+}
+export async function createAiProfile(input: AiProfileInput, signal?: AbortSignal): Promise<AiProfile> {
+  return jsonOrThrow(await authFetch('/api/ai/profiles', { method: 'POST', ...jsonBody(input), signal }))
+}
+export async function updateAiProfile(id: string, input: AiProfileInput, signal?: AbortSignal): Promise<AiProfile> {
+  return jsonOrThrow(await authFetch(`/api/ai/profiles/${encodeURIComponent(id)}`, { method: 'PATCH', ...jsonBody(input), signal }))
+}
+export async function activateAiProfile(id: string, signal?: AbortSignal): Promise<{ activeProfileId: string }> {
+  return jsonOrThrow(await authFetch(`/api/ai/profiles/${encodeURIComponent(id)}/activate`, { method: 'PUT', signal }))
+}
+export async function deleteAiProfile(id: string, disableDefault: boolean, signal?: AbortSignal): Promise<{ deleted: true }> {
+  return jsonOrThrow(await authFetch(`/api/ai/profiles/${encodeURIComponent(id)}`, { method: 'DELETE', ...jsonBody({ disableDefault }), signal }))
+}
+export async function testAiProfileConnection(id: string | null, input: AiProfileInput, signal?: AbortSignal): Promise<AiConnectionTestResult> {
+  const path = id ? `/${encodeURIComponent(id)}` : ''
+  return jsonOrThrow(await authFetch(`/api/ai/profiles${path}/test-connection`, { method: 'POST', ...jsonBody(input), signal }))
 }
 
 export async function getAiCredentialStatus(): Promise<AiCredentialStatus> {

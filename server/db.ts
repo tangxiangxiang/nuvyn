@@ -15,6 +15,8 @@ import { existsSync, mkdirSync, readdirSync, readFileSync } from 'node:fs'
 import path from 'node:path'
 import { NUVYN_DATABASE_FILE_NAME } from './technicalNamespace.js'
 import { readCanonicalEnv } from './env.js'
+import { initializeAiProfiles } from './ai/profiles.js'
+import { AiKeyConfigurationError } from './ai/settings.js'
 
 // Browser integration harnesses may provide an explicitly isolated database
 // path. Production otherwise uses the canonical process.cwd()/data/nuvyn.db
@@ -100,6 +102,11 @@ export function getDb(): DatabaseT {
   _db.pragma('journal_mode = WAL')
   _db.pragma('foreign_keys = ON')
   applyMigrations(_db)
+  try { initializeAiProfiles(_db) } catch (error) {
+    // Keep the application and credential-recovery UI available. The import
+    // transaction rolled back; no stored key is discarded or replaced.
+    if (!(error instanceof AiKeyConfigurationError)) throw error
+  }
   return _db
 }
 

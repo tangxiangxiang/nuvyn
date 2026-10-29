@@ -57,6 +57,7 @@ export async function generateCommitMessage(opts: {
   try {
     result = await generateText({
       model: cfg.model,
+      runtimeConfig: cfg,
       maxTokens: MAX_TOKENS,
       temperature: 0,
       signal: opts.signal,

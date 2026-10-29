@@ -18,6 +18,7 @@ export async function generateTags(opts: {
   try {
     const result = await generateText({
       model: cfg.model,
+      runtimeConfig: cfg,
       maxTokens: 256,
       temperature: 0,
       signal: opts.signal,

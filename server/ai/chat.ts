@@ -1,3 +1,4 @@
+import { getAiRuntimeConfig, type AiRuntimeConfig } from './settings.js'
 // AI chat orchestrator. Pure functions of (db, ...args) — no
 // closures over module state, no classes (ChatError is the one
 // exception; it lives in ./errors.ts to avoid a circular import
@@ -205,6 +206,7 @@ export type ChatEvent =
   | { type: 'error'; reason: string; message?: string; code?: AiErrorCode }
 
 export type RunChatDeps = {
+  runtimeConfig?: AiRuntimeConfig
   db: DatabaseT
   model: string
   signal?: AbortSignal
@@ -228,6 +230,7 @@ export async function runChat(opts: RunChatOpts): Promise<{
   if (opts.userContent.trim().length === 0) {
     throw new ChatError('empty')
   }
+  const runtimeConfig = opts.runtimeConfig ?? getAiRuntimeConfig(opts.db)
   const sess = sessions.getSession(opts.db, opts.sessionId)
   if (!sess) throw new ChatError('not-found')
 
@@ -235,7 +238,7 @@ export async function runChat(opts: RunChatOpts): Promise<{
   // provider is unavailable, compaction is deferred and every raw message
   // remains available for this request.
   try {
-    await compactAiThreadIfNeeded({ db: opts.db, sessionId: opts.sessionId, model: opts.model })
+    await compactAiThreadIfNeeded({ db: opts.db, sessionId: opts.sessionId, model: opts.model, runtimeConfig })
   } catch {
     // A summary failure must never discard or corrupt the raw transcript.
   }
@@ -279,7 +282,7 @@ export async function runChat(opts: RunChatOpts): Promise<{
   // current settings (the backend factory reads the SQLite settings
   // fresh on miss).
   clearChatBackendCache()
-  const backend = getChatBackend(opts.db)
+  const backend = getChatBackend(opts.db, runtimeConfig.provider)
 
   let fullText = ''
   // Each round's NormalizedRound is accumulated here so the final
@@ -302,7 +305,7 @@ export async function runChat(opts: RunChatOpts): Promise<{
 
       const result = await backend.streamRound({
         db: opts.db,
-        model: opts.model,
+        model: opts.model, runtimeConfig,
         system,
         messages: convo,
         tools: TOOL_DEFINITIONS,
@@ -449,7 +452,7 @@ export async function runChat(opts: RunChatOpts): Promise<{
 
   // Start the next compaction after the visible answer has completed. The
   // next turn awaits this same per-thread job if it has not finished yet.
-  void compactAiThreadIfNeeded({ db: opts.db, sessionId: opts.sessionId, model: opts.model }).catch(() => {})
+  void compactAiThreadIfNeeded({ db: opts.db, sessionId: opts.sessionId, model: opts.model, runtimeConfig }).catch(() => {})
 
   return { userId, assistantId, fullText }
 }

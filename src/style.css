@@ -2989,6 +2989,15 @@ main.container.auth-page-shell {
    The modal is teleported to body, so it derives its layered surfaces
    from the root theme tokens instead of relying on vault-scoped tokens. */
 
+.settings-ai-profiles { display: flex; flex-direction: column; gap: 4px; }
+.settings-ai-profile.n-button { width: 100%; height: auto; min-height: 48px; justify-content: flex-start; padding: 10px 12px; }
+.settings-ai-profile .n-button__content { width: 100%; justify-content: space-between; gap: 12px; }
+.settings-ai-profile-copy { display: flex; flex-direction: column; gap: 3px; text-align: left; min-width: 0; white-space: normal; overflow-wrap: anywhere; }
+.settings-ai-profile-copy small { color: var(--text-muted); }
+.settings-ai-profile.is-selected { background: color-mix(in srgb, var(--accent) 8%, transparent); }
+.settings-ai-profile-default { color: var(--accent); font-size: 12px; flex-shrink: 0; }
+.settings-ai-profile-actions { margin-top: 16px; flex-wrap: wrap; }
+
 .settings-backdrop {
   position: fixed;
   inset: 0;

@@ -1,3 +1,4 @@
+import { initializeAiProfiles } from '../ai/profiles'
 // Real-wire OpenAI-compatible tests. Unlike openai-llm.test.ts, this file
 // does not mock the OpenAI SDK: a local HTTP server verifies the request path,
 // auth header, JSON body, streaming chunks, and bounded compatibility retry.
@@ -332,6 +333,8 @@ describe('OpenAI-compatible HTTP protocol', () => {
       baseURL: `${server.baseURL}/v1`,
       model: 'saved-model',
     })
+    initializeAiProfiles(db) // Real getDb() imports before a request is handled.
+    const beforeProfiles = db.prepare('SELECT * FROM ai_profiles').all()
     const before = db.prepare('SELECT key, value FROM settings ORDER BY key').all()
     const result = await aiRoutes.fetch(new Request('http://localhost/settings/test-connection', {
       method: 'POST',
@@ -340,6 +343,7 @@ describe('OpenAI-compatible HTTP protocol', () => {
     }))
     expect(result.status).toBe(200)
     expect(db.prepare('SELECT key, value FROM settings ORDER BY key').all()).toEqual(before)
+    expect(db.prepare('SELECT * FROM ai_profiles').all()).toEqual(beforeProfiles)
   })
 
   it('preserves an explicit timeout classification for connection probes', async () => {

@@ -40,7 +40,7 @@ function hasSetting(db: Database.Database, key: string): boolean {
 function aiSettingsSnapshot(db: Database.Database): Array<{ key: string; value: string }> {
   return db.prepare(`
     SELECT key, value FROM settings
-    WHERE key LIKE 'ai.%'
+    WHERE key LIKE 'ai.%' AND key NOT IN ('ai.profiles.imported.v1', 'ai.active.profileId')
     ORDER BY key
   `).all() as Array<{ key: string; value: string }>
 }

@@ -55,12 +55,13 @@ import {
   MAX_AI_BASE_URL_LENGTH,
   MAX_AI_MODEL_LENGTH,
   normalizeOpenAiBaseURL,
-  readStoredAiSettingsReadOnly,
   saveAiSettings,
   SUPPORTED_PROVIDERS,
   type Provider,
 } from './settings.js'
 import type { AssistantBlocks, AiThreadScope, Message } from '../../src/lib/ai-api.js'
+import profileRoutes from './profileRoutes.js'
+import { AiProfileError, initializeAiProfiles, legacyProfileId, profileProbeConfig } from './profiles.js'
 
 function bad(c: any, msg: string, status = 400, errorCode?: string) {
   c.header('Cache-Control', 'no-store')
@@ -88,6 +89,7 @@ function aiKeyErrorResponse(c: any, error: unknown) {
 }
 
 function aiSettingsValidationResponse(c: any, error: unknown) {
+  if (error instanceof AiProfileError) return bad(c, error.message, error.status, error.code)
   if (error instanceof AiSettingsValidationError) {
     return bad(c, error.message, 400, error.code)
   }
@@ -265,6 +267,7 @@ function threadScopeMatchesContext(scope: AiThreadScope, ctx: ChatContext): bool
 }
 
 const ai = new Hono()
+ai.route('/profiles', profileRoutes)
 
 // ---- /thread ----
 // The UI addresses one durable thread by document identity. Sessions
@@ -402,9 +405,12 @@ ai.post('/settings/test-connection', async (c) => {
   if (requestedBaseURL && !isValidHttpUrl(requestedBaseURL)) return bad(c, 'baseURL must be an http(s) URL')
   if (requestedModel && !isValidModelName(requestedModel)) return bad(c, 'model contains unsupported characters')
 
-  let stored: ReturnType<typeof readStoredAiSettingsReadOnly>
+  let config: ReturnType<typeof profileProbeConfig>
   try {
-    stored = readStoredAiSettingsReadOnly(getDb())
+    const id = legacyProfileId(getDb(), provider)
+    config = profileProbeConfig(getDb(), id ?? undefined, {
+      provider, apiKey: requestedKey, baseURL: requestedBaseURL, model: requestedModel,
+    })
   } catch (error) {
     const validation = aiSettingsValidationResponse(c, error)
     if (validation) return validation
@@ -412,10 +418,9 @@ ai.post('/settings/test-connection', async (c) => {
     if (response) return response
     throw error
   }
-  const saved = stored[provider]
-  const apiKey = requestedKey || saved.apiKey
+  const apiKey = config.apiKey
   if (!apiKey) return bad(c, 'AI API key is not configured', 503, 'ai-authentication-failed')
-  let baseURL = requestedBaseURL === undefined ? saved.baseURL : requestedBaseURL
+  let baseURL = config.baseURL
   if (provider === 'openai' && baseURL) {
     try {
       baseURL = normalizeOpenAiBaseURL(baseURL)
@@ -425,7 +430,7 @@ ai.post('/settings/test-connection', async (c) => {
       throw error
     }
   }
-  const model = requestedModel || saved.model
+  const model = config.model
   const startedAt = Date.now()
   try {
     await probeAiConnection({
@@ -480,6 +485,7 @@ ai.put('/settings', async (c) => {
   if (baseURL && !isValidHttpUrl(baseURL)) return bad(c, 'baseURL must be an http(s) URL')
   if (model && !isValidModelName(model)) return bad(c, 'model contains unsupported characters')
   try {
+    initializeAiProfiles(getDb())
     saveAiSettings(getDb(), { provider, apiKey, baseURL, model })
     return c.json(getAiSettingsView(getDb()))
   } catch (error) {
@@ -496,7 +502,13 @@ ai.delete('/settings/key', (c) => {
   if (requested !== undefined && !(SUPPORTED_PROVIDERS as readonly string[]).includes(requested)) {
     return bad(c, `provider must be one of: ${SUPPORTED_PROVIDERS.join(', ')}`)
   }
-  return c.json(clearAiApiKey(getDb(), requested as Provider | undefined))
+  try {
+    return c.json(clearAiApiKey(getDb(), requested as Provider | undefined))
+  } catch (error) {
+    const response = aiSettingsValidationResponse(c, error)
+    if (response) return response
+    throw error
+  }
 })
 
 // This endpoint intentionally inspects only whether rows are non-empty. It
@@ -884,6 +896,7 @@ ai.post('/chat', async (c) => {
         userContent,
         ctx,
         model: runtimeConfig.model,
+        runtimeConfig,
         diaryBodyAccess: (path) => {
           const canonical = normalizeLogicalContentPath(path)
           if (!canonical || classifyDiaryPath(canonical) !== 'managed') return true

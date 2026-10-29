@@ -1,8 +1,29 @@
 # AI
 
-## Configure a Provider
+## Manage AI Profiles
 
-Open Settings and choose either Anthropic or OpenAI. Enter the API key and, if needed, override the model or HTTP(S) base URL. Each provider keeps a separate saved configuration; switching providers does not copy credentials between them.
+Open **Settings → AI**, click **Add profile**, and enter a name, protocol
+(Anthropic or OpenAI), API key, optional HTTP(S) API root and model. Multiple
+profiles may use the same protocol. The name identifies your configuration;
+protocol specifies the API format, not the service brand.
+
+Click **Save**, then explicitly choose **Set as default** when the profile should
+serve Chat and document/metadata generation. Adding or selecting a profile for
+editing never changes the default. There is one global default, shared by AI
+features; already-running requests keep their starting configuration.
+
+Click a profile to edit it. A blank API Key field preserves the saved key;
+**Clear key** removes only that profile credential after confirmation. Changing
+a protocol with a saved key requires confirmation that the credential and
+endpoint support the new protocol. Switching profiles, closing Settings or
+leaving the AI section asks before discarding unsaved changes. Save failures
+retain your form. Connection status resets whenever its form changes.
+
+Deleting a configuration identifies its name and protocol and permanently
+removes its Profile record. Deleting the default additionally asks permission
+to disable AI; no remaining profile is silently activated. Original pre-upgrade
+provider rows may remain as migration backup data; see the deployment guide
+before downgrading or handling a database backup.
 
 The OpenAI provider uses the streaming OpenAI-compatible Chat Completions
 protocol. Its Base URL is an API root such as `https://api.openai.com/v1` (or a
@@ -43,14 +64,14 @@ If you manually edit the target field while generation is pending, the AI result
 ## Test the Current Connection
 
 Settings → AI includes a real, manual connection probe for the configuration
-currently shown in the form. Choose Anthropic or OpenAI, enter a new API key or
+currently shown in the form. Choose a profile, enter a new API key or
 keep the existing credential, set the Base URL and model, then click **Test
-connection**. Opening Settings, changing a field, switching providers, or
+connection**. Opening Settings, changing a field, switching profiles, or
 saving does not contact the provider automatically.
 
 The probe tests the displayed provider, credential, Base URL, and model as one
 configuration. A newly entered API key is used immediately without being saved;
-when the API Key field is empty, Nuvyn reuses the selected provider's saved key
+when the API Key field is empty, Nuvyn reuses only that profile's saved key
 for a read-only test. Unsaved Base URL and model values are also used. The probe
 does not save these transient values or modify Settings. It makes a small
 provider request, so a successful test may use a small amount of API quota.
@@ -62,7 +83,7 @@ The status is local to the Settings page and has four states:
 - **Connected** — the exact displayed provider, credential, Base URL, and model completed a real Nuvyn-compatible probe. The result includes the provider, model, and latency.
 - **Connection failed** — the probe did not complete successfully and can be run again.
 
-Editing the provider, API key, Base URL, or model invalidates an old Connected
+Editing the name, protocol, API key, Base URL, or model invalidates an old Connected
 status and returns it to **Not tested**. The same happens after saving or
 clearing a key, so the status never represents an older configuration.
 
@@ -111,3 +132,13 @@ Review tool-call cards and History changes after an AI-assisted edit. Create a G
 - **Master-key error:** restore the exact key that encrypted the stored credentials. If the key is permanently unavailable, use Settings → AI → Forget the affected provider API key and confirm the destructive action. This removes only that provider's encrypted credential; Nuvyn never clears or replaces credentials automatically. After all unrecoverable provider credentials are explicitly cleared, a new API key can be saved and a new fallback key will be created.
 - **Tool rejected:** save or resolve the active workspace state, then ask the model to re-read before retrying.
 - **Provider error:** verify the selected model, network access, and API account. For OpenAI-compatible providers, verify that the Base URL is the API root (not `/chat/completions`) and that the endpoint supports streaming Chat Completions and tool/function calling.
+
+## After upgrading from provider slots
+
+Existing Anthropic and OpenAI slots are imported with their saved fields and
+original active-protocol selection. Missing keys do not discard saved models
+or URLs. If credentials are unavailable, metadata remains visible along with
+a safe recovery code. Restore the original master key; for a failed historical
+format conversion, click **Retry** after restoring it. Explicitly clearing a
+credential is permanent and should only be used when you intend to replace it.
+Do not create a replacement master key while unrecovered encrypted keys remain.

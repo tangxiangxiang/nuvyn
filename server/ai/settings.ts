@@ -4,8 +4,8 @@
 // IV and auth tag. An explicitly supplied NUVYN_MASTER_KEY or
 // NUVYN_MASTER_KEY_FILE takes precedence; otherwise Nuvyn creates a separate
 // local secret file next to the database. The master key is never stored in
-// SQLite. Existing databases that contain ai.encryption.key are migrated
-// transactionally on first access.
+// SQLite. Legacy format helpers below are reused by the explicit, transactional Profile
+// import; production runtime reads only the default Profile.
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import path from 'node:path'
 import { randomBytes } from 'node:crypto'
@@ -16,6 +16,7 @@ import {
   isEncryptedFormat,
 } from './keyEncryption.js'
 import { NUVYN_MASTER_KEY_FILE_NAME } from '../technicalNamespace.js'
+import { activeProfileRuntime, profilesImported, saveLegacyProfile, clearLegacyProfileKey, legacySettingsSnapshot } from './profiles.js'
 
 export const SUPPORTED_PROVIDERS = ['anthropic', 'openai'] as const
 export type Provider = typeof SUPPORTED_PROVIDERS[number]
@@ -398,6 +399,7 @@ function readStoredAiSettingsWithMigration(db: DatabaseT, persistMigration: bool
 }
 
 export function readStoredAiSettings(db: DatabaseT): StoredAiSettings {
+  if (profilesImported(db)) return legacySettingsSnapshot(db)
   return readStoredAiSettingsWithMigration(db, true)
 }
 
@@ -414,6 +416,13 @@ export interface SaveAiSettingsInput {
 }
 
 export function saveAiSettings(db: DatabaseT, input: SaveAiSettingsInput): StoredAiSettings {
+  if (profilesImported(db)) {
+    // Validate the old slot-shaped response before any mutation. With multiple
+    // same-protocol profiles that shape is ambiguous even when the default is known.
+    legacySettingsSnapshot(db)
+    saveLegacyProfile(db, input)
+    return legacySettingsSnapshot(db)
+  }
   // Read/migrate before changing the active provider, so a bad master key
   // cannot leave a partially applied settings update behind.
   const current = readStoredAiSettings(db)
@@ -455,6 +464,7 @@ export function clearAiApiKey(
   db: DatabaseT,
   provider?: Provider,
 ): { cleared: true; provider: Provider } {
+  if (profilesImported(db)) return clearLegacyProfileKey(db, provider)
   const target = provider ?? readActiveProvider(db)
   const clear = db.transaction(() => deleteSetting(db, keyApiKey(target)))
   clear()
@@ -467,6 +477,13 @@ export function clearAiApiKey(
  * action after a master-key-required response.
  */
 export function getAiCredentialStatus(db: DatabaseT): AiCredentialStatus {
+  if (profilesImported(db)) {
+    const stored = legacySettingsSnapshot(db, false)
+    return { provider: stored.provider, providers: {
+      anthropic: { stored: Boolean(stored.anthropic.apiKey) },
+      openai: { stored: Boolean(stored.openai.apiKey) },
+    } }
+  }
   return {
     provider: readActiveProvider(db),
     providers: {
@@ -483,35 +500,17 @@ export function maskKey(key: string): string {
 }
 
 export function getAiRuntimeConfig(db: DatabaseT): AiRuntimeConfig {
-  const stored = readStoredAiSettings(db)
-  const provider = stored.provider
-  const active = stored[provider]
-  if (active?.apiKey) {
-    return {
-      apiKey: active.apiKey,
-      baseURL: active.baseURL || undefined,
-      model: active.model || defaultModelFor(provider),
-      provider,
-      source: 'db',
-    }
-  }
-  return {
-    baseURL: active?.baseURL || undefined,
-    model: active?.model || defaultModelFor(provider),
-    provider,
-    source: 'none',
-  }
+  return activeProfileRuntime(db)
 }
 
 export function getAiSettingsView(db: DatabaseT): AiSettingsView {
-  const stored = readStoredAiSettings(db)
-  const active = stored[stored.provider]
+  const active = getAiRuntimeConfig(db)
   return {
-    provider: stored.provider,
+    provider: active.provider,
     configured: Boolean(active.apiKey),
     source: active.apiKey ? 'db' : 'none',
-    maskedKey: maskKey(active.apiKey),
-    baseURL: active.baseURL,
+    maskedKey: maskKey(active.apiKey ?? ''),
+    baseURL: active.baseURL ?? '',
     model: active.model,
   }
 }

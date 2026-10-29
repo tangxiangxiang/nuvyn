@@ -1,3 +1,4 @@
+import type { AiRuntimeConfig } from './settings.js'
 import type { Database as DatabaseT } from 'better-sqlite3'
 import type { Message } from '../../src/lib/ai-api.js'
 import { generateText } from './llm.js'
@@ -19,6 +20,7 @@ export async function compactAiThreadIfNeeded(opts: {
   db: DatabaseT
   sessionId: number
   model: string
+  runtimeConfig?: AiRuntimeConfig
 }): Promise<void> {
   let bySession = inFlightByDb.get(opts.db)
   if (!bySession) {
@@ -41,6 +43,7 @@ async function compactNow(opts: {
   db: DatabaseT
   sessionId: number
   model: string
+  runtimeConfig?: AiRuntimeConfig
 }): Promise<void> {
   let state = sessions.getAiThreadCompactionState(opts.db, opts.sessionId)
   if (!state) return
@@ -208,7 +211,7 @@ function splitText(value: string, maxChars: number): string[] {
 }
 
 async function summarizeBatch(
-  opts: { db: DatabaseT; model: string },
+  opts: { db: DatabaseT; model: string; runtimeConfig?: AiRuntimeConfig },
   previousSummary: string,
   batch: Message[],
 ): Promise<string> {
@@ -216,7 +219,7 @@ async function summarizeBatch(
 }
 
 async function summarizeText(
-  opts: { db: DatabaseT; model: string },
+  opts: { db: DatabaseT; model: string; runtimeConfig?: AiRuntimeConfig },
   previousSummary: string,
   compactedText: string,
 ): Promise<string> {
@@ -224,6 +227,7 @@ async function summarizeText(
   const result = await generateText({
     db: opts.db,
     model: opts.model,
+    runtimeConfig: opts.runtimeConfig,
     maxTokens: MAX_SUMMARY_TOKENS,
     temperature: 0,
     system: [

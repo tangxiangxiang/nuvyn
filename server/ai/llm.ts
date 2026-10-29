@@ -3,7 +3,7 @@
 // Three layers:
 //
 //   1. resolveAiRuntimeConfig(): reads auth + base URL + model from
-//      the active provider's DB settings slot. Used by helpers and
+//      the active Profile snapshot. Used by helpers and
 //      by the chat backend factory.
 //
 //   2. generateText(opts): synchronous-shape non-streaming helper.
@@ -19,7 +19,7 @@
 //      OpenAI backend implements OpenAI's tool_calls wire format.
 //
 // Auth + base URL + model + provider all come from the SQLite
-// `settings` table (see settings.ts). API keys are stored encrypted
+// `ai_profiles` table (see profiles.ts). API keys are stored encrypted
 // at rest (AES-256-GCM, keyEncryption.ts) and decrypted transparently
 // on read. There is no env-var override path.
 import Anthropic from '@anthropic-ai/sdk'
@@ -31,6 +31,7 @@ import {
   AiKeyConfigurationError,
   getAiRuntimeConfig,
   type Provider,
+  type AiRuntimeConfig,
 } from './settings.js'
 import type { Database as DatabaseT } from 'better-sqlite3'
 
@@ -294,6 +295,7 @@ export interface NormalizedToolCall {
 }
 
 export interface StreamRoundOpts {
+  runtimeConfig?: AiRuntimeConfig
   db: DatabaseT
   model: string
   system: string
@@ -325,7 +327,7 @@ class AnthropicBackend implements ChatBackend {
   readonly name = 'anthropic' as const
 
   async streamRound(opts: StreamRoundOpts): Promise<StreamRoundResult> {
-    const cfg = resolveAiRuntimeConfig(opts.db)
+    const cfg = opts.runtimeConfig ?? resolveAiRuntimeConfig(opts.db)
     if (!cfg.apiKey) throw new ChatError('no-api-key')
     const client = new Anthropic(cfg.baseURL ? { apiKey: cfg.apiKey, baseURL: cfg.baseURL } : { apiKey: cfg.apiKey })
 
@@ -403,7 +405,7 @@ class OpenAIBackend implements ChatBackend {
   readonly name = 'openai' as const
 
   async streamRound(opts: StreamRoundOpts): Promise<StreamRoundResult> {
-    const cfg = resolveAiRuntimeConfig(opts.db)
+    const cfg = opts.runtimeConfig ?? resolveAiRuntimeConfig(opts.db)
     if (!cfg.apiKey) throw new ChatError('no-api-key')
     const client = new OpenAI({
       apiKey: cfg.apiKey,
@@ -668,6 +670,7 @@ export function resolveAiRuntimeConfig(db: DatabaseT = getDb()) {
  * ------------------------------------------------------------------ */
 
 export interface GenerateTextOpts {
+  runtimeConfig?: AiRuntimeConfig
   system: string
   user: string
   model: string
@@ -696,7 +699,7 @@ function normalizeAnthropicFinishReason(reason: unknown): GenerateTextResult['fi
 }
 
 export async function generateText(opts: GenerateTextOpts): Promise<GenerateTextResult> {
-  const cfg = resolveAiRuntimeConfig(opts.db)
+  const cfg = opts.runtimeConfig ?? resolveAiRuntimeConfig(opts.db)
   if (!cfg.apiKey) throw new ChatError('no-api-key')
   if (cfg.provider === 'openai') {
     const client = new OpenAI({ apiKey: cfg.apiKey, ...(cfg.baseURL ? { baseURL: cfg.baseURL } : {}) })

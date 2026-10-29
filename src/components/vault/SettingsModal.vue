@@ -2,22 +2,7 @@
 import { nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { NButton, NIcon } from 'naive-ui'
 import { Book, Edit, FileText, MoodSmile, Paperclip, Robot, Tag, Wallet, X } from '@vicons/tabler'
-import {
-  clearAiApiKey,
-  getAiCredentialStatus,
-  getAiSettings,
-  saveAiSettings,
-  testAiConnection,
-  type AiCredentialStatus,
-  type AiConnectionErrorCode,
-  type AiConnectionState,
-  type AiConnectionTestResult,
-  type AiKeyErrorCode,
-  type AiProvider,
-  type AiSettings,
-} from '../../lib/ai-api'
 import { useToast } from '../../composables/useToast'
-import { useAiHistory } from '../../composables/vault/useAiHistory'
 import { useFocusTrap } from '../../composables/useFocusTrap'
 import { useConfirm } from '../../composables/useConfirm'
 import { useI18n } from '../../composables/useI18n'
@@ -55,46 +40,18 @@ const emit = defineEmits<{
 }>()
 
 const toast = useToast()
-const aiHistory = useAiHistory()
 const trap = useFocusTrap()
 const { confirm } = useConfirm()
 const { t } = useI18n()
 const vaultContext = useOptionalVaultContext()
 
-const loading = ref(false)
-const saving = ref(false)
-const settings = ref<AiSettings | null>(null)
-const aiErrorCode = ref<AiKeyErrorCode | undefined>()
-const credentialStatus = ref<AiCredentialStatus | null>(null)
-const apiKey = ref('')
-const baseURL = ref('')
-const model = ref('claude-sonnet-4-6')
-const connectionState = ref<AiConnectionState>('untested')
-const connectionResult = ref<AiConnectionTestResult | null>(null)
-const connectionError = ref('')
-const connectionController = ref<AbortController | null>(null)
-let connectionRunId = 0
+const aiSection = ref<InstanceType<typeof SettingsAiSection> | null>(null)
 const modalRef = ref<HTMLElement | null>(null)
 const migrationSummary = ref<MetadataMigrationSummary | null>(null)
 const cleanupPreview = ref<FrontmatterCleanupPreview | null>(null)
 const previewing = ref(false)
 const mutatingMetadata = ref(false)
 const cleanedPaths = ref<string[]>([])
-
-async function refreshActiveAiModel() {
-  await aiHistory.loadSettings()
-  if (!aiHistory.model?.value && aiHistory.refreshModel) {
-    await aiHistory.refreshModel().catch(() => {})
-  }
-}
-
-function isMasterKeyRecoveryCode(code: unknown): boolean {
-  return code === 'master-key-required' || code === 'master-key-invalid'
-}
-
-async function refreshCredentialStatus() {
-  credentialStatus.value = await getAiCredentialStatus().catch(() => null)
-}
 
 /* Left nav + right detail. Each section is its own .vue file
    (SettingsAiSection / SettingsEditorSection / SettingsMetadataSection /
@@ -117,96 +74,10 @@ const SECTIONS = [
 const active = ref<SectionId>('ai')
 
 async function load() {
-  loading.value = true
-  resetConnectionStatus()
-  aiErrorCode.value = undefined
-  credentialStatus.value = null
-  try {
-    const [next, migration] = await Promise.all([
-      getAiSettings(),
-      getMetadataMigrationStatus().catch(() => null),
-    ])
-    settings.value = next
-    apiKey.value = ''
-    baseURL.value = next.baseURL
-    model.value = next.model || 'claude-sonnet-4-6'
-    aiErrorCode.value = undefined
-    credentialStatus.value = null
-    migrationSummary.value = migration?.summary ?? null
-    cleanedPaths.value = migration?.cleanedPaths ?? []
-  } catch (e: any) {
-    aiErrorCode.value = e.code
-    if (isMasterKeyRecoveryCode(e.code)) await refreshCredentialStatus()
-    toast.error(t('settings.load_failed', { error: e.message ?? t('common.unknown_error') }))
-  } finally {
-    loading.value = false
-  }
-}
-
-function resetConnectionStatus() {
-  connectionRunId += 1
-  connectionController.value?.abort()
-  connectionController.value = null
-  connectionState.value = 'untested'
-  connectionResult.value = null
-  connectionError.value = ''
-}
-
-function abortConnectionTest() {
-  connectionRunId += 1
-  connectionController.value?.abort()
-  connectionController.value = null
-}
-
-function updateApiKey(value: string) {
-  apiKey.value = value
-  resetConnectionStatus()
-}
-
-function updateBaseURL(value: string) {
-  baseURL.value = value
-  resetConnectionStatus()
-}
-
-function updateModel(value: string) {
-  model.value = value
-  resetConnectionStatus()
-}
-
-function connectionErrorMessage(error: any): string {
-  const code = error?.code as AiConnectionErrorCode | 'openai-tools-unsupported' | undefined
-  if (code === 'ai-connection-timeout') return t('settings.connection_timeout')
-  if (code === 'ai-authentication-failed') return t('settings.connection_auth_failed')
-  if (code === 'ai-model-unavailable') return t('settings.connection_model_unavailable')
-  return error?.message || t('settings.connection_failed')
-}
-
-async function onTestConnection() {
-  connectionController.value?.abort()
-  const controller = new AbortController()
-  const runId = ++connectionRunId
-  connectionController.value = controller
-  connectionState.value = 'checking'
-  connectionResult.value = null
-  connectionError.value = ''
-  const provider = settings.value?.provider ?? credentialStatus.value?.provider ?? 'anthropic'
-  try {
-    const result = await testAiConnection({
-      provider,
-      ...(apiKey.value.trim() ? { apiKey: apiKey.value } : {}),
-      baseURL: baseURL.value,
-      model: model.value,
-    }, controller.signal)
-    if (runId !== connectionRunId || controller.signal.aborted) return
-    connectionResult.value = result
-    connectionState.value = 'connected'
-  } catch (error) {
-    if (runId !== connectionRunId || controller.signal.aborted) return
-    connectionState.value = 'failed'
-    connectionError.value = connectionErrorMessage(error)
-  } finally {
-    if (runId === connectionRunId) connectionController.value = null
-  }
+  const migration = await getMetadataMigrationStatus().catch(() => null)
+  if (!props.open) return
+  migrationSummary.value = migration?.summary ?? null
+  cleanedPaths.value = migration?.cleanedPaths ?? []
 }
 
 async function reloadMetadataStatus() {
@@ -276,104 +147,6 @@ async function previewCleanup() {
   }
 }
 
-async function onSave() {
-  resetConnectionStatus()
-  saving.value = true
-  try {
-    const next = await saveAiSettings({
-      ...(apiKey.value.trim() ? { apiKey: apiKey.value } : {}),
-      baseURL: baseURL.value,
-      model: model.value,
-    })
-    settings.value = next
-    apiKey.value = ''
-    baseURL.value = next.baseURL
-    model.value = next.model
-    aiErrorCode.value = undefined
-    credentialStatus.value = null
-    await refreshActiveAiModel()
-    toast.success(t('settings.saved'))
-  } catch (e: any) {
-    aiErrorCode.value = e.code
-    if (isMasterKeyRecoveryCode(e.code)) await refreshCredentialStatus()
-    toast.error(t('settings.save_failed', { error: e.message ?? t('common.unknown_error') }))
-  } finally {
-    saving.value = false
-  }
-}
-
-/* Provider switch — saves { provider } only (no apiKey/baseURL/model),
-   which on the server side updates the active provider and returns the
-   new view. We then refresh local refs from the response so the form
-   fields show the new provider's saved config. The local input values
-   (apiKey/baseURL/model) get overwritten by the response so the user
-   sees what is now active. */
-async function onSwitchProvider(provider: 'anthropic' | 'openai') {
-  resetConnectionStatus()
-  saving.value = true
-  try {
-    const next = await saveAiSettings({ provider })
-    settings.value = next
-    apiKey.value = ''
-    baseURL.value = next.baseURL
-    model.value = next.model
-    aiErrorCode.value = undefined
-    credentialStatus.value = null
-    await refreshActiveAiModel()
-  } catch (e: any) {
-    aiErrorCode.value = e.code
-    if (isMasterKeyRecoveryCode(e.code)) await refreshCredentialStatus()
-    toast.error(t('settings.save_failed', { error: e.message ?? t('common.unknown_error') }))
-  } finally {
-    saving.value = false
-  }
-}
-
-async function onClearKey(provider?: AiProvider) {
-  const target = provider ?? settings.value?.provider ?? credentialStatus.value?.provider ?? 'anthropic'
-  const ok = await confirm(
-    t('settings.forget_key_confirm', { provider: target }),
-    t('settings.forget_key_detail'),
-    {
-      confirmLabel: t('settings.forget_key_action'),
-      cancelLabel: t('settings.cancel'),
-      destructive: true,
-    },
-  )
-  if (!ok) return
-  resetConnectionStatus()
-  saving.value = true
-  try {
-    await clearAiApiKey(target)
-    apiKey.value = ''
-    if (settings.value?.provider === target) {
-      settings.value = {
-        ...settings.value,
-        configured: false,
-        source: 'none',
-        maskedKey: '',
-      }
-    }
-    try {
-      const next = await getAiSettings()
-      settings.value = next
-      baseURL.value = next.baseURL
-      model.value = next.model
-      aiErrorCode.value = undefined
-      credentialStatus.value = null
-      await aiHistory.loadSettings()
-    } catch (error: any) {
-      aiErrorCode.value = error.code
-      if (isMasterKeyRecoveryCode(error.code)) await refreshCredentialStatus()
-    }
-    toast.success(t('settings.key_cleared'))
-  } catch (e: any) {
-    toast.error(t('settings.clear_failed', { error: e.message ?? t('common.unknown_error') }))
-  } finally {
-    saving.value = false
-  }
-}
-
 watch(() => props.open, async (open) => {
   if (open) {
     active.value = 'ai'
@@ -382,7 +155,6 @@ watch(() => props.open, async (open) => {
     await load()
     await focusFirstSettingsField()
   } else {
-    abortConnectionTest()
     await trap.deactivate()
   }
 })
@@ -403,6 +175,7 @@ async function focusFirstSettingsField(): Promise<void> {
 }
 
 function onKeydown(e: KeyboardEvent) {
+  if (e.defaultPrevented) return
   if (e.key === 'Escape') {
     e.preventDefault()
     closeSettings()
@@ -413,20 +186,20 @@ function onKeydown(e: KeyboardEvent) {
   }
 }
 
-function selectSection(section: SectionId): void {
+async function selectSection(section: SectionId): Promise<void> {
   if (section === active.value) return
   if (active.value === 'tags' && !props.activeSectionCanLeave) return
+  if (aiSection.value && !await aiSection.value.canLeave()) return
   active.value = section
 }
 
-function closeSettings() {
-  abortConnectionTest()
+async function closeSettings() {
   if (active.value === 'tags' && !props.activeSectionCanLeave) return
+  if (aiSection.value && !await aiSection.value.canLeave()) return
   emit('close')
 }
 
 onBeforeUnmount(() => {
-  abortConnectionTest()
   void trap.deactivate()
 })
 </script>
@@ -488,28 +261,7 @@ onBeforeUnmount(() => {
               @back="active = 'ai'"
               @navigate-reference="(reference, destination) => emit('navigateReference', reference, destination)"
             />
-            <SettingsAiSection
-              v-else-if="active === 'ai'"
-              :settings="settings"
-              :apiKey="apiKey"
-              :baseURL="baseURL"
-              :model="model"
-              :recoveryCode="aiErrorCode"
-              :credentialStatus="credentialStatus"
-              :loading="loading"
-              :saving="saving"
-              :connectionState="connectionState"
-              :connectionResult="connectionResult"
-              :connectionError="connectionError"
-              @update:apiKey="updateApiKey"
-              @update:baseURL="updateBaseURL"
-              @update:model="updateModel"
-              @save="onSave"
-              @clear-key="onClearKey()"
-              @forget-credential="onClearKey"
-              @switch-provider="onSwitchProvider"
-              @test-connection="onTestConnection"
-            />
+            <SettingsAiSection v-else-if="active === 'ai'" ref="aiSection" />
             <SettingsEditorSection v-else-if="active === 'editor'" />
             <SettingsMetadataSection
               v-else-if="active === 'metadata'"

@@ -324,7 +324,7 @@ describe('GET/PUT /api/ai/settings', () => {
       await call('PUT', '/settings', { provider: 'anthropic', apiKey: 'sk-ant-unrecoverable' })
       await call('PUT', '/settings', { provider: 'openai', apiKey: 'sk-openai-unrecoverable' })
       const fallbackFile = path.join(root, 'data', '.nuvyn-master-key')
-      const openAiCiphertext = testDbRef.value!.prepare('SELECT value FROM settings WHERE key = ?').get('ai.openai.apiKey') as { value: string }
+      const openAiCiphertext = testDbRef.value!.prepare('SELECT encrypted_api_key AS value FROM ai_profiles WHERE provider = ?').get('openai') as { value: string }
       expect(existsSync(fallbackFile)).toBe(true)
       unlinkSync(fallbackFile)
 
@@ -332,8 +332,8 @@ describe('GET/PUT /api/ai/settings', () => {
       expect(r.status).toBe(200)
       expect(await r.json()).toEqual({ cleared: true, provider: 'anthropic' })
       expect(existsSync(fallbackFile)).toBe(false)
-      expect((testDbRef.value!.prepare('SELECT value FROM settings WHERE key = ?').get('ai.anthropic.apiKey') as { value?: string } | undefined)?.value).toBeUndefined()
-      expect((testDbRef.value!.prepare('SELECT value FROM settings WHERE key = ?').get('ai.openai.apiKey') as { value: string }).value).toBe(openAiCiphertext.value)
+      expect((testDbRef.value!.prepare('SELECT encrypted_api_key AS value FROM ai_profiles WHERE provider = ?').get('anthropic') as { value: string }).value).toBe('')
+      expect((testDbRef.value!.prepare('SELECT encrypted_api_key AS value FROM ai_profiles WHERE provider = ?').get('openai') as { value: string }).value).toBe(openAiCiphertext.value)
 
       const failed = await call('GET', '/settings')
       expect(failed.status).toBe(503)

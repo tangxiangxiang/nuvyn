@@ -133,3 +133,20 @@ archives from the same stopped point in time. If `NUVYN_MASTER_KEY` or
 `NUVYN_MASTER_KEY_FILE` is supplied from an external secret store, preserve
 that secret separately as part of the host's secret-backup policy; never place
 it in Git.
+
+## AI Profile schema upgrade (0039)
+
+Versions with named AI profiles add `ai_profiles` and import legacy provider slots
+transactionally during initialization. Review [AI Profile security and recovery](security.md#ai-profile-upgrade-and-recovery)
+before upgrading. Back up a consistent SQLite volume (including WAL/SHM), Vault
+with `.git`/hidden state, and the matching master-key configuration/file.
+
+After upgrading, verify every imported configuration name, protocol, Base URL,
+model and original default. Test each intended configuration manually, verify
+old conversations, then add a same-protocol profile and confirm it does not
+change the default until explicitly activated. Browser tests use fixture keys
+and never establish that a real MiniMax/Agnes account is reachable.
+
+Older images cannot interpret new Profiles. A safe rollback restores the
+pre-upgrade database and matching Vault/key backup; switching only the image
+is insufficient. This development task performs no NAS deployment or migration.

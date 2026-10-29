@@ -10,7 +10,7 @@ process.env.NUVYN_SETUP_TOKEN = 'nuvyn-e2e-compat-setup-token-0123456789'
 
 export default defineConfig({
   testDir: './e2e',
-  testMatch: ['pdf-export-compat.spec.ts', 'pdf-export-flex.spec.ts', 'document-export.spec.ts', 'html-export.spec.ts', 'markdown-folding.spec.ts', 'markdown-folding-diary.spec.ts', 'markdown-tasks.spec.ts'],
+  testMatch: ['settings-ai.spec.ts', 'pdf-export-compat.spec.ts', 'pdf-export-flex.spec.ts', 'document-export.spec.ts', 'html-export.spec.ts', 'markdown-folding.spec.ts', 'markdown-folding-diary.spec.ts', 'markdown-tasks.spec.ts'],
   fullyParallel: false,
   workers: 1,
   retries: 0,

@@ -74,6 +74,7 @@ export async function generateSlug(opts: {
     try {
       result = await generateText({
         model: cfg.model,
+      runtimeConfig: cfg,
         maxTokens: attempt === 0 ? INITIAL_MAX_TOKENS : RETRY_MAX_TOKENS,
         temperature: 0,
         signal: opts.signal,

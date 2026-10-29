@@ -17,6 +17,7 @@ export async function generateTitle(opts: {
   try {
     const result = await generateText({
       model: cfg.model,
+      runtimeConfig: cfg,
       maxTokens: 128,
       temperature: 0,
       signal: opts.signal,

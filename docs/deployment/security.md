@@ -150,6 +150,38 @@ Sanitization is a browser rendering boundary, not a promise that arbitrary Markd
 
 Encryption at rest does not defend against an attacker who can run code as the Nuvyn process or use an exposed, unauthenticated Nuvyn instance.
 
+## AI Profile upgrade and recovery
+
+Migration 0039 adds `ai_profiles`; a separate, transactional initialization imports
+legacy protocol slots. Existing AES-GCM blobs are copied without requiring a key.
+Historical plaintext/database-key formats use the existing decryption chain and
+are only re-encrypted after all ciphertext has been verified. No read creates a
+replacement key for unrecovered ciphertext. Failed conversion preserves the
+original slots, returns no secrets, and exposes metadata for explicit recovery.
+A restored key can be retried explicitly; no automatic destructive repair occurs.
+
+Profile lists return a fixed mask and safe credential-error codes, never full
+keys, ciphertext or master-key material. Missing/wrong/unreadable master keys
+and invalid stored data keep their existing error categories. Explicit removal
+of an affected credential does not clear any other Profile. New key writes
+validate stored ciphertext before creating/reusing a fallback master key.
+A profile protocol change cannot reuse a saved key without explicit confirmation
+or a newly supplied credential.
+
+Original pre-upgrade provider rows (including any legacy database encryption-key
+row) remain recovery data, are not dual-written, and must be protected with the
+same care as the entire database. The new Profile store is authoritative. An old
+binary may still read those stale recovery rows, cannot understand multiple
+same-protocol profiles, and must not be used as a way to undo this upgrade.
+
+Before upgrading, take a consistent backup of SQLite (including WAL/SHM), the
+complete Vault including `.git` and hidden state, and the external master key or
+its file. Stop writers or use the established consistent-backup procedure. Test
+migration using an isolated copy; never experiment on NAS production data.
+Rollback requires restoring the matching pre-upgrade SQLite, Vault and key
+backup, together with a compatible older image. Changing only the Docker tag
+can expose stale defaults/credentials and lose visibility of new Profiles.
+
 ## Filesystem and AI Tool Boundaries
 
 Logical vault paths are validated and security-sensitive reads reject symbolic-link traversal. Save and lifecycle operations use ownership checks, create-only publication, compare-and-swap behavior, and durable journals to avoid overwriting external writers.

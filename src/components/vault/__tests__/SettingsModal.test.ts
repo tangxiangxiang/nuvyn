@@ -9,11 +9,12 @@ import TagManagementPanel from '../TagManagementPanel.vue'
 import { useEditorPreferences } from '../../../composables/vault/useEditorPreferences'
 import { useFileTreePreferences } from '../../../composables/vault/useFileTreePreferences'
 
-const getAiSettings = vi.fn()
-const getAiCredentialStatus = vi.fn()
-const saveAiSettings = vi.fn()
-const clearAiApiKey = vi.fn()
-const testAiConnection = vi.fn()
+const getAiProfiles = vi.fn()
+const createAiProfile = vi.fn()
+const updateAiProfile = vi.fn()
+const activateAiProfile = vi.fn()
+const deleteAiProfile = vi.fn()
+const testAiProfileConnection = vi.fn()
 const getMetadataMigrationStatus = vi.fn()
 const getFrontmatterCleanupPreview = vi.fn()
 const cleanDocumentFrontmatter = vi.fn()
@@ -32,11 +33,12 @@ const listAttachments = vi.fn()
 const refreshAttachmentIndex = vi.fn()
 
 vi.mock('../../../lib/ai-api', () => ({
-  getAiSettings: (...args: unknown[]) => getAiSettings(...args),
-  getAiCredentialStatus: (...args: unknown[]) => getAiCredentialStatus(...args),
-  saveAiSettings: (...args: unknown[]) => saveAiSettings(...args),
-  clearAiApiKey: (...args: unknown[]) => clearAiApiKey(...args),
-  testAiConnection: (...args: unknown[]) => testAiConnection(...args),
+  getAiProfiles: (...args: unknown[]) => getAiProfiles(...args),
+  createAiProfile: (...args: unknown[]) => createAiProfile(...args),
+  updateAiProfile: (...args: unknown[]) => updateAiProfile(...args),
+  activateAiProfile: (...args: unknown[]) => activateAiProfile(...args),
+  deleteAiProfile: (...args: unknown[]) => deleteAiProfile(...args),
+  testAiProfileConnection: (...args: unknown[]) => testAiProfileConnection(...args),
 }))
 
 vi.mock('../../../lib/api', () => ({
@@ -77,7 +79,7 @@ vi.mock('../../../composables/useToast', () => ({
 }))
 
 vi.mock('../../../composables/useConfirm', () => ({
-  useConfirm: () => ({ confirm }),
+  useConfirm: () => ({ confirm, confirmCancellable: (...args: unknown[]) => ({ promise: confirm(...args), cancel: vi.fn() }) }),
 }))
 
 vi.mock('../../../composables/useFocusTrap', () => ({
@@ -97,6 +99,7 @@ vi.mock('../../../composables/vault/context/useVaultContext', () => ({
 }))
 
 const openAiSettings = () => ({
+  id: 'openai-profile', name: 'Agnes AI', createdAt: 1, updatedAt: 1,
   provider: 'openai' as const,
   configured: true,
   source: 'db' as const,
@@ -106,6 +109,7 @@ const openAiSettings = () => ({
 })
 
 const anthropicSettings = () => ({
+  id: 'anthropic-profile', name: 'MiniMax', createdAt: 2, updatedAt: 2,
   provider: 'anthropic' as const,
   configured: true,
   source: 'db' as const,
@@ -173,20 +177,12 @@ beforeEach(() => {
   useI18n().setLocale('zh')
   localStorage.clear()
   vi.clearAllMocks()
-  getAiSettings.mockResolvedValue(openAiSettings())
-  getAiCredentialStatus.mockResolvedValue({
-    provider: 'openai',
-    providers: { anthropic: { stored: false }, openai: { stored: true } },
-  })
-  saveAiSettings.mockResolvedValue(openAiSettings())
-  clearAiApiKey.mockResolvedValue({ cleared: true, provider: 'openai' })
-  testAiConnection.mockResolvedValue({
-    ok: true,
-    provider: 'openai',
-    model: 'agnes-2.5-flash',
-    checkedAt: 1,
-    latencyMs: 326,
-  })
+  getAiProfiles.mockResolvedValue({ profiles: [openAiSettings(), anthropicSettings()], activeProfileId: 'openai-profile' })
+  updateAiProfile.mockResolvedValue(openAiSettings())
+  createAiProfile.mockResolvedValue({ ...anthropicSettings(), id: 'new-profile', name: 'New' })
+  activateAiProfile.mockImplementation(async (id: string) => ({ activeProfileId: id }))
+  deleteAiProfile.mockResolvedValue({ deleted: true })
+  testAiProfileConnection.mockResolvedValue({ ok: true, provider: 'openai', model: 'agnes-2.5-flash', checkedAt: 1, latencyMs: 326 })
   getMetadataMigrationStatus.mockResolvedValue(migration)
   getFrontmatterCleanupPreview.mockResolvedValue({ candidates: [], blocked: [] })
   listManagedTags.mockResolvedValue([])
@@ -236,7 +232,7 @@ describe('SettingsModal', () => {
     expect(dialog?.getAttribute('aria-modal')).toBe('true')
     expect(dialog?.getAttribute('aria-label')).toBe('设置')
     expect(document.body.querySelector('[aria-current="page"]')?.textContent?.trim()).toBe('AI')
-    expect(document.body.textContent).toContain('AI 提供商配置')
+    expect(document.body.textContent).toContain('命名配置与默认模型')
     expect(document.body.textContent).toContain('配置')
 
     const provider = wrapper.getComponent(NSelect)
@@ -283,11 +279,12 @@ describe('SettingsModal', () => {
     mountSettings()
     await flushPromises()
 
-    expect(testAiConnection).not.toHaveBeenCalled()
+    expect(testAiProfileConnection).not.toHaveBeenCalled()
     findButton('测试连接').click()
     await flushPromises()
 
-    expect(testAiConnection).toHaveBeenCalledWith({
+    expect(testAiProfileConnection).toHaveBeenCalledWith('openai-profile', {
+      name: 'Agnes AI',
       provider: 'openai',
       baseURL: 'https://apihub.agnes-ai.com/v1',
       model: 'agnes-2.5-flash',
@@ -310,7 +307,7 @@ describe('SettingsModal', () => {
   })
 
   it('shows a safe failure state when the probe is rejected', async () => {
-    testAiConnection.mockRejectedValueOnce(Object.assign(new Error('upstream details'), {
+    testAiProfileConnection.mockRejectedValueOnce(Object.assign(new Error('upstream details'), {
       code: 'ai-authentication-failed',
     }))
     mountSettings()
@@ -325,7 +322,7 @@ describe('SettingsModal', () => {
 
   it('aborts an in-flight probe when the modal closes', async () => {
     let signal: AbortSignal | undefined
-    testAiConnection.mockImplementationOnce((_input: unknown, nextSignal: AbortSignal) => {
+    testAiProfileConnection.mockImplementationOnce((_id: string, _input: unknown, nextSignal: AbortSignal) => {
       signal = nextSignal
       return new Promise(() => {})
     })
@@ -337,19 +334,20 @@ describe('SettingsModal', () => {
     expect(signal?.aborted).toBe(true)
   })
 
-  it('switches providers through the existing save call and uses the optional URL placeholder for Anthropic', async () => {
-    saveAiSettings.mockResolvedValueOnce(anthropicSettings())
+  it('changes protocol locally without activating another profile and keeps the optional Anthropic URL placeholder', async () => {
     const wrapper = mountSettings()
     await flushPromises()
-
     const provider = wrapper.getComponent(NSelect)
     provider.vm.$emit('update:value', 'anthropic')
     await flushPromises()
-
-    expect(saveAiSettings).toHaveBeenCalledWith({ provider: 'anthropic' })
+    expect(activateAiProfile).not.toHaveBeenCalled()
+    expect(updateAiProfile).not.toHaveBeenCalled()
     expect(provider.props('value')).toBe('anthropic')
-    expect(fieldControl<HTMLInputElement>('模型', 'input').value).toBe('claude-sonnet-4-6')
     expect(fieldControl<HTMLInputElement>('Base URL', 'input').placeholder).toBe('可选')
+    findButton('保存').click()
+    await flushPromises()
+    expect(confirm).toHaveBeenCalledWith('确认将此凭据用于另一种协议？', expect.any(String))
+    expect(updateAiProfile).toHaveBeenCalledWith('openai-profile', expect.objectContaining({ provider: 'anthropic', confirmProviderChange: true }), expect.any(AbortSignal))
   })
 
   it('saves edited AI fields without changing the existing settings payload semantics', async () => {
@@ -363,77 +361,121 @@ describe('SettingsModal', () => {
     findButton('保存').click()
     await flushPromises()
 
-    expect(saveAiSettings).toHaveBeenCalledWith({
+    expect(updateAiProfile).toHaveBeenCalledWith('openai-profile', {
+      name: 'Agnes AI', provider: 'openai',
       apiKey: 'sk-new',
       baseURL: 'https://example.test/v1',
       model: 'third-party-model',
-    })
+    }, expect.any(AbortSignal))
     expect(loadSettings).toHaveBeenCalled()
     expect(toastSuccess).toHaveBeenCalledWith('AI 设置已保存')
   })
 
-  it('keeps Clear Key behind the destructive confirmation flow', async () => {
+  it('keeps Clear Key behind a profile-specific destructive confirmation', async () => {
     mountSettings()
     await flushPromises()
-
     findButton('清除 Key').click()
     await flushPromises()
-
-    expect(confirm).toHaveBeenCalledWith(
-      '永久删除 openai 保存的 API Key？',
-      '即使之后找回原 master key，也无法恢复已删除的加密凭据。',
-      expect.objectContaining({
-        confirmLabel: '永久删除',
-        cancelLabel: '取消',
-        destructive: true,
-      }),
-    )
-    expect(clearAiApiKey).toHaveBeenCalledWith('openai')
+    expect(confirm).toHaveBeenCalledWith('清除「Agnes AI」（openai）的 API Key？', expect.any(String), expect.objectContaining({ destructive: true }))
+    expect(updateAiProfile).toHaveBeenCalledWith('openai-profile', { clearKey: true }, expect.any(AbortSignal))
   })
 
-  it('renders the master-key recovery warning and stored-provider forget action', async () => {
-    getAiSettings.mockRejectedValue(Object.assign(new Error('master key required'), {
-      code: 'master-key-required',
-    }))
+  it.each(['master-key-required', 'master-key-invalid', 'master-key-file-unreadable', 'stored-key-invalid'])('keeps metadata and targeted credential recovery available for %s', async (code) => {
+    getAiProfiles.mockResolvedValueOnce({ profiles: [{ ...openAiSettings(), credentialError: code }], activeProfileId: 'openai-profile' })
     mountSettings()
     await flushPromises()
-
-    const alert = document.body.querySelector<HTMLElement>('[role="alert"]')
-    expect(alert?.textContent).toContain('找不到用于解密现有 AI 凭据的主密钥')
-    expect(alert?.textContent).toContain('data/.nuvyn-master-key')
-    expect(findButton('放弃 openai API Key')).toBeTruthy()
-    expect(document.body.textContent).not.toContain('放弃 anthropic API Key')
-    expect(getAiCredentialStatus).toHaveBeenCalled()
+    expect(document.body.querySelector('[role="alert"]')?.textContent).toContain(code)
+    expect(fieldControl<HTMLInputElement>('名称', 'input').value).toBe('Agnes AI')
+    expect(findButton('清除 Key').disabled).toBe(false)
+    expect(findButton('设为默认').disabled).toBe(true)
   })
 
-  it('offers the same provider-specific recovery when the master key does not match', async () => {
-    getAiSettings.mockRejectedValue(Object.assign(new Error('master key mismatch'), {
-      code: 'master-key-invalid',
-    }))
+  it('retains entered fields and offers explicit retry after a failed save', async () => {
+    updateAiProfile.mockRejectedValueOnce(Object.assign(new Error('master key mismatch'), { code: 'master-key-invalid' }))
     mountSettings()
     await flushPromises()
-
-    const alert = document.body.querySelector<HTMLElement>('[role="alert"]')
-    expect(alert?.textContent).toContain('当前主密钥无法解密已保存的 AI 凭据')
-    expect(alert?.textContent).toContain('NUVYN_MASTER_KEY')
-    expect(findButton('放弃 openai API Key')).toBeTruthy()
-    expect(getAiCredentialStatus).toHaveBeenCalled()
-  })
-
-  it('shows the recovery entry after saving with a mismatched master key', async () => {
-    saveAiSettings.mockRejectedValueOnce(Object.assign(new Error('master key mismatch'), {
-      code: 'master-key-invalid',
-    }))
-    mountSettings()
-    await flushPromises()
-
     inputValue(fieldControl<HTMLInputElement>('API Key', 'input'), 'replacement-key')
+    inputValue(fieldControl<HTMLInputElement>('模型', 'input'), 'unsaved-model')
     findButton('保存').click()
     await flushPromises()
+    expect(fieldControl<HTMLInputElement>('API Key', 'input').value).toBe('replacement-key')
+    expect(fieldControl<HTMLInputElement>('模型', 'input').value).toBe('unsaved-model')
+    expect(toastError).toHaveBeenCalled()
+    expect(findButton('保存').disabled).toBe(false)
+  })
 
-    expect(document.body.querySelector('[role="alert"]')?.textContent).toContain('当前主密钥无法解密已保存的 AI 凭据')
-    expect(findButton('放弃 openai API Key')).toBeTruthy()
-    expect(getAiCredentialStatus).toHaveBeenCalled()
+  it('preserves unsaved fields on cancelled switching or closing and never carries an entered key to another profile', async () => {
+    const wrapper = mountSettings()
+    await flushPromises()
+    inputValue(fieldControl<HTMLInputElement>('API Key', 'input'), 'sk-unsaved')
+    const target = Array.from(document.body.querySelectorAll<HTMLButtonElement>('.settings-ai-profile')).find((el) => el.textContent?.includes('MiniMax'))!
+    confirm.mockResolvedValueOnce(false)
+    target.click()
+    await flushPromises()
+    expect(fieldControl<HTMLInputElement>('API Key', 'input').value).toBe('sk-unsaved')
+    confirm.mockResolvedValueOnce(false)
+    document.body.querySelector<HTMLButtonElement>('[aria-label="关闭"]')!.click()
+    await flushPromises()
+    expect(wrapper.emitted('close')).toBeUndefined()
+    target.click()
+    await flushPromises()
+    expect(fieldControl<HTMLInputElement>('名称', 'input').value).toBe('MiniMax')
+    expect(fieldControl<HTMLInputElement>('API Key', 'input').value).toBe('')
+    expect(activateAiProfile).not.toHaveBeenCalled()
+  })
+
+  it('creates a named profile without implicitly activating it', async () => {
+    mountSettings()
+    await flushPromises()
+    findButton('新增配置').click()
+    await flushPromises()
+    inputValue(fieldControl<HTMLInputElement>('名称', 'input'), 'New')
+    inputValue(fieldControl<HTMLInputElement>('API Key', 'input'), 'sk-new')
+    await flushPromises()
+    findButton('保存').click()
+    await flushPromises()
+    expect(createAiProfile).toHaveBeenCalledWith(expect.objectContaining({ name: 'New', provider: 'anthropic', apiKey: 'sk-new' }), expect.any(AbortSignal))
+    expect(activateAiProfile).not.toHaveBeenCalled()
+    expect(fieldControl<HTMLInputElement>('API Key', 'input').value).toBe('')
+    expect(document.body.querySelector('.settings-ai-profile.is-selected')?.textContent).toContain('New')
+  })
+
+  it('activates only by explicit action and refreshes the displayed runtime model', async () => {
+    mountSettings()
+    await flushPromises()
+    Array.from(document.body.querySelectorAll<HTMLButtonElement>('.settings-ai-profile')).find((el) => el.textContent?.includes('MiniMax'))!.click()
+    await flushPromises()
+    findButton('设为默认').click()
+    await flushPromises()
+    expect(activateAiProfile).toHaveBeenCalledWith('anthropic-profile', expect.any(AbortSignal))
+    expect(loadSettings).toHaveBeenCalled()
+    expect(document.body.querySelector('.settings-ai-profile.is-selected .settings-ai-profile-default')?.textContent).toBe('默认')
+  })
+
+  it('requires explicit confirmation to delete a default profile and disables AI rather than selecting another default', async () => {
+    mountSettings()
+    await flushPromises()
+    findButton('删除').click()
+    await flushPromises()
+    expect(confirm).toHaveBeenCalledWith('删除配置「Agnes AI」（openai）？', expect.stringContaining('禁用 AI'), expect.objectContaining({ destructive: true }))
+    expect(deleteAiProfile).toHaveBeenCalledWith('openai-profile', true, expect.any(AbortSignal))
+    expect(document.body.querySelectorAll('.settings-ai-profile-default')).toHaveLength(0)
+    expect(document.body.querySelectorAll('.settings-ai-profile')).toHaveLength(1)
+  })
+
+  it('ignores a late connection result after switching to another profile', async () => {
+    let resolve!: (value: unknown) => void
+    testAiProfileConnection.mockImplementationOnce(() => new Promise((r) => { resolve = r }))
+    mountSettings()
+    await flushPromises()
+    findButton('测试连接').click()
+    await flushPromises()
+    Array.from(document.body.querySelectorAll<HTMLButtonElement>('.settings-ai-profile')).find((el) => el.textContent?.includes('MiniMax'))!.click()
+    await flushPromises()
+    resolve({ ok: true, provider: 'openai', model: 'old-model', checkedAt: 1, latencyMs: 42 })
+    await flushPromises()
+    expect(document.body.querySelector('.settings-connection-status')?.textContent).toContain('未检测')
+    expect(document.body.textContent).not.toContain('old-model')
   })
 
   it('switches to the Editor and Metadata sections without changing their behavior surfaces', async () => {
@@ -520,6 +562,7 @@ describe('SettingsModal', () => {
     expect(onFocusTrapTab).toHaveBeenCalledTimes(1)
 
     backdrop.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))
+    await flushPromises()
     expect(wrapper.emitted('close')).toHaveLength(1)
 
     await wrapper.setProps({ open: false })
@@ -546,6 +589,7 @@ describe('SettingsModal', () => {
 
     await wrapper.setProps({ activeSectionCanLeave: true })
     document.body.querySelector<HTMLElement>('.settings-icon-btn')!.click()
+    await flushPromises()
     expect(wrapper.emitted('close')).toHaveLength(1)
   })
 })

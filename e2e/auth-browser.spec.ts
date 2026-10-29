@@ -194,16 +194,23 @@ test('real revoked session preserves a browser draft through expiry, login, and 
   expect(cookiesAfterRevoke.some((cookie) => cookie.name === activeCookie?.name
     && cookie.value === activeCookie.value)).toBe(true)
 
-  const protectedResponsePromise = page.waitForResponse((response) => {
-    const url = new URL(response.url())
-    return response.request().method() === 'GET' && url.pathname === '/api/ai/settings'
+  // Read the real protected response before authFetch redirects the document;
+  // Chromium can discard Network.getResponseBody after that navigation.
+  let observeProtectedResponse!: (value: { status: number; body: { code?: string } }) => void
+  const protectedResponsePromise = new Promise<{ status: number; body: { code?: string } }>((resolve) => {
+    observeProtectedResponse = resolve
+  })
+  await page.route('**/api/ai/profiles', async (route) => {
+    const response = await route.fetch()
+    const body = await response.json() as { code?: string }
+    observeProtectedResponse({ status: response.status(), body })
+    await route.fulfill({ response })
   })
   await page.locator('.navbar [data-testid="account-button"]').click()
   await page.locator('[data-testid="account-settings"]').click()
   const protectedResponse = await protectedResponsePromise
-  expect(protectedResponse.status()).toBe(401)
-  const protectedBody = await protectedResponse.json() as { code?: string }
-  expect(protectedBody.code).toBe('auth-session-required')
+  expect(protectedResponse.status).toBe(401)
+  expect(protectedResponse.body.code).toBe('auth-session-required')
   expiryObserved = true
   const savesAtExpiry = saveRequests
 
