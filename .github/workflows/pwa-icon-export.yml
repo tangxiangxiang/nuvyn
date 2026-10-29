@@ -1,0 +1,29 @@
+name: PWA icon export (temporary)
+on:
+  push:
+    branches: [feat/pwa-icon-assets]
+permissions:
+  contents: write
+jobs:
+  export:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: feat/pwa-icon-assets
+          persist-credentials: true
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: python -m pip install "cairosvg==2.7.1" "Pillow==11.3.0"
+      - run: python scripts/generate-pwa-icons.py
+      - name: Commit exported icons
+        run: |
+          git config user.name "$(git log -1 --format=%an)"
+          git config user.email "$(git log -1 --format=%ae)"
+          git add public/pwa-192.png public/pwa-512.png public/pwa-maskable-512.png public/apple-touch-icon.png
+          if ! git diff --cached --quiet; then
+            git commit -m "chore(pwa): export raster icons from canonical logo"
+            git push origin HEAD:feat/pwa-icon-assets
+          fi
