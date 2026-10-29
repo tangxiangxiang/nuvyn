@@ -22,4 +22,9 @@ describe('normal application chrome visibility', () => {
     expect(shouldShowNormalChrome('unknown', false, true)).toBe(true)
     expect(shouldShowNormalChrome('unauthenticated', true, true)).toBe(true)
   })
+
+  it('hides all chrome until the initial route has committed', () => {
+    expect(shouldShowNormalChrome('authenticated', false, false, true, false)).toBe(false)
+    expect(shouldShowNormalChrome('authenticated', false, true, true, false)).toBe(false)
+  })
 })

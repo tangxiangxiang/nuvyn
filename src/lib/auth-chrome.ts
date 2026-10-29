@@ -10,6 +10,7 @@ export function shouldShowNormalChrome(
   isAuthPage: boolean,
   isPublicPreview: boolean,
   identityReady = true,
+  routeReady = true,
 ): boolean {
-  return isPublicPreview || (!isAuthPage && authState === 'authenticated' && identityReady)
+  return routeReady && (isPublicPreview || (!isAuthPage && authState === 'authenticated' && identityReady))
 }

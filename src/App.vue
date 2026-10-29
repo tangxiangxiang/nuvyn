@@ -33,6 +33,11 @@ import type { AttachmentReference } from '../shared/attachmentProtocol'
 
 const route = useRoute()
 const router = useRouter()
+const initialRouteReady = ref(false)
+void router.isReady().then(
+  () => { initialRouteReady.value = true },
+  () => { initialRouteReady.value = true },
+)
 const auth = useAuth()
 const vaultIdentity = getVaultIdentityState()
 const { t } = useI18n()
@@ -141,6 +146,7 @@ const showNormalChrome = computed(() => shouldShowNormalChrome(
   route.meta.authPage === true,
   isPublicDevPreview.value,
   !requiresVaultIdentity.value || vaultIdentity.state.value === 'ready',
+  initialRouteReady.value,
 ) && !isImmersive.value)
 const identityLoading = computed(() => auth.state.value === 'authenticated'
   && requiresVaultIdentity.value
@@ -148,10 +154,11 @@ const identityLoading = computed(() => auth.state.value === 'authenticated'
 const identityFailure = computed(() => auth.state.value === 'authenticated'
   && requiresVaultIdentity.value
   && vaultIdentity.state.value === 'error')
-const showRoutedContent = computed(() => isPublicDevPreview.value
+const showRoutedContent = computed(() => initialRouteReady.value && (isPublicDevPreview.value
   || (auth.state.value !== 'unknown'
-    && (!route.meta.workspace || !requiresVaultIdentity.value || vaultIdentity.state.value === 'ready')))
-const authLoading = computed(() => auth.hydrating.value || (auth.state.value === 'unknown' && !auth.hydrationError.value))
+    && (!route.meta.workspace || !requiresVaultIdentity.value || vaultIdentity.state.value === 'ready'))))
+const routeLoading = computed(() => !initialRouteReady.value)
+const authLoading = computed(() => routeLoading.value || auth.hydrating.value || (auth.state.value === 'unknown' && !auth.hydrationError.value))
 const authFailureMessage = computed(() => {
   return auth.hydrationError.value ? t('auth.unavailable') : ''
 })
