@@ -14,8 +14,22 @@ PWA 使用与 Web 相同的 Vue 前端、Hono API 和 NAS 数据。它不是独�
 - 首次安装后，独立 PWA 的浏览器存储可能与原浏览器标签页隔离；需要重新登录是正常的。
   已保存的 NAS 数据不受影响，但 IndexedDB 中未保存的本地草稿不会自动迁移。
 
-当前沿用品牌 SVG 作为可缩放安装图标以及现有 PNG 作兼容性回退；
-后续可以补专用的 192、512 和 iOS 180 像素 PNG 图标，以覆盖更广泛的安装器并改善清晰度。
+安装图标全部源自现有 `public/logo.svg`：保留 SVG 矢量图标，同时提供
+Android 192×192、512×512 PNG，以及单独留安全边距的 512×512 maskable 图标。
+iOS 主屏幕使用独立的 180×180 PNG；背景为与当前 PWA 主题一致的 `#f8fafc`。
+这不是新的品牌图形或移动端专用 Logo。
+
+## 图标维护
+
+仅在 `public/logo.svg` 品牌图形发生改变时重新导出 PNG：
+
+```bash
+python -m pip install "cairosvg==2.7.1" "Pillow==11.3.0"
+python scripts/generate-pwa-icons.py
+```
+
+PNG 作为静态资源提交到仓库，不在 NAS 生产启动或 Docker 构建时依赖 Python 图像库。
+安装、验证过程中不要清理浏览器的 IndexedDB 草稿。
 
 ## 缓存与更新
 
