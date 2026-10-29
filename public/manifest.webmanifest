@@ -1,0 +1,28 @@
+{
+  "id": "/",
+  "name": "Nuvyn — Personal OS",
+  "short_name": "Nuvyn",
+  "description": "A personal space for notes, diary, and ledger.",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "background_color": "#f8fafc",
+  "theme_color": "#f8fafc",
+  "icons": [
+    {
+      "src": "/logo.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any"
+    },
+    {
+      "src": "/logo-48.png",
+      "sizes": "48x48",
+      "type": "image/png",
+      "purpose": "any"
+    }
+  ],
+  "categories": [
+    "productivity"
+  ]
+}

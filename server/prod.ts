@@ -46,6 +46,18 @@ async function getIndexHtml(): Promise<string> {
 // /assets/* and other static files come straight off disk. Everything
 // else that isn't /api/* falls through to index.html so vue-router's
 // HTML5 history mode (createWebHistory) keeps working after a refresh.
+// PWA metadata and worker scripts must be revalidated; do not pin them in
+// browser or proxy caches. Likewise never persist the SPA entry HTML.
+app.use('/*', async (c, next) => {
+  const pathname = c.req.path
+  if (pathname === '/' || pathname === '/index.html') {
+    c.header('Cache-Control', 'no-store')
+  } else if (pathname === '/sw.js' || pathname === '/manifest.webmanifest') {
+    c.header('Cache-Control', 'no-cache')
+  }
+  await next()
+})
+
 app.use(
   '/*',
   serveStatic({
@@ -57,6 +69,7 @@ app.get('*', async (c) => {
   // catches SPA paths like /vault/inbox/foo that have no on-disk file.
   if (c.req.path.startsWith('/api/')) return c.notFound()
   const html = await getIndexHtml()
+  c.header('Cache-Control', 'no-store')
   return c.html(html)
 })
 
