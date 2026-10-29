@@ -3,6 +3,36 @@
 All notable changes to Nuvyn are documented in this file. Entries dated before
 the Nuvyn brand baseline may refer to Nuvyn as the historical product name.
 
+## Nuvyn v0.1.0-alpha.11 — 2026-10-29
+
+Changes since `v0.1.0-alpha.10`.
+
+### AI Profiles
+
+- Added multiple named AI profiles, including multiple independent profiles for the same Anthropic- or OpenAI-compatible protocol. Each profile has its own API key, Base URL and model, and can be created, edited, tested and deleted.
+- Added an explicit global default-profile selection. Editing or creating a profile does not silently change the default.
+- Kept API keys encrypted with AES-256-GCM under the existing master-key system. Existing Anthropic and OpenAI settings are imported into profiles while retaining their original settings as recovery data; existing AI sessions remain compatible.
+
+### PWA
+
+- Added installable PWA metadata and Android/iOS home-screen icons generated from the existing Nuvyn logo.
+- The Service Worker caches only same-origin, content-hashed public static assets. It does not cache sensitive APIs, Diary or Ledger data, or unsaved edits, and the app does not provide offline writing.
+- Real-device installation and mobile acceptance on iPad Safari and Android remain pending.
+
+### Reliability
+
+- Preserved Diary deep links and browser history during initialization, prevented the temporary standard Navbar from flashing before the initial route is ready, and fixed the AI provider menu being obscured by Settings.
+
+### Build
+
+- Restored Debian's official APT sources in Docker builds and changed 146 npm lockfile download URLs from the legacy mirror to the official npm registry. Dependency versions, integrity values, BuildKit cache and npm cache behavior are unchanged.
+
+### Migration & Deployment
+
+- Added SQLite Schema migration `0039_ai_profiles.sql`. On initialization, existing Anthropic/OpenAI settings are imported into the new Profile table; credential encryption continues to use the existing AES-256-GCM master-key system.
+- Before upgrading, make a consistent backup of the SQLite data volume (including WAL/SHM), the complete Vault (including `.git` and hidden `.nuvyn` state), and the AI master-key file or external master-key configuration.
+- A rollback cannot rely on switching to the previous Docker image alone because it cannot interpret the new AI Profile structure. Restore the consistent pre-upgrade database and Vault backup together with the matching master key before running the older image.
+
 ## Nuvyn v0.1.0-alpha.10 — 2026-10-28
 
 Changes since `v0.1.0-alpha.9`.
