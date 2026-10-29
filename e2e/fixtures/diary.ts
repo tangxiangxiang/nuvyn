@@ -281,6 +281,7 @@ async function bootstrapDiaryPage(
     return
   }
 
+  const managedRoutePath = managedDiaryPathFromVaultRoute(pathname)
   const diaryChip = page.locator('.scope-chip').filter({ hasText: 'diary' })
   const noteChip = page.locator('.scope-chip').filter({ hasText: 'note' })
   await expect(diaryChip).toBeVisible({ timeout: 15_000 })
@@ -337,7 +338,28 @@ async function bootstrapDiaryPage(
       await diagnostics.record('SCOPE_ACTIVATION_FINISH', 'mobile-note-nav-unavailable')
     }
   }
-  if (await diaryChip.getAttribute('aria-pressed') !== 'true') {
+  // A canonical Diary deep link already owns the requested document route.
+  // On a browser Back/Forward restoration the route's async authorization can
+  // lag behind Vue mounting. Pressing the Diary workspace chip here races with
+  // that restoration: changeVaultScope() sees no opened Diary tab yet and can
+  // replace the explicit /vault/diary/<date> URL with /vault Home.
+  // Wait for the route-owned access dialog or the restored native reader
+  // instead. The chip is only an appropriate bootstrap action on /vault Home.
+  if (managedRoutePath
+    && await diaryChip.getAttribute('aria-pressed') !== 'true'
+    && !await password.isVisible().catch(() => false)) {
+    const routeTab = page.locator(`[role="tab"][data-tab-id="${managedRoutePath}"]`)
+    await expect.poll(async () => {
+      if (new URL(page.url()).pathname !== pathname) return 'route-replaced'
+      if (await password.isVisible().catch(() => false)) return 'access-dialog'
+      if (await diaryChip.getAttribute('aria-pressed') === 'true'
+        && await routeTab.getAttribute('aria-selected').catch(() => null) === 'true') {
+        return 'reader-ready'
+      }
+      return 'pending'
+    }, { timeout: 15_000 }).toMatch(/^(access-dialog|reader-ready)$/)
+  }
+  if (!managedRoutePath && await diaryChip.getAttribute('aria-pressed') !== 'true') {
     await diagnostics.record('SCOPE_ACTIVATION_START', 'diary')
     await activateScopeChip(page, diaryChip)
     await diagnostics.record('SCOPE_ACTIVATION_FINISH', 'diary')
@@ -360,6 +382,12 @@ async function bootstrapDiaryPage(
     await activateScopeChip(page, noteChip)
     await expect(noteChip).toHaveAttribute('aria-pressed', 'true')
     await diagnostics.record('SCOPE_ACTIVATION_FINISH', 'restore-note')
+  }
+  // The fixture itself must never silently normalize a requested document
+  // URL to /vault; assert the original destination before generic checks.
+  if (managedRoutePath) {
+    await expect.poll(() => new URL(page.url()).pathname)
+      .toBe(`/vault/${managedRoutePath}`)
   }
   await waitForDiaryWorkspaceRoute(page, diagnostics)
   await diagnostics.record('WORKSPACE_CHECK')
