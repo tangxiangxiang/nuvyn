@@ -151,6 +151,12 @@ let revealAnchorSequence = 0
 let decorationTimer: ReturnType<typeof setTimeout> | null = null
 let scrollbarHideTimer: ReturnType<typeof setTimeout> | null = null
 let scrollbarPointerId: number | null = null
+let foldingPointerMedia: MediaQueryList | null = null
+function syncFoldingControls(): void {
+  // Hover-only gutters cannot reliably be revealed by touch, particularly
+  // after a section collapses and the native glyph is recreated.
+  editor?.updateOptions({ showFoldingControls: foldingPointerMedia?.matches ? 'always' : 'mouseover' })
+}
 const VIEW_STATE_KEY = NUVYN_BROWSER_STORAGE_KEYS.editorMonacoViewState
 const RECENT_LINKS_KEY = NUVYN_BROWSER_STORAGE_KEYS.editorRecentWikiLinks
 const MONACO_SCROLLBAR_SELECTOR = '.monaco-scrollable-element > .scrollbar'
@@ -1116,6 +1122,8 @@ onMounted(() => {
   host.value.addEventListener('dragover', onImageDragOver)
   host.value.addEventListener('dragleave', onImageDragLeave)
   host.value.addEventListener('drop', onImageDrop)
+  foldingPointerMedia = window.matchMedia('(hover: none), (pointer: coarse)')
+  foldingPointerMedia.addEventListener('change', syncFoldingControls)
   model = acquireMarkdownModel(props.path, props.modelValue)
   fenceStateCache.reset()
   bindMarkdownProviderContext(model, { completion: completionProvider, hover: hoverProvider })
@@ -1130,7 +1138,7 @@ onMounted(() => {
     glyphMargin: false,
     folding: !isLargeDocument.value,
     foldingStrategy: 'auto',
-    showFoldingControls: 'mouseover',
+    showFoldingControls: foldingPointerMedia.matches ? 'always' : 'mouseover',
     fontFamily: preferences.fontFamily.value.trim() || 'var(--mono)',
     fontSize: preferences.fontSize.value,
     lineHeight: preferences.lineHeight.value,
@@ -1436,6 +1444,8 @@ onBeforeUnmount(() => {
   if (props.tabletEditing) finishTabletComposition()
   document.removeEventListener('pointerdown', onTabletOutsidePointer, true)
   mounted = false
+  foldingPointerMedia?.removeEventListener('change', syncFoldingControls)
+  foldingPointerMedia = null
   clearSyntaxMarkers()
   imageEditorGeneration += 1
   if (filePickerIntent) releaseImageInsertionIntent(filePickerIntent)
