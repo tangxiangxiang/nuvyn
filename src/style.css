@@ -1288,7 +1288,19 @@ main.container.auth-page-shell {
   .vault .monaco-host .margin-view-overlays:not(:hover) :is(.codicon-folding-collapsed, .codicon-folding-manual-collapsed) { opacity: 0; }
 }
 @media (hover: none), (pointer: coarse) {
-  .vault .monaco-host .margin-view-overlays :is(.codicon-folding-expanded, .codicon-folding-manual-expanded) { opacity: 1; }
+  /* Touch has no reliable hover. Keep expanded headings visually clean;
+     tapping a heading folds it, while collapsed sections retain a visible
+     affordance to reopen. Native keyboard/button controls still work. */
+  .article .nuvyn-fold-toggle { opacity: 0; }
+  .article .nuvyn-fold-toggle[aria-expanded='false'],
+  .article .nuvyn-fold-toggle:focus-visible { opacity: 1; }
+
+  /* Monaco already uses showFoldingControls: 'mouseover'. Do not force
+     expanded gutter markers to remain visible on touch screens. A folded
+     range remains discoverable, and touching the gutter still works. */
+  .vault .monaco-host .margin-view-overlays :is(.codicon-folding-expanded, .codicon-folding-manual-expanded) { opacity: 0; }
+  .vault .monaco-host .margin-view-overlays :is(.codicon-folding-collapsed, .codicon-folding-manual-collapsed) { opacity: 1; }
+  .vault .monaco-host .margin-view-overlays:active :is(.codicon-folding-expanded, .codicon-folding-manual-expanded) { opacity: 1; }
 }
 @media (prefers-reduced-motion: reduce) {
   .article .nuvyn-fold-toggle { transition: none; }
