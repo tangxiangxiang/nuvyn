@@ -26,6 +26,30 @@ async function expectMobileNavigation(page: Page): Promise<void> {
   await expect(navigation.locator('.scope-chip').filter({ hasText: 'ledger' })).toBeVisible()
 }
 
+async function brandWorkspaceGap(page: Page): Promise<number> {
+  const brand = page.locator('.navbar .brand')
+  const firstWorkspace = page.locator('.workspace-navigation .nav-workspace-link').first()
+  await expect(brand).toBeVisible()
+  await expect(firstWorkspace).toBeVisible()
+  const brandBounds = await brand.boundingBox()
+  const workspaceBounds = await firstWorkspace.boundingBox()
+  expect(brandBounds).not.toBeNull()
+  expect(workspaceBounds).not.toBeNull()
+  return workspaceBounds!.x - (brandBounds!.x + brandBounds!.width)
+}
+
+test('tablet and desktop align the first workspace equally beside the Nuvyn brand', async ({ page }) => {
+  for (const width of [768, 1024, 1280]) {
+    await page.setViewportSize({ width, height: 900 })
+    for (const route of ['/vault', '/ledger', '/board']) {
+      await page.goto(route)
+      const gap = await brandWorkspaceGap(page)
+      expect(gap, `brand-to-workspace gap on ${route} at ${width}px`).toBeGreaterThanOrEqual(9)
+      expect(gap, `brand-to-workspace gap on ${route} at ${width}px`).toBeLessThanOrEqual(11)
+    }
+  }
+})
+
 test('mobile nav shows Diary and Ledger at the 600px boundary and common phone widths', async ({ page }) => {
   await page.setViewportSize(DESKTOP_VIEWPORT)
   await page.goto('/vault')
@@ -98,6 +122,9 @@ diaryTest('Diary Calendar keeps workspace labels visible on tablet', async ({ pa
     await expect(page.locator('.navbar .scope-chip-label').filter({ hasText: name })).toBeVisible()
   }
   await expect(page.locator('.navbar .workspace-board-link-label')).toBeVisible()
+  const gap = await brandWorkspaceGap(page)
+  expect(gap).toBeGreaterThanOrEqual(9)
+  expect(gap).toBeLessThanOrEqual(11)
 })
 
 diaryTest('Diary and Ledger entries remain usable from the mobile navigation', async ({ page }) => {
