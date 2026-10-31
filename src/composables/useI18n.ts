@@ -56,6 +56,7 @@ const STRINGS: Strings = {
   'attachments.audit.operation.attachment-quarantine': { zh: '图片回收', en: 'Recycle image' },
   'attachments.audit.operation.attachment-restore': { zh: '图片恢复', en: 'Restore image' },
   'nav.home': { zh: 'Nuvyn 首页', en: 'Nuvyn home' },
+  'nav.zen_exit': { zh: '退出专注', en: 'Exit focus mode' },
   'nav.logo_alt': { zh: 'Nuvyn 标志', en: 'Nuvyn logo' },
   'brand.virtue.courage': { zh: '勇气', en: 'Courage' },
   'brand.virtue.honesty': { zh: '诚实', en: 'Honesty' },
