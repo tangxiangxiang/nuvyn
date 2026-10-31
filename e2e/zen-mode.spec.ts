@@ -513,7 +513,9 @@ test('Ledger Zen is available from a mobile long press, with a touch exit', asyn
   const exit = page.getByTestId('ledger-zen-exit')
   await expect(exit).toBeVisible({ timeout: 10_000 })
   await expect(page.locator('.navbar')).toHaveCount(0)
-  await exit.tap()
+  // Click here: this Playwright project uses synthetic PointerEvents for
+  // long-press coverage rather than enabling hasTouch on its browser context.
+  await exit.click()
   await expect(page.locator('.navbar')).toBeVisible()
   await expect(page.getByTestId('ledger-page')).toBeVisible()
 })
