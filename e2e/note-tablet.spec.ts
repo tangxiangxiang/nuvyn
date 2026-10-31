@@ -69,7 +69,7 @@ async function noPageOverflow(page: Page) {
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true)
 }
 
-for (const [width, height] of [[390, 844], [600, 900], [601, 900], [768, 1024], [820, 1180], [1024, 768], [1180, 820], [1199, 900], [1200, 900], [1440, 900]]) {
+for (const [width, height] of [[390, 844], [600, 900], [601, 900], [768, 1024], [820, 1180], [899, 900], [900, 900], [1024, 768], [1180, 820], [1199, 900], [1200, 900], [1440, 900]]) {
   test(`Note viewport boundary ${width}x${height}`, async ({ page, request }) => {
     await page.setViewportSize({ width: width!, height: height! })
     const f = await seed(request)
@@ -80,6 +80,16 @@ for (const [width, height] of [[390, 844], [600, 900], [601, 900], [768, 1024], 
       await expect(page.locator('.workspace-board-link')).toHaveCount(width! <= 600 ? 0 : 1)
       if (width! > 600 && width! < 1200) {
         await expect(page.locator('.vault')).toHaveClass(/note-tablet-mode/)
+        await expect(page.locator('.navbar')).toHaveClass(/note-tablet-nav/)
+        await expect(page.locator('.navbar .brand-wordmark')).toBeVisible()
+        for (const name of ['note', 'diary', 'ledger']) {
+          await expect(page.locator('.navbar .scope-chip-label').filter({ hasText: name })).toBeVisible()
+        }
+        await expect(page.locator('.navbar .workspace-board-link-label')).toBeVisible()
+        // Narrow tablets may scroll the workspace links, not push account/actions
+        // beyond the screen or create document-level horizontal overflow.
+        await expect(page.locator('.navbar .account-menu-root')).toBeInViewport()
+        await noPageOverflow(page)
         await expect(page.locator('.editor-tabs-shell')).toHaveCount(0)
         const editorArea = await page.locator('.editor-area').boundingBox()
         const content = await page.locator('.reading-content').boundingBox()
