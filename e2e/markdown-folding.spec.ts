@@ -365,6 +365,33 @@ test.describe('touch folding affordances', () => {
     } finally { await request.delete(`/api/posts/${path}`) }
   })
 
+  test('same Markdown heading unfolds on first tap immediately after it is collapsed', async ({ page, request }) => {
+    const body = '# Document\\n\\n## First section\\n\\nFIRST_SECTION_BODY\\n\\n## Second section\\n\\nSECOND_SECTION_BODY'
+    const path = await setup(page, request, body)
+    try {
+      const monaco = page.locator('.monaco-editor')
+      const lines = monaco.locator('.view-lines')
+      const gutter = monaco.locator('.margin-view-overlays')
+      const expanded = gutter.locator('.codicon-folding-expanded')
+      await expect(expanded).toHaveCount(3)
+      await expect(lines).toContainText('FIRST_SECTION_BODY')
+      await expect(lines).toContainText('SECOND_SECTION_BODY')
+
+      for (let iteration = 0; iteration < 3; iteration++) {
+        // H1 is first; the next folding glyph belongs to "First section".
+        await expanded.nth(1).tap()
+        await expect(lines).not.toContainText('FIRST_SECTION_BODY')
+        await expect(lines).toContainText('SECOND_SECTION_BODY')
+        const collapsed = gutter.locator('.codicon-folding-collapsed')
+        await expect(collapsed).toHaveCount(1)
+        await collapsed.tap()
+        await expect(lines).toContainText('FIRST_SECTION_BODY')
+        await expect(lines).toContainText('SECOND_SECTION_BODY')
+      }
+      expect((await (await request.get(`/api/posts/${path}`)).json()).raw).toBe(body)
+    } finally { await request.delete(`/api/posts/${path}`) }
+  })
+
   test('touching a link inside a heading does not fold the heading', async ({ page, request }) => {
     const content = '# Document\n\n## Heading with [link](#missing)\n\nKeep this content visible'
     const path = await setup(page, request, content)
