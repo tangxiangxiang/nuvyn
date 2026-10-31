@@ -535,7 +535,8 @@ describe('VaultView editor tab wiring', () => {
     }
     expect(focusAfterChange).toContain('activeId && workspaceTabStripVisible.value')
     expect(focusAfterChange).toContain('editorTabsRef.value?.focusTab(activeId)')
-    expect(focusAfterChange).toContain('openWorkspaceDocumentsRef.value?.focusToggle()')
+    expect(focusAfterChange).not.toContain('openWorkspaceDocumentsRef')
+    expect(source).not.toContain('OpenWorkspaceDocuments')
     expect(focusAfterChange).toContain('vaultRef.value?.focus()')
   })
 

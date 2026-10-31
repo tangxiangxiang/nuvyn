@@ -56,9 +56,8 @@ for (const [width, height] of [[601, 900], [768, 1024], [820, 1180], [1024, 768]
       await page.keyboard.insertText('触摸输入 ')
       await expect.poll(async () => (await (await request.get(`/api/posts/${document}`)).json()).raw).toContain('触摸输入')
       await page.getByTestId('left-panel-toggle').tap()
-      const documents = page.getByTestId('open-workspace-documents')
-      await documents.locator('.open-workspace-documents-toggle').tap()
-      await expect(documents.locator(`[data-workspace-document-id="${document}"]`)).toHaveAttribute('data-tab-mode', 'pinned')
+      await expect(page.locator('.file-tree')).toBeVisible()
+      await expect(page.getByTestId('open-workspace-documents')).toHaveCount(0)
       await page.getByTestId('left-panel-toggle').tap()
       await page.getByTestId('view-toggle').tap()
       await expect(imageButton(page)).toHaveCount(0)
@@ -193,7 +192,7 @@ test('an image upload cannot insert into a different tablet Note after navigatio
   }
 })
 
-test('save failure keeps the edited tablet Preview pinned and recoverable while another Note opens', async ({ page, request }) => {
+test('save failure preserves tablet edits when returning via FileTree', async ({ page, request }) => {
   await page.setViewportSize({ width: 768, height: 1024 })
   const a = `inbox/tablet-error-a-${randomUUID()}`
   const b = `inbox/tablet-error-b-${randomUUID()}`
@@ -208,13 +207,8 @@ test('save failure keeps the edited tablet Preview pinned and recoverable while 
     await page.locator('.monaco-editor .view-lines').tap({ position: { x: 80, y: 12 } })
     await page.keyboard.insertText('LOCAL')
     await openTreeDocument(page, b)
-    await page.getByTestId('left-panel-toggle').tap()
-    const documents = page.getByTestId('open-workspace-documents')
-    await documents.locator('.open-workspace-documents-toggle').tap()
-    const source = documents.locator(`[data-workspace-document-id="${a}"]`)
-    await expect(source).toHaveAttribute('data-tab-mode', 'pinned')
-    await expect(source).toHaveAttribute('data-save-status', 'error')
-    await source.locator('.open-workspace-document-select').tap()
+    await expect(page.getByTestId('open-workspace-documents')).toHaveCount(0)
+    await openTreeDocument(page, a)
     await expect(page.locator('.monaco-editor .view-lines')).toContainText('LOCAL')
     expect((await (await request.get(`/api/posts/${a}`)).json()).raw).toBe('# Save source')
   } finally {
@@ -248,10 +242,9 @@ test('controlled composition protects a Preview before programmatic document nav
     await expect(page.locator('.monaco-editor .view-lines')).toContainText('Destination')
     await expect.poll(async () => (await (await request.get(`/api/posts/${a}`)).json()).raw).toBe('合成中文# Composition source')
     expect((await (await request.get(`/api/posts/${b}`)).json()).raw).toBe('# Destination')
-    await page.getByTestId('left-panel-toggle').tap()
-    const documents = page.getByTestId('open-workspace-documents')
-    await documents.locator('.open-workspace-documents-toggle').tap()
-    await expect(documents.locator(`[data-workspace-document-id="${a}"]`)).toHaveAttribute('data-tab-mode', 'pinned')
+    await openTreeDocument(page, a)
+    await expect(page.locator('.monaco-editor .view-lines')).toContainText('合成中文')
+    await expect(page.getByTestId('open-workspace-documents')).toHaveCount(0)
   } finally {
     await request.delete(`/api/posts/${a}`)
     await request.delete(`/api/posts/${b}`)

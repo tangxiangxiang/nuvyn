@@ -96,7 +96,6 @@ import { handleDiaryHomeKeydown } from './diaryHomeKeyboard'
 import { createDiaryShortcutChord, isDiaryShortcutBlocked, isDiaryTextEntryContext } from './diaryShortcutChord'
 import { createZenModeChord } from './zenModeChord'
 import FileTree from '../components/vault/FileTree.vue'
-import OpenWorkspaceDocuments from '../components/vault/OpenWorkspaceDocuments.vue'
 import { projectFileTree } from '../components/vault/fileTreeProjection'
 import {
   downloadDiaryAnalysisExport,
@@ -193,7 +192,6 @@ const editorPaneRef = ref<{
 } | null>(null)
 onBeforeRouteLeave(() => { editorPaneRef.value?.finishComposition() })
 onBeforeRouteUpdate(() => { editorPaneRef.value?.finishComposition() })
-const openWorkspaceDocumentsRef = ref<InstanceType<typeof OpenWorkspaceDocuments> | null>(null)
 const readingPaneRef = ref<{
   revealAnchor(anchor: string, isCurrent?: () => boolean): boolean | Promise<boolean>
 } | null>(null)
@@ -1585,27 +1583,10 @@ async function selectWorkspaceTab(id: string, focusViewer = true): Promise<void>
   }
 }
 
-async function selectOpenWorkspaceDocument(id: string): Promise<void> {
-  await selectWorkspaceTab(id, false)
-  closeTabletDrawer()
-}
-
-async function closeOpenWorkspaceDocument(id: string): Promise<void> {
-  if (!(await closeWorkspaceTab(id))) return
-  if (!workspaceTabStripVisible.value && noteTabletLayout.value && tabletDrawer.value === 'left') {
-    await nextTick()
-    openWorkspaceDocumentsRef.value?.focusToggle()
-  }
-}
-
 function focusAfterWorkspaceTabChange(): void {
   const activeId = activeWorkspaceTabId.value
   if (activeId && workspaceTabStripVisible.value) {
     editorTabsRef.value?.focusTab(activeId)
-    return
-  }
-  if (!workspaceTabStripVisible.value && noteTabletLayout.value && tabletDrawer.value === 'left') {
-    openWorkspaceDocumentsRef.value?.focusToggle()
     return
   }
   vaultRef.value?.focus()
@@ -3252,16 +3233,6 @@ watch(isReadMode, async (reading) => {
         @refresh="refresh"
         @export-document="documentExport.request"
       >
-        <template v-if="noteTabletLayout" #workspace-documents>
-          <OpenWorkspaceDocuments
-            ref="openWorkspaceDocumentsRef"
-            :tabs="workspaceTabs"
-            :active-id="activeWorkspaceTabId"
-            @select="selectOpenWorkspaceDocument"
-            @pin="pinEditorTab"
-            @close="closeOpenWorkspaceDocument"
-          />
-        </template>
       </FileTree>
       <TagPanel
         v-else-if="tagPanelVisible"
