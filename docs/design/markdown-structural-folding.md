@@ -54,8 +54,12 @@ IDs connect controls via `aria-controls`; native buttons provide keyboard and
 touch activation, `aria-expanded`, labels and focus outlines. On hover-capable
 pointers, controls appear on hover; Reader keyboard focus also reveals them.
 Controls are positioned outside the text flow, without reserving inline space
-or changing line height. Touch controls remain visible. One root click
-listener serves all controls. Disposal restores hidden state, removes owned
+or changing line height. On touch devices expanded Reader controls are hidden
+until focus; tapping a heading toggles its section, while collapsed controls
+remain visible to signal hidden content. Interactive links inside headings
+retain their normal behavior. The Monaco gutter no longer forces expanded
+controls visible for coarse pointers; native folding remains active. One root
+click listener serves all controls. Disposal restores hidden state, removes owned
 controls/IDs and releases references. There is no folding MutationObserver.
 
 Only Vault's ordinary Reader and the Markdown specimen opt into the default-off
