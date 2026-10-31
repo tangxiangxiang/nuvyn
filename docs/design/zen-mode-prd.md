@@ -538,4 +538,4 @@ Reduced Motion 简化为静止圆内的「勇气 → 清明」，跳过移动与
 
 Ledger 在已登录的正常 Workspace 页面中可通过原有 Logo 悬停/长按触发九德动画并进入 Zen。与 Vault 的文档级禅模式不同，Ledger 只隐藏全局 NavBar，不隐藏财务概览、账户、交易记录、按钮，也不修改 Ledger 业务状态、数据加载或页面滚动。普通模式的内容内边距与排版保持不变。
 
-Ledger Zen 中在右上角保留小型「退出专注」浮动按钮，兼容手机和平板；桌面可用 Escape 退出，菜单及对话框优先处理 Escape。切换 Workspace、切换 Ledger 子页面、退出登录或刷新页面恢复普通布局。Vault 的 Note/Diary Zen 入口与原有生命周期完全不变；Board 继续不支持 Zen。该增量不修改本 PRD 原先针对 Note/Diary V1 的历史验收范围。
+Ledger Zen 中在右上角保留小型「退出专注」浮动按钮，兼容手机和平板；桌面可用 Escape 或 Ctrl/Cmd+K → Z 退出，菜单及对话框优先处理 Escape。切换 Workspace、切换 Ledger 子页面、退出登录或刷新页面恢复普通布局。Vault 的 Note/Diary Zen 入口与原有生命周期完全不变；Board 继续不支持 Zen。该增量不修改本 PRD 原先针对 Note/Diary V1 的历史验收范围。
