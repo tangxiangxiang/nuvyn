@@ -1530,8 +1530,9 @@ main.container.auth-page-shell {
   }
 }
 @media (min-width: 601px) and (max-width: 899px) {
-  /* Narrow Note tablets scroll only the workspace links, preserving actions. */
-  .navbar.note-tablet-nav .workspace-navigation {
+  /* Narrow tablets share one scrollable workspace strip. The brand and
+     right-side controls stay fixed as users switch Note/Diary/Ledger/Board. */
+  .navbar.is-workspace .workspace-navigation {
     flex: 1 1 auto;
     min-width: 0;
     gap: 2px;
@@ -1540,9 +1541,9 @@ main.container.auth-page-shell {
     overscroll-behavior-x: contain;
     scrollbar-width: none;
   }
-  .navbar.note-tablet-nav .workspace-navigation::-webkit-scrollbar { display: none; }
-  .navbar.note-tablet-nav .scope-chips { flex: 0 0 auto; }
-  .navbar.note-tablet-nav .nav-workspace-link { flex: 0 0 auto; }
+  .navbar.is-workspace .workspace-navigation::-webkit-scrollbar { display: none; }
+  .navbar.is-workspace .scope-chips { flex: 0 0 auto; }
+  .navbar.is-workspace .nav-workspace-link { flex: 0 0 auto; }
 }
 
 .vault {
