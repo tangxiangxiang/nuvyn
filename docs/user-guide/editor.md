@@ -97,6 +97,8 @@ On an open Note or unlocked Diary document, use `Ctrl/Cmd+K` followed by `Z` to 
 
 Press `Escape` or use the keyboard shortcut again to leave Zen Mode. The editor, reading mode, unsaved drafts, and Diary session remain the same; refreshing the page returns to the regular workspace layout.
 
+Ledger supports a simpler focus mode from the same Logo gesture: it hides only the global navbar, leaving accounts and transactions unchanged. Use the small **Exit focus mode** button (also available on touch screens), press `Escape`, or reload to return to normal. Moving to another Ledger page or Workspace also exits this temporary mode.
+
 Edits are marked dirty immediately and are saved after 800 ms without another keystroke. If more typing occurs while a request is in flight, Nuvyn acknowledges that revision and then saves the newer one.
 
 ## External Changes and Conflicts
