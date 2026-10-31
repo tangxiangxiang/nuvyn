@@ -38,6 +38,31 @@ async function brandWorkspaceGap(page: Page): Promise<number> {
   return workspaceBounds!.x - (brandBounds!.x + brandBounds!.width)
 }
 
+async function navbarGeometry(page: Page) {
+  return page.locator('.navbar').evaluate((root) => {
+    const inner = root.querySelector<HTMLElement>('.navbar-inner')
+    const brand = root.querySelector<HTMLElement>('.brand')
+    const firstChip = root.querySelector<HTMLElement>('.scope-chip')
+    const chips = root.querySelector<HTMLElement>('.scope-chips')
+    if (!inner || !brand || !firstChip || !chips) throw new Error('Workspace navigation is incomplete')
+    const innerStyle = getComputedStyle(inner)
+    const chipStyle = getComputedStyle(firstChip)
+    return {
+      headerHeight: root.getBoundingClientRect().height,
+      rowHeight: inner.getBoundingClientRect().height,
+      paddingLeft: innerStyle.paddingLeft,
+      paddingRight: innerStyle.paddingRight,
+      rowGap: innerStyle.gap,
+      brandLeft: brand.getBoundingClientRect().left,
+      firstChipLeft: firstChip.getBoundingClientRect().left,
+      chipHeight: firstChip.getBoundingClientRect().height,
+      chipPaddingLeft: chipStyle.paddingLeft,
+      chipPaddingRight: chipStyle.paddingRight,
+      chipGap: getComputedStyle(chips).gap,
+    }
+  })
+}
+
 test('switching to Note does not enlarge the shared tablet header', async ({ page }) => {
   for (const width of [768, 1024, 1199]) {
     await page.setViewportSize({ width, height: 900 })
@@ -143,9 +168,16 @@ test('mobile direct Board route remains open while its navigation entry stays ab
   await expect(page.locator('.scope-chip[aria-pressed="true"]')).toHaveCount(0)
 })
 
-diaryTest('Diary Calendar keeps workspace labels visible on tablet', async ({ page }) => {
+diaryTest('Diary Calendar matches Note navbar geometry across tablet breakpoints', async ({ page }) => {
   await page.setViewportSize(DESKTOP_VIEWPORT)
   await page.goto('/vault')
+  const tabletWidths = [601, 768, 899, 900, 901, 1024, 1199]
+  const noteGeometry = new Map<number, Awaited<ReturnType<typeof navbarGeometry>>>()
+  for (const width of tabletWidths) {
+    await page.setViewportSize({ width, height: 1024 })
+    noteGeometry.set(width, await navbarGeometry(page))
+  }
+
   await page.setViewportSize({ width: 768, height: 1024 })
   const diary = page.locator('.scope-chip').filter({ hasText: 'diary' })
   await diary.click()
@@ -155,9 +187,16 @@ diaryTest('Diary Calendar keeps workspace labels visible on tablet', async ({ pa
     await expect(page.locator('.navbar .scope-chip-label').filter({ hasText: name })).toBeVisible()
   }
   await expect(page.locator('.navbar .workspace-board-link-label')).toBeVisible()
-  const gap = await brandWorkspaceGap(page)
-  expect(gap).toBeGreaterThanOrEqual(9)
-  expect(gap).toBeLessThanOrEqual(11)
+
+  for (const width of tabletWidths) {
+    await page.setViewportSize({ width, height: 1024 })
+    const actual = await navbarGeometry(page)
+    expect(actual, `Diary navbar at ${width}px must match Note`).toEqual(noteGeometry.get(width))
+    expect(actual.headerHeight).toBe(37) // 36px row + 1px border
+    expect(actual.chipHeight).toBe(28)
+    expect(actual.paddingLeft).toBe('10px')
+    expect(actual.chipPaddingLeft).toBe('8px')
+  }
 })
 
 diaryTest('Diary and Ledger entries remain usable from the mobile navigation', async ({ page }) => {
