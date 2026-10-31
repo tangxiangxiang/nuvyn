@@ -1122,8 +1122,10 @@ onMounted(() => {
   host.value.addEventListener('dragover', onImageDragOver)
   host.value.addEventListener('dragleave', onImageDragLeave)
   host.value.addEventListener('drop', onImageDrop)
-  foldingPointerMedia = window.matchMedia('(hover: none), (pointer: coarse)')
-  foldingPointerMedia.addEventListener('change', syncFoldingControls)
+  foldingPointerMedia = typeof window.matchMedia === 'function'
+    ? window.matchMedia('(hover: none), (pointer: coarse)')
+    : null
+  foldingPointerMedia?.addEventListener?.('change', syncFoldingControls)
   model = acquireMarkdownModel(props.path, props.modelValue)
   fenceStateCache.reset()
   bindMarkdownProviderContext(model, { completion: completionProvider, hover: hoverProvider })
@@ -1138,7 +1140,7 @@ onMounted(() => {
     glyphMargin: false,
     folding: !isLargeDocument.value,
     foldingStrategy: 'auto',
-    showFoldingControls: foldingPointerMedia.matches ? 'always' : 'mouseover',
+    showFoldingControls: foldingPointerMedia?.matches ? 'always' : 'mouseover',
     fontFamily: preferences.fontFamily.value.trim() || 'var(--mono)',
     fontSize: preferences.fontSize.value,
     lineHeight: preferences.lineHeight.value,
@@ -1444,7 +1446,7 @@ onBeforeUnmount(() => {
   if (props.tabletEditing) finishTabletComposition()
   document.removeEventListener('pointerdown', onTabletOutsidePointer, true)
   mounted = false
-  foldingPointerMedia?.removeEventListener('change', syncFoldingControls)
+  foldingPointerMedia?.removeEventListener?.('change', syncFoldingControls)
   foldingPointerMedia = null
   clearSyntaxMarkers()
   imageEditorGeneration += 1
