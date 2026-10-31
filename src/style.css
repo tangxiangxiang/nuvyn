@@ -499,7 +499,8 @@ hr {
 }
 .navbar.is-workspace .navbar-inner {
   height: 36px;
-  gap: 20px;
+  /* One shared brand-to-workspace gap across Note, Diary, Ledger and Board. */
+  gap: 10px;
 }
 .brand {
   display: inline-flex;
@@ -903,7 +904,7 @@ body.brand-constellation-active * {
   display: inline-flex;
   align-items: center;
   gap: 4px;
-  margin-left: 12px;
+  margin-left: 0;
 }
 .navbar .scope-chips {
   display: inline-flex;
@@ -1516,7 +1517,6 @@ main.container.auth-page-shell {
 }
 .note-tablet-mode .article :where(img, video, svg) { max-width: 100%; }
 .note-tablet-mode .article :where(.nuvyn-code-group-tab, summary) { min-height: 40px; }
-.navbar.note-tablet-nav .navbar-inner { gap: 10px; }
 .navbar.note-tablet-nav .nav-actions { gap: 2px; }
 .navbar.note-tablet-nav .nav-actions .n-button { min-width: 40px; min-height: 40px; }
 .navbar.note-tablet-nav .navbar-inner { min-height: 48px; }
@@ -1527,7 +1527,6 @@ main.container.auth-page-shell {
   .navbar.note-tablet-nav .workspace-navigation {
     flex: 1 1 auto;
     min-width: 0;
-    margin-left: 0;
     gap: 2px;
     overflow-x: auto;
     overflow-y: hidden;
@@ -1635,6 +1634,12 @@ main.container.auth-page-shell {
     flex-shrink: 0;
     gap: 2px;
   }
+}
+
+/* Diary Calendar's older compact rule applies below 900px. Match the same
+   workspace gap on tablets, without touching its phone-only 8px layout. */
+@media (min-width: 601px) and (max-width: 900px) {
+  .navbar.is-vault.diary-calendar-mode .navbar-inner { gap: 10px; }
 }
 
 /* Workspace navigation entries are filtered by the shared mobile
