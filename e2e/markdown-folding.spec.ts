@@ -366,7 +366,7 @@ test.describe('touch folding affordances', () => {
   })
 
   test('same Markdown heading unfolds on first tap immediately after it is collapsed', async ({ page, request }) => {
-    const body = '# Document\\n\\n## First section\\n\\nFIRST_SECTION_BODY\\n\\n## Second section\\n\\nSECOND_SECTION_BODY'
+    const body = '# Document\n\n## First section\n\nFIRST_SECTION_BODY\n\n## Second section\n\nSECOND_SECTION_BODY'
     const path = await setup(page, request, body)
     try {
       const monaco = page.locator('.monaco-editor')
