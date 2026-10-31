@@ -100,6 +100,7 @@ const mocks = vi.hoisted(() => {
     setSelection: vi.fn(),
     revealRangeInCenterIfOutsideViewport: vi.fn(),
     updateOptions: vi.fn(),
+    trigger: vi.fn(),
     focus: vi.fn(),
     dispose: vi.fn(),
   }
@@ -256,6 +257,49 @@ describe('Monaco EditorPane', () => {
       { triggerKind: 1, triggerCharacter: ':' },
     )
   }
+
+  it('unfolds the touched collapsed heading immediately using that line rather than the editor cursor', () => {
+    const wrapper = mount(EditorPane, { props: { modelValue: '# Title\\n\\n## First\\n\\nBody', path: 'inbox/first' } })
+    const host = editorHost(wrapper)
+    const gutter = document.createElement('div')
+    gutter.className = 'margin-view-overlays'
+    const collapsed = document.createElement('div')
+    collapsed.className = 'codicon-folding-collapsed'
+    gutter.append(collapsed)
+    host.querySelector('.monaco-editor')!.append(gutter)
+    mocks.editor.getTargetAtClientPoint.mockReturnValue({ position: { lineNumber: 3, column: 1 } } as any)
+    const pointer = (type: string, button = 0) => {
+      const event = new Event('pointerdown', { bubbles: true, cancelable: true })
+      Object.defineProperties(event, {
+        pointerType: { value: type },
+        button: { value: button },
+        clientX: { value: 24 },
+        clientY: { value: 105 },
+      })
+      collapsed.dispatchEvent(event)
+      return event
+    }
+
+    const touch = pointer('touch')
+    expect(touch.defaultPrevented).toBe(true)
+    expect(mocks.editor.trigger).toHaveBeenCalledWith('nuvyn-touch-folding', 'editor.unfold', {
+      selectionLines: [2],
+    })
+    // Reopening uses the clicked section, even when the editor's cursor is
+    // somewhere else; subsequent touch attempts continue to hit that section.
+    pointer('touch')
+    expect(mocks.editor.trigger).toHaveBeenCalledTimes(2)
+
+    mocks.editor.trigger.mockClear()
+    expect(pointer('mouse').defaultPrevented).toBe(false)
+    expect(pointer('touch', 2).defaultPrevented).toBe(false)
+    expect(mocks.editor.trigger).not.toHaveBeenCalled()
+    wrapper.unmount()
+
+    mocks.editor.trigger.mockClear()
+    pointer('touch')
+    expect(mocks.editor.trigger).not.toHaveBeenCalled()
+  })
 
   it('keeps native folding available when touch pointers change and releases the media listener', () => {
     const original = Object.getOwnPropertyDescriptor(window, 'matchMedia')
