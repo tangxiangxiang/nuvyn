@@ -515,7 +515,9 @@ hr {
   letter-spacing: 0.2px;
   text-decoration: none;
   cursor: pointer;
-  touch-action: manipulation;
+  /* This small, dedicated long-press target must not initiate panning,
+     text selection, a native image callout, or touch cancellation. */
+  touch-action: none;
   user-select: none;
   -webkit-user-select: none;
   -webkit-touch-callout: none;
@@ -526,8 +528,17 @@ hr {
   height: 24px;
   display: block;
   flex-shrink: 0;
+  /* Always hit-test the surrounding brand button, never the actual image. */
+  pointer-events: none;
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-touch-callout: none;
+  -webkit-user-drag: none;
 }
 .brand-wordmark {
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-touch-callout: none;
   /* The wordmark follows the rounded geometry of the knowledge crest. */
   font-family: ui-rounded, "SF Pro Rounded", "Avenir Next", var(--sans);
   font-weight: 700;
