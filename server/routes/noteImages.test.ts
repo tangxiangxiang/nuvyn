@@ -65,6 +65,18 @@ describe('Note image uploads', () => {
     expect(await crossOrigin.json()).toMatchObject({ code: 'csrf-origin-mismatch' })
   })
 
+  it('accepts image uploads from a configured secondary HTTPS origin', async () => {
+    closeAuthTestContext(auth)
+    auth = createAuthenticatedTestContext({
+      origin: 'https://nuvyn.example.com,https://backup.example.com',
+    })
+    const response = await upload(imageForm(PNG_BYTES), { origin: 'https://backup.example.com' })
+    expect(response.status).toBe(201)
+    const unlisted = await upload(imageForm(PNG_BYTES), { origin: 'https://attacker.example.com' })
+    expect(unlisted.status).toBe(403)
+    expect(await unlisted.json()).toMatchObject({ code: 'csrf-origin-mismatch' })
+  })
+
   it('stores signature-verified images under a generated create-only path and serves them', async () => {
     const response = await upload(imageForm(PNG_BYTES), { origin: auth.runtime.config.publicOrigin })
     expect(response.status).toBe(201)
