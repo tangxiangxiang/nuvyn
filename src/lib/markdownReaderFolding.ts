@@ -48,6 +48,7 @@ export function enhanceMarkdownFolding(root: HTMLElement, initialLabels: Folding
   const prefix = `nuvyn-fold-${++sequence}-`
   const folds: Fold[] = []
   const byButton = new WeakMap<HTMLElement, Fold>()
+  const byHeading = new WeakMap<HTMLElement, Fold>()
   const hiddenBy = new Map<HTMLElement, Set<Fold>>()
   const originalHidden = new Map<HTMLElement, boolean>()
   const addedClasses = new Map<HTMLElement, Set<string>>()
@@ -125,14 +126,30 @@ export function enhanceMarkdownFolding(root: HTMLElement, initialLabels: Folding
     const fold: Fold = { host, targets, label, button, collapsed: false }
     folds.push(fold)
     byButton.set(button, fold)
+    byHeading.set(host, fold)
     setFoldingClass(host, 'nuvyn-fold-host', true)
     host.prepend(button)
     updateButton(fold)
   }
   const onClick = (event: MouseEvent) => {
-    const button = event.target instanceof Element ? event.target.closest<HTMLButtonElement>('button') : null
-    const fold = button && byButton.get(button)
-    if (!fold || disposed) return
+    if (disposed || !(event.target instanceof Element)) return
+    const target = event.target
+    const button = target.closest<HTMLButtonElement>('button')
+    let fold = button && byButton.get(button)
+
+    // Coarse pointers cannot hover to reveal an expanded heading's toggle.
+    // Tapping the heading text instead toggles its section without modifying
+    // links, text selections, keyboard interaction, or desktop mouse behavior.
+    if (!fold && typeof window.matchMedia === 'function'
+      && window.matchMedia('(hover: none), (pointer: coarse)').matches
+      && !target.closest('a,button,input,select,textarea,[role="button"]')
+      && !window.getSelection()?.toString().trim()) {
+      const heading = target.closest<HTMLElement>('.nuvyn-fold-host')
+      if (heading && root.contains(heading) && /^H[1-6]$/.test(heading.tagName)) {
+        fold = byHeading.get(heading)
+      }
+    }
+    if (!fold) return
     event.preventDefault()
     event.stopPropagation()
     setCollapsed(fold, !fold.collapsed)
