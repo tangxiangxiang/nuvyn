@@ -1181,6 +1181,39 @@ describe('NavBar — brand constellation', () => {
     }
   })
 
+  it('does not allow the logo image to open native context menus or start a drag', async () => {
+    const { wrapper } = mountNavBar()
+    const brand = wrapper.get('.brand')
+    const logo = brand.get('.brand-logo')
+    expect(logo.attributes('draggable')).toBe('false')
+
+    // The browser may fire contextmenu after pointercancel has cleared its
+    // state, or target the image rather than the surrounding button.
+    dispatchPointerEvent(logo.element, 'pointerdown', {
+      pointerType: 'touch', pointerId: 58, clientX: 18, clientY: 18,
+    })
+    dispatchPointerEvent(logo.element, 'pointercancel', { pointerType: 'touch', pointerId: 58 })
+    const menu = new MouseEvent('contextmenu', { bubbles: true, cancelable: true })
+    logo.element.dispatchEvent(menu)
+    expect(menu.defaultPrevented).toBe(true)
+
+    const drag = new Event('dragstart', { bubbles: true, cancelable: true })
+    logo.element.dispatchEvent(drag)
+    expect(drag.defaultPrevented).toBe(true)
+    const select = new Event('selectstart', { bubbles: true, cancelable: true })
+    logo.element.dispatchEvent(select)
+    expect(select.defaultPrevented).toBe(true)
+
+    // Suppressing the browser menu must not change a deliberate Zen long
+    // press into home navigation or prevent the usual three-second gesture.
+    dispatchPointerEvent(brand.element, 'pointerdown', {
+      pointerType: 'touch', pointerId: 59, clientX: 18, clientY: 18,
+    })
+    await advanceAnimation(3000)
+    expect(wrapper.find('.brand-constellation').exists()).toBe(true)
+    wrapper.unmount()
+  })
+
   it('cancels an unfinished touch long press when the finger moves or is cancelled', async () => {
     const { wrapper } = mountNavBar()
     const brand = wrapper.find('.brand')
