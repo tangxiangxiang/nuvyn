@@ -134,8 +134,8 @@ vi.mock('monaco-editor/esm/vs/editor/editor.api.js', () => ({
     defineTheme: mocks.defineTheme,
     setTheme: mocks.setTheme,
     createModel: vi.fn((value: string) => { mocks.model.value = value; return mocks.model }),
-    create: vi.fn((host?: HTMLElement) => {
-      mocks.createEditor()
+    create: vi.fn((host?: HTMLElement, options?: Record<string, unknown>) => {
+      mocks.createEditor(options)
       if (host) {
         const root = document.createElement('div')
         root.className = 'monaco-editor'
@@ -256,6 +256,46 @@ describe('Monaco EditorPane', () => {
       { triggerKind: 1, triggerCharacter: ':' },
     )
   }
+
+  it('keeps native folding available when touch pointers change and releases the media listener', () => {
+    const original = Object.getOwnPropertyDescriptor(window, 'matchMedia')
+    const listeners = new Set<() => void>()
+    let isTouch = true
+    const query = {
+      get matches() { return isTouch },
+      addEventListener: vi.fn((_type: string, listener: () => void) => { listeners.add(listener) }),
+      removeEventListener: vi.fn((_type: string, listener: () => void) => { listeners.delete(listener) }),
+    }
+    Object.defineProperty(window, 'matchMedia', {
+      configurable: true,
+      value: vi.fn(() => query),
+    })
+    let wrapper: ReturnType<typeof mount> | null = null
+    try {
+      wrapper = mount(EditorPane, { props: { modelValue: '# Heading\\n\\nBody', path: 'inbox/touch-folding' } })
+      expect(mocks.createEditor).toHaveBeenCalledWith(expect.objectContaining({
+        showFoldingControls: 'always',
+      }))
+      expect(listeners.size).toBe(1)
+
+      isTouch = false
+      for (const listener of listeners) listener()
+      expect(mocks.editor.updateOptions).toHaveBeenCalledWith({ showFoldingControls: 'mouseover' })
+
+      isTouch = true
+      for (const listener of listeners) listener()
+      expect(mocks.editor.updateOptions).toHaveBeenCalledWith({ showFoldingControls: 'always' })
+
+      wrapper.unmount()
+      wrapper = null
+      expect(query.removeEventListener).toHaveBeenCalledWith('change', expect.any(Function))
+      expect(listeners.size).toBe(0)
+    } finally {
+      wrapper?.unmount()
+      if (original) Object.defineProperty(window, 'matchMedia', original)
+      else delete (window as { matchMedia?: typeof window.matchMedia }).matchMedia
+    }
+  })
 
   beforeEach(() => {
     resetMarkdownModelsForTesting()
