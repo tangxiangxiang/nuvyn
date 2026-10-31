@@ -132,35 +132,25 @@ test('global search previews documents and refresh retains the route document', 
 test.describe('touch preview operations', () => {
   test.use({ viewport: { width: 768, height: 1024 }, hasTouch: true })
 
-  test('tap previews and Open documents provides explicit pinning without a tab strip', async ({ page, request }) => {
+  test('tablet FileTree switches previews without exposing open documents or a tab strip', async ({ page, request }) => {
     const f = await fixture(request)
     try {
       await gotoVaultReady(page)
       await (await row(page, f.paths.a)).tap()
       await expect(host(page)).toBeVisible()
+      await expect(page.locator('.monaco-editor .view-lines')).toContainText('Alpha')
       await page.getByTestId('left-panel-toggle').tap()
-      const documents = page.getByTestId('open-workspace-documents')
-      const expandDocuments = async () => {
-        const toggle = documents.locator('.open-workspace-documents-toggle')
-        if (await toggle.getAttribute('aria-expanded') !== 'true') await toggle.tap()
-      }
-      await expandDocuments()
-      const document = (path: string) => documents.locator(`[data-workspace-document-id="${path}"]`)
-      await expect(document(f.paths.a)).toHaveAttribute('data-tab-mode', 'preview')
-      await document(f.paths.a).getByRole('button', { name: /固定|Pin/ }).tap()
-      await expect(document(f.paths.a)).toHaveAttribute('data-tab-mode', 'pinned')
+      await expect(page.locator('.file-tree')).toBeVisible()
+      await expect(page.getByTestId('open-workspace-documents')).toHaveCount(0)
       await (await row(page, f.paths.b)).tap()
       await expect(host(page)).toBeVisible()
       await expect(page.locator('.monaco-editor .view-lines')).toContainText('Beta')
-      await page.getByTestId('left-panel-toggle').tap()
-      await expandDocuments()
-      await expect(document(f.paths.b)).toHaveAttribute('data-tab-mode', 'preview')
-      await expect(document(f.paths.a)).toHaveAttribute('data-tab-mode', 'pinned')
-      await expect(documents.locator('[data-workspace-document-id]')).toHaveCount(2)
       await expect(page.locator('.editor-tabs-shell')).toHaveCount(0)
       const editorArea = await page.locator('.editor-area').boundingBox()
       const editorPane = await page.locator('.editor-pane').boundingBox()
       expect(editorPane?.y).toBe(editorArea?.y)
+      await (await row(page, f.paths.a)).tap()
+      await expect(page.locator('.monaco-editor .view-lines')).toContainText('Alpha')
     } finally { await f.cleanup() }
   })
 })
