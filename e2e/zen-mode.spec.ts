@@ -452,3 +452,66 @@ test('touch long press on the brand enters Zen Mode after the constellation fini
     }
   }
 })
+
+
+test('Ledger Zen hides only the global navbar and exits without resetting the page', async ({ page }) => {
+  test.setTimeout(35_000)
+  await page.emulateMedia({ reducedMotion: 'reduce' })
+  await page.setViewportSize({ width: 1024, height: 800 })
+  await page.goto('/ledger')
+  const ledger = page.getByTestId('ledger-page')
+  await expect(ledger).toBeVisible()
+  const originalLedger = await ledger.elementHandle()
+  await expect(page.locator('.navbar')).toBeVisible()
+
+  await page.locator('.navbar .brand').hover()
+  await expect(page.locator('.brand-constellation')).toBeVisible({ timeout: 5000 })
+  const exit = page.getByTestId('ledger-zen-exit')
+  await expect(exit).toBeVisible({ timeout: 10_000 })
+  await expect(page.locator('.navbar')).toHaveCount(0)
+  await expect(ledger).toBeVisible()
+  expect(await ledger.evaluate((element, original) => element === original, originalLedger)).toBe(true)
+  await expect(page.locator('main.container')).not.toHaveClass(/zen-mode-shell/)
+
+  // The small action remains available to touch-only devices.
+  await exit.click()
+  await expect(page.locator('.navbar')).toBeVisible()
+  await expect(exit).toHaveCount(0)
+  await expect(ledger).toBeVisible()
+
+  // A second entry must still work after the first exit.
+  await page.locator('.navbar .brand').hover()
+  await expect(exit).toBeVisible({ timeout: 10_000 })
+  await page.keyboard.press('Escape')
+  await expect(page.locator('.navbar')).toBeVisible()
+  await expect(exit).toHaveCount(0)
+  await page.reload()
+  await expect(page.locator('.navbar')).toBeVisible()
+  await expect(page.getByTestId('ledger-zen-exit')).toHaveCount(0)
+})
+
+test('Ledger Zen is available from a mobile long press, with a touch exit', async ({ page }) => {
+  test.setTimeout(25_000)
+  await page.emulateMedia({ reducedMotion: 'reduce' })
+  await page.setViewportSize({ width: 768, height: 1024 })
+  await page.goto('/ledger')
+  await expect(page.getByTestId('ledger-page')).toBeVisible()
+  const brand = page.locator('.navbar .brand')
+  await brand.evaluate((element) => {
+    element.dispatchEvent(new PointerEvent('pointerdown', {
+      bubbles: true, pointerType: 'touch', pointerId: 27, clientX: 24, clientY: 18,
+    }))
+  })
+  await expect(page.locator('.brand-constellation')).toBeVisible({ timeout: 5000 })
+  await brand.evaluate((element) => {
+    element.dispatchEvent(new PointerEvent('pointerup', {
+      bubbles: true, pointerType: 'touch', pointerId: 27, clientX: 24, clientY: 18,
+    }))
+  })
+  const exit = page.getByTestId('ledger-zen-exit')
+  await expect(exit).toBeVisible({ timeout: 10_000 })
+  await expect(page.locator('.navbar')).toHaveCount(0)
+  await exit.tap()
+  await expect(page.locator('.navbar')).toBeVisible()
+  await expect(page.getByTestId('ledger-page')).toBeVisible()
+})
