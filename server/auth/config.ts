@@ -33,6 +33,7 @@ export type AuthCookieProfile = {
 
 export type AuthConfig = {
   readonly publicOrigin: string
+  readonly allowedOrigins: readonly string[]
   readonly cookie: AuthCookieProfile
   readonly sessionLifetimeMs: number
   readonly sessionLastSeenUpdateIntervalMs: number
@@ -49,6 +50,7 @@ export class AuthConfigError extends Error {
 }
 
 const LOOPBACK_HTTP_HOSTS = new Set(['localhost', '127.0.0.1', '[::1]'])
+const MAX_PUBLIC_ORIGINS = 8
 
 function cookieProfile(secure: boolean): AuthCookieProfile {
   return secure
@@ -69,43 +71,58 @@ function cookieProfile(secure: boolean): AuthCookieProfile {
 }
 
 /**
- * Parse the browser-facing origin and derive the only accepted cookie profile.
- * Listener addresses and forwarded request headers are intentionally absent
- * from this API: public origin is the security authority.
+ * Parse one or more explicit browser-facing origins (comma-separated).
+ * The first is the canonical origin for legacy consumers; each is equally
+ * authorized for same-origin browser mutations. No CORS is enabled.
  */
 export function parsePublicOrigin(value: string): AuthConfig {
   if (typeof value !== 'string' || value.trim().length === 0) {
     throw new AuthConfigError('NUVYN_PUBLIC_ORIGIN is required')
   }
 
-  const raw = value.trim()
-  let url: URL
-  try {
-    url = new URL(raw)
-  } catch {
-    throw new AuthConfigError('NUVYN_PUBLIC_ORIGIN must be an absolute http(s) origin')
+  const entries = value.split(',').map((entry) => entry.trim())
+  if (entries.some((entry) => !entry) || entries.length > MAX_PUBLIC_ORIGINS) {
+    throw new AuthConfigError('NUVYN_PUBLIC_ORIGIN must contain 1–8 non-empty origins')
   }
 
-  if (url.protocol !== 'http:' && url.protocol !== 'https:') {
-    throw new AuthConfigError('NUVYN_PUBLIC_ORIGIN must use http or https')
-  }
-  if (url.username || url.password) {
-    throw new AuthConfigError('NUVYN_PUBLIC_ORIGIN must not contain credentials')
-  }
-  // URL.origin always implies a root pathname. A non-root pathname is a
-  // deployment path, not an origin, and would make same-origin checks unsafe.
-  if (url.pathname !== '/' || url.search || url.hash) {
-    throw new AuthConfigError('NUVYN_PUBLIC_ORIGIN must not contain a path, query, or fragment')
+  const urls = entries.map((raw) => {
+    let url: URL
+    try {
+      url = new URL(raw)
+    } catch {
+      throw new AuthConfigError('NUVYN_PUBLIC_ORIGIN must contain absolute http(s) origins')
+    }
+
+    if (url.protocol !== 'http:' && url.protocol !== 'https:') {
+      throw new AuthConfigError('NUVYN_PUBLIC_ORIGIN must use http or https')
+    }
+    if (url.username || url.password || url.hostname.includes('*')) {
+      throw new AuthConfigError('NUVYN_PUBLIC_ORIGIN must not contain credentials or wildcard hosts')
+    }
+    if (url.pathname !== '/' || url.search || url.hash) {
+      throw new AuthConfigError('NUVYN_PUBLIC_ORIGIN must not contain a path, query, or fragment')
+    }
+    if (url.protocol === 'http:' && !LOOPBACK_HTTP_HOSTS.has(url.hostname)) {
+      throw new AuthConfigError('plaintext HTTP is allowed only for loopback origins')
+    }
+    return url
+  })
+
+  // A single HTTP loopback origin remains valid for development. Mixing
+  // secure and insecure origins would yield one incompatible cookie profile.
+  if (urls.length > 1 && urls.some((url) => url.protocol !== 'https:')) {
+    throw new AuthConfigError('multiple NUVYN_PUBLIC_ORIGIN entries must all use HTTPS')
   }
 
-  const secure = url.protocol === 'https:'
-  if (!secure && !LOOPBACK_HTTP_HOSTS.has(url.hostname)) {
-    throw new AuthConfigError('plaintext HTTP is allowed only for loopback origins')
+  const allowedOrigins = urls.map((url) => url.origin)
+  if (new Set(allowedOrigins).size !== allowedOrigins.length) {
+    throw new AuthConfigError('NUVYN_PUBLIC_ORIGIN must not contain duplicate origins')
   }
 
   return {
-    publicOrigin: url.origin,
-    cookie: cookieProfile(secure),
+    publicOrigin: allowedOrigins[0]!,
+    allowedOrigins,
+    cookie: cookieProfile(urls[0]!.protocol === 'https:'),
     sessionLifetimeMs: SESSION_LIFETIME_MS,
     sessionLastSeenUpdateIntervalMs: SESSION_LAST_SEEN_UPDATE_INTERVAL_MS,
     revokeSessionsOnStart: false,
