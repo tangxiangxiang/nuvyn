@@ -314,14 +314,25 @@ test.describe('touch folding affordances', () => {
       await expect(page.locator('.vault')).toHaveClass(/note-tablet-mode/)
       expect(await page.evaluate(() => matchMedia('(hover: none), (pointer: coarse)').matches)).toBe(true)
 
-      const expandedGutter = page.locator('.monaco-editor .margin-view-overlays .codicon-folding-expanded').first()
-      await expect(expandedGutter).toHaveCount(1)
-      // Touch users must be able to see and operate Monaco's gutter folds.
-      await expect(expandedGutter).toHaveCSS('opacity', '1')
-      await expandedGutter.tap()
-      await expect(page.locator('.monaco-editor .view-lines')).not.toContainText('Parent body')
-      await page.locator('.monaco-editor .margin-view-overlays .codicon-folding-collapsed').first().tap()
-      await expect(page.locator('.monaco-editor .view-lines')).toContainText('Parent body')
+      const monacoHost = page.locator('.monaco-host')
+      const touchFoldingMode = () => monacoHost.evaluate((host) => (
+        (host as any).__vueParentComponent.setupState.editor.getRawOptions().showFoldingControls
+      ))
+      await expect.poll(touchFoldingMode).toBe('always')
+      const folds = page.locator('.monaco-editor .margin-view-overlays')
+      const lines = page.locator('.monaco-editor .view-lines')
+      for (let cycle = 0; cycle < 3; cycle++) {
+        const expanded = folds.locator('.codicon-folding-expanded').first()
+        await expect(expanded).toHaveCount(1)
+        await expect(expanded).toHaveCSS('opacity', '1')
+        await expanded.tap()
+        await expect(lines).not.toContainText('Parent body')
+        const collapsed = folds.locator('.codicon-folding-collapsed').first()
+        await expect(collapsed).toHaveCount(1)
+        await expect(collapsed).toHaveCSS('opacity', '1')
+        await collapsed.tap()
+        await expect(lines).toContainText('Parent body')
+      }
 
       await page.getByTestId('view-toggle').tap()
       const article = page.locator('.reading-pane .article')
@@ -333,6 +344,12 @@ test.describe('touch folding affordances', () => {
       await heading.tap()
       await expect(control).toHaveAttribute('aria-expanded', 'false')
       await expect(control).toHaveCSS('opacity', '1')
+      // Touch Reader chevron is visually raised, without moving the heading.
+      const headingRect = await heading.boundingBox()
+      const controlRect = await control.boundingBox()
+      expect(headingRect).not.toBeNull()
+      expect(controlRect).not.toBeNull()
+      expect(controlRect!.y + controlRect!.height / 2).toBeLessThan(headingRect!.y + headingRect!.height / 2)
       await expect(article.getByText('Parent body', { exact: true })).toBeHidden()
 
       await heading.tap()
