@@ -25,14 +25,18 @@ The supplied Compose file does not expose `VAULT_DIR` because it always mounts t
 
 ## Browser-facing Authentication Origin
 
-`NUVYN_PUBLIC_ORIGIN` is the canonical origin that a browser uses to access
-Nuvyn. It controls the session cookie profile and the Origin check for unsafe
-mutations. It is separate from both the bare-metal `HOST` listener and Docker's
+`NUVYN_PUBLIC_ORIGIN` accepts one origin or a comma-separated list of at most
+8 explicit HTTPS origins. The first entry is canonical for compatibility; all
+entries are allowed for the Origin check on unsafe mutations. A single loopback
+HTTP origin remains supported for local development. Mixed HTTP/HTTPS lists,
+wildcards, duplicate origins, paths, query strings, and fragments are rejected
+at startup. The entries control the selected session cookie profile and the
+allowed browser origins. It is separate from both the bare-metal `HOST` listener and Docker's
 internal `HOST=0.0.0.0`.
 
 | Variable | Default / example | Notes |
 | --- | --- | --- |
-| `NUVYN_PUBLIC_ORIGIN` | Bare-metal loopback: `http://127.0.0.1:<PORT>`; Docker: `http://127.0.0.1:<NUVYN_PORT>` | Must match the browser URL exactly, with no path, query, or fragment. |
+| `NUVYN_PUBLIC_ORIGIN` | Bare-metal loopback: `http://127.0.0.1:<PORT>`; Docker: `http://127.0.0.1:<NUVYN_PORT>` | Each origin must match its browser URL exactly, with no path, query, or fragment. |
 | `NUVYN_BIND_ADDRESS` | `127.0.0.1` | Host interface for Docker port publication only. It is not the public origin. |
 | `NUVYN_PORT` | `3000` | Host port mapped to container port 3000; the default origin follows it. |
 
@@ -48,7 +52,17 @@ For an HTTPS reverse proxy, use the external URL instead:
 
 ```bash
 NUVYN_PUBLIC_ORIGIN=https://nuvyn.example.com
+
+# Multiple HTTPS reverse proxies to the same Nuvyn instance:
+NUVYN_PUBLIC_ORIGIN=https://nuvyn.example.com,https://backup.example.com
 ```
+
+With multiple domains, each browser host sets its own `__Host-nuvyn_session`
+Secure/HttpOnly/SameSite=Lax cookie; sign in independently at each host. One
+logout revokes the active host session only. No cross-domain cookie sharing or
+CORS is enabled, and each proxy must independently forward valid origin
+headers. This option cannot bypass an upstream authentication gateway or its
+redirects (such as a NAS vendor login page). PWAs are installed per origin.
 
 Do not use `http://0.0.0.0:3000` as a browser-facing origin. Plain HTTP is
 accepted only for `localhost`, `127.0.0.1`, and `[::1]`; a non-loopback HTTP

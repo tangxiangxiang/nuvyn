@@ -225,6 +225,30 @@ describe('Phase 5 central authentication boundary', () => {
     }
   })
 
+  it('accepts configured secondary-origin mutations but denies other origins', async () => {
+    const context = createAuthenticatedTestContext({
+      origin: 'https://nuvyn.example.com,https://backup.example.com',
+    })
+    try {
+      const secondary = await app.fetch(authenticatedRequest(context, '/api/posts', {
+        method: 'POST',
+        origin: 'https://backup.example.com',
+        body: {},
+      }))
+      expect(secondary.status).not.toBe(403)
+
+      const unlisted = await app.fetch(authenticatedRequest(context, '/api/posts', {
+        method: 'POST',
+        origin: 'https://unlisted.example.com',
+        body: {},
+      }))
+      expect(unlisted.status).toBe(403)
+      expect(await unlisted.json()).toMatchObject({ code: 'csrf-origin-mismatch' })
+    } finally {
+      closeAuthTestContext(context)
+    }
+  })
+
   it('normalizes missing, unknown, revoked, expired, and disabled sessions to one 401 contract', async () => {
     const now = 1_700_000_000_000
     const context = createAuthenticatedTestContext({ now: () => now })

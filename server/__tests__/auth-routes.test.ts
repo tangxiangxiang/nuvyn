@@ -89,6 +89,54 @@ describe('Phase 2 auth routes', () => {
     expect(await second.json()).toMatchObject({ code: 'already-initialized' })
   })
 
+  it('allows independent login sessions from both configured HTTPS origins', async () => {
+    closeAuthTestContext(context)
+    context = createAuthTestContext({
+      origin: 'https://nuvyn.example.com,https://backup.example.com',
+    })
+    expect((await setupOwner()).response.status).toBe(201)
+
+    const login = (origin: string) => app.fetch(jsonRequest('/api/auth/login', {
+      method: 'POST',
+      origin,
+      body: { username: 'admin', password: 'correct horse battery staple' },
+    }))
+    const primary = await login('https://nuvyn.example.com')
+    const secondary = await login('https://backup.example.com')
+    expect(primary.status).toBe(200)
+    expect(secondary.status).toBe(200)
+
+    for (const response of [primary, secondary]) {
+      const header = response.headers.get('set-cookie') ?? ''
+      expect(header).toContain('__Host-nuvyn_session=')
+      expect(header).toContain('Secure')
+      expect(header).toContain('HttpOnly')
+      expect(header).not.toContain('Domain=')
+    }
+    const primaryCookie = cookieFromResponse(primary)
+    const secondaryCookie = cookieFromResponse(secondary)
+    expect(primaryCookie).not.toBe(secondaryCookie)
+
+    const rejected = await login('https://attacker.example.com')
+    expect(rejected.status).toBe(403)
+    expect(await rejected.json()).toMatchObject({ code: 'csrf-origin-mismatch' })
+
+    const logout = await app.fetch(jsonRequest('/api/auth/logout', {
+      method: 'POST',
+      origin: 'https://backup.example.com',
+      cookie: secondaryCookie,
+    }))
+    expect(logout.status).toBe(204)
+    const primaryStatus = await app.fetch(new Request('http://localhost/api/auth/status', {
+      headers: { Cookie: primaryCookie },
+    }))
+    const secondaryStatus = await app.fetch(new Request('http://localhost/api/auth/status', {
+      headers: { Cookie: secondaryCookie },
+    }))
+    expect((await primaryStatus.json()).authenticated).toBe(true)
+    expect((await secondaryStatus.json()).authenticated).toBe(false)
+  })
+
   it('uses bootstrap-invalid for both missing and incorrect setup tokens', async () => {
     const missing = await app.fetch(jsonRequest('/api/auth/setup', {
       method: 'POST',

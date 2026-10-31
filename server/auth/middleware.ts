@@ -105,7 +105,7 @@ export const authBoundary: MiddlewareHandler = async (c, next) => {
     if (!csrf.ok) return jsonError(c, 403, csrf.message, csrf.code)
 
     if (method === 'POST' && c.req.path === '/api/note/images'
-      && c.req.raw.headers.get('origin') !== runtime.config.publicOrigin) {
+      && !runtime.config.allowedOrigins.includes(c.req.raw.headers.get('origin') ?? '')) {
       return jsonError(c, 403, 'Request origin is required.', 'csrf-origin-mismatch')
     }
 
