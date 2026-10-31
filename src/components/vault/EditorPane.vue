@@ -157,7 +157,6 @@ function syncFoldingControls(): void {
   // after a section collapses and the native glyph is recreated.
   editor?.updateOptions({
     showFoldingControls: foldingPointerMedia?.matches ? 'always' : 'mouseover',
-    unfoldOnClickAfterEndOfLine: Boolean(foldingPointerMedia?.matches),
   })
 }
 const VIEW_STATE_KEY = NUVYN_BROWSER_STORAGE_KEYS.editorMonacoViewState
@@ -675,23 +674,27 @@ function onHostPointerDown(event: PointerEvent) {
   document.addEventListener('visibilitychange', onScrollbarVisibilityChange)
 }
 
-function onTouchCollapsedFoldingPointerDown(event: PointerEvent) {
+function onTouchFoldingPointerDown(event: PointerEvent) {
   if (!editor || event.button !== 0 || !['touch', 'pen'].includes(event.pointerType)) return
   if (!(event.target instanceof Element) || !host.value) return
-  const collapsed = event.target.closest(
-    '.margin-view-overlays .codicon-folding-collapsed, .margin-view-overlays .codicon-folding-manual-collapsed',
+  const marker = event.target.closest<HTMLElement>(
+    '.margin-view-overlays :is(.codicon-folding-expanded, .codicon-folding-manual-expanded, .codicon-folding-collapsed, .codicon-folding-manual-collapsed)',
   )
-  if (!collapsed || !host.value.contains(collapsed)) return
+  if (!marker || !host.value.contains(marker)) return
   const lineNumber = editor.getTargetAtClientPoint(event.clientX, event.clientY)?.position?.lineNumber
   if (!lineNumber) return
 
-  // Monaco's synthetic mouse-down folding handler may miss the freshly
-  // collapsed gutter marker on touch until another section re-renders.
-  // Use its public unfold command for this exact line, not the current cursor.
-  // Cancel the compatibility mouse event to avoid unfolding twice.
+  // Do not mix Monaco's synthetic mouse folding (expanded) with our touch
+  // command (collapsed): after the latter, the next synthetic mouse event
+  // can miss a freshly rendered glyph. Handle both directions through the
+  // same public command using the touched heading, never the cursor.
+  const isCollapsed = marker.classList.contains('codicon-folding-collapsed')
+    || marker.classList.contains('codicon-folding-manual-collapsed')
   event.preventDefault()
   event.stopImmediatePropagation()
-  editor.trigger('nuvyn-touch-folding', 'editor.unfold', { selectionLines: [lineNumber - 1] })
+  editor.trigger('nuvyn-touch-folding', isCollapsed ? 'editor.unfold' : 'editor.fold', {
+    selectionLines: [lineNumber - 1],
+  })
 }
 
 monaco.editor.defineTheme('nuvyn-light', {
@@ -1139,7 +1142,7 @@ onMounted(() => {
   imageInput.addEventListener('change', onImageInputChange)
   imageInput.addEventListener('cancel', onImageInputCancel)
   document.body.append(imageInput)
-  host.value.addEventListener('pointerdown', onTouchCollapsedFoldingPointerDown, true)
+  host.value.addEventListener('pointerdown', onTouchFoldingPointerDown, true)
   host.value.addEventListener('pointerdown', onHostPointerDown)
   host.value.addEventListener('dragenter', onImageDragEnter)
   host.value.addEventListener('dragover', onImageDragOver)
@@ -1164,7 +1167,6 @@ onMounted(() => {
     folding: !isLargeDocument.value,
     foldingStrategy: 'auto',
     showFoldingControls: foldingPointerMedia?.matches ? 'always' : 'mouseover',
-    unfoldOnClickAfterEndOfLine: Boolean(foldingPointerMedia?.matches),
     fontFamily: preferences.fontFamily.value.trim() || 'var(--mono)',
     fontSize: preferences.fontSize.value,
     lineHeight: preferences.lineHeight.value,
@@ -1486,7 +1488,7 @@ onBeforeUnmount(() => {
   themeObserver?.disconnect()
   if (decorationTimer) clearTimeout(decorationTimer)
   clearScrollbarHideTimer()
-  host.value?.removeEventListener('pointerdown', onTouchCollapsedFoldingPointerDown, true)
+  host.value?.removeEventListener('pointerdown', onTouchFoldingPointerDown, true)
   host.value?.removeEventListener('pointerdown', onHostPointerDown)
   host.value?.removeEventListener('dragenter', onImageDragEnter)
   host.value?.removeEventListener('dragover', onImageDragOver)
