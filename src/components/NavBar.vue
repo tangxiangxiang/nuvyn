@@ -864,11 +864,10 @@ function onBrandPointerCancel(event: PointerEvent) {
 }
 
 function onBrandContextMenu(event: MouseEvent) {
-  if (
-    touchPointerId !== null
-    || touchLongPressTriggered
-    || (showBrandConstellation.value && brandConstellationTrigger === 'touch')
-  ) event.preventDefault()
+  // Some mobile browsers dispatch contextmenu after pointercancel, when the
+  // touch pointer state has already been cleared. Never let the browser's
+  // long-press image/text menu compete with this dedicated Zen entry target.
+  event.preventDefault()
 }
 
 function onBrandClick(event: MouseEvent) {
@@ -963,9 +962,11 @@ onBeforeUnmount(() => {
         @pointerup="onBrandPointerUp"
         @pointercancel="onBrandPointerCancel"
         @contextmenu="onBrandContextMenu"
+        @dragstart.prevent
+        @selectstart.prevent
         @click="onBrandClick"
       >
-        <img class="brand-logo" :src="'/logo-48.png'" :alt="t('nav.logo_alt')" width="24" height="24" />
+        <img class="brand-logo" :src="'/logo-48.png'" :alt="t('nav.logo_alt')" width="24" height="24" draggable="false" />
         <span class="brand-wordmark">Nuvyn</span>
       </NButton>
       <!-- Scope filter: lives in the navbar (the file tree header is too
