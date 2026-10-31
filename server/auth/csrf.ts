@@ -16,11 +16,11 @@ export function isUnsafeMethod(method: string): boolean {
 export function checkCsrfHeaders(
   headers: Headers,
   method: string,
-  config: Pick<AuthConfig, 'publicOrigin'>,
+  config: Pick<AuthConfig, 'allowedOrigins'>,
 ): CsrfCheckResult {
   if (!isUnsafeMethod(method)) return { ok: true }
   const origin = headers.get('origin')
-  if (origin !== null && origin !== config.publicOrigin) {
+  if (origin !== null && !config.allowedOrigins.includes(origin)) {
     return {
       ok: false,
       code: 'csrf-origin-mismatch',
