@@ -93,3 +93,7 @@ Chromium 和 WebKit 的 768/1024 阅读、左导航、右目录截图分别位�
 ## Phase 2 边界
 
 Monaco 软键盘、IME、触控笔、系统长按菜单与更完善的触屏固定标签交互留待 Phase 2。未新增手势系统或常驻/浮动模式，未改变 Diary、Ledger、Board 业务策略。
+
+## 后续修订（2026-10-31）
+
+统一平板的全局导航表现：601–899px 的 Note 不再隐藏 Nuvyn 品牌文字及 Note / Diary / Ledger / Board 标签；Diary Calendar 在 601–900px 也保留文字。手机端（≤600px）继续使用紧凑图标导航。较窄 Note 平板的 Workspace 导航可局部横向滚动，右侧操作按钮始终保留在视口内。该修订仅影响导航 CSS 和回归测试，不改变 Phase 1 的 Note 单列、抽屉、阅读、编辑和数据协议。
