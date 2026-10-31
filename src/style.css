@@ -1517,14 +1517,24 @@ main.container.auth-page-shell {
 }
 .note-tablet-mode .article :where(img, video, svg) { max-width: 100%; }
 .note-tablet-mode .article :where(.nuvyn-code-group-tab, summary) { min-height: 40px; }
-.navbar.note-tablet-nav .nav-actions { gap: 2px; }
-.navbar.note-tablet-nav .nav-actions .n-button { min-width: 40px; min-height: 40px; }
-.navbar.note-tablet-nav .navbar-inner { min-height: 48px; }
+/* Every tablet Workspace shares Note's 48px navigation row and 40px
+   touch targets. Previously only Note enlarged its active chip, leaving
+   Ledger/Board with 28px selections and a shorter global header. */
+@media (min-width: 601px) and (max-width: 1199px) {
+  .navbar.is-workspace .navbar-inner { height: 48px; }
+  .navbar.is-workspace .nav-workspace-link {
+    box-sizing: border-box;
+    height: 40px;
+    min-height: 40px;
+    padding: 0 8px;
+  }
+  .navbar.is-workspace .nav-actions { gap: 2px; }
+  .navbar.is-workspace .nav-actions .n-button { min-width: 40px; min-height: 40px; }
+}
 @media (min-width: 601px) and (max-width: 899px) {
-  /* Keep Note's labels consistent with other tablet workspaces. When the
-     navigation does not fit, scroll only the workspace links so the action
-     buttons remain visible and usable on narrow tablets. */
-  .navbar.note-tablet-nav .workspace-navigation {
+  /* On narrow tablets scroll only the workspace links if they overflow,
+     keeping the remaining global actions accessible. */
+  .navbar.is-workspace .workspace-navigation {
     flex: 1 1 auto;
     min-width: 0;
     gap: 2px;
@@ -1533,9 +1543,9 @@ main.container.auth-page-shell {
     overscroll-behavior-x: contain;
     scrollbar-width: none;
   }
-  .navbar.note-tablet-nav .workspace-navigation::-webkit-scrollbar { display: none; }
-  .navbar.note-tablet-nav .scope-chips { flex: 0 0 auto; }
-  .navbar.note-tablet-nav .nav-workspace-link { flex: 0 0 auto; min-height: 40px; padding: 0 8px; }
+  .navbar.is-workspace .workspace-navigation::-webkit-scrollbar { display: none; }
+  .navbar.is-workspace .scope-chips { flex: 0 0 auto; }
+  .navbar.is-workspace .nav-workspace-link { flex: 0 0 auto; }
 }
 
 .vault {
