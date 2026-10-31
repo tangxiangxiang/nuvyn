@@ -26,8 +26,8 @@ there is no HTML login redirect at the API boundary.
 
 Bare-metal production listens on `127.0.0.1` unless `HOST` is set. Docker
 listens on `0.0.0.0` inside the container, but Compose publishes the port at
-`127.0.0.1:3000` by default. `NUVYN_PUBLIC_ORIGIN` is the browser-facing
-security authority; it is not derived from `HOST`, Docker's internal bind
+`127.0.0.1:3000` by default. `NUVYN_PUBLIC_ORIGIN` defines the explicit browser-facing
+origin allowlist (one origin or comma-separated HTTPS origins); it is not derived from `HOST`, Docker's internal bind
 address, or arbitrary forwarded headers.
 
 Plain HTTP is valid only for `localhost`, `127.0.0.1`, and `[::1]`. A
@@ -58,7 +58,9 @@ not the raw token. The server checks the owner, disabled state, revocation, and
 fixed absolute expiry before protected access. The default lifetime is 7 days;
 `last_seen_at` is observability metadata and does not extend that expiry.
 
-The profile is selected only from the resolved `NUVYN_PUBLIC_ORIGIN`:
+The profile is selected from the configured `NUVYN_PUBLIC_ORIGIN` scheme; multiple
+origins must all use HTTPS, and each host receives an independently scoped
+host-only session cookie:
 
 | Browser origin | Cookie contract |
 | --- | --- |
@@ -76,9 +78,13 @@ normal restarts leave still-valid sessions alone.
 Nuvyn uses layered same-origin protections for authenticated mutations:
 
 - `SameSite=Lax` limits cross-site cookie delivery.
-- `POST`, `PUT`, `PATCH`, and `DELETE` reject a present `Origin` that does not exactly match the resolved `NUVYN_PUBLIC_ORIGIN` and reject known `Sec-Fetch-Site: cross-site` requests.
+- `POST`, `PUT`, `PATCH`, and `DELETE` reject a present `Origin` that does not exactly match one explicitly configured `NUVYN_PUBLIC_ORIGIN` entry and reject known `Sec-Fetch-Site: cross-site` requests.
 - Body-bearing mutation endpoints require `Content-Type: application/json`; bodyless `DELETE` remains supported.
 - The same policy applies to setup, login, and logout mutations where applicable. CORS is not opened as an authentication mechanism.
+
+Adding a browser origin is not a CORS grant and does not permit cross-site
+mutation requests. Multi-origin mode does not override upstream proxy authentication,
+redirects, or PWA same-origin installation requirements.
 
 Missing browser metadata is allowed for compatible server-to-server callers,
 but protected callers still need a valid selected session cookie.
