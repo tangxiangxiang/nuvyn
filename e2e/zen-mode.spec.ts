@@ -479,14 +479,20 @@ test('Ledger Zen hides only the global navbar and exits without resetting the pa
   await expect(exit).toHaveCount(0)
   await expect(ledger).toBeVisible()
 
-  // Move outside the brand first; a stationary mouse can fail to generate
-  // a second pointerenter when the navbar was remounted.
-  await page.mouse.move(750, 550)
-  await page.locator('.navbar .brand').hover()
-  await expect(exit).toBeVisible({ timeout: 10_000 })
+  // Ledger uses the same existing keyboard chord as Vault.
+  await page.keyboard.press('ControlOrMeta+K')
+  await page.keyboard.press('z')
+  await expect(exit).toBeVisible()
   await page.keyboard.press('Escape')
   await expect(page.locator('.navbar')).toBeVisible()
   await expect(exit).toHaveCount(0)
+
+  await page.keyboard.press('ControlOrMeta+K')
+  await page.keyboard.press('z')
+  await expect(page.locator('.navbar')).toHaveCount(0)
+  await page.keyboard.press('ControlOrMeta+K')
+  await page.keyboard.press('z')
+  await expect(page.locator('.navbar')).toBeVisible()
   await page.reload()
   await expect(page.locator('.navbar')).toBeVisible()
   await expect(page.getByTestId('ledger-zen-exit')).toHaveCount(0)
