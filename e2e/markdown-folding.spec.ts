@@ -308,7 +308,7 @@ test('authored folding class stays visible and survives section collapse and mod
 test.describe('touch folding affordances', () => {
   test.use({ viewport: { width: 768, height: 1024 }, hasTouch: true })
 
-  test('expanded controls stay unobtrusive, tapping a heading folds, and collapsed controls remain visible', async ({ page, request }) => {
+  test('native Monaco controls stay tappable and Reader headings use on-demand disclosure', async ({ page, request }) => {
     const path = await setup(page, request)
     try {
       await expect(page.locator('.vault')).toHaveClass(/note-tablet-mode/)
@@ -316,7 +316,12 @@ test.describe('touch folding affordances', () => {
 
       const expandedGutter = page.locator('.monaco-editor .margin-view-overlays .codicon-folding-expanded').first()
       await expect(expandedGutter).toHaveCount(1)
-      await expect(expandedGutter).toHaveCSS('opacity', '0')
+      // Touch users must be able to see and operate Monaco's gutter folds.
+      await expect(expandedGutter).toHaveCSS('opacity', '1')
+      await expandedGutter.tap()
+      await expect(page.locator('.monaco-editor .view-lines')).not.toContainText('Parent body')
+      await page.locator('.monaco-editor .margin-view-overlays .codicon-folding-collapsed').first().tap()
+      await expect(page.locator('.monaco-editor .view-lines')).toContainText('Parent body')
 
       await page.getByTestId('view-toggle').tap()
       const article = page.locator('.reading-pane .article')
