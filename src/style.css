@@ -1457,7 +1457,8 @@ main.container.auth-page-shell {
 
 /* Only Note's tablet presentation removes the persistent sidebar tracks. */
 .vault.note-tablet-mode {
-  --navbar-h: 49px; /* 48px touch row plus its existing 1px border. */
+  /* Inherit the shared Workspace navbar height from the App shell.
+     A Note-only 49px override left the canvas out of sync with Ledger/Board. */
   position: relative;
   min-width: 0;
   overflow: hidden;
@@ -1517,11 +1518,9 @@ main.container.auth-page-shell {
 }
 .note-tablet-mode .article :where(img, video, svg) { max-width: 100%; }
 .note-tablet-mode .article :where(.nuvyn-code-group-tab, summary) { min-height: 40px; }
-/* Keep Note's 48px tablet toolbar for its 40px action targets, but
-   use the same 28px workspace selection chips as Ledger/Board/Diary. */
+/* Note tablets use the same 36px header and native small action buttons
+   as the other Workspaces. Do not force 40px buttons into a 36px navbar. */
 .navbar.note-tablet-nav .nav-actions { gap: 2px; }
-.navbar.note-tablet-nav .nav-actions .n-button { min-width: 40px; min-height: 40px; }
-.navbar.note-tablet-nav .navbar-inner { min-height: 48px; }
 @media (min-width: 601px) and (max-width: 1199px) {
   .navbar.note-tablet-nav .nav-workspace-link {
     box-sizing: border-box;
