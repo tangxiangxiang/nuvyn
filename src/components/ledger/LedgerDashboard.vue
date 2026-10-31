@@ -1935,9 +1935,38 @@ function animatedMoneyParts(minor: number, currency: string, key: MetricKey): { 
 .ledger-period-values strong.is-repayment { color: var(--ledger-repayment); }
 .ledger-period-values strong.is-balance { color: var(--ledger-balance); }
 
+@media (min-width: 621px) and (max-width: 960px) {
+  .ledger-metric-layout {
+    position: relative;
+    grid-template-columns: minmax(0, 1fr);
+    padding: 16px;
+  }
+  .ledger-metric-icon {
+    position: absolute;
+    top: 16px;
+    left: 16px;
+    width: 28px;
+    height: 28px;
+    border-radius: 9px;
+  }
+  .ledger-metric-copy :deep(.n-statistic__label) {
+    display: flex;
+    align-items: center;
+    min-height: 28px;
+    padding-left: 38px;
+    margin-bottom: 12px;
+  }
+  .ledger-metric-copy :deep(.n-statistic-value) {
+    font-size: clamp(1rem, 2.5vw, 1.35rem);
+    white-space: nowrap;
+  }
+  .ledger-metric-copy :deep(.n-statistic-value__prefix),
+  .ledger-metric-copy :deep(.n-statistic-value__content) {
+    font-size: inherit;
+  }
+}
+
 @media (max-width: 960px) {
-  .ledger-metric-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-  .ledger-metric-card.is-primary { grid-column: 1 / -1; }
   .ledger-dashboard-two-column { grid-template-columns: 1fr; row-gap: 14px; }
   .ledger-cashflow-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .ledger-cashflow-grid > div:nth-child(odd) {

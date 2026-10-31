@@ -455,6 +455,7 @@ const {
   authorizeDocumentPath: authorizeDiaryDocumentPath,
   isDiaryAccessReady: () => diaryAccess.isUnlocked.value,
   singleManagedDiaryDocument: true,
+  canActivateRestoredPath: (path) => scopeForWorkspacePath(path) === activeScope.value,
   onPreviewReplaced: (from, to) => {
     workspaceTabOrder.value = migrateWorkspaceTabIds(workspaceTabOrder.value, [{ from, to }])
   },

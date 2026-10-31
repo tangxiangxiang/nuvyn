@@ -442,18 +442,6 @@ provide(VaultViewModeKey, { mode: viewMode, set: setViewMode, toggle: toggleView
     @logout="onLogout"
     @lock-diary="lockDiary"
   />
-  <NButton
-    v-if="ledgerZenActive"
-    class="ledger-zen-exit"
-    attr-type="button"
-    size="small"
-    quaternary
-    :bordered="false"
-    :aria-label="t('nav.zen_exit')"
-    :title="t('nav.zen_exit')"
-    data-testid="ledger-zen-exit"
-    @click="exitZenMode"
-  >{{ t('nav.zen_exit') }}</NButton>
   <SettingsModal
     v-if="isLedgerRoute"
     :open="ledgerSettingsOpen"

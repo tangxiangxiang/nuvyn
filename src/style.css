@@ -1002,24 +1002,6 @@ main.container.auth-page-shell {
   padding-bottom: 0;
 }
 
-/* Ledger Zen leaves the entire financial page intact. Only the global
-   navbar disappears; this small touch-accessible escape hatch is not a
-   replacement toolbar and never changes Ledger layout or data state. */
-.ledger-zen-exit {
-  position: fixed;
-  z-index: 90;
-  top: max(12px, env(safe-area-inset-top));
-  right: max(12px, env(safe-area-inset-right));
-  min-height: 36px;
-  padding: 0 12px;
-  color: var(--text-muted);
-  background: var(--bg-soft);
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  box-shadow: 0 2px 12px #00000012;
-}
-.ledger-zen-exit:hover { color: var(--text-h); background: var(--bg-soft); }
-
 /* Post list */
 .post-list {
   display: flex;
@@ -5290,10 +5272,15 @@ body:has(.ledger-detail-sheet-card) .n-modal-mask {
 }
 .vault.is-zen-mode .reading-pane {
   padding:
-    max(env(safe-area-inset-top), clamp(32px, 6vh, 72px))
+    max(48px, env(safe-area-inset-top))
     max(24px, env(safe-area-inset-right))
     max(32px, env(safe-area-inset-bottom))
     max(24px, env(safe-area-inset-left));
+}
+@media (max-width: 600px) {
+  .vault.is-zen-mode .reading-pane {
+    padding-top: calc(24px + env(safe-area-inset-top));
+  }
 }
 .vault.is-zen-mode .reading-layout {
   max-width: 800px;

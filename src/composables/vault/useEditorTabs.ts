@@ -62,6 +62,8 @@ export function useEditorTabs(opts: {
   onDiaryAccessCancelled?: (path: string) => void
   /** Keep only one canonical managed Diary document open in this workspace. */
   singleManagedDiaryDocument?: boolean
+  /** Limit home-route activation to the selected workspace; explicit deep links win. */
+  canActivateRestoredPath?: (path: string) => boolean
   onPreviewReplaced?: (from: string, to: string) => void
 }) {
   const toast = useToast()
@@ -560,6 +562,7 @@ export function useEditorTabs(opts: {
       && deferredDiaryActivePath === path
       && routePath.value === null
       && activePath.value === null
+      && (opts.canActivateRestoredPath?.(path) ?? true)
     ) {
       activePath.value = path
       navigateTo(path)
@@ -693,6 +696,7 @@ export function useEditorTabs(opts: {
         && !routeDiaryPath
         && saved.active === persistedDiaryPath
         && needsDiaryAccess(persistedDiaryPath)
+        && (opts.canActivateRestoredPath?.(persistedDiaryPath) ?? true)
       ) {
         deferredDiaryActivePath = persistedDiaryPath
       }
@@ -721,11 +725,14 @@ export function useEditorTabs(opts: {
         // Prefer the saved active if it survived restore; otherwise
         // fall back to the first restored tab (left-to-right reading
         // order matches the persisted order).
-        const target = saved.active && tabs.value.some((t) => t.path === saved.active)
+        const candidates = tabs.value.filter((tab) => opts.canActivateRestoredPath?.(tab.path) ?? true)
+        const target = saved.active && candidates.some((tab) => tab.path === saved.active)
           ? saved.active
-          : tabs.value[0].path
-        activePath.value = target
-        navigateTo(target)
+          : candidates[0]?.path
+        if (target) {
+          activePath.value = target
+          navigateTo(target)
+        }
       }
       if (missing.length > 0) {
         const sample = missing.slice(0, 3).map((p) => `· ${p}`).join('\n')

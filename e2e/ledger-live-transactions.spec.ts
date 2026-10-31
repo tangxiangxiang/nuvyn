@@ -296,6 +296,31 @@ test('real Ledger onboarding and expense survive dashboard refresh', async ({ pa
 // This file owns the fresh Ledger onboarding case first. Tests below may call
 // ensureLedgerDashboardFixtures(), but must not move ahead of onboarding
 // because the application E2E server and SQLite database are shared within a shard.
+test('tablet overview keeps three cards in one row with complete single-line amounts', async ({ page, request }) => {
+  await ensureLedgerDashboardFixtures(request)
+  await page.goto('/ledger')
+  const cards = page.locator('.ledger-metric-card')
+  await expect(cards).toHaveCount(3)
+  for (const width of [640, 768, 960]) {
+    await page.setViewportSize({ width, height: 900 })
+    const measurements = await cards.evaluateAll((elements) => elements.map((card, index) => {
+      const amount = card.querySelector('.n-statistic-value__content')!
+      amount.textContent = ['410,520.90', '227,119.00', '183,401.90'][index]!
+      const range = document.createRange()
+      range.selectNodeContents(amount)
+      const text = range.getBoundingClientRect()
+      const bounds = card.getBoundingClientRect()
+      return { top: bounds.top, left: text.left - bounds.left, right: bounds.right - text.right, textHeight: text.height }
+    }))
+    expect(Math.max(...measurements.map((m) => m.top)) - Math.min(...measurements.map((m) => m.top))).toBeLessThan(1)
+    for (const measurement of measurements) {
+      expect(measurement.left).toBeGreaterThan(0)
+      expect(measurement.right).toBeGreaterThan(0)
+      expect(measurement.textHeight).toBeLessThan(32)
+    }
+  }
+})
+
 test('Accounts cards and lists use the desktop workspace height without mobile regression', async ({ page, request }) => {
   await ensureLedgerDashboardFixtures(request)
 

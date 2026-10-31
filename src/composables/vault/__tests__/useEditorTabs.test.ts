@@ -2433,6 +2433,31 @@ describe('useEditorTabs — tab persistence', () => {
     expect(h.activePath.value).toBe('a')
   })
 
+  it.each([true, false])('restores Note instead of the last Diary when returning home (unlocked=%s)', async (unlocked) => {
+    const diary = 'diary/2026-08-27'
+    stubFetchForPaths({ 'inbox/note': 'Note body', [diary]: 'Diary body' })
+    localStorage.setItem(PERSIST_KEY, JSON.stringify({
+      v: 1, paths: ['inbox/note', diary], active: diary,
+    }))
+    const h = await setup({
+      singleManagedDiaryDocument: true,
+      isDiaryAccessReady: () => unlocked,
+      canActivateRestoredPath: (path) => !path.startsWith('diary/'),
+    })
+    expect(h.activePath.value).toBe('inbox/note')
+    expect(h.tabs.value.find((tab) => tab.path === h.activePath.value)?.raw).toBe('Note body')
+    h.unmount()
+  })
+
+  it('leaves Note home empty when only a Diary tab was retained', async () => {
+    const diary = 'diary/2026-08-27'
+    stubFetchForPaths({ [diary]: 'Diary body' })
+    localStorage.setItem(PERSIST_KEY, JSON.stringify({ v: 1, paths: [diary], active: diary }))
+    const h = await setup({ canActivateRestoredPath: (path) => !path.startsWith('diary/') })
+    expect(h.activePath.value).toBeNull()
+    h.unmount()
+  })
+
   it('restores only the persisted active managed Diary path', async () => {
     const paths = [
       'diary/2026-09-14',

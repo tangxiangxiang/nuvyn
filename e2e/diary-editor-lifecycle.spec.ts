@@ -285,6 +285,34 @@ test('Native Editor dirty lifecycle preserves identity and reveals Calendar afte
   expect(state.consoleErrors).toEqual([])
 })
 
+test('returning from Ledger to Note never activates the retained Diary document', async ({ page, request }) => {
+  const date = localCivilDate()
+  const note = `inbox/ledger-return-${RUN_ID}`
+  const secret = `DIARY_LEDGER_RETURN_${RUN_ID}`
+  try {
+    await seedDiary(request, date, `# ${date}\n\n${secret}`)
+    await seedOrdinaryNote(request, note)
+    await page.goto(`/vault/${note}`)
+    const noteTab = page.locator(`[role="tab"][data-tab-id="${note}"]`)
+    await expect(noteTab).toHaveAttribute('aria-selected', 'true')
+    await noteTab.dblclick()
+    await page.locator('.scope-chip').filter({ hasText: 'diary' }).click()
+    await expect(page.getByTestId('diary-calendar')).toBeVisible()
+    await clickDiaryDate(page, date)
+    await assertNativeReader(page, date)
+    await expect(page.getByText(secret, { exact: true })).toBeVisible()
+    await page.locator('.scope-chip').filter({ hasText: 'ledger' }).click()
+    await expect(page.getByTestId('ledger-page')).toBeVisible()
+    await page.locator('.scope-chip').filter({ hasText: 'note' }).click()
+    await expect(page).toHaveURL(`/vault/${note}`)
+    await expect(noteTab).toHaveAttribute('aria-selected', 'true')
+    await expect(page.getByText(secret, { exact: true })).not.toBeVisible()
+  } finally {
+    await deleteDiaryDate(request, date)
+    await deletePost(request, note)
+  }
+})
+
 test('switching to Note saves and hides the Diary edit, then restores it on re-entry', async ({ page, request }) => {
   const date = localCivilDate()
   const path = diaryPath(date)
