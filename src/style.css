@@ -1616,38 +1616,8 @@ main.container.auth-page-shell {
   --accent-bg: var(--vs-accent-bg);
 }
 
-/* On compact screens Calendar Home uses the full content canvas. Ledger uses
-   the same compact App Shell navbar, while its body remains a normal
-   scrollable workspace; these rules only keep the shared scope navigation
-   compact on narrow screens. */
-@media (max-width: 900px) {
-  .navbar.is-vault.diary-calendar-mode .navbar-inner {
-    gap: 8px;
-    padding-left: 6px;
-    padding-right: 4px;
-  }
-
-  .navbar.is-vault.diary-calendar-mode .scope-chips {
-    gap: 0;
-    margin-left: 0;
-  }
-
-  .navbar.is-vault.diary-calendar-mode .scope-chip {
-    padding-left: 5px;
-    padding-right: 5px;
-  }
-
-  .navbar.is-vault.diary-calendar-mode .nav-actions {
-    flex-shrink: 0;
-    gap: 2px;
-  }
-}
-
-/* Diary Calendar's older compact rule applies below 900px. Match the same
-   workspace gap on tablets, without touching its phone-only 8px layout. */
-@media (min-width: 601px) and (max-width: 900px) {
-  .navbar.is-vault.diary-calendar-mode .navbar-inner { gap: 10px; }
-}
+/* Diary Calendar shares the same global navbar spacing as every Workspace;
+   the common <=600px compact rules below also cover Diary on phones. */
 
 /* Workspace navigation entries are filtered by the shared mobile
    availability capability. Keep the remaining controls compact at phone
