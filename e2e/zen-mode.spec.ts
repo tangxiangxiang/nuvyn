@@ -479,7 +479,9 @@ test('Ledger Zen hides only the global navbar and exits without resetting the pa
   await expect(exit).toHaveCount(0)
   await expect(ledger).toBeVisible()
 
-  // A second entry must still work after the first exit.
+  // Move outside the brand first; a stationary mouse can fail to generate
+  // a second pointerenter when the navbar was remounted.
+  await page.mouse.move(750, 550)
   await page.locator('.navbar .brand').hover()
   await expect(exit).toBeVisible({ timeout: 10_000 })
   await page.keyboard.press('Escape')
