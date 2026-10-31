@@ -86,6 +86,20 @@ test('mobile direct Board route remains open while its navigation entry stays ab
   await expect(page.locator('.scope-chip[aria-pressed="true"]')).toHaveCount(0)
 })
 
+diaryTest('Diary Calendar keeps workspace labels visible on tablet', async ({ page }) => {
+  await page.setViewportSize(DESKTOP_VIEWPORT)
+  await page.goto('/vault')
+  await page.setViewportSize({ width: 768, height: 1024 })
+  const diary = page.locator('.scope-chip').filter({ hasText: 'diary' })
+  await diary.click()
+  await expect(page.getByTestId('diary-calendar-surface')).toBeVisible()
+  await expect(page.locator('.navbar .brand-wordmark')).toBeVisible()
+  for (const name of ['note', 'diary', 'ledger']) {
+    await expect(page.locator('.navbar .scope-chip-label').filter({ hasText: name })).toBeVisible()
+  }
+  await expect(page.locator('.navbar .workspace-board-link-label')).toBeVisible()
+})
+
 diaryTest('Diary and Ledger entries remain usable from the mobile navigation', async ({ page }) => {
   // Let the Diary fixture complete its supported unlock/bootstrap flow on
   // desktop, where Note is still present, then exercise the mobile nav.
