@@ -38,6 +38,39 @@ async function brandWorkspaceGap(page: Page): Promise<number> {
   return workspaceBounds!.x - (brandBounds!.x + brandBounds!.width)
 }
 
+test('switching to Note does not enlarge the shared tablet header', async ({ page }) => {
+  for (const width of [768, 1024, 1199]) {
+    await page.setViewportSize({ width, height: 900 })
+    await page.goto('/board')
+    await expect(page.locator('.navbar-inner')).toHaveCSS('height', '36px')
+    const boardHeader = await page.locator('.navbar').boundingBox()
+    expect(boardHeader).not.toBeNull()
+
+    for (const next of ['note', 'ledger', 'note', 'board'] as const) {
+      if (next === 'board') {
+        await page.locator('.workspace-board-link').click()
+        await expect(page).toHaveURL(/\/board(?:[/?#]|$)/)
+      } else {
+        await page.locator('.scope-chip').filter({ hasText: next }).click()
+        await expect(page).toHaveURL(next === 'note' ? /\/vault(?:[/?#]|$)/ : /\/ledger(?:[/?#]|$)/)
+      }
+      await expect(page.locator('.navbar-inner')).toHaveCSS('height', '36px')
+      const header = await page.locator('.navbar').boundingBox()
+      expect(header).not.toBeNull()
+      expect(header!.height, `header on ${next} at ${width}px`).toBeCloseTo(boardHeader!.height, 1)
+      if (next === 'note') {
+        await expect(page.locator('.navbar')).toHaveClass(/note-tablet-nav/)
+        await expect(page.locator('.vault')).toHaveClass(/note-tablet-mode/)
+        await expect(page.locator('.scope-chip').filter({ hasText: 'note' })).toHaveCSS('height', '28px')
+        const headerHeight = await page.locator('.vault').evaluate((element) => (
+          getComputedStyle(element).getPropertyValue('--navbar-h').trim()
+        ))
+        expect(headerHeight).toBe('36px')
+      }
+    }
+  }
+})
+
 test('tablet and desktop align the first workspace equally beside the Nuvyn brand', async ({ page }) => {
   for (const width of [768, 1024, 1280]) {
     await page.setViewportSize({ width, height: 900 })
