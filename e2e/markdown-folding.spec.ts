@@ -303,3 +303,62 @@ test('authored folding class stays visible and survives section collapse and mod
     await expect(content).toHaveClass('nuvyn-fold-hidden custom')
   } finally { await request.delete(`/api/posts/${path}`) }
 })
+
+
+test.describe('touch folding affordances', () => {
+  test.use({ viewport: { width: 768, height: 1024 }, hasTouch: true })
+
+  test('expanded controls stay unobtrusive, tapping a heading folds, and collapsed controls remain visible', async ({ page, request }) => {
+    const path = await setup(page, request)
+    try {
+      await expect(page.locator('.vault')).toHaveClass(/note-tablet-mode/)
+      expect(await page.evaluate(() => matchMedia('(hover: none), (pointer: coarse)').matches)).toBe(true)
+
+      const expandedGutter = page.locator('.monaco-editor .margin-view-overlays .codicon-folding-expanded').first()
+      await expect(expandedGutter).toHaveCount(1)
+      await expect(expandedGutter).toHaveCSS('opacity', '0')
+
+      await page.getByTestId('view-toggle').tap()
+      const article = page.locator('.reading-pane .article')
+      const heading = article.locator('#parent')
+      const control = heading.locator(':scope > .nuvyn-fold-toggle')
+      await expect(control).toHaveAttribute('aria-expanded', 'true')
+      await expect(control).toHaveCSS('opacity', '0')
+
+      await heading.tap()
+      await expect(control).toHaveAttribute('aria-expanded', 'false')
+      await expect(control).toHaveCSS('opacity', '1')
+      await expect(article.getByText('Parent body', { exact: true })).toBeHidden()
+
+      await heading.tap()
+      await expect(control).toHaveAttribute('aria-expanded', 'true')
+      await expect(control).toHaveCSS('opacity', '0')
+      await expect(article.getByText('Parent body', { exact: true })).toBeVisible()
+
+      // The explicit disclosure button remains operable on touch.
+      await control.tap()
+      await expect(control).toHaveAttribute('aria-expanded', 'false')
+      await control.tap()
+      await expect(control).toHaveAttribute('aria-expanded', 'true')
+    } finally { await request.delete(`/api/posts/${path}`) }
+  })
+
+  test('touching a link inside a heading does not fold the heading', async ({ page, request }) => {
+    const content = '# Document\\n\\n## Heading with [link](https://example.com)\\n\\nKeep this content visible'
+    const path = await setup(page, request, content)
+    try {
+      await page.getByTestId('view-toggle').tap()
+      const heading = page.locator('.reading-pane .article h2')
+      const control = heading.locator(':scope > .nuvyn-fold-toggle')
+      await expect(control).toHaveAttribute('aria-expanded', 'true')
+      // This click can navigate externally; intercept it to test the fold
+      // event without leaving the Nuvyn document.
+      await heading.locator('a').evaluate((anchor) => {
+        anchor.addEventListener('click', (event) => event.preventDefault(), { once: true })
+      })
+      await heading.locator('a').tap()
+      await expect(control).toHaveAttribute('aria-expanded', 'true')
+      await expect(page.locator('.reading-pane .article')).toContainText('Keep this content visible')
+    } finally { await request.delete(`/api/posts/${path}`) }
+  })
+})
