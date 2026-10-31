@@ -83,8 +83,8 @@ heading/block (or Monaco gutter). Reader controls also appear on keyboard
 focus. On touch devices, expanded headings no longer show a permanent chevron:
 tap a Reader heading to fold it, and tap again to expand it. A collapsed
 heading retains a visible chevron, which can also be tapped. In the Monaco
-editor, expanded gutter chevrons stay out of the way while native gutter and
-keyboard folding remain available. Revealing controls does not move content.
+editor, native gutter controls stay visible on touch screens so they remain
+discoverable and tappable; desktop still uses hover. Revealing controls does not move content.
 
 In reading mode, only section headings receive chevrons. A leading H1 is
 treated as the document title and has no folding control; later H1 sections
