@@ -259,7 +259,7 @@ describe('Monaco EditorPane', () => {
   }
 
   it('unfolds the touched collapsed heading immediately using that line rather than the editor cursor', () => {
-    const wrapper = mount(EditorPane, { props: { modelValue: '# Title\\n\\n## First\\n\\nBody', path: 'inbox/first' } })
+    const wrapper = mount(EditorPane, { props: { modelValue: '# Title\n\n## First\n\nBody', path: 'inbox/first' } })
     const host = editorHost(wrapper)
     const gutter = document.createElement('div')
     gutter.className = 'margin-view-overlays'
