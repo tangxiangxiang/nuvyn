@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, nextTick, provide, ref, watch, watchEffect } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, provide, ref, watch, watchEffect } from 'vue'
 import { NButton } from 'naive-ui'
 import { useRoute, useRouter } from 'vue-router'
 import NavBar from './components/NavBar.vue'
@@ -43,7 +43,7 @@ const vaultIdentity = getVaultIdentityState()
 const { t } = useI18n()
 const toast = useToast()
 const diaryAccess = useDiaryAccessSession()
-const { active: zenModeActive, exit: exitZenMode } = useZenMode()
+const { active: zenModeActive, enter: enterZenMode, exit: exitZenMode } = useZenMode()
 const { activeScope, selectScope } = useScopeFilter()
 const settingsRequestTick = ref(0)
 const noteTabletImageCommand = ref<(() => void) | null>(null)
@@ -111,14 +111,58 @@ const isVaultRoute = computed(() => (
   && auth.state.value === 'authenticated'
   && vaultIdentity.state.value === 'ready'
 ))
-const zenModeOwnsChrome = computed(() => isVaultRoute.value && zenModeActive.value)
-watch(isVaultRoute, (isVault) => {
-  if (!isVault) {
+const isLedgerRoute = computed(() => workspaceKind.value === 'ledger')
+const ledgerZenEligible = computed(() => (
+  isLedgerRoute.value
+  && auth.state.value === 'authenticated'
+  && chromeStyle.value === 'workspace'
+  && !ledgerSettingsOpen.value
+))
+const ledgerZenActive = computed(() => ledgerZenEligible.value && zenModeActive.value)
+const zenModeOwnsChrome = computed(() => zenModeActive.value && (isVaultRoute.value || ledgerZenEligible.value))
+
+// VaultView continues to own document Zen. Ledger's simpler Zen is owned by
+// the App shell because Ledger has no editor/document lifecycle to manage.
+const ledgerZenBrandEntry = {
+  canEnter: () => ledgerZenEligible.value,
+  enter: () => {
+    if (!ledgerZenEligible.value) return false
+    enterZenMode()
+    return true
+  },
+}
+watch(isLedgerRoute, (ledger) => {
+  if (ledger) zenModeBrandEntry.value = ledgerZenBrandEntry
+  else if (zenModeBrandEntry.value === ledgerZenBrandEntry) zenModeBrandEntry.value = null
+}, { immediate: true, flush: 'sync' })
+
+watch(workspaceKind, (kind, previous) => {
+  // Do not carry a Vault document's Zen state into Ledger or vice versa.
+  if (kind !== previous) {
     exitZenMode()
     zenModeBrandTransitioning.value = false
   }
 }, { flush: 'sync' })
-const isLedgerRoute = computed(() => workspaceKind.value === 'ledger')
+watch([isVaultRoute, ledgerZenEligible], ([vault, ledger]) => {
+  if (!vault && !ledger) {
+    exitZenMode()
+    zenModeBrandTransitioning.value = false
+  }
+}, { flush: 'sync' })
+watch(() => route.fullPath, (next, previous) => {
+  // Navigating between Ledger screens exits the temporary presentation.
+  if (next !== previous && isLedgerRoute.value && zenModeActive.value) exitZenMode()
+}, { flush: 'sync' })
+
+function onLedgerZenKeydown(event: KeyboardEvent): void {
+  if (!ledgerZenActive.value || event.key !== 'Escape' || event.defaultPrevented || event.isComposing) return
+  // Menus, sheets and dialogs own Escape before the optional Zen exit.
+  if (document.querySelector('[role="dialog"], [role="menu"], [aria-modal="true"], .n-modal-mask')) return
+  event.preventDefault()
+  exitZenMode()
+}
+onMounted(() => window.addEventListener('keydown', onLedgerZenKeydown))
+onBeforeUnmount(() => window.removeEventListener('keydown', onLedgerZenKeydown))
 // Ledger's sibling routes have no shared view owner. Keep one module command
 // across them, and invalidate it when leaving Ledger or changing auth owner.
 watch([isLedgerRoute, () => auth.state.value, () => auth.user.value?.username ?? null], ([isLedger, authState], _previous, onCleanup) => {
@@ -386,6 +430,18 @@ provide(VaultViewModeKey, { mode: viewMode, set: setViewMode, toggle: toggleView
     @logout="onLogout"
     @lock-diary="lockDiary"
   />
+  <NButton
+    v-if="ledgerZenActive"
+    class="ledger-zen-exit"
+    attr-type="button"
+    size="small"
+    quaternary
+    :bordered="false"
+    :aria-label="t('nav.zen_exit')"
+    :title="t('nav.zen_exit')"
+    data-testid="ledger-zen-exit"
+    @click="exitZenMode"
+  >{{ t('nav.zen_exit') }}</NButton>
   <SettingsModal
     v-if="isLedgerRoute"
     :open="ledgerSettingsOpen"
@@ -424,7 +480,7 @@ provide(VaultViewModeKey, { mode: viewMode, set: setViewMode, toggle: toggleView
       :class="['container', {
         'full-width': r.meta.fullWidth,
         'auth-page-shell': r.meta.authPage === true,
-        'zen-mode-shell': zenModeOwnsChrome,
+        'zen-mode-shell': isVaultRoute && zenModeActive,
       }]"
       :style="{ '--navbar-h': zenModeOwnsChrome ? '0px' : (showNormalChrome ? (isWorkspaceChrome ? '36px' : '56px') : '0px') }"
       :inert="auth.transitionKind.value !== null || undefined"
