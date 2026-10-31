@@ -325,6 +325,16 @@ test('touch long press on the brand enters Zen Mode after the constellation fini
     await page.setViewportSize({ width: touchViewportWidth, height: 812 })
 
     const brand = page.locator('.navbar .brand')
+    const logo = brand.locator('.brand-logo')
+    // Native image drag, callout and text selection must not steal the
+    // touch long-press gesture before its three-second Zen recognition.
+    await expect(brand).toHaveCSS('touch-action', 'none')
+    await expect(logo).toHaveAttribute('draggable', 'false')
+    await expect(logo).toHaveCSS('pointer-events', 'none')
+    const contextMenuPrevented = await logo.evaluate((element) => (
+      !element.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true }))
+    ))
+    expect(contextMenuPrevented).toBe(true)
     const editor = page.locator('.editor-pane .monaco-editor').first()
     await editor.evaluate((element) => {
       Object.defineProperty(window, '__zenModeEditorNode', { value: element, configurable: true })
