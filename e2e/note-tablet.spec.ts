@@ -80,6 +80,8 @@ for (const [width, height] of [[390, 844], [600, 900], [601, 900], [768, 1024], 
       if (width! > 600 && width! < 1200) {
         await expect(page.locator('.vault')).toHaveClass(/note-tablet-mode/)
         await expect(page.locator('.navbar')).toHaveClass(/note-tablet-nav/)
+        // Match the compact 28px selection chips used by Ledger and Board.
+        await expect(note).toHaveCSS('height', '28px')
         await expect(page.locator('.navbar .brand-wordmark')).toBeVisible()
         for (const name of ['note', 'diary', 'ledger']) {
           await expect(page.locator('.navbar .scope-chip-label').filter({ hasText: name })).toBeVisible()
