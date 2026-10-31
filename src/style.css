@@ -1294,6 +1294,9 @@ main.container.auth-page-shell {
   .article .nuvyn-fold-toggle { opacity: 0; }
   .article .nuvyn-fold-toggle[aria-expanded='false'],
   .article .nuvyn-fold-toggle:focus-visible { opacity: 1; }
+  /* The glyph's visual center sits below the heading text on touch; lift
+     collapsed indicators without changing heading layout or hit area. */
+  .article .nuvyn-fold-toggle[aria-expanded='false'] { top: -0.2em; }
 
   /* Monaco gutters cannot be revealed reliably by hover on touch.
      Keep its native controls discoverable/tappable rather than rendering
