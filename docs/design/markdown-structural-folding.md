@@ -57,8 +57,9 @@ Controls are positioned outside the text flow, without reserving inline space
 or changing line height. On touch devices expanded Reader controls are hidden
 until focus; tapping a heading toggles its section, while collapsed controls
 remain visible to signal hidden content. Interactive links inside headings
-retain their normal behavior. The Monaco gutter no longer forces expanded
-controls visible for coarse pointers; native folding remains active. One root
+retain their normal behavior. Monaco folding gutters remain visibly
+tappable on coarse pointers: hiding them behind hover would remove the only
+discoverable native touch target. Desktop retains the hover behavior. One root
 click listener serves all controls. Disposal restores hidden state, removes owned
 controls/IDs and releases references. There is no folding MutationObserver.
 
