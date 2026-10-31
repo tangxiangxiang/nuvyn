@@ -16,6 +16,7 @@ import { ensureVaultIdentity, getVaultIdentityState } from './lib/vault-identity
 import { useToast } from './composables/useToast'
 import { useScopeFilter } from './composables/vault/useScopeFilter'
 import { useZenMode } from './composables/vault/useZenMode'
+import { createZenModeChord } from './views/zenModeChord'
 import { useDiaryAccessSession } from './composables/diary/useDiaryAccessSession'
 import { DiaryAccessContextKey } from './composables/diary/diaryAccessContext'
 import { AppShellContextKey } from './composables/appShellContext'
@@ -154,15 +155,26 @@ watch(() => route.fullPath, (next, previous) => {
   if (next !== previous && isLedgerRoute.value && zenModeActive.value) exitZenMode()
 }, { flush: 'sync' })
 
-function onLedgerZenKeydown(event: KeyboardEvent): void {
-  if (!ledgerZenActive.value || event.key !== 'Escape' || event.defaultPrevented || event.isComposing) return
-  // Menus, sheets and dialogs own Escape before the optional Zen exit.
-  if (document.querySelector('[role="dialog"], [role="menu"], [aria-modal="true"], .n-modal-mask')) return
-  event.preventDefault()
-  exitZenMode()
-}
-onMounted(() => window.addEventListener('keydown', onLedgerZenKeydown))
-onBeforeUnmount(() => window.removeEventListener('keydown', onLedgerZenKeydown))
+const ledgerZenChord = createZenModeChord({
+  canToggle: () => ledgerZenEligible.value,
+  isActive: () => ledgerZenActive.value,
+  isBlocked: () => Boolean(document.querySelector(
+    '[role="dialog"], [role="menu"], [aria-modal="true"], .n-modal-mask, .n-drawer-mask',
+  )),
+  toggle: () => {
+    if (ledgerZenActive.value) exitZenMode()
+    else if (ledgerZenEligible.value) enterZenMode()
+  },
+  exit: exitZenMode,
+})
+watch(ledgerZenEligible, (eligible) => {
+  if (!eligible) ledgerZenChord.reset()
+}, { flush: 'sync' })
+onMounted(() => window.addEventListener('keydown', ledgerZenChord.onKeydown))
+onBeforeUnmount(() => {
+  window.removeEventListener('keydown', ledgerZenChord.onKeydown)
+  ledgerZenChord.dispose()
+})
 // Ledger's sibling routes have no shared view owner. Keep one module command
 // across them, and invalidate it when leaving Ledger or changing auth owner.
 watch([isLedgerRoute, () => auth.state.value, () => auth.user.value?.username ?? null], ([isLedger, authState], _previous, onCleanup) => {
