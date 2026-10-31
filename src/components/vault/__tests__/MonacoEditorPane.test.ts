@@ -258,15 +258,16 @@ describe('Monaco EditorPane', () => {
     )
   }
 
-  it('unfolds the touched collapsed heading immediately using that line rather than the editor cursor', () => {
-    const wrapper = mount(EditorPane, { props: { modelValue: '# Title\n\n## First\n\nBody', path: 'inbox/first' } })
+  it('uses one exact-line command path for repeated touch fold and unfold on the same heading', () => {
+    const wrapper = mount(EditorPane, { props: { modelValue: '# Title\\n\\n## First\\n\\nBody', path: 'inbox/first' } })
     const host = editorHost(wrapper)
     const gutter = document.createElement('div')
     gutter.className = 'margin-view-overlays'
-    const collapsed = document.createElement('div')
-    collapsed.className = 'codicon-folding-collapsed'
-    gutter.append(collapsed)
+    const marker = document.createElement('div')
+    marker.className = 'codicon-folding-expanded'
+    gutter.append(marker)
     host.querySelector('.monaco-editor')!.append(gutter)
+    // The editor cursor is intentionally elsewhere: gutter hit-test wins.
     mocks.editor.getTargetAtClientPoint.mockReturnValue({ position: { lineNumber: 3, column: 1 } } as any)
     const pointer = (type: string, button = 0) => {
       const event = new Event('pointerdown', { bubbles: true, cancelable: true })
@@ -276,26 +277,36 @@ describe('Monaco EditorPane', () => {
         clientX: { value: 24 },
         clientY: { value: 105 },
       })
-      collapsed.dispatchEvent(event)
+      marker.dispatchEvent(event)
       return event
     }
 
-    const touch = pointer('touch')
-    expect(touch.defaultPrevented).toBe(true)
-    expect(mocks.editor.trigger).toHaveBeenCalledWith('nuvyn-touch-folding', 'editor.unfold', {
-      selectionLines: [2],
-    })
-    // Reopening uses the clicked section, even when the editor's cursor is
-    // somewhere else; subsequent touch attempts continue to hit that section.
-    pointer('touch')
-    expect(mocks.editor.trigger).toHaveBeenCalledTimes(2)
+    for (let cycle = 0; cycle < 3; cycle++) {
+      marker.className = 'codicon-folding-expanded'
+      expect(pointer('touch').defaultPrevented).toBe(true)
+      expect(mocks.editor.trigger).toHaveBeenLastCalledWith('nuvyn-touch-folding', 'editor.fold', {
+        selectionLines: [2],
+      })
+      marker.className = 'codicon-folding-collapsed'
+      expect(pointer('touch').defaultPrevented).toBe(true)
+      expect(mocks.editor.trigger).toHaveBeenLastCalledWith('nuvyn-touch-folding', 'editor.unfold', {
+        selectionLines: [2],
+      })
+    }
+    expect(mocks.editor.trigger).toHaveBeenCalledTimes(6)
 
     mocks.editor.trigger.mockClear()
+    marker.className = 'codicon-folding-expanded'
     expect(pointer('mouse').defaultPrevented).toBe(false)
     expect(pointer('touch', 2).defaultPrevented).toBe(false)
     expect(mocks.editor.trigger).not.toHaveBeenCalled()
-    wrapper.unmount()
+    // Pen taps share the same touch path.
+    expect(pointer('pen').defaultPrevented).toBe(true)
+    expect(mocks.editor.trigger).toHaveBeenCalledWith('nuvyn-touch-folding', 'editor.fold', {
+      selectionLines: [2],
+    })
 
+    wrapper.unmount()
     mocks.editor.trigger.mockClear()
     pointer('touch')
     expect(mocks.editor.trigger).not.toHaveBeenCalled()
