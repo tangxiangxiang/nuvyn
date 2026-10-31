@@ -111,7 +111,7 @@ describe('Phase 2 auth routes', () => {
       expect(header).toContain('__Host-nuvyn_session=')
       expect(header).toContain('Secure')
       expect(header).toContain('HttpOnly')
-      expect(header).not.toMatch(/(?:^|;)\\s*Domain=/i)
+      expect(header).not.toContain('Domain=')
     }
     const primaryCookie = cookieFromResponse(primary)
     const secondaryCookie = cookieFromResponse(secondary)
