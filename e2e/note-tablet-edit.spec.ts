@@ -51,7 +51,11 @@ for (const [width, height] of [[601, 900], [768, 1024], [820, 1180], [1024, 768]
       await expect(imageButton(page)).toBeVisible()
       await expect(page.locator('.editor-tabs-shell')).toHaveCount(0)
       const box = await imageButton(page).boundingBox()
-      expect(box!.height).toBeGreaterThanOrEqual(40)
+      // Tablet Note shares the compact 36px Workspace navbar.
+      expect(box!.height).toBe(28)
+      const navbar = await page.locator('.navbar').boundingBox()
+      expect(box!.y).toBeGreaterThanOrEqual(navbar!.y)
+      expect(box!.y + box!.height).toBeLessThanOrEqual(navbar!.y + navbar!.height)
       await page.locator('.monaco-editor .view-lines').tap({ position: { x: 80, y: 12 } })
       await page.keyboard.insertText('触摸输入 ')
       await expect.poll(async () => (await (await request.get(`/api/posts/${document}`)).json()).raw).toContain('触摸输入')

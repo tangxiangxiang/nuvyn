@@ -15,8 +15,13 @@ const source = [
 async function setup(page: import('@playwright/test').Page, request: import('@playwright/test').APIRequestContext, body = source) {
   const path = `inbox/markdown-fold-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`
   await createDoc(request, path, body, [])
-  await gotoVaultReady(page)
-  await openDoc(page, path)
+  // Folding exercises document content on desktop and tablets. A deep link
+  // avoids assuming a mounted desktop file tree or tab strip during setup.
+  await page.goto(`/vault/${path}`)
+  const toggle = page.getByTestId('view-toggle')
+  await expect(toggle).toBeVisible()
+  if (/edit|编辑/i.test(await toggle.getAttribute('aria-label') ?? '')) await toggle.click()
+  await expect(page.locator('.monaco-host .view-lines')).toBeVisible()
   return path
 }
 
