@@ -3348,11 +3348,11 @@ watch(isReadMode, async (reading) => {
   <div
     ref="vaultRef"
     class="vault"
-    :class="{ 'is-read': isReadMode, 'is-zen-mode': zenModeActive, 'right-rail-open': rightRailVisible, 'side-panel-open': sidePanelOpen, 'diary-calendar-mode': isDiaryCalendarVisible, 'diary-native-document-mode': isOrdinaryManagedDiaryDocumentActive, 'note-tablet-mode': noteTabletLayout }"
+    :class="{ 'is-read': isReadMode, 'is-zen-mode': zenModeActive, 'right-rail-open': rightRailVisible, 'side-panel-open': sidePanelOpen, 'diary-calendar-mode': isDiaryCalendarVisible, 'diary-native-document-mode': isOrdinaryManagedDiaryDocumentActive, 'note-tablet-mode': noteTabletLayout, 'has-tablet-pull-refresh': tabletPullRefreshAvailable, 'is-pulling-refresh': tabletPullRefreshDistance > 0 && !tabletPullRefreshing }"
     :data-zen-mode="zenModeActive ? 'true' : 'false'"
     :data-tablet-editing="tabletEditing ? 'true' : undefined"
     tabindex="0"
-    :style="vaultStyle"
+    :style="[vaultStyle, { '--pull-offset': tabletPullRefreshOffset }]"
     @keydown="onVaultKeydown"
   >
     <div v-if="tabletDrawer" class="note-tablet-backdrop" data-testid="note-tablet-backdrop" aria-hidden="true" @click="closeTabletDrawer" />
@@ -3364,7 +3364,6 @@ watch(isReadMode, async (reading) => {
         'is-armed': tabletPullRefreshDistance >= TABLET_PULL_REFRESH_THRESHOLD,
         'is-refreshing': tabletPullRefreshing,
       }"
-      :style="{ '--pull-offset': tabletPullRefreshOffset }"
       role="status"
       :aria-label="tabletPullRefreshLabel"
       aria-live="polite"

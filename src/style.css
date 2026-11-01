@@ -1519,6 +1519,12 @@ main.container.auth-page-shell {
 .note-tablet-mode .article :where(img, video, svg) { max-width: 100%; }
 .note-tablet-mode .article :where(.nuvyn-code-group-tab, summary) { min-height: 40px; }
 
+.vault.has-tablet-pull-refresh { background: var(--vs-bg-1); }
+.vault.has-tablet-pull-refresh > .editor-area {
+  translate: 0 var(--pull-offset, 0px);
+  transition: translate 200ms ease;
+}
+.vault.is-pulling-refresh > .editor-area { transition: none; }
 .vault-tablet-refresh-indicator {
   position: fixed;
   z-index: 50;
@@ -1565,6 +1571,7 @@ main.container.auth-page-shell {
   to { transform: rotate(360deg); }
 }
 @media (prefers-reduced-motion: reduce) {
+  .vault.has-tablet-pull-refresh > .editor-area { translate: none; transition: none; }
   .vault-tablet-refresh-icon { transition: none; }
   .vault-tablet-refresh-indicator.is-refreshing .vault-tablet-refresh-icon { animation: none; }
 }
