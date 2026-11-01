@@ -2,7 +2,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { flushPromises, mount, type VueWrapper } from '@vue/test-utils'
 import { createMemoryHistory, createRouter } from 'vue-router'
-import { NSelect } from 'naive-ui'
+import { NPagination, NSelect } from 'naive-ui'
 import BoardHomeView from '../BoardHomeView.vue'
 import BoardGallery from '../../components/board/BoardGallery.vue'
 import BoardFolderSection from '../../components/board/BoardFolderSection.vue'
@@ -121,7 +121,7 @@ describe('Board Gallery Home', () => {
     ])
     const { wrapper } = await mountHome()
 
-    expect(wrapper.findAll('.board-all-section .board-card')).toHaveLength(5)
+    expect(wrapper.findAll('.board-all-section .board-card')).toHaveLength(6)
     expect(wrapper.find('.board-all-section .board-gallery').classes()).toContain('is-grid')
     expect(wrapper.find('.board-recent-section').exists()).toBe(false)
     expect(wrapper.find('[data-testid="board-quick-tab-recent"]').exists()).toBe(false)
@@ -179,13 +179,8 @@ describe('Board Gallery Home', () => {
     await wrapper.get('[data-testid="board-filter-favorites"]').trigger('click')
     await flushPromises()
 
-    expect(wrapper.findAll('.board-all-section [data-testid="board-card-title"]')).toHaveLength(5)
-    const pageTwo = Array.from((wrapper.element as HTMLElement).querySelectorAll('.n-pagination-item--clickable'))
-      .find((item) => item.textContent?.trim() === '2') as HTMLElement | undefined
-    expect(pageTwo).toBeDefined()
-    pageTwo?.click()
-    await flushPromises()
-    expect(wrapper.findAll('.board-all-section [data-testid="board-card-title"]').map((item) => item.text())).toEqual(['Board 1'])
+    expect(wrapper.findAll('.board-all-section [data-testid="board-card-title"]')).toHaveLength(6)
+    expect(wrapper.findAll('.board-all-section [data-testid="board-card-title"]').map((item) => item.text())).toContain('Board 1')
     expect(wrapper.find('.board-recent-section').exists()).toBe(false)
     wrapper.unmount()
   })
@@ -212,8 +207,26 @@ describe('Board Gallery Home', () => {
     wrapper.unmount()
   })
 
+  it('defaults to 50 Boards and allows up to 200 per page', async () => {
+    api.listBoards.mockResolvedValue(Array.from({ length: 201 }, (_, index) => (
+      board(`board-${index}`, `Board ${index}`, index + 1)
+    )))
+    const { wrapper } = await mountHome()
+    const pagination = wrapper.findComponent(NPagination)
+    expect(pagination.props('pageSize')).toBe(50)
+    expect(pagination.props('pageSizes')).toEqual([25, 50, 100, 200])
+    expect(wrapper.findAll('.board-all-section .board-card')).toHaveLength(50)
+    pagination.vm.$emit('update:page-size', 200)
+    await flushPromises()
+    expect(wrapper.findAll('.board-all-section .board-card')).toHaveLength(200)
+    pagination.vm.$emit('update:page', 2)
+    await flushPromises()
+    expect(wrapper.findAll('.board-all-section .board-card')).toHaveLength(1)
+    wrapper.unmount()
+  })
+
   it('resets pagination after search and sort changes', async () => {
-    api.listBoards.mockResolvedValue(Array.from({ length: 11 }, (_, index) => (
+    api.listBoards.mockResolvedValue(Array.from({ length: 101 }, (_, index) => (
       board(`board-${index}`, `Board ${index}`, index + 1)
     )))
     const { wrapper } = await mountHome()
@@ -244,7 +257,7 @@ describe('Board Gallery Home', () => {
   })
 
   it('resets pagination after the favorite filter changes', async () => {
-    api.listBoards.mockResolvedValue(Array.from({ length: 11 }, (_, index) => (
+    api.listBoards.mockResolvedValue(Array.from({ length: 101 }, (_, index) => (
       board(`board-${index}`, `Board ${index}`, index + 1)
     )))
     useBoardFavorites().favoriteBoardIds.value = ['board-0']
@@ -265,14 +278,14 @@ describe('Board Gallery Home', () => {
   })
 
   it('moves back to the previous page after deleting its last Board', async () => {
-    api.listBoards.mockResolvedValue(Array.from({ length: 11 }, (_, index) => (
+    api.listBoards.mockResolvedValue(Array.from({ length: 101 }, (_, index) => (
       board(`board-${index}`, `Board ${index}`, 100 - index)
     )))
     api.deleteBoard.mockResolvedValueOnce(undefined)
     const { wrapper } = await mountHome()
 
     const pageTwo = Array.from((wrapper.element as HTMLElement).querySelectorAll('.n-pagination-item--clickable'))
-      .find((item) => item.textContent?.trim() === '2') as HTMLElement | undefined
+      .find((item) => item.textContent?.trim() === '3') as HTMLElement | undefined
     pageTwo?.click()
     await flushPromises()
     const lastCard = wrapper.get('.board-all-section .board-card')
@@ -283,7 +296,7 @@ describe('Board Gallery Home', () => {
 
     expect(api.deleteBoard).toHaveBeenCalledWith(lastBoard!.id)
     expect(wrapper.find('.n-pagination-item--active').text()).toBe('2')
-    expect(wrapper.findAll('.board-all-section .board-card')).toHaveLength(5)
+    expect(wrapper.findAll('.board-all-section .board-card')).toHaveLength(50)
     wrapper.unmount()
   })
 

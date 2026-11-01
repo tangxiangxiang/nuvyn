@@ -107,8 +107,8 @@ const sortedBoards = computed(() => [...filteredBoards.value].sort((left, right)
   }
   return right.updatedAt - left.updatedAt || right.id.localeCompare(left.id)
 }))
-const boardPageSize = ref(5)
-const boardPageSizeOptions = [5, 10, 25, 50]
+const boardPageSize = ref(50)
+const boardPageSizeOptions = [25, 50, 100, 200]
 const boardPage = ref(1)
 const boardPageCount = computed(() => Math.max(1, Math.ceil(sortedBoards.value.length / boardPageSize.value)))
 const canvasGalleryElement = ref<HTMLElement | null>(null)
