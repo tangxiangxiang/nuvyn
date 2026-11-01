@@ -722,7 +722,18 @@ test('tablet account detail places the actions beside the identity and wraps saf
     await expect(header).toBeVisible()
     const identity = (await header.locator('.ledger-account-identity').boundingBox())!
     const actions = (await header.locator('.ledger-detail-header-actions').boundingBox())!
-    if (width >= 768) {
+    // Flex wrapping follows the space needed by the actual rendered buttons,
+    // whose font metrics differ between macOS and Linux CI.
+    const fitsBesideIdentity = width >= 601 && await header.evaluate((element) => {
+      const identity = element.querySelector<HTMLElement>('.ledger-account-identity')!
+      const actions = element.querySelector<HTMLElement>('.ledger-detail-header-actions')!
+      const style = getComputedStyle(element)
+      const available = element.clientWidth - parseFloat(style.paddingLeft) - parseFloat(style.paddingRight)
+      const required = parseFloat(getComputedStyle(identity).flexBasis)
+        + actions.getBoundingClientRect().width + parseFloat(style.columnGap)
+      return required <= available
+    })
+    if (fitsBesideIdentity) {
       expect(actions.x).toBeGreaterThanOrEqual(identity.x + identity.width)
       expect(Math.abs(identity.y + identity.height / 2 - actions.y - actions.height / 2)).toBeLessThan(1)
     } else {
@@ -741,4 +752,26 @@ test('tablet account detail places the actions beside the identity and wraps saf
     }
     expect(await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth)).toBeLessThanOrEqual(1)
   }
+
+  // Exercise insufficient space explicitly rather than relying on one
+  // platform's font metrics to push the 601px viewport over the wrap point.
+  await page.setViewportSize({ width: 601, height: 1000 })
+  await page.goto(`/ledger/accounts/${account.id}`)
+  const header = page.locator('.ledger-detail-header')
+  await expect(header).toBeVisible()
+  await header.evaluate((element) => { element.style.maxWidth = '400px' })
+  const identity = (await header.locator('.ledger-account-identity').boundingBox())!
+  const actions = (await header.locator('.ledger-detail-header-actions').boundingBox())!
+  expect(actions.y).toBeGreaterThanOrEqual(identity.y + identity.height)
+  const controls = header.locator('.ledger-detail-header-actions > *')
+  const boxes = await controls.evaluateAll((elements) => elements.map((element) => {
+    const box = element.getBoundingClientRect()
+    return { left: box.left, right: box.right, centerY: box.top + box.height / 2 }
+  }))
+  expect(boxes.length).toBeGreaterThan(1)
+  for (const [index, box] of boxes.entries()) {
+    expect(Math.abs(box.centerY - boxes[0]!.centerY)).toBeLessThan(1)
+    if (index > 0) expect(box.left).toBeGreaterThanOrEqual(boxes[index - 1]!.right)
+  }
+  expect(actions.x + actions.width).toBeLessThanOrEqual((await header.boundingBox())!.x + 400)
 })
