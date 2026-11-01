@@ -342,4 +342,7 @@ function onAccountSaved(): void {
   .ledger-account-create-modal-card { width: calc(100vw - 24px); max-height: 92vh; }
   .ledger-account-create-modal-card :deep(.n-card__content) { padding: 21px 17px; }
 }
+@media (min-width: 601px) and (max-width: 1199px) and (hover: none) {
+  .ledger-account-type-filter { opacity: 1; }
+}
 </style>

@@ -2048,7 +2048,7 @@ function pullRefreshElement(path: readonly Element[], selector: string): Element
 
 function clearTabletPullGesture(): void {
   tabletPullTouchId = null
-  tabletPullDistance.value = 0
+  tabletPullRefreshDistance.value = 0
 }
 
 function touchWithId(list: TouchList, identifier: number): Touch | undefined {

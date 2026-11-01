@@ -48,6 +48,7 @@ const toast = useToast()
 const route = useRoute()
 const desktopTableFlexHeight = useMediaQuery('(min-width: 651px)')
 const compactTableScroll = useMediaQuery('(max-width: 720px)')
+const tabletTable = useMediaQuery('(min-width: 601px) and (max-width: 1199px)')
 const paginationPageSlot = computed(() => compactTableScroll.value ? 5 : 7)
 const transactionSheetOpen = ref(false)
 const detailOpen = ref(false)
@@ -441,7 +442,8 @@ function scheduleSearch(): void {
 }
 
 function formatTransactionTableTime(instantMs: number): string {
-  return formatLedgerTransactionDateTime(instantMs, store.settings.value?.timezone ?? 'UTC')
+  const formatted = formatLedgerTransactionDateTime(instantMs, store.settings.value?.timezone ?? 'UTC')
+  return tabletTable.value ? formatted.slice(0, 10) : formatted
 }
 
 function tableSortOrder(key: TransactionTableSortKey): DataTableSortOrder {
@@ -705,6 +707,15 @@ const transactionColumns = computed<DataTableColumns<LedgerTransactionDto>>(() =
     },
   },
 ])
+const visibleTransactionColumns = computed(() => {
+  if (!tabletTable.value) return transactionColumns.value
+  const widths: Record<string, number | string | undefined> = {
+    transaction: undefined, type: 90, account: '20%', time: 110, amount: 140,
+  }
+  return transactionColumns.value
+    .filter((column) => !('key' in column) || (column.key !== 'category' && column.key !== 'note'))
+    .map((column) => 'key' in column ? { ...column, width: widths[String(column.key)] } : column)
+})
 </script>
 
 <template>
@@ -842,7 +853,7 @@ const transactionColumns = computed<DataTableColumns<LedgerTransactionDto>>(() =
         data-testid="ledger-transaction-list"
         aria-label="交易记录表格"
         :data="visibleTransactions"
-        :columns="transactionColumns"
+        :columns="visibleTransactionColumns"
         remote
         @update:sorter="changeTableSort"
         :row-key="(transaction) => transaction.id"
@@ -850,7 +861,7 @@ const transactionColumns = computed<DataTableColumns<LedgerTransactionDto>>(() =
         :loading="loading || paginationLoading"
         :flex-height="desktopTableFlexHeight"
         :max-height="desktopTableFlexHeight ? undefined : 268"
-        :scroll-x="compactTableScroll ? 760 : undefined"
+        :scroll-x="tabletTable ? undefined : (compactTableScroll ? 760 : 1190)"
         size="small"
         :bordered="false"
         :bottom-bordered="false"
@@ -1329,10 +1340,12 @@ const transactionColumns = computed<DataTableColumns<LedgerTransactionDto>>(() =
 .ledger-transaction-history :deep(.n-card__content) { overflow-x: auto; }
 .ledger-transaction-table {
   width: 100%;
-  min-width: 1000px;
+  min-width: 0;
 }
 .ledger-transaction-table :deep(.n-data-table) { width: 100%; }
-.ledger-transaction-table :deep(.n-data-table-wrapper) { min-width: 1000px; }
+/* Keep the shell inside the card; NDataTable owns horizontal scrolling and
+   synchronizes its header/body using scroll-x. */
+.ledger-transaction-table :deep(.n-data-table-wrapper) { min-width: 0; }
 .ledger-transaction-table :deep(.n-data-table-table) {
   display: table;
   width: 100%;
@@ -1583,6 +1596,16 @@ const transactionColumns = computed<DataTableColumns<LedgerTransactionDto>>(() =
   .ledger-transaction-table td { padding-right: 14px; padding-left: 14px; }
   .ledger-transaction-table { width: 100%; min-width: 0; }
   .ledger-transaction-table :deep(.n-data-table-wrapper) { min-width: 0; }
+  .ledger-transaction-pagination { align-items: stretch; flex-direction: column; padding: 14px 16px; }
+  .ledger-pagination-controls { justify-content: space-between; }
+}
+@media (min-width: 601px) and (max-width: 1199px) {
+  .ledger-transaction-table :deep(.n-data-table-th),
+  .ledger-transaction-table :deep(.n-data-table-td) { padding-right: 12px; padding-left: 12px; }
+  .ledger-transaction-table :deep(.ledger-transaction-date) { white-space: nowrap; }
+  .ledger-transaction-table :deep(.ledger-transaction-amount) { white-space: nowrap; }
+}
+@media (max-width: 600px) {
   .ledger-transaction-table th:nth-child(3),
   .ledger-transaction-table td:nth-child(3),
   .ledger-transaction-table th:nth-child(5),
@@ -1599,7 +1622,5 @@ const transactionColumns = computed<DataTableColumns<LedgerTransactionDto>>(() =
   .ledger-transaction-table td:nth-child(6) { width: 16%; }
   .ledger-transaction-table th:nth-child(7),
   .ledger-transaction-table td:nth-child(7) { width: 14%; }
-  .ledger-transaction-pagination { align-items: stretch; flex-direction: column; padding: 14px 16px; }
-  .ledger-pagination-controls { justify-content: space-between; }
 }
 </style>

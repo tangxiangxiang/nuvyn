@@ -2086,4 +2086,13 @@ function animatedMoneyParts(minor: number, currency: string, key: MetricKey): { 
   }
   .ledger-recent-amount { font-size: .74rem; }
 }
+@media (min-width: 601px) and (max-width: 1199px) and (hover: none) {
+  .ledger-period-scope,
+  .ledger-category-scope,
+  .ledger-category-date,
+  .ledger-trend-date { opacity: 1; }
+  .ledger-period-date-control { flex: 0 0 148px; min-height: 28px; }
+  .ledger-period-date-label { visibility: hidden; }
+  .ledger-period-date-editor { opacity: 1; pointer-events: auto; }
+}
 </style>

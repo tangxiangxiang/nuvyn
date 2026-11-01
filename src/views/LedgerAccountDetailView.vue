@@ -995,11 +995,25 @@ const netMovement = computed(() => {
   .ledger-account-info { grid-row: auto; }
   .ledger-detail-note { min-height: 190px; }
 }
+@media (min-width: 601px) and (max-width: 1199px) {
+  .ledger-detail-header { display: flex; flex-wrap: wrap; align-items: center; gap: 16px 24px; }
+  .ledger-detail-header .ledger-account-identity { flex: 1 1 320px; }
+  .ledger-detail-header-actions { flex: 0 0 auto; flex-wrap: nowrap; justify-content: flex-end; }
+  .ledger-detail-header-actions > *,
+  .ledger-detail-header-actions :deep(.ledger-action-trigger) { flex: 0 0 auto; }
+  .ledger-detail-grid { grid-template-columns: minmax(0, 1fr); }
+  .ledger-detail-side-column { height: auto; grid-template-columns: minmax(0, 1fr); grid-template-rows: auto; }
+  .ledger-account-info { grid-row: auto; }
+  .ledger-detail-note { min-height: 0; }
+}
 @media (max-width: 440px) {
   .ledger-detail-title-row { align-items: flex-start; flex-direction: column; gap: 7px; }
   .ledger-detail-account-icon { width: 68px; height: 68px; }
   .ledger-metric-item { gap: 9px; }
   .ledger-metric-icon { width: 36px; height: 36px; border-radius: 10px; font-size: 1.1rem; }
   .ledger-metric-item strong { font-size: .95rem; }
+}
+@media (min-width: 601px) and (max-width: 1199px) and (hover: none) {
+  .ledger-trend-range { visibility: visible; opacity: 1; }
 }
 </style>

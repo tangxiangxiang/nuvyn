@@ -1,6 +1,8 @@
 import { expect, test } from './fixtures/auth'
 import {
   ensureLedgerDashboardFixtures,
+  ensurePeriodNavigationFixtures,
+  createPeriodExpense,
   getAccounts,
   getTransactions,
   ledgerDateInput,
@@ -634,4 +636,109 @@ test.describe(() => {
     await expect.poll(async () => (await getAccounts(request)).filter((account) => account.name === uniqueName).length).toBe(1)
     expect(await page.evaluate(() => sessionStorage.getItem('nuvyn.ledger.pending-create'))).toBeNull()
   })
+})
+
+test.describe('tablet transaction table scrolling', () => {
+  test.use({ hasTouch: true })
+
+  test('shows tablet amounts without horizontal scrolling and preserves mobile/desktop columns', async ({ page, request }) => {
+    await ensureLedgerDashboardFixtures(request)
+    const { categoryId } = await ensurePeriodNavigationFixtures(request)
+    const account = (await getAccounts(request)).find((item) => item.archivedAt === null)!
+    await createPeriodExpense(request, {
+      accountId: account.id, categoryId, amountMinor: 41052090, occurredAt: Date.now(),
+      payee: 'Tablet horizontal scroll', key: `tablet-scroll-${Date.now()}`,
+    })
+    for (const width of [601, 700, 768, 1024, 1180]) {
+      await page.setViewportSize({ width, height: 1000 })
+      await page.goto('/ledger/transactions')
+      const table = page.getByTestId('ledger-transaction-list')
+      await expect(table).toBeVisible()
+      const scroller = table.locator('.n-data-table-base-table-body .n-scrollbar-container')
+      await expect(scroller).toBeVisible()
+      const bounds = await table.boundingBox()
+      expect(bounds!.x + bounds!.width, `${width}px table fits viewport`).toBeLessThanOrEqual(width)
+      const extent = await scroller.evaluate((element) => element.scrollWidth - element.clientWidth)
+      await expect(table.locator('th')).toHaveText(['交易对象', '类型', '账户', '时间', '金额'])
+      const dates = table.locator('.ledger-transaction-date')
+      for (const date of await dates.all()) {
+        await expect(date).toHaveText(/^\d{4}\/\d{2}\/\d{2}$/)
+        await expect(date).toHaveAttribute('title', /\d{1,2}:\d{2}/)
+        const geometry = await date.evaluate((element) => ({
+          height: element.getBoundingClientRect().height,
+          lineHeight: Number.parseFloat(getComputedStyle(element).lineHeight),
+        }))
+        expect(geometry.height).toBeLessThanOrEqual(geometry.lineHeight + 1)
+      }
+      expect(extent, `${width}px five columns fit without scrolling`).toBeLessThanOrEqual(1)
+      const amountHeader = (await table.locator('th').last().boundingBox())!
+      expect(amountHeader.x + amountHeader.width).toBeLessThanOrEqual(bounds!.x + bounds!.width + 1)
+      const amounts = await table.locator('.ledger-transaction-amount').evaluateAll((elements) => elements.map((element) => {
+        const range = document.createRange()
+        range.selectNodeContents(element)
+        const text = range.getBoundingClientRect()
+        const cell = element.closest('td')!.getBoundingClientRect()
+        return { left: text.left - cell.left, right: cell.right - text.right }
+      }))
+      expect(amounts.length).toBeGreaterThan(0)
+      for (const amount of amounts) {
+        expect(amount.left).toBeGreaterThanOrEqual(0)
+        expect(amount.right).toBeGreaterThanOrEqual(0)
+      }
+      const pageOverflow = await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth)
+      expect(pageOverflow).toBeLessThanOrEqual(1)
+    }
+    for (const width of [390, 1440]) {
+      await page.setViewportSize({ width, height: 1000 })
+      await page.goto('/ledger/transactions')
+      const table = page.getByTestId('ledger-transaction-list')
+      await expect(table).toBeVisible()
+      const bounds = (await table.boundingBox())!
+      expect(bounds.x + bounds.width).toBeLessThanOrEqual(width)
+      const overflow = await table.locator('.n-data-table-base-table-body .n-scrollbar-container')
+        .evaluate((element) => element.scrollWidth - element.clientWidth)
+      if (width === 390) expect(overflow).toBeGreaterThan(0)
+      else await expect(table.locator('th')).toHaveText(['交易对象', '类型', '分类', '账户', '备注', '时间', '金额'])
+      await table.locator('.n-data-table-base-table-body .n-scrollbar-container')
+        .evaluate((element) => { element.scrollLeft = element.scrollWidth })
+      const amountHeader = table.locator('th').last()
+      await expect.poll(async () => {
+        const amount = (await amountHeader.boundingBox())!
+        return amount.x + amount.width
+      }).toBeLessThanOrEqual(bounds.x + bounds.width + 1)
+      expect((await amountHeader.boundingBox())!.x).toBeGreaterThanOrEqual(bounds.x)
+      expect(await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth)).toBeLessThanOrEqual(1)
+    }
+  })
+})
+
+test('tablet account detail places the actions beside the identity and wraps safely on narrow screens', async ({ page, request }) => {
+  await ensureLedgerDashboardFixtures(request)
+  const account = (await getAccounts(request)).find((item) => item.archivedAt === null)!
+  for (const width of [768, 1024, 1180, 601, 390]) {
+    await page.setViewportSize({ width, height: 1000 })
+    await page.goto(`/ledger/accounts/${account.id}`)
+    const header = page.locator('.ledger-detail-header')
+    await expect(header).toBeVisible()
+    const identity = (await header.locator('.ledger-account-identity').boundingBox())!
+    const actions = (await header.locator('.ledger-detail-header-actions').boundingBox())!
+    if (width >= 768) {
+      expect(actions.x).toBeGreaterThanOrEqual(identity.x + identity.width)
+      expect(Math.abs(identity.y + identity.height / 2 - actions.y - actions.height / 2)).toBeLessThan(1)
+    } else {
+      expect(actions.y).toBeGreaterThanOrEqual(identity.y + identity.height)
+    }
+    expect(actions.x + actions.width).toBeLessThanOrEqual(width)
+    if (width >= 601) {
+      const info = (await page.locator('.ledger-account-info').boundingBox())!
+      const note = (await page.locator('.ledger-detail-note').boundingBox())!
+      const recent = (await page.locator('.ledger-recent-transactions').boundingBox())!
+      expect(info.y).toBeGreaterThanOrEqual(recent.y + recent.height)
+      expect(note.y).toBeGreaterThanOrEqual(info.y + info.height)
+      expect(Math.abs(info.x - note.x)).toBeLessThan(1)
+      expect(Math.abs(info.width - note.width)).toBeLessThan(1)
+      expect(note.height).toBeLessThan(120)
+    }
+    expect(await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth)).toBeLessThanOrEqual(1)
+  }
 })
