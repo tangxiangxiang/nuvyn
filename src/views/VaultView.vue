@@ -187,10 +187,24 @@ const HtmlExportSurface = defineAsyncComponent(() => import('../components/vault
 const editorPaneRef = ref<{
   chooseImage(): void
   finishComposition(): void
+  getScrollTop(): number
   revealText(text: string): boolean
   revealAnchor(anchor: string, isCurrent?: () => boolean): boolean | Promise<boolean>
 } | null>(null)
-onBeforeRouteLeave(() => { editorPaneRef.value?.finishComposition() })
+onBeforeRouteLeave(() => {
+  editorPaneRef.value?.finishComposition()
+
+  // Note Tablet presents one document without a visible tab strip. Keep its
+  // current preview when the user leaves the Vault for another workspace so
+  // returning to Note restores the document they were just reading/editing.
+  const path = activePath.value
+  if (
+    noteTabletLayout.value
+    && path
+    && activeTab.value?.path === path
+    && activeTab.value.mode === 'preview'
+  ) pinEditorTab(path)
+})
 onBeforeRouteUpdate(() => { editorPaneRef.value?.finishComposition() })
 const readingPaneRef = ref<{
   revealAnchor(anchor: string, isCurrent?: () => boolean): boolean | Promise<boolean>
@@ -1994,6 +2008,173 @@ const workspaceTabStripVisible = computed(() => {
     && (isDiaryDocumentMode.value || isManagedDiaryDocumentActive.value)
     && !specialWorkspaceSurfaceActive.value)
 })
+
+const tabletPullRefreshDistance = ref(0)
+const tabletPullRefreshing = ref(false)
+const TABLET_PULL_REFRESH_THRESHOLD = 76
+const TABLET_PULL_REFRESH_CANCEL_SLOP = 14
+let tabletPullTouchId: number | null = null
+let tabletPullStartX = 0
+let tabletPullStartY = 0
+let tabletRefreshSurface: HTMLElement | null = null
+
+const tabletPullRefreshAvailable = computed(() => (
+  isTabletViewport.value
+  && (activeScope.value === 'note' || isDiaryScope.value)
+  && !specialWorkspaceSurfaceActive.value
+  && !settingsOpen.value
+  && !tabletDrawer.value
+  && !zenModeActive.value
+))
+const tabletPullRefreshOffset = computed(() => `${Math.min(54, tabletPullRefreshDistance.value * 0.62)}px`)
+const tabletPullRefreshLabel = computed(() => {
+  if (tabletPullRefreshing.value) return t('vault.refreshing')
+  return tabletPullRefreshDistance.value >= TABLET_PULL_REFRESH_THRESHOLD
+    ? t('vault.release_to_refresh')
+    : t('vault.pull_to_refresh')
+})
+
+function pullRefreshPath(event: Event): Element[] {
+  const root = vaultRef.value
+  if (!root) return []
+  return event.composedPath().filter((node): node is Element => (
+    node instanceof Element && (node === root || root.contains(node))
+  ))
+}
+
+function pullRefreshElement(path: readonly Element[], selector: string): Element | undefined {
+  return path.find((element) => element.matches(selector))
+}
+
+function clearTabletPullGesture(): void {
+  tabletPullTouchId = null
+  tabletPullDistance.value = 0
+}
+
+function touchWithId(list: TouchList, identifier: number): Touch | undefined {
+  for (let index = 0; index < list.length; index++) {
+    const touch = list.item(index)
+    if (touch?.identifier === identifier) return touch
+  }
+  return undefined
+}
+
+function onTabletPullTouchStart(event: TouchEvent): void {
+  if (!tabletPullRefreshAvailable.value
+    || tabletPullRefreshing.value
+    || treeLoading.value
+    || event.touches.length !== 1) return
+
+  const path = pullRefreshPath(event)
+  const blocked = pullRefreshElement(path, [
+    '.note-tablet-backdrop',
+    '.workspace-left-navigation',
+    '.workspace-right-navigation',
+    '[role="dialog"]',
+    '.n-modal',
+    '.n-popover',
+    '.n-dropdown',
+  ].join(','))
+  if (blocked) return
+
+  const calendar = pullRefreshElement(path, '.diary-calendar-content') as HTMLElement | undefined
+  const readingPane = pullRefreshElement(path, '.reading-pane') as HTMLElement | undefined
+  const monacoHost = pullRefreshElement(path, '.monaco-host') as HTMLElement | undefined
+  const editorArea = pullRefreshElement(path, '.editor-area')
+  const surface = readingPane ?? monacoHost ?? calendar ?? editorArea
+  if (!surface) return
+
+  const inMonaco = monacoHost !== undefined
+  const inCalendar = calendar !== undefined
+  const interactiveTarget = pullRefreshElement(path, 'a,button,input,textarea,select,[contenteditable="true"]')
+  if (interactiveTarget && !inMonaco && !inCalendar) return
+  if (readingPane && readingPane.scrollTop > 0) return
+  if (calendar && calendar.scrollTop > 0) return
+  if (inMonaco && (editorPaneRef.value?.getScrollTop() ?? 0) > 0) return
+
+  const touch = event.touches.item(0)
+  if (!touch) return
+  tabletPullTouchId = touch.identifier
+  tabletPullStartX = touch.clientX
+  tabletPullStartY = touch.clientY
+  tabletPullRefreshDistance.value = 0
+}
+
+function onTabletPullTouchMove(event: TouchEvent): void {
+  if (tabletPullTouchId === null) return
+  if (!tabletPullRefreshAvailable.value) {
+    clearTabletPullGesture()
+    return
+  }
+  if (event.touches.length !== 1) {
+    clearTabletPullGesture()
+    return
+  }
+
+  const touch = touchWithId(event.touches, tabletPullTouchId)
+  if (!touch) return
+  const deltaX = touch.clientX - tabletPullStartX
+  const deltaY = touch.clientY - tabletPullStartY
+  if (deltaY < 0 || Math.abs(deltaX) > Math.max(TABLET_PULL_REFRESH_CANCEL_SLOP, deltaY * 0.8)) {
+    clearTabletPullGesture()
+    return
+  }
+
+  tabletPullRefreshDistance.value = deltaY
+  if (deltaY >= TABLET_PULL_REFRESH_CANCEL_SLOP && event.cancelable) event.preventDefault()
+}
+
+async function refreshTabletVault(): Promise<void> {
+  if (!tabletPullRefreshAvailable.value || tabletPullRefreshing.value || treeLoading.value) return
+  tabletPullRefreshing.value = true
+  tabletPullRefreshDistance.value = TABLET_PULL_REFRESH_THRESHOLD
+  try {
+    // This refreshes the Vault tree and the Diary calendar projection. Open
+    // editor buffers remain untouched, so pending edits and Diary sessions
+    // retain their existing save and access boundaries.
+    await refresh()
+  } catch {
+    toast.error(t('vault.refresh_failed'))
+  } finally {
+    tabletPullRefreshing.value = false
+    tabletPullRefreshDistance.value = 0
+  }
+}
+
+function onTabletPullTouchEnd(event: TouchEvent): void {
+  if (tabletPullTouchId === null) return
+  const touch = touchWithId(event.changedTouches, tabletPullTouchId)
+  if (!touch) return
+  const shouldRefresh = tabletPullRefreshDistance.value >= TABLET_PULL_REFRESH_THRESHOLD
+    && tabletPullRefreshAvailable.value
+  clearTabletPullGesture()
+  if (shouldRefresh) void refreshTabletVault()
+}
+
+function onTabletPullTouchCancel(): void {
+  clearTabletPullGesture()
+}
+
+onMounted(() => {
+  tabletRefreshSurface = vaultRef.value?.querySelector<HTMLElement>('.editor-area') ?? null
+  if (!tabletRefreshSurface) return
+  tabletRefreshSurface.addEventListener('touchstart', onTabletPullTouchStart, { passive: true })
+  tabletRefreshSurface.addEventListener('touchmove', onTabletPullTouchMove, { passive: false })
+  tabletRefreshSurface.addEventListener('touchend', onTabletPullTouchEnd, { passive: true })
+  tabletRefreshSurface.addEventListener('touchcancel', onTabletPullTouchCancel, { passive: true })
+  document.addEventListener('visibilitychange', onTabletPullTouchCancel)
+})
+
+onBeforeUnmount(() => {
+  tabletRefreshSurface?.removeEventListener('touchstart', onTabletPullTouchStart)
+  tabletRefreshSurface?.removeEventListener('touchmove', onTabletPullTouchMove)
+  tabletRefreshSurface?.removeEventListener('touchend', onTabletPullTouchEnd)
+  tabletRefreshSurface?.removeEventListener('touchcancel', onTabletPullTouchCancel)
+  tabletRefreshSurface = null
+  document.removeEventListener('visibilitychange', onTabletPullTouchCancel)
+  clearTabletPullGesture()
+})
+
 watch([isDiaryScope, isDiaryCalendarVisible], ([diary, calendarHome]) => {
   if (!diary || calendarHome) diaryRecoveryCenterVisible.value = false
 }, { flush: 'sync' })
@@ -3175,6 +3356,22 @@ watch(isReadMode, async (reading) => {
     @keydown="onVaultKeydown"
   >
     <div v-if="tabletDrawer" class="note-tablet-backdrop" data-testid="note-tablet-backdrop" aria-hidden="true" @click="closeTabletDrawer" />
+
+    <div
+      v-if="tabletPullRefreshDistance > 0 || tabletPullRefreshing"
+      class="vault-tablet-refresh-indicator"
+      :class="{
+        'is-armed': tabletPullRefreshDistance >= TABLET_PULL_REFRESH_THRESHOLD,
+        'is-refreshing': tabletPullRefreshing,
+      }"
+      :style="{ '--pull-offset': tabletPullRefreshOffset }"
+      role="status"
+      :aria-label="tabletPullRefreshLabel"
+      aria-live="polite"
+    >
+      <span class="vault-tablet-refresh-icon" aria-hidden="true" />
+      <span>{{ tabletPullRefreshLabel }}</span>
+    </div>
 
     <SettingsModal
       :open="settingsOpen"

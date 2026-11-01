@@ -1553,6 +1553,7 @@ async function revealAnchor(anchor: string, isCurrent: () => boolean = () => tru
 
 defineExpose({
   finishComposition: () => { if (props.tabletEditing) finishTabletComposition() },
+  getScrollTop: () => editor?.getScrollTop() ?? 0,
   focus: () => editor?.focus(),
   chooseImage,
   revealText,
