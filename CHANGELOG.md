@@ -3,6 +3,37 @@
 All notable changes to Nuvyn are documented in this file. Entries dated before
 the Nuvyn brand baseline may refer to Nuvyn as the historical product name.
 
+## Nuvyn v0.1.0-alpha.12 — 2026-11-01
+
+Changes since `v0.1.0-alpha.11`.
+
+### Workspace & Navigation
+
+- Unified Note, Diary and Ledger navigation spacing and responsive sizing. Restored documents are now filtered to the active workspace, preventing a Diary document from appearing when returning from Ledger to Note while preserving Diary's single-document policy and Note Tablet's single-document presentation.
+- Added the simplified Ledger Zen presentation, which hides only the global Navbar and keeps Ledger content and financial state visible. It uses `Ctrl/Cmd+K → Z`, supports Escape on desktop, and returns to the regular layout through navigation or refresh on mobile.
+
+### Note & Markdown
+
+- Refined Note Tablet navigation and touch editing, including on-demand Markdown folding controls, heading touch-to-fold behavior, repeated fold/unfold reliability and tablet image insertion. Adjusted Zen Mode and Reader layout and lifecycle handling without changing saved document content.
+- Improved Reader and Markdown folding touch interaction and aligned folding styles with the current touch presentation.
+
+### Board
+
+- Changed Board pagination to show 50 boards by default, with page sizes of 25, 50, 100 and 200. Existing sorting, filtering, pagination and last-page deletion behavior are retained.
+
+### Authentication & Configuration
+
+- `NUVYN_PUBLIC_ORIGIN` now accepts up to eight explicit HTTPS origins. Origin validation and CSRF protections remain in place; wildcard origins and cross-origin cookies are not enabled, and the existing authentication model is unchanged.
+
+### PWA
+
+- Preserved the alpha.11 manifest, install icons and Service Worker behavior; this release does not change PWA resources or caching policy. The user has confirmed installation through the Tailscale access path; this does not constitute broad iPad Safari or Android device acceptance. Authentication redirects from the Ugreen proxy remain an external deployment-chain issue and are not addressed with proxy-specific code.
+
+### Migration & Deployment
+
+- No SQLite schema migration was added; Schema v39 remains unchanged. The Docker Compose production contract and release workflow structure are unchanged.
+- Before upgrading, make a consistent backup of the SQLite data volume (including WAL/SHM), the complete Vault (including `.git` and hidden `.nuvyn` state), and the AI master-key file or external master-key configuration. NAS deployment remains a separate manual operation.
+
 ## Nuvyn v0.1.0-alpha.11 — 2026-10-29
 
 Changes since `v0.1.0-alpha.10`.
