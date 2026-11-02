@@ -63,6 +63,24 @@ test('Board Home keeps a compact phone toolbar, complete previews, and folder ro
         .evaluate((element) => element.getBoundingClientRect().height)
       expect(folderHeight).toBeGreaterThanOrEqual(60)
       expect(folderHeight).toBeLessThanOrEqual(64)
+      const pagination = page.locator('.board-pagination')
+      await expect(pagination).toBeVisible()
+      await expect(pagination).toHaveCSS('flex-direction', 'row')
+      await expect(pagination.locator('.n-base-selection')).toHaveCount(0)
+      const pageLayout = await pagination.evaluate((element) => {
+        const total = element.querySelector<HTMLElement>('.board-pagination-meta')!.getBoundingClientRect()
+        const controls = element.querySelector<HTMLElement>('.n-pagination')!.getBoundingClientRect()
+        return {
+          totalTop: total.top,
+          controlsTop: controls.top,
+          totalRight: total.right,
+          controlsLeft: controls.left,
+          controlsRight: controls.right,
+        }
+      })
+      expect(Math.abs(pageLayout.totalTop - pageLayout.controlsTop)).toBeLessThanOrEqual(16)
+      expect(pageLayout.totalRight).toBeLessThanOrEqual(pageLayout.controlsLeft)
+      expect(pageLayout.controlsRight).toBeLessThanOrEqual(width + 1)
       expect(await page.evaluate(() => document.documentElement.scrollWidth - innerWidth)).toBeLessThanOrEqual(1)
     }
 
@@ -70,6 +88,7 @@ test('Board Home keeps a compact phone toolbar, complete previews, and folder ro
     await expect(page.locator('.board-home-subtitle')).toBeVisible()
     await expect(page.getByTestId('board-toolbar')).toHaveCSS('display', 'flex')
     await expect(page.locator('.board-sort-select')).toBeVisible()
+    await expect(page.locator('.board-pagination .n-base-selection')).toHaveCount(1)
     const tabletAspectRatio = await page.locator('.board-card').filter({ hasText: title })
       .locator('.board-card-thumbnail').evaluate((element) => getComputedStyle(element).aspectRatio)
     const ratioParts = tabletAspectRatio.split('/').map((value) => Number.parseFloat(value.trim()))

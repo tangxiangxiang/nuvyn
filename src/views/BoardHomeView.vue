@@ -111,6 +111,14 @@ const boardPageSize = ref(50)
 const boardPageSizeOptions = [25, 50, 100, 200]
 const boardPage = ref(1)
 const boardPageCount = computed(() => Math.max(1, Math.ceil(sortedBoards.value.length / boardPageSize.value)))
+const mobilePaginationMediaQuery = typeof window !== 'undefined' && typeof window.matchMedia === 'function'
+  ? window.matchMedia('(max-width: 600px)')
+  : null
+const mobilePagination = ref(mobilePaginationMediaQuery?.matches ?? false)
+
+function onMobilePaginationBreakpointChange(event: MediaQueryListEvent): void {
+  mobilePagination.value = event.matches
+}
 const canvasGalleryElement = ref<HTMLElement | null>(null)
 const canvasGalleryHeight = ref<number | null>(null)
 let canvasGalleryResizeObserver: ResizeObserver | null = null
@@ -154,7 +162,10 @@ watch(canvasGalleryElement, (element) => {
   }
 }, { flush: 'post' })
 
-onBeforeUnmount(() => canvasGalleryResizeObserver?.disconnect())
+onBeforeUnmount(() => {
+  canvasGalleryResizeObserver?.disconnect()
+  mobilePaginationMediaQuery?.removeEventListener('change', onMobilePaginationBreakpointChange)
+})
 const moveFolderOptions = computed<SelectOption[]>(() => [
   { label: t('board.root_folder'), value: ROOT_FOLDER_VALUE },
   ...boardFolders.value
@@ -217,7 +228,11 @@ function retryLoad(): void {
   void Promise.all([loadBoards(), loadFolders()])
 }
 
-onMounted(() => { retryLoad() })
+onMounted(() => {
+  mobilePaginationMediaQuery?.addEventListener('change', onMobilePaginationBreakpointChange)
+  mobilePagination.value = mobilePaginationMediaQuery?.matches ?? false
+  retryLoad()
+})
 
 function setMutationBusy(key: string, busy: boolean): void {
   mutationKeys.value = busy
@@ -718,7 +733,8 @@ async function removeBoard(board: BoardMetadata): Promise<void> {
               v-model:page-size="boardPageSize"
               :item-count="sortedBoards.length"
               :page-sizes="boardPageSizeOptions"
-              show-size-picker
+              :show-size-picker="!mobilePagination"
+              :simple="mobilePagination"
               size="medium"
               :aria-label="t('board.all_boards')"
             />
@@ -994,9 +1010,20 @@ async function removeBoard(board: BoardMetadata): Promise<void> {
   .board-subsection-label { margin-top: 16px; }
   .board-skeleton-grid { display: flex; overflow-x: hidden; }
   .board-skeleton-card { flex: 0 0 calc((100% - 18px) / 2); }
-  .board-pagination { align-items: stretch; flex-direction: column; }
-  .board-pagination-meta { order: 2; }
-  .board-pagination :deep(.n-pagination) { justify-content: space-between; }
+  .board-pagination {
+    flex-direction: row;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    margin-top: 12px;
+    padding: 12px 0 16px;
+  }
+  .board-pagination-meta { flex: 0 0 auto; white-space: nowrap; }
+  .board-pagination :deep(.n-pagination) {
+    flex: 0 1 auto;
+    min-width: 0;
+    justify-content: flex-end;
+  }
 }
 @media (max-width: 440px) { .board-home-header h1 { font-size: 1.75rem; } }
 </style>
