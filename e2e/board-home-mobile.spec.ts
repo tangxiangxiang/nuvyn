@@ -49,6 +49,11 @@ test('Board Home keeps a compact phone toolbar, complete previews, and folder ro
         const rect = element.getBoundingClientRect()
         const image = document.createElement('img')
         image.src = 'data:image/svg+xml,%3Csvg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 500"%3E%3C/svg%3E'
+        // A dynamically appended node does not receive Vue's scoped-style
+        // data-v attribute, so the component's CSS would otherwise not match.
+        for (const name of element.getAttributeNames()) {
+          if (name.startsWith('data-v-')) image.setAttribute(name, '')
+        }
         element.appendChild(image)
         const objectFit = getComputedStyle(image).objectFit
         const objectPosition = getComputedStyle(image).objectPosition

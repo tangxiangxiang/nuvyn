@@ -1117,8 +1117,10 @@ test('native READ and EDIT remain usable across panel states, breakpoints, and r
     let leftPanelOpen = true
     for (const viewport of sequence) {
       await page.setViewportSize(viewport)
-      await expect(page.locator('.workspace-navigation .scope-chip')).toHaveCount(viewport.width <= 600 ? 2 : 3)
-      await expect(page.locator('.workspace-board-link')).toHaveCount(viewport.width <= 600 ? 0 : 1)
+      // Phone navigation now includes Note and Board, just like tablet/PC.
+      // Compact mode hides labels rather than removing the controls.
+      await expect(page.locator('.workspace-navigation .scope-chip')).toHaveCount(3)
+      await expect(page.locator('.workspace-board-link')).toHaveCount(1)
       // Entering a mobile Diary viewport collapses the panel; resizing back
       // to desktop preserves that choice instead of automatically reopening it.
       if (viewport.width <= 600) leftPanelOpen = false

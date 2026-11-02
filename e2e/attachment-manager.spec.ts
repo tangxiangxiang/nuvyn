@@ -287,7 +287,7 @@ test('Attachment Manager remains reachable in desktop, tablet, and short mobile 
       // setViewportSize can resolve before matchMedia's change event updates
       // the Vue layout and Monaco's ResizeObserver. Compare the modal with
       // the settled closed workspace, not the previous tablet presentation.
-      if (viewport.width > 600 && viewport.width < 1200) {
+      if (viewport.width < 1200) {
         await expect(page.locator('.vault')).toHaveClass(/note-tablet-mode/)
       } else {
         await expect(page.locator('.vault')).not.toHaveClass(/note-tablet-mode/)

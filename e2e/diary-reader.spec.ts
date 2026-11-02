@@ -499,7 +499,7 @@ test.describe('Diary date title swipe on phones', () => {
   test.use({ hasTouch: true })
 
   async function swipeTitle(page: Page, dx: number, dy = 0, fromEdge = false): Promise<void> {
-    await page.locator('.editor-tabs-shell .tab.active .tab-title').evaluate((title, gesture) => {
+    await page.locator('.reading-slot .reading-pane article h1').first().evaluate((title, gesture) => {
       const bounds = title.getBoundingClientRect()
       const x = gesture.fromEdge ? 10 : Math.max(30, Math.min(innerWidth - 30, bounds.left + bounds.width / 2))
       const y = bounds.top + bounds.height / 2
@@ -526,7 +526,8 @@ test.describe('Diary date title swipe on phones', () => {
       await clickDiaryDate(page, today)
       await expect(page).toHaveURL(new RegExp(`/vault/${diaryPath(today)}$`))
       await expect(page.locator('.reading-pane')).toBeVisible()
-      await expect(page.locator('.editor-tabs-shell .tab.active .tab-title')).toBeVisible()
+      await expect(page.locator('.reading-slot .reading-pane article h1').first()).toBeVisible()
+      await expect(page.locator('.editor-tabs-shell .tab.active')).toBeHidden()
       await expect(page.getByTestId('left-panel-toggle')).toHaveAttribute('aria-pressed', 'false')
 
       await swipeTitle(page, 16, 110)

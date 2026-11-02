@@ -608,7 +608,7 @@ function animatedMoneyParts(minor: number, currency: string, key: MetricKey): { 
 
     <template v-if="overview">
       <section class="ledger-metric-grid" aria-label="资产概览">
-        <NCard class="ledger-metric-card" data-testid="ledger-total-assets" size="small">
+        <NCard class="ledger-metric-card" data-testid="ledger-total-assets" size="small" content-style="padding: 0">
           <div class="ledger-metric-layout">
             <span class="ledger-metric-icon" aria-hidden="true">
               <NIcon aria-hidden="true" :size="22"><Wallet /></NIcon>
@@ -621,7 +621,7 @@ function animatedMoneyParts(minor: number, currency: string, key: MetricKey): { 
             </span>
           </div>
         </NCard>
-        <NCard class="ledger-metric-card" data-testid="ledger-total-liabilities" size="small">
+        <NCard class="ledger-metric-card" data-testid="ledger-total-liabilities" size="small" content-style="padding: 0">
           <div class="ledger-metric-layout">
             <span class="ledger-metric-icon" aria-hidden="true">
               <NIcon aria-hidden="true" :size="22"><CreditCard /></NIcon>
@@ -634,7 +634,7 @@ function animatedMoneyParts(minor: number, currency: string, key: MetricKey): { 
             </span>
           </div>
         </NCard>
-        <NCard class="ledger-metric-card is-primary" data-testid="ledger-net-worth" size="small">
+        <NCard class="ledger-metric-card is-primary" data-testid="ledger-net-worth" size="small" content-style="padding: 0">
           <div class="ledger-metric-layout">
             <span class="ledger-metric-icon" aria-hidden="true">
               <NIcon aria-hidden="true" :size="22"><Scale /></NIcon>

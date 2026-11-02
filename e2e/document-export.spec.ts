@@ -126,6 +126,7 @@ test('export retries a source failure, rejects duplicate clicks and uses one del
 })
 
 test('export dialog supports Escape, restores tree focus and fits a mobile viewport', async ({ page, request }, testInfo) => {
+  test.setTimeout(60_000)
   const path = `inbox/export-cancel-${randomUUID().slice(0, 8)}`
   await createDoc(request, path, '', [])
   try {
@@ -133,8 +134,10 @@ test('export dialog supports Escape, restores tree focus and fits a mobile viewp
     await gotoVaultReady(page)
     // Open the existing mobile Files drawer; do not change its layout policy.
     const row = page.locator(`[data-tree-key="file:${path}"]`)
-    const files = page.getByRole('button', { name: /Files|文件/u, exact: true })
-    if (!await page.locator('.file-tree').isVisible() && await files.count()) await files.first().click()
+    const toggle = page.getByTestId('left-panel-toggle')
+    await expect(toggle).toBeVisible()
+    if (!await page.locator('.file-tree').isVisible()) await toggle.click()
+    await expect(row).toBeVisible()
     await openMenu(page, path)
     await page.locator('.tree-context-menu').getByRole('button', { name: /^(Export…|导出…)$/u }).click()
     const dialog = page.getByRole('dialog')

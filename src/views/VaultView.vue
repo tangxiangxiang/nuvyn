@@ -2004,9 +2004,14 @@ function onDiaryTitleTouchStart(event: TouchEvent): void {
     || leftSidebarVisible.value || event.touches.length !== 1
   ) return
   if (!(event.target instanceof Element)) return
-  const title = event.target.closest('.tab.active .tab-title')
-  const tab = title?.closest<HTMLElement>('[data-tab-id]')
-  if (!tab || tab.dataset.tabId !== activePath.value) return
+  // The ordinary Diary tab strip is intentionally hidden. The only visible
+  // gesture target is the first rendered Markdown heading in the Diary reader.
+  // Never treat body paragraphs, subsequent headings, links or scroll panes
+  // as date navigation targets.
+  const heading = event.target.closest('.reading-slot .reading-pane article h1')
+  const article = heading?.closest('article')
+  if (!heading || !article || article.querySelector('h1') !== heading
+    || event.target.closest('a, button, [contenteditable]')) return
   const finger = event.touches[0]
   if (!finger || finger.clientX < 24 || finger.clientX > window.innerWidth - 24) return
   diaryTitleTouch = {
@@ -3562,9 +3567,6 @@ watch(isReadMode, async (reading) => {
       <EditorTabs
         v-if="workspaceTabs.length > 0 && !noteTabletLayout"
         v-show="workspaceTabStripVisible"
-        @touchstart.passive="onDiaryTitleTouchStart"
-        @touchend.passive="onDiaryTitleTouchEnd"
-        @touchcancel.passive="cancelDiaryTitleTouch"
         ref="editorTabsRef"
         :tabs="workspaceTabs"
         :active-path="activeWorkspaceTabId"
@@ -3665,6 +3667,9 @@ watch(isReadMode, async (reading) => {
           v-if="activeTab"
           :key="activeTab.path"
           class="reading-slot"
+          @touchstart.passive="onDiaryTitleTouchStart"
+          @touchend.passive="onDiaryTitleTouchEnd"
+          @touchcancel.passive="cancelDiaryTitleTouch"
         >
           <ReadingPane
             ref="readingPaneRef"
