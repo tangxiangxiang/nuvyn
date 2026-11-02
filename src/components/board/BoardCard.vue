@@ -222,7 +222,14 @@ function onDragEnd(event: DragEvent): void {
   .board-card:focus-within .board-card-menu { opacity: .82; }
 }
 @media (max-width: 600px) {
-  .board-card-thumbnail { width: calc(100% - 20px); margin: 10px 10px 0; }
-  .board-card-copy { padding: 12px 42px 14px 12px; }
+  .board-card-thumbnail {
+    width: calc(100% - 20px);
+    height: clamp(180px, 52vw, 210px);
+    aspect-ratio: auto;
+    margin: 10px 10px 0;
+  }
+  /* The entire stored thumbnail must be visible at every phone width. */
+  .board-card-thumbnail img { object-fit: contain; object-position: center; }
+  .board-card-copy { padding: 10px 42px 12px 12px; }
 }
 </style>

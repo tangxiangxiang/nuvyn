@@ -960,14 +960,38 @@ async function removeBoard(board: BoardMetadata): Promise<void> {
   .board-skeleton-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }
 @media (max-width: 600px) {
-  .board-home-header { align-items: stretch; flex-direction: column; }
-  .board-home-subtitle { max-width: 32rem; }
+  .board-home { padding-top: 22px; }
+  .board-home-header { align-items: stretch; flex-direction: column; gap: 16px; margin-bottom: 18px; }
+  .board-home-eyebrow { margin-bottom: 6px; }
+  .board-home-subtitle { display: none; }
   .board-home-actions { width: 100%; }
   .board-new-folder-button,
   .board-new-button { flex: 1; }
-  .board-all-section-heading { align-items: stretch; flex-direction: column; gap: 10px; }
-  .board-all-heading-controls { width: 100%; flex-wrap: wrap; }
-  .board-all-search { width: auto; flex: 1 1 auto; }
+
+  /* Keep one semantic toolbar: sort beside the heading, search/filter below. */
+  .board-all-section-heading {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    grid-template-areas:
+      "title sort"
+      "search filter";
+    gap: 10px 8px;
+    align-items: center;
+    margin-bottom: 12px;
+  }
+  .board-all-section-heading > h2 {
+    grid-area: title;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .board-all-heading-controls { display: contents; }
+  .board-all-search { grid-area: search; width: 100%; min-width: 0; }
+  .board-filter { grid-area: filter; }
+  .board-sort-select { grid-area: sort; width: 128px; }
+
+  .board-subsection-label { margin-top: 16px; }
   .board-skeleton-grid { display: flex; overflow-x: hidden; }
   .board-skeleton-card { flex: 0 0 calc((100% - 18px) / 2); }
   .board-pagination { align-items: stretch; flex-direction: column; }

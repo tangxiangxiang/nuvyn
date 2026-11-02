@@ -76,6 +76,7 @@ function emitDragEnd(board: BoardMetadata, event: DragEvent): void {
   .board-gallery.is-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }
 @media (max-width: 600px) {
+  .board-gallery { gap: 12px; }
   .board-gallery.is-grid { grid-template-columns: minmax(0, 1fr); }
 }
 </style>

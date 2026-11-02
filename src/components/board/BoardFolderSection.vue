@@ -160,5 +160,9 @@ function onDrop(event: DragEvent, folder: BoardFolderSummary): void {
 @media (max-width: 1279px) { .board-folder-grid { grid-template-columns: repeat(4, minmax(0, 1fr)); } }
 @media (max-width: 1023px) { .board-folder-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
 @media (max-width: 767px) { .board-folder-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
-@media (max-width: 600px) { .board-folder-grid { grid-template-columns: minmax(0, 1fr); } }
+@media (max-width: 600px) {
+  .board-folder-heading { min-height: 28px; margin: 10px 0 8px; }
+  .board-folder-grid { grid-template-columns: minmax(0, 1fr); gap: 9px; }
+  .board-folder-card { min-height: 60px; padding: 8px 42px 8px 12px; }
+}
 </style>
