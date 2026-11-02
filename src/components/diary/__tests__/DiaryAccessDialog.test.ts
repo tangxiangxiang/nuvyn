@@ -46,7 +46,7 @@ describe('DiaryAccessDialog', () => {
     form().dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }))
     await wrapper.vm.$nextTick()
     expect(wrapper.emitted('submit')).toEqual([[
-      { password: 'diary-password', confirmPassword: 'diary-password' },
+      { password: 'diary-password', confirmPassword: 'diary-password', rememberDevice: false },
     ]])
 
     cancel().click()
@@ -55,6 +55,7 @@ describe('DiaryAccessDialog', () => {
     await wrapper.setProps({ open: false })
     await wrapper.setProps({ open: true })
     expect(password().value).toBe('')
+    expect((document.querySelector('[data-testid="diary-remember-device"] input') as HTMLInputElement).checked).toBe(false)
   })
 
   it('cancels on Escape and only shows one password field in unlock mode', async () => {
@@ -92,5 +93,32 @@ describe('DiaryAccessDialog', () => {
     expect(wrapper.emitted('cancel')).toBeUndefined()
     expect(wrapper.emitted('submit')).toBeUndefined()
     expect(document.querySelector('.diary-access-backdrop')).not.toBeNull()
+  })
+
+  it('only remembers a device after explicit opt-in and resets the choice when reopened', async () => {
+    const wrapper = mount(DiaryAccessDialog, {
+      props: { open: true, mode: 'unlock' },
+      attachTo: document.body,
+    })
+    await wrapper.vm.$nextTick()
+    const checkbox = document.querySelector('[data-testid="diary-remember-device"] input[type="checkbox"]') as HTMLInputElement
+    expect(checkbox).toBeTruthy()
+    expect(checkbox.checked).toBe(false)
+    checkbox.click()
+    await wrapper.vm.$nextTick()
+    expect(checkbox.checked).toBe(true)
+    const password = document.getElementById('diary-access-password') as HTMLInputElement
+    password.value = 'diary-password'
+    password.dispatchEvent(new Event('input', { bubbles: true }))
+    const form = document.querySelector('form.diary-access-dialog') as HTMLFormElement
+    form.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }))
+    await wrapper.vm.$nextTick()
+    expect(wrapper.emitted('submit')).toEqual([[
+      { password: 'diary-password', confirmPassword: '', rememberDevice: true },
+    ]])
+    await wrapper.setProps({ open: false })
+    await wrapper.setProps({ open: true })
+    const reopened = document.querySelector('[data-testid="diary-remember-device"] input[type="checkbox"]') as HTMLInputElement
+    expect(reopened.checked).toBe(false)
   })
 })

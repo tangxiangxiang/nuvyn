@@ -51,20 +51,26 @@ export async function getDiaryAccessStatus(): Promise<DiaryAccessStatus> {
   return validateStatus(await jsonOrThrow(await diaryAuthFetch('/api/diary/access/status')))
 }
 
-async function postPassword(path: string, password: string): Promise<DiaryAccessUnlocked> {
+async function postPassword(path: string, password: string, rememberDevice: boolean): Promise<DiaryAccessUnlocked> {
   return validateUnlocked(await jsonOrThrow(await authFetch(path, {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ password }),
+    body: JSON.stringify({ password, rememberDevice }),
   })))
 }
 
-export function setupDiaryAccess(password: string): Promise<DiaryAccessUnlocked> {
-  return postPassword('/api/diary/access/setup', password)
+export function setupDiaryAccess(password: string, rememberDevice = false): Promise<DiaryAccessUnlocked> {
+  return postPassword('/api/diary/access/setup', password, rememberDevice)
 }
 
-export function unlockDiaryAccess(password: string): Promise<DiaryAccessUnlocked> {
-  return postPassword('/api/diary/access/unlock', password)
+export function unlockDiaryAccess(password: string, rememberDevice = false): Promise<DiaryAccessUnlocked> {
+  return postPassword('/api/diary/access/unlock', password, rememberDevice)
+}
+
+export async function resumeDiaryAccess(): Promise<DiaryAccessUnlocked | { state: 'LOCKED' }> {
+  const response = await jsonOrThrow(await authFetch('/api/diary/access/resume', { method: 'POST' }))
+  const status = validateStatus(response)
+  return status.state === 'UNLOCKED' ? validateUnlocked(response) : { state: 'LOCKED' }
 }
 
 export async function lockDiaryAccess(): Promise<void> {

@@ -1,4 +1,4 @@
-import { randomBytes } from 'node:crypto'
+import { createHash, randomBytes } from 'node:crypto'
 import type { Database as DatabaseT } from 'better-sqlite3'
 import { getVaultId } from '../vaultIdentity.js'
 import { isValidPassword } from '../auth/password.js'
@@ -105,6 +105,7 @@ type Capability = {
   readonly epoch: number
   readonly expiresAt: number
   readonly dek: Buffer
+  rememberTokenHash?: string
   expiryTimer?: ReturnType<typeof setTimeout>
 }
 
@@ -131,6 +132,17 @@ export type DiaryBodyOperation = {
 }
 
 const MAX_CAPABILITY_EXPIRY_TIMER_MS = 2_147_000_000
+export const DIARY_REMEMBER_DEVICE_LIFETIME_MS = 7 * 24 * 60 * 60 * 1000
+
+type RememberedDevice = {
+  readonly sessionId: number
+  readonly capability: string
+  readonly expiresAt: number
+}
+
+function hashRememberToken(token: string): string {
+  return createHash('sha256').update(token).digest('hex')
+}
 
 export type DiaryAccessAuthSession = {
   readonly valid: boolean
@@ -210,6 +222,9 @@ export class DiaryAccessService {
   readonly unwrapDek: typeof unwrapDiaryDek
   private readonly sessionEpochs = new Map<number, number>()
   private readonly capabilities = new Map<string, Capability>()
+  // Process-local, single-session remembered grants. No Diary DEK, password,
+  // or token hash is persisted to disk; restart always requires the password.
+  private readonly rememberedDevices = new Map<string, RememberedDevice>()
   private readonly activeBodyOperations = new Map<number, number>()
   private readonly sessionQuiescences = new Map<number, SessionQuiescence>()
   private readonly sessionLifecycleGenerations = new Map<number, number>()
@@ -242,6 +257,7 @@ export class DiaryAccessService {
     const capability = this.capabilities.get(token)
     if (capability) {
       if (capability.expiryTimer !== undefined) clearTimeout(capability.expiryTimer)
+      if (capability.rememberTokenHash) this.rememberedDevices.delete(capability.rememberTokenHash)
       capability.dek.fill(0)
     }
     this.capabilities.delete(token)
@@ -452,6 +468,43 @@ export class DiaryAccessService {
       && capability.epoch === this.sessionEpochs.get(sessionId)
       && capability.dek.length === SCRYPT_KEY_BYTES,
     )
+  }
+
+  /**
+   * A remembered device is a separate opaque, HttpOnly-cookie credential.
+   * It can only recover an existing in-memory capability for the SAME active
+   * owner session. It never unwraps a DEK or extends either expiry.
+   */
+  rememberDevice(sessionId: number, capabilityToken: string): { token: string; expiresAt: number } {
+    if (!this.isCapabilityValid(sessionId, capabilityToken)) {
+      throw new DiaryAccessServiceError('diary-access-invalid-state', 409, 'Diary is not unlocked for this session.')
+    }
+    const capability = this.capabilities.get(capabilityToken)!
+    if (capability.rememberTokenHash) this.rememberedDevices.delete(capability.rememberTokenHash)
+    const token = randomBytes(32).toString('base64url')
+    const hash = hashRememberToken(token)
+    const expiresAt = Math.min(capability.expiresAt, this.now() + DIARY_REMEMBER_DEVICE_LIFETIME_MS)
+    capability.rememberTokenHash = hash
+    this.rememberedDevices.set(hash, { sessionId, capability: capabilityToken, expiresAt })
+    return { token, expiresAt }
+  }
+
+  resumeRememberedDevice(
+    sessionId: number,
+    token: unknown,
+  ): { state: 'UNLOCKED'; capability: string; epoch: number } | { state: 'LOCKED' } {
+    if (typeof token !== 'string' || !/^[A-Za-z0-9_-]{43}$/.test(token)) return { state: 'LOCKED' }
+    const hash = hashRememberToken(token)
+    const record = this.rememberedDevices.get(hash)
+    if (!record) return { state: 'LOCKED' }
+    if (record.expiresAt <= this.now() || record.sessionId !== sessionId) {
+      if (record.expiresAt <= this.now()) this.rememberedDevices.delete(hash)
+      return { state: 'LOCKED' }
+    }
+    if (!this.isCapabilityValid(sessionId, record.capability)) return { state: 'LOCKED' }
+    const capability = this.capabilities.get(record.capability)
+    if (!capability || capability.rememberTokenHash !== hash) return { state: 'LOCKED' }
+    return { state: 'UNLOCKED', capability: record.capability, epoch: capability.epoch }
   }
 
   private releaseBodyOperation(sessionId: number): void {

@@ -117,6 +117,8 @@ const STRINGS: Strings = {
   'diary_access.setup_description': { zh: '为日记工作区设置独立的访问密码。', en: 'Set a separate password for the Diary workspace.' },
   'diary_access.unlock_description': { zh: '输入日记访问密码以继续。', en: 'Enter the Diary access password to continue.' },
   'diary_access.password': { zh: '日记访问密码', en: 'Diary access password' },
+  'diary_access.remember_device': { zh: '在此设备保持解锁 7 天', en: 'Keep Diary unlocked on this device for 7 days' },
+  'diary_access.remember_device_hint': { zh: '仅限本次登录会话；手动锁定、退出登录或服务重启后需重新输入。', en: 'Limited to this login session. Locking, logging out or restarting the server requires the password again.' },
   'diary_access.confirm_password': { zh: '确认日记访问密码', en: 'Confirm Diary access password' },
   'diary_access.setup': { zh: '设置并解锁', en: 'Set up and unlock' },
   'diary_access.unlock': { zh: '解锁', en: 'Unlock' },

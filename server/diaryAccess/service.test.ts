@@ -518,4 +518,49 @@ describe('D8.1 Diary access foundation', () => {
     expect(service.isCapabilityValid(7, current.capability)).toBe(true)
     db.close()
   })
+
+  it('remembers only a session-bound process-local grant and revokes it on lock or restart', async () => {
+    const db = new Database(':memory:')
+    applyMigrations(db)
+    const now = 1_700_000_000_000
+    const service = makeService(db, now, VAULT_ID, () => ({ valid: true, expiresAt: now + 2 * 24 * 60 * 60 * 1000 }))
+    const unlocked = await service.setup(7, PASSWORD)
+    const remembered = service.rememberDevice(7, unlocked.capability)
+    expect(remembered.token).toMatch(/^[A-Za-z0-9_-]{43}$/)
+    expect(remembered.expiresAt).toBe(now + 2 * 24 * 60 * 60 * 1000)
+    expect(service.resumeRememberedDevice(7, remembered.token)).toEqual(unlocked)
+    expect(service.resumeRememberedDevice(8, remembered.token)).toEqual({ state: 'LOCKED' })
+    expect(service.resumeRememberedDevice(7, 'guess')).toEqual({ state: 'LOCKED' })
+    const restarted = makeService(db, now)
+    expect(restarted.resumeRememberedDevice(7, remembered.token)).toEqual({ state: 'LOCKED' })
+    await service.lock(7)
+    expect(service.resumeRememberedDevice(7, remembered.token)).toEqual({ state: 'LOCKED' })
+    db.close()
+  })
+
+  it('cannot revive an old grant after capability replacement, expiration or auth logout', async () => {
+    const db = new Database(':memory:')
+    applyMigrations(db)
+    let now = 1_700_000_000_000
+    const service = new DiaryAccessService({
+      db,
+      kdfGuard: new KdfGuard({ concurrency: 1, maxQueue: 2, maxQueueWaitMs: 10_000 }),
+      now: () => now,
+      getVaultId: () => VAULT_ID,
+      resolveAuthSession: () => ({ valid: true, expiresAt: 1_700_000_000_000 + 14 * 24 * 60 * 60 * 1000 }),
+    })
+    const unlocked = await service.setup(7, PASSWORD)
+    const first = service.rememberDevice(7, unlocked.capability)
+    expect(first.expiresAt).toBe(now + 7 * 24 * 60 * 60 * 1000)
+    const replaced = await service.unlock(7, PASSWORD)
+    expect(service.resumeRememberedDevice(7, first.token)).toEqual({ state: 'LOCKED' })
+    const second = service.rememberDevice(7, replaced.capability)
+    now += 7 * 24 * 60 * 60 * 1000 + 1
+    expect(service.resumeRememberedDevice(7, second.token)).toEqual({ state: 'LOCKED' })
+    now -= 7 * 24 * 60 * 60 * 1000 + 1
+    const third = service.rememberDevice(7, replaced.capability)
+    await service.invalidateAuthSession(7)
+    expect(service.resumeRememberedDevice(7, third.token)).toEqual({ state: 'LOCKED' })
+    db.close()
+  })
 })

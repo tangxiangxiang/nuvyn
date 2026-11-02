@@ -2,6 +2,7 @@ import { computed, readonly, ref, watch, type Ref } from 'vue'
 import {
   getDiaryAccessStatus,
   lockDiaryAccess,
+  resumeDiaryAccess,
   setupDiaryAccess,
   unlockDiaryAccess,
   type DiaryAccessState,
@@ -19,8 +20,8 @@ export interface DiaryAccessSession {
    *  real lock/expiry/logout after the session was already reconciled. */
   readonly statusResolved: Readonly<Ref<boolean>>
   readonly ensureStatus: () => Promise<DiaryAccessState>
-  readonly setup: (password: string) => Promise<void>
-  readonly unlock: (password: string) => Promise<void>
+  readonly setup: (password: string, rememberDevice?: boolean) => Promise<void>
+  readonly unlock: (password: string, rememberDevice?: boolean) => Promise<void>
   readonly lock: () => Promise<void>
   readonly clear: () => void
 }
@@ -72,7 +73,22 @@ async function ensureStatus(): Promise<DiaryAccessState> {
   if (statusRequest?.generation === generation) return statusRequest.promise
   const requestGeneration = generation
   const pending = getDiaryAccessStatus()
-    .then((status) => {
+    .then(async (status) => {
+      // Only a fresh, locked bootstrap can restore a remembered device.
+      // A previously unlocked state becoming LOCKED is an invalidation:
+      // never silently re-open it with an old browser cookie.
+      if (status.state === 'LOCKED' && state.value !== 'UNLOCKED') {
+        try {
+          const restored = await resumeDiaryAccess()
+          if (requestGeneration === generation && restored.state === 'UNLOCKED') {
+            setDiaryCapability(restored.capability)
+            status = restored
+          }
+        } catch {
+          // Stale/revoked/expired remember cookies cannot make a status
+          // lookup fail. The user still has the password unlock option.
+        }
+      }
       if (requestGeneration !== generation) return state.value
       // Status reconciliation is also an authoritative lock boundary. A
       // session can be locked elsewhere without emitting the local auth
@@ -95,12 +111,12 @@ async function ensureStatus(): Promise<DiaryAccessState> {
   return pending
 }
 
-async function setup(password: string): Promise<void> {
+async function setup(password: string, rememberDevice = false): Promise<void> {
   const requestGeneration = state.value === 'UNLOCKED'
     ? (notifyTeardown('capability-replaced'), generation)
     : ++generation
   statusRequest = null
-  const result = await setupDiaryAccess(password)
+  const result = await setupDiaryAccess(password, rememberDevice)
   if (requestGeneration !== generation) return
   setDiaryCapability(result.capability)
   state.value = result.state
@@ -108,12 +124,12 @@ async function setup(password: string): Promise<void> {
   statusResolved.value = true
 }
 
-async function unlock(password: string): Promise<void> {
+async function unlock(password: string, rememberDevice = false): Promise<void> {
   const requestGeneration = state.value === 'UNLOCKED'
     ? (notifyTeardown('capability-replaced'), generation)
     : ++generation
   statusRequest = null
-  const result = await unlockDiaryAccess(password)
+  const result = await unlockDiaryAccess(password, rememberDevice)
   if (requestGeneration !== generation) return
   setDiaryCapability(result.capability)
   state.value = result.state

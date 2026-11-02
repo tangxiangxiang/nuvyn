@@ -303,7 +303,7 @@ function finishAccess(granted: boolean): void {
   resolve?.(granted)
 }
 
-async function submitDiaryAccess(payload: { password: string; confirmPassword: string }): Promise<void> {
+async function submitDiaryAccess(payload: { password: string; confirmPassword: string; rememberDevice: boolean }): Promise<void> {
   if (diaryAccessBusy.value) return
   if (diaryAccessMode.value === 'setup' && payload.password !== payload.confirmPassword) {
     diaryAccessError.value = t('auth.password_mismatch')
@@ -313,8 +313,8 @@ async function submitDiaryAccess(payload: { password: string; confirmPassword: s
   diaryAccessError.value = ''
   const requestGeneration = accessIntentGeneration
   try {
-    if (diaryAccessMode.value === 'setup') await diaryAccess.setup(payload.password)
-    else await diaryAccess.unlock(payload.password)
+    if (diaryAccessMode.value === 'setup') await diaryAccess.setup(payload.password, payload.rememberDevice)
+    else await diaryAccess.unlock(payload.password, payload.rememberDevice)
     if (requestGeneration !== accessIntentGeneration
       || auth.state.value !== 'authenticated'
       || !diaryAccess.isUnlocked.value) return

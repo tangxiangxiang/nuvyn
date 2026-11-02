@@ -10,6 +10,7 @@ import { checkCsrfHeaders, checkJsonContentType } from './csrf.js'
 import { AuthServiceError } from './service.js'
 import { getAuthRuntime } from './runtime.js'
 import { findSessionByRawToken, selectSessionToken } from './session.js'
+import { clearDiaryRememberCookie } from '../diaryAccess/rememberCookie.js'
 
 const authRoutes = new Hono()
 
@@ -232,6 +233,7 @@ authRoutes.post('/logout', async (c) => {
   }
   try {
     clearSessionCookies(c)
+    clearDiaryRememberCookie(c, runtime.config.cookie.secure)
   } catch {
     // Cookie cleanup is best effort even when the underlying revoke failed.
   }

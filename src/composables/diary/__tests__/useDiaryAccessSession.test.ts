@@ -5,6 +5,7 @@ const authState = ref<'authenticated' | 'unauthenticated'>('authenticated')
 
 vi.mock('../../../lib/diary-access-api', () => ({
   getDiaryAccessStatus: vi.fn(),
+  resumeDiaryAccess: vi.fn(),
   lockDiaryAccess: vi.fn(),
   setupDiaryAccess: vi.fn(),
   unlockDiaryAccess: vi.fn(),
@@ -18,6 +19,7 @@ vi.mock('../../useAuth', () => ({
 
 import {
   getDiaryAccessStatus,
+  resumeDiaryAccess,
   unlockDiaryAccess,
 } from '../../../lib/diary-access-api'
 import { getDiaryCapability } from '../../../lib/diary-capability'
@@ -38,6 +40,7 @@ describe('D8.1 Diary client transition generation', () => {
     authState.value = 'authenticated'
     resetDiaryAccessSessionForTesting()
     vi.mocked(getDiaryAccessStatus).mockReset()
+    vi.mocked(resumeDiaryAccess).mockReset()
     vi.mocked(unlockDiaryAccess).mockReset()
   })
 
@@ -112,6 +115,38 @@ describe('D8.1 Diary client transition generation', () => {
 
     unsubscribe()
     expect(events).toContain('auth-invalidated')
+    expect(access.isUnlocked.value).toBe(false)
+    expect(getDiaryCapability()).toBeNull()
+  })
+
+  it('restores only a fresh locked bootstrap from the remembered-device endpoint', async () => {
+    vi.mocked(getDiaryAccessStatus).mockResolvedValue({ state: 'LOCKED' })
+    vi.mocked(resumeDiaryAccess).mockResolvedValue({
+      state: 'UNLOCKED', capability: 'restored-capability', epoch: 9,
+    })
+    const access = useDiaryAccessSession()
+    expect(await access.ensureStatus()).toBe('UNLOCKED')
+    expect(access.epoch.value).toBe(9)
+    expect(getDiaryCapability()).toBe('restored-capability')
+    expect(resumeDiaryAccess).toHaveBeenCalledTimes(1)
+
+    vi.mocked(getDiaryAccessStatus).mockResolvedValue({ state: 'LOCKED' })
+    await access.ensureStatus()
+    expect(access.isUnlocked.value).toBe(false)
+    expect(resumeDiaryAccess).toHaveBeenCalledTimes(1)
+    expect(getDiaryCapability()).toBeNull()
+  })
+
+  it('discards a delayed device restore after an explicit invalidation', async () => {
+    const pending = deferred<{ state: 'UNLOCKED'; capability: string; epoch: number }>()
+    vi.mocked(getDiaryAccessStatus).mockResolvedValue({ state: 'LOCKED' })
+    vi.mocked(resumeDiaryAccess).mockReturnValue(pending.promise)
+    const access = useDiaryAccessSession()
+    const refresh = access.ensureStatus()
+    await vi.waitFor(() => expect(resumeDiaryAccess).toHaveBeenCalledOnce())
+    access.clear()
+    pending.resolve({ state: 'UNLOCKED', capability: 'stale-remembered', epoch: 2 })
+    await refresh
     expect(access.isUnlocked.value).toBe(false)
     expect(getDiaryCapability()).toBeNull()
   })

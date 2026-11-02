@@ -177,3 +177,36 @@ test('full Diary navigation waits for route-led workspace hydration', async ({ p
     }
   }
 })
+
+
+test('opt-in remembered Diary access resumes in the same auth session and is revoked by lock', async ({ request }) => {
+  const password = 'e2e-diary-access-password-strong-123'
+  const unlockedResponse = await request.post('/api/diary/access/unlock', {
+    data: { password, rememberDevice: true },
+  })
+  expect(unlockedResponse.status(), await unlockedResponse.text()).toBe(200)
+  const unlocked = await readJson(unlockedResponse)
+  expect(unlocked.state).toBe('UNLOCKED')
+  const cookie = unlockedResponse.headers()['set-cookie'] ?? ''
+  expect(cookie).toContain('nuvyn_diary_device_local_v1=')
+  expect(cookie.toLowerCase()).toContain('httponly')
+  expect(cookie.toLowerCase()).toContain('samesite=strict')
+  expect(cookie).toContain('Path=/api/diary/access')
+  expect(cookie).not.toContain(password)
+  expect(unlocked).not.toHaveProperty('rememberToken')
+
+  const restoredResponse = await request.post('/api/diary/access/resume')
+  expect(restoredResponse.status(), await restoredResponse.text()).toBe(200)
+  expect(await readJson(restoredResponse)).toMatchObject({
+    state: 'UNLOCKED',
+    capability: unlocked.capability,
+    epoch: unlocked.epoch,
+  })
+
+  const lockedResponse = await request.post('/api/diary/access/lock')
+  expect(lockedResponse.status(), await lockedResponse.text()).toBe(200)
+  expect(lockedResponse.headers()['set-cookie']).toContain('nuvyn_diary_device_local_v1=')
+  const postLock = await request.post('/api/diary/access/resume')
+  expect(postLock.status(), await postLock.text()).toBe(200)
+  expect(await readJson(postLock)).toEqual({ state: 'LOCKED' })
+})

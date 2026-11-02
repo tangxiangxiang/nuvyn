@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
-import { NButton, NInput, type InputInst } from 'naive-ui'
+import { NButton, NCheckbox, NInput, type InputInst } from 'naive-ui'
 import { useFocusTrap } from '../../composables/useFocusTrap'
 import { useI18n } from '../../composables/useI18n'
 
@@ -12,7 +12,7 @@ const props = defineProps<{
 }>()
 
 const emit = defineEmits<{
-  submit: [payload: { password: string; confirmPassword: string }]
+  submit: [payload: { password: string; confirmPassword: string; rememberDevice: boolean }]
   cancel: []
 }>()
 
@@ -22,10 +22,12 @@ const modalRef = ref<HTMLElement | null>(null)
 const passwordRef = ref<InputInst | null>(null)
 const password = ref('')
 const confirmPassword = ref('')
+const rememberDevice = ref(false)
 
 function clearFields(): void {
   password.value = ''
   confirmPassword.value = ''
+  rememberDevice.value = false
 }
 
 function close(): void {
@@ -36,7 +38,7 @@ function close(): void {
 
 function submit(): void {
   if (props.busy || !password.value) return
-  emit('submit', { password: password.value, confirmPassword: confirmPassword.value })
+  emit('submit', { password: password.value, confirmPassword: confirmPassword.value, rememberDevice: rememberDevice.value })
 }
 
 function onKeydown(event: KeyboardEvent): void {
@@ -123,6 +125,12 @@ onMounted(() => {
             :disabled="busy"
           />
         </template>
+        <div class="diary-remember-option">
+          <NCheckbox v-model:checked="rememberDevice" :disabled="busy" data-testid="diary-remember-device">
+            {{ t('diary_access.remember_device') }}
+          </NCheckbox>
+          <p>{{ t('diary_access.remember_device_hint') }}</p>
+        </div>
         <p v-if="error" class="diary-access-error" role="alert">{{ error }}</p>
         <div class="diary-access-actions">
           <NButton
@@ -158,6 +166,8 @@ onMounted(() => {
 .diary-access-control { width: 100%; }
 .diary-access-control :deep(.n-input) { width: 100%; min-height: 40px; border-color: var(--border); border-radius: 5px; background: var(--bg-soft); }
 .diary-access-control :deep(.n-input__input-el) { color: var(--text-h); }
+.diary-remember-option { display: grid; gap: 4px; margin-top: 4px; }
+.diary-remember-option p { margin: 0 0 2px 24px; color: var(--text-muted); font-size: 0.78rem; line-height: 1.45; }
 .diary-access-error { margin: 2px 0 0; color: #b91c1c; }
 .diary-access-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 8px; }
 @media (max-width: 600px) { .diary-access-backdrop { align-items: end; padding: 0; } .diary-access-dialog { width: 100%; border-radius: 8px 8px 0 0; } }

@@ -71,7 +71,14 @@ Diary has a separate access password in addition to the Nuvyn owner login.
 The first visit asks you to set it up; later visits ask you to unlock Diary.
 Locking Diary is available from the Nuvyn navigation controls. Locking or an
 expired session removes access to protected Diary bodies until you unlock
-again.
+again. Optionally check **Keep Diary unlocked on this device for 7 days**
+when entering the Diary password. An HttpOnly, SameSite=Strict browser cookie
+can resume only the current authenticated owner's process-local decryption
+authorization after page reload/PWA reopening. Its expiration is capped by
+the owner login session (up to 7 days). Passwords and decryption keys are not
+placed in browser storage; manual Diary lock, logout, or server restart
+invalidates remembered access and requires the password again. This choice
+is off by default and affects only the current device/browser.
 
 If Nuvyn finds legacy Diary data, the Settings migration section shows an
 explicit scan and the required next action. Depending on the platform, Nuvyn
