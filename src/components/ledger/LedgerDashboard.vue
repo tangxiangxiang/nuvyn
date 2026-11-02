@@ -2019,9 +2019,84 @@ function animatedMoneyParts(minor: number, currency: string, key: MetricKey): { 
 }
 
 @media (max-width: 620px) {
-  .ledger-metric-grid { grid-template-columns: 1fr; }
-  .ledger-metric-card.is-primary { grid-column: auto; }
-  .ledger-dashboard-section :deep(.n-card__content) { padding: 17px 15px; }
+  .ledger-dashboard-header { margin-bottom: 18px; }
+  .ledger-dashboard-section { margin-top: 16px; }
+  .ledger-dashboard-section :deep(.n-card__content) { padding: 14px 13px; }
+  .ledger-section-heading { margin-bottom: 10px; }
+
+  /* Mobile metrics share one surface and read as a compact balance summary. */
+  .ledger-metric-grid {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 0;
+    overflow: hidden;
+    border: 1px solid var(--ledger-border);
+    border-radius: 12px;
+    background:
+      linear-gradient(135deg, var(--ledger-glass-tint), transparent 58%),
+      var(--ledger-glass-surface);
+    box-shadow:
+      inset 0 1px 0 var(--ledger-glass-highlight),
+      0 8px 24px var(--ledger-glass-shadow);
+    -webkit-backdrop-filter: saturate(145%) blur(18px);
+    backdrop-filter: saturate(145%) blur(18px);
+  }
+  .ledger-metric-card,
+  .ledger-metric-card.is-primary {
+    min-height: 52px;
+    grid-column: auto;
+    border: 0;
+    border-radius: 0;
+    background: transparent;
+    box-shadow: none;
+    -webkit-backdrop-filter: none;
+    backdrop-filter: none;
+  }
+  .ledger-metric-card + .ledger-metric-card {
+    border-top: 1px solid var(--ledger-divider);
+  }
+  .ledger-metric-layout {
+    grid-template-columns: 28px minmax(0, 1fr);
+    gap: 10px;
+    min-height: 52px;
+    padding: 7px 12px;
+  }
+  .ledger-metric-icon {
+    width: 28px;
+    height: 28px;
+    border-radius: 9px;
+  }
+  .ledger-metric-copy {
+    display: block;
+  }
+  .ledger-metric-copy :deep(.n-statistic) {
+    display: flex;
+    width: 100%;
+    min-width: 0;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+  }
+  .ledger-metric-copy :deep(.n-statistic__label) {
+    flex: 1 1 auto;
+    min-width: 0;
+    margin-bottom: 0;
+    overflow: hidden;
+    color: var(--text-muted);
+    font-size: .76rem;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .ledger-metric-copy :deep(.n-statistic-value) {
+    flex: 0 0 auto;
+    font-size: 1rem;
+    line-height: 1.25;
+    white-space: nowrap;
+  }
+  .ledger-metric-copy :deep(.n-statistic-value__prefix),
+  .ledger-metric-copy :deep(.n-statistic-value__content) {
+    font-size: inherit;
+  }
+
   .ledger-dashboard-account-list-viewport,
   .ledger-breakdown-list-viewport {
     max-height: none;
@@ -2029,41 +2104,52 @@ function animatedMoneyParts(minor: number, currency: string, key: MetricKey): { 
     overscroll-behavior: auto;
     scrollbar-gutter: auto;
   }
-  .ledger-cashflow-grid { grid-template-columns: 1fr; margin-inline: 0; }
+
+  /* Four cashflow values fit naturally into a two-by-two mobile grid. */
+  .ledger-cashflow-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 0;
+    margin-inline: 0;
+  }
   .ledger-cashflow-grid > div {
-    min-height: 60px;
-    padding: 12px 2px;
-    border-top: 1px solid var(--ledger-divider);
+    grid-template-columns: 30px minmax(0, 1fr);
+    min-height: 54px;
+    gap: 8px;
+    padding: 8px 4px;
+    border-top: 0;
     border-left: 0;
   }
-  .ledger-cashflow-grid > div:nth-child(odd) { padding-left: 2px; }
-  .ledger-cashflow-grid > div:first-child {
-    padding-top: 4px;
-    border-top: 0;
+  .ledger-cashflow-grid > div:nth-child(odd) {
+    padding-left: 2px;
+    padding-right: 8px;
+    border-left: 0;
   }
+  .ledger-cashflow-grid > div:nth-child(even) {
+    padding-left: 10px;
+    padding-right: 2px;
+    border-left: 1px solid var(--ledger-divider);
+  }
+  .ledger-cashflow-grid > div:nth-child(n + 3) {
+    padding-top: 10px;
+    border-top: 1px solid var(--ledger-divider);
+  }
+  .ledger-cashflow-grid > div:first-child { padding-top: 4px; }
   .ledger-cashflow-grid > div:last-child { padding-bottom: 4px; }
+  .ledger-cashflow-mark {
+    width: 30px;
+    height: 30px;
+    border-radius: 9px;
+    font-size: 1rem;
+  }
+  .ledger-cashflow-copy > span { font-size: .68rem; }
+  .ledger-cashflow-copy strong { font-size: .9rem; }
+
   .ledger-breakdown-columns { grid-template-columns: 1fr; gap: 20px; }
   .ledger-breakdown-columns > div:first-child { padding-right: 0; }
   .ledger-breakdown-columns > div + div {
     padding: 20px 0 0;
     border-top: 1px solid var(--ledger-divider);
     border-left: 0;
-  }
-}
-
-@media (max-width: 600px) {
-  .ledger-metric-grid { gap: 10px; }
-  .ledger-metric-card { min-height: 80px; }
-  .ledger-metric-layout {
-    grid-template-columns: 36px minmax(0, 1fr);
-    gap: 10px;
-    min-height: 78px;
-    padding: 8px 14px;
-  }
-  .ledger-metric-icon {
-    width: 36px;
-    height: 36px;
-    border-radius: 11px;
   }
 }
 

@@ -298,7 +298,7 @@ test('real Ledger onboarding and expense survive dashboard refresh', async ({ pa
 // This file owns the fresh Ledger onboarding case first. Tests below may call
 // ensureLedgerDashboardFixtures(), but must not move ahead of onboarding
 // because the application E2E server and SQLite database are shared within a shard.
-test('mobile overview keeps compact metric cards while tablet and desktop layouts remain unchanged', async ({ page, request }) => {
+test('mobile overview uses compact metric and cashflow summaries without changing tablet or desktop layouts', async ({ page, request }) => {
   await ensureLedgerDashboardFixtures(request)
   await page.goto('/ledger')
   const cards = page.locator('.ledger-metric-card')
@@ -306,9 +306,9 @@ test('mobile overview keeps compact metric cards while tablet and desktop layout
 
   for (const width of [640, 768, 960]) {
     await page.setViewportSize({ width, height: 900 })
-    const measurements = await cards.evaluateAll((elements) => elements.map((card, index) => {
+    const measurements = await cards.evaluateAll((elements, amounts) => elements.map((card, index) => {
       const amount = card.querySelector('.n-statistic-value__content')!
-      amount.textContent = ['410,520.90', '227,119.00', '183,401.90'][index]!
+      amount.textContent = amounts[index]!
       const range = document.createRange()
       range.selectNodeContents(amount)
       const text = range.getBoundingClientRect()
@@ -326,7 +326,7 @@ test('mobile overview keeps compact metric cards while tablet and desktop layout
         iconWidth: iconStyle.width,
         iconHeight: iconStyle.height,
       }
-    }))
+    }), ['410,520.90', '227,119.00', '183,401.90'])
     expect(Math.max(...measurements.map((measurement) => measurement.top))
       - Math.min(...measurements.map((measurement) => measurement.top))).toBeLessThan(1)
     for (const measurement of measurements) {
@@ -339,34 +339,62 @@ test('mobile overview keeps compact metric cards while tablet and desktop layout
     }
   }
 
-  for (const width of [320, 360, 375, 390, 430, 600]) {
+  for (const width of [320, 360, 375, 376, 390, 430, 600]) {
     await page.setViewportSize({ width, height: 900 })
-    const measurements = await cards.evaluateAll((elements) => elements.map((card) => {
-      const layout = card.querySelector<HTMLElement>('.ledger-metric-layout')!
-      const icon = card.querySelector<HTMLElement>('.ledger-metric-icon')!
-      const layoutStyle = getComputedStyle(layout)
-      const iconStyle = getComputedStyle(icon)
-      return {
-        cardHeight: card.getBoundingClientRect().height,
-        layoutHeight: layout.getBoundingClientRect().height,
-        layoutPadding: layoutStyle.padding,
-        layoutGap: layoutStyle.gap,
-        iconWidth: iconStyle.width,
-        iconHeight: iconStyle.height,
-      }
+
+    const metricLayout = await page.locator('.ledger-metric-grid').evaluate((grid) => ({
+      columns: getComputedStyle(grid).gridTemplateColumns.split(' ').length,
+      rowGap: getComputedStyle(grid).rowGap,
+      borderRadius: getComputedStyle(grid).borderRadius,
+      cards: Array.from(grid.children).map((card) => ({
+        height: card.getBoundingClientRect().height,
+        layout: (() => {
+          const element = card.querySelector<HTMLElement>('.ledger-metric-layout')!
+          const icon = card.querySelector<HTMLElement>('.ledger-metric-icon')!
+          const statistic = card.querySelector<HTMLElement>('.n-statistic')!
+          return {
+            height: element.getBoundingClientRect().height,
+            padding: getComputedStyle(element).padding,
+            iconWidth: getComputedStyle(icon).width,
+            iconHeight: getComputedStyle(icon).height,
+            statisticDisplay: getComputedStyle(statistic).display,
+          }
+        })(),
+      })),
     }))
-    expect(measurements).toHaveLength(3)
-    for (const measurement of measurements) {
-      expect(measurement.cardHeight).toBeGreaterThanOrEqual(80)
-      expect(measurement.cardHeight).toBeLessThanOrEqual(84)
-      expect(measurement.layoutHeight).toBeGreaterThanOrEqual(78)
-      expect(measurement.layoutPadding).toBe('8px 14px')
-      expect(measurement.layoutGap).toBe('10px')
-      expect(measurement.iconWidth).toBe('36px')
-      expect(measurement.iconHeight).toBe('36px')
+    expect(metricLayout.columns).toBe(1)
+    expect(metricLayout.rowGap).toBe('0px')
+    expect(metricLayout.borderRadius).toBe('12px')
+    expect(metricLayout.cards).toHaveLength(3)
+    for (const card of metricLayout.cards) {
+      expect(card.height).toBeGreaterThanOrEqual(52)
+      expect(card.height).toBeLessThanOrEqual(54)
+      expect(card.layout.height).toBeGreaterThanOrEqual(52)
+      expect(card.layout.padding).toBe('7px 12px')
+      expect(card.layout.iconWidth).toBe('28px')
+      expect(card.layout.iconHeight).toBe('28px')
+      expect(card.layout.statisticDisplay).toBe('flex')
     }
-    const gridGap = await page.locator('.ledger-metric-grid').evaluate((element) => getComputedStyle(element).rowGap)
-    expect(gridGap).toBe('10px')
+
+    const cashflowLayout = await page.getByTestId('ledger-dashboard-cashflow').evaluate((grid) => {
+      const children = Array.from(grid.children).map((element) => {
+        const rect = element.getBoundingClientRect()
+        return { top: rect.top, left: rect.left, height: rect.height }
+      })
+      return {
+        columns: getComputedStyle(grid).gridTemplateColumns.split(' ').length,
+        children,
+      }
+    })
+    expect(cashflowLayout.columns).toBe(2)
+    expect(cashflowLayout.children).toHaveLength(4)
+    expect(Math.abs(cashflowLayout.children[0]!.top - cashflowLayout.children[1]!.top)).toBeLessThan(1)
+    expect(Math.abs(cashflowLayout.children[2]!.top - cashflowLayout.children[3]!.top)).toBeLessThan(1)
+    expect(cashflowLayout.children[2]!.top).toBeGreaterThan(cashflowLayout.children[0]!.top)
+    for (const child of cashflowLayout.children) {
+      expect(child.height).toBeLessThanOrEqual(68)
+    }
+    expect(await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth)).toBeLessThanOrEqual(1)
   }
 
   await page.setViewportSize({ width: 1280, height: 900 })
