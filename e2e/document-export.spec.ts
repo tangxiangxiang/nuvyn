@@ -141,7 +141,9 @@ test('export dialog supports Escape, restores tree focus and fits a mobile viewp
     // expands its ancestor before waiting for the specific file row.
     await openMenu(page, path)
     await page.locator('.tree-context-menu').getByRole('button', { name: /^(Export…|导出…)$/u }).click()
-    const dialog = page.getByRole('dialog')
+    // The phone FileTree drawer also has role="dialog". Address only the
+    // modal owned by DocumentExportDialog, not the surrounding drawer.
+    const dialog = page.locator('.document-export-dialog[role="dialog"]')
     await expect(dialog).toBeVisible()
     await expect(dialog.getByRole('radio')).toHaveCount(3)
     const bounds = await dialog.boundingBox()

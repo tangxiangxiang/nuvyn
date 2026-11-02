@@ -2113,6 +2113,7 @@ function animatedMoneyParts(minor: number, currency: string, key: MetricKey): { 
   }
   .ledger-cashflow-grid > div {
     grid-template-columns: 30px minmax(0, 1fr);
+    box-sizing: border-box;
     min-height: 54px;
     gap: 8px;
     padding: 8px 4px;

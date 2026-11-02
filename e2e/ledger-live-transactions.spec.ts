@@ -379,7 +379,10 @@ test('mobile overview uses compact metric and cashflow summaries without changin
     const cashflowLayout = await page.getByTestId('ledger-dashboard-cashflow').evaluate((grid) => {
       const children = Array.from(grid.children).map((element) => {
         const rect = element.getBoundingClientRect()
-        return { top: rect.top, left: rect.left, height: rect.height }
+        return {
+          top: rect.top, left: rect.left, height: rect.height,
+          boxSizing: getComputedStyle(element).boxSizing,
+        }
       })
       return {
         columns: getComputedStyle(grid).gridTemplateColumns.split(' ').length,
@@ -392,6 +395,7 @@ test('mobile overview uses compact metric and cashflow summaries without changin
     expect(Math.abs(cashflowLayout.children[2]!.top - cashflowLayout.children[3]!.top)).toBeLessThan(1)
     expect(cashflowLayout.children[2]!.top).toBeGreaterThan(cashflowLayout.children[0]!.top)
     for (const child of cashflowLayout.children) {
+      expect(child.boxSizing).toBe('border-box')
       expect(child.height).toBeLessThanOrEqual(68)
     }
     expect(await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth)).toBeLessThanOrEqual(1)
