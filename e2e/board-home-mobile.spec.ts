@@ -25,6 +25,7 @@ test('Board Home keeps a compact phone toolbar, complete previews, and folder ro
       await page.setViewportSize({ width, height: 812 })
       const toolbar = page.getByTestId('board-toolbar')
       const mobileLayout = await toolbar.evaluate((element) => {
+        const sort = element.querySelector<HTMLElement>('.board-sort-select')!
         const box = (selector: string) => {
           const rect = element.querySelector(selector)!.getBoundingClientRect()
           return { top: rect.top, left: rect.left, right: rect.right, width: rect.width }
@@ -32,14 +33,14 @@ test('Board Home keeps a compact phone toolbar, complete previews, and folder ro
         return {
           display: getComputedStyle(element).display,
           title: box('h2'),
-          sort: box('.board-sort-select'),
+          sortDisplay: getComputedStyle(sort).display,
           search: box('.board-all-search'),
           filter: box('.board-filter'),
         }
       })
       expect(mobileLayout.display).toBe('grid')
-      expect(mobileLayout.title.right).toBeLessThanOrEqual(mobileLayout.sort.left + 1)
-      expect(mobileLayout.sort.top).toBeLessThan(mobileLayout.search.top)
+      expect(mobileLayout.sortDisplay).toBe('none')
+      expect(mobileLayout.title.top).toBeLessThan(mobileLayout.search.top)
       expect(Math.abs(mobileLayout.search.top - mobileLayout.filter.top)).toBeLessThanOrEqual(4)
       expect(mobileLayout.search.width).toBeGreaterThan(90)
       await expect(page.locator('.board-home-subtitle')).toBeHidden()
@@ -68,6 +69,7 @@ test('Board Home keeps a compact phone toolbar, complete previews, and folder ro
     await page.setViewportSize({ width: 768, height: 1024 })
     await expect(page.locator('.board-home-subtitle')).toBeVisible()
     await expect(page.getByTestId('board-toolbar')).toHaveCSS('display', 'flex')
+    await expect(page.locator('.board-sort-select')).toBeVisible()
     const tabletAspectRatio = await page.locator('.board-card').filter({ hasText: title })
       .locator('.board-card-thumbnail').evaluate((element) => getComputedStyle(element).aspectRatio)
     const ratioParts = tabletAspectRatio.split('/').map((value) => Number.parseFloat(value.trim()))

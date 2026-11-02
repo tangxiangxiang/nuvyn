@@ -968,12 +968,12 @@ async function removeBoard(board: BoardMetadata): Promise<void> {
   .board-new-folder-button,
   .board-new-button { flex: 1; }
 
-  /* Keep one semantic toolbar: sort beside the heading, search/filter below. */
+  /* Mobile keeps search and filters, but omits the secondary sort control. */
   .board-all-section-heading {
     display: grid;
     grid-template-columns: minmax(0, 1fr) auto;
     grid-template-areas:
-      "title sort"
+      "title title"
       "search filter";
     gap: 10px 8px;
     align-items: center;
@@ -989,7 +989,7 @@ async function removeBoard(board: BoardMetadata): Promise<void> {
   .board-all-heading-controls { display: contents; }
   .board-all-search { grid-area: search; width: 100%; min-width: 0; }
   .board-filter { grid-area: filter; }
-  .board-sort-select { grid-area: sort; width: 128px; }
+  .board-sort-select { display: none; }
 
   .board-subsection-label { margin-top: 16px; }
   .board-skeleton-grid { display: flex; overflow-x: hidden; }
