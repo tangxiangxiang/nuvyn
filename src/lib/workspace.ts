@@ -12,10 +12,10 @@ export type WorkspaceNavigationViewport = 'desktop' | 'mobile'
  * availability: every workspace remains directly addressable on mobile.
  */
 export const workspaceNavigationAvailability = {
-  note: { desktop: true, mobile: false },
+  note: { desktop: true, mobile: true },
   diary: { desktop: true, mobile: true },
   ledger: { desktop: true, mobile: true },
-  board: { desktop: true, mobile: false },
+  board: { desktop: true, mobile: true },
 } as const satisfies Record<
   WorkspaceNavigationKey,
   Record<WorkspaceNavigationViewport, boolean>

@@ -1504,28 +1504,24 @@ describe('NavBar — workspace mobile availability', () => {
   })
   afterEach(() => useI18n().setLocale('zh'))
 
-  it('removes Note and Board from mobile navigation and restores them on resize', async () => {
+  it('keeps all workspaces available across the mobile boundary', async () => {
     const media = installWorkspaceMobileMediaQuery(true)
     const { wrapper } = mountNavBar()
-
-    expect(wrapper.findAll('.scope-chip-label').map((label) => label.text())).toEqual(['diary', 'ledger'])
-    expect(wrapper.find('.workspace-board-link').exists()).toBe(false)
-    expect(wrapper.findAll('.scope-chip[aria-pressed="true"]')).toHaveLength(0)
-
+    const assertAllWorkspaces = () => {
+      expect(wrapper.findAll('.scope-chip-label').map((label) => label.text())).toEqual([
+        'note', 'diary', 'ledger',
+      ])
+      expect(wrapper.find('.workspace-board-link').exists()).toBe(true)
+      expect(wrapper.findAll('.scope-chip[aria-pressed="true"]')).toHaveLength(1)
+      expect(wrapper.find('.scope-chip[aria-pressed="true"] .scope-chip-label').text()).toBe('note')
+    }
+    assertAllWorkspaces()
     media.resize(false)
     await nextTick()
-    expect(wrapper.findAll('.scope-chip-label').map((label) => label.text())).toEqual([
-      'note',
-      'diary',
-      'ledger',
-    ])
-    expect(wrapper.find('.workspace-board-link').exists()).toBe(true)
-    expect(wrapper.find('.scope-chip[aria-pressed="true"] .scope-chip-label').text()).toBe('note')
-
+    assertAllWorkspaces()
     media.resize(true)
     await nextTick()
-    expect(wrapper.findAll('.scope-chip-label').map((label) => label.text())).toEqual(['diary', 'ledger'])
-    expect(wrapper.find('.workspace-board-link').exists()).toBe(false)
+    assertAllWorkspaces()
 
     wrapper.unmount()
     media.restore()

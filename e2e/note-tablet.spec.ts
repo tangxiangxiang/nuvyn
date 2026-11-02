@@ -75,8 +75,8 @@ for (const [width, height] of [[390, 844], [600, 900], [601, 900], [768, 1024], 
     try {
       await read(page, f.paths[0]!)
       const note = page.locator('.scope-chip').filter({ hasText: 'note' })
-      await expect(note).toHaveCount(width! <= 600 ? 0 : 1)
-      await expect(page.locator('.workspace-board-link')).toHaveCount(width! <= 600 ? 0 : 1)
+      await expect(note).toHaveCount(1)
+      await expect(page.locator('.workspace-board-link')).toHaveCount(1)
       if (width! > 600 && width! < 1200) {
         await expect(page.locator('.vault')).toHaveClass(/note-tablet-mode/)
         await expect(page.locator('.navbar')).toHaveClass(/note-tablet-nav/)

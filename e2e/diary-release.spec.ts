@@ -155,8 +155,8 @@ test('Diary Calendar remains usable across the D5 responsive matrix', async ({ p
     await expect(page.locator('.diary-calendar-content')).toBeVisible()
   }
 
-  // Note is intentionally absent from the mobile workspace navigation; use
-  // its desktop entry when leaving Calendar Home in this smoke test.
+  // Switch to desktop before checking Note's full-width sidebar presentation.
+  // The Note navigation entry is now also available on mobile.
   await page.setViewportSize({ width: 1280, height: 800 })
   await page.locator('.scope-chip').filter({ hasText: 'note' }).click()
   await expect(page.getByTestId('diary-calendar-surface')).toHaveCount(0)

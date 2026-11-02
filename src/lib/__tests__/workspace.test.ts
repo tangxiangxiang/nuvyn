@@ -7,7 +7,7 @@ import {
 } from '../workspace'
 
 describe('workspace navigation availability', () => {
-  it('shows the full navigation on desktop and Diary/Ledger on mobile', () => {
+  it('shows the full navigation on both desktop and mobile', () => {
     expect(Object.entries(workspaceNavigationAvailability)
       .filter(([, availability]) => availability.desktop)
       .map(([key]) => key))
@@ -16,13 +16,13 @@ describe('workspace navigation availability', () => {
     expect(Object.entries(workspaceNavigationAvailability)
       .filter(([, availability]) => availability.mobile)
       .map(([key]) => key))
-      .toEqual(['diary', 'ledger'])
+      .toEqual(['note', 'diary', 'ledger', 'board'])
   })
 
   it('uses the existing inclusive 600px mobile boundary', () => {
     expect(workspaceMobileNavigationQuery).toBe('(max-width: 600px)')
-    expect(isWorkspaceNavigationAvailable('note', 'mobile')).toBe(false)
-    expect(isWorkspaceNavigationAvailable('board', 'mobile')).toBe(false)
+    expect(isWorkspaceNavigationAvailable('note', 'mobile')).toBe(true)
+    expect(isWorkspaceNavigationAvailable('board', 'mobile')).toBe(true)
     expect(isWorkspaceNavigationAvailable('diary', 'mobile')).toBe(true)
     expect(isWorkspaceNavigationAvailable('ledger', 'mobile')).toBe(true)
   })

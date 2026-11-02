@@ -19,11 +19,17 @@ async function deleteNote(request: APIRequestContext, path: string): Promise<voi
 
 async function expectMobileNavigation(page: Page): Promise<void> {
   const navigation = page.locator('.workspace-navigation')
-  await expect(navigation.locator('.scope-chip')).toHaveCount(2)
-  await expect(navigation.locator('.scope-chip').filter({ hasText: 'note' })).toHaveCount(0)
-  await expect(navigation.locator('.workspace-board-link')).toHaveCount(0)
-  await expect(navigation.locator('.scope-chip').filter({ hasText: 'diary' })).toBeVisible()
-  await expect(navigation.locator('.scope-chip').filter({ hasText: 'ledger' })).toBeVisible()
+  await expect(navigation.locator('.scope-chip')).toHaveCount(3)
+  for (const scope of ['note', 'diary', 'ledger']) {
+    await expect(navigation.locator('.scope-chip').filter({ hasText: scope })).toBeVisible()
+  }
+  await expect(navigation.locator('.workspace-board-link')).toBeVisible()
+  await expect(navigation.locator('.scope-chip-label').first()).toBeHidden()
+  await expect(navigation.locator('.workspace-board-link-label')).toBeHidden()
+  await expect(page.locator('.navbar .brand-wordmark')).toBeHidden()
+  await expect(page.locator('.navbar .account-menu-root')).toBeInViewport()
+  expect(await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth))
+    .toBeLessThanOrEqual(1)
 }
 
 async function brandWorkspaceGap(page: Page): Promise<number> {
@@ -108,7 +114,7 @@ test('tablet and desktop align the first workspace equally beside the Nuvyn bran
   }
 })
 
-test('mobile nav shows Diary and Ledger at the 600px boundary and common phone widths', async ({ page }) => {
+test('mobile nav shows all four workspaces at the 600px boundary and common phone widths', async ({ page }) => {
   await page.setViewportSize(DESKTOP_VIEWPORT)
   await page.goto('/vault')
 
@@ -116,13 +122,13 @@ test('mobile nav shows Diary and Ledger at the 600px boundary and common phone w
   await expect(navigation.locator('.scope-chip')).toHaveCount(3)
   await expect(navigation.locator('.workspace-board-link')).toBeVisible()
 
-  for (const width of [375, 390, 430, 600]) {
+  for (const width of [320, 375, 390, 430, 600]) {
     await page.setViewportSize({ width, height: MOBILE_VIEWPORT.height })
     await expectMobileNavigation(page)
   }
 })
 
-test('workspace navigation entries restore on resize without reloading', async ({ page }) => {
+test('workspace navigation remains available on resize without reloading', async ({ page }) => {
   await page.setViewportSize(DESKTOP_VIEWPORT)
   await page.goto('/vault')
   const navigation = page.locator('.workspace-navigation')
@@ -141,7 +147,7 @@ test('workspace navigation entries restore on resize without reloading', async (
   await expect(navigation.locator('.scope-chip[aria-pressed="true"]')).toHaveCount(1)
 })
 
-test('mobile direct Note route remains open with no falsely active Diary or Ledger entry', async ({ page, request }) => {
+test('mobile direct Note route selects Note without activating Diary or Ledger', async ({ page, request }) => {
   const path = `inbox/mobile-nav-${RUN_ID}`
   try {
     await createNote(request, path)
@@ -152,13 +158,14 @@ test('mobile direct Note route remains open with no falsely active Diary or Ledg
     await expect(page.locator('.vault')).toBeVisible()
     await expect(page.locator(`[role="tab"][data-tab-id="${path}"]`)).toBeVisible()
     await expectMobileNavigation(page)
-    await expect(page.locator('.scope-chip[aria-pressed="true"]')).toHaveCount(0)
+    await expect(page.locator('.scope-chip[aria-pressed="true"]')).toHaveCount(1)
+    await expect(page.locator('.scope-chip').filter({ hasText: 'note' })).toHaveAttribute('aria-pressed', 'true')
   } finally {
     await deleteNote(request, path)
   }
 })
 
-test('mobile direct Board route remains open while its navigation entry stays absent', async ({ page }) => {
+test('mobile direct Board route highlights its navigation entry', async ({ page }) => {
   await page.setViewportSize(MOBILE_VIEWPORT)
   await page.goto('/board')
 
@@ -166,6 +173,26 @@ test('mobile direct Board route remains open while its navigation entry stays ab
   await expect(page.getByTestId('board-home')).toBeVisible()
   await expectMobileNavigation(page)
   await expect(page.locator('.scope-chip[aria-pressed="true"]')).toHaveCount(0)
+  await expect(page.locator('.workspace-board-link')).toHaveAttribute('aria-current', 'page')
+})
+
+test('mobile navigation switches between Note, Board and Ledger', async ({ page }) => {
+  await page.setViewportSize(MOBILE_VIEWPORT)
+  await page.goto('/ledger')
+  await expectMobileNavigation(page)
+
+  await page.locator('.scope-chip').filter({ hasText: 'note' }).click()
+  await expect(page).toHaveURL(/\/vault(?:[/?#]|$)/)
+  await expect(page.locator('.scope-chip').filter({ hasText: 'note' })).toHaveAttribute('aria-pressed', 'true')
+
+  await page.locator('.workspace-board-link').click()
+  await expect(page).toHaveURL(/\/board(?:[/?#]|$)/)
+  await expect(page.getByTestId('board-home')).toBeVisible()
+  await expect(page.locator('.workspace-board-link')).toHaveAttribute('aria-current', 'page')
+
+  await page.locator('.scope-chip').filter({ hasText: 'ledger' }).click()
+  await expect(page).toHaveURL(/\/ledger(?:[/?#]|$)/)
+  await expect(page.getByTestId('ledger-page')).toBeVisible()
 })
 
 diaryTest('Diary Calendar matches Note navbar geometry across tablet breakpoints', async ({ page }) => {

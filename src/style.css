@@ -1678,9 +1678,8 @@ main.container.auth-page-shell {
 /* Diary Calendar shares the same global navbar spacing as every Workspace;
    the common <=600px compact rules below also cover Diary on phones. */
 
-/* Workspace navigation entries are filtered by the shared mobile
-   availability capability. Keep the remaining controls compact at phone
-   widths; this only changes presentation and never limits workspace routes. */
+/* Phone navigation exposes all four workspaces with icon-only controls.
+   Its strip may scroll without pushing the account/actions off-screen. */
 @media (max-width: 600px) {
   .navbar.is-workspace .navbar-inner {
     box-sizing: border-box;
@@ -1691,21 +1690,31 @@ main.container.auth-page-shell {
   }
 
   .navbar.is-workspace .brand-wordmark,
-  .navbar.is-workspace .scope-chip-label {
+  .navbar.is-workspace .scope-chip-label,
+  .navbar.is-workspace .workspace-board-link-label {
     display: none;
   }
 
   .navbar.is-workspace .scope-chips {
+    flex: 0 0 auto;
     gap: 0;
-    min-width: 0;
   }
 
   .navbar.is-workspace .workspace-navigation {
+    flex: 1 1 auto;
+    min-width: 0;
     gap: 0;
     margin-left: 0;
+    overflow-x: auto;
+    overflow-y: hidden;
+    overscroll-behavior-x: contain;
+    scrollbar-width: none;
   }
 
+  .navbar.is-workspace .workspace-navigation::-webkit-scrollbar { display: none; }
+
   .navbar.is-workspace .nav-workspace-link {
+    flex: 0 0 auto;
     padding-left: 5px;
     padding-right: 5px;
   }
