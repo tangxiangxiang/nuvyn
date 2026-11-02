@@ -137,7 +137,8 @@ test('export dialog supports Escape, restores tree focus and fits a mobile viewp
     const toggle = page.getByTestId('left-panel-toggle')
     await expect(toggle).toBeVisible()
     if (!await page.locator('.file-tree').isVisible()) await toggle.click()
-    await expect(row).toBeVisible()
+    // The inbox folder starts collapsed on a fresh mobile drawer. openMenu
+    // expands its ancestor before waiting for the specific file row.
     await openMenu(page, path)
     await page.locator('.tree-context-menu').getByRole('button', { name: /^(Export…|导出…)$/u }).click()
     const dialog = page.getByRole('dialog')

@@ -2130,7 +2130,7 @@ function animatedMoneyParts(minor: number, currency: string, key: MetricKey): { 
     border-left: 1px solid var(--ledger-divider);
   }
   .ledger-cashflow-grid > div:nth-child(n + 3) {
-    padding-top: 10px;
+    padding-top: 8px;
     border-top: 1px solid var(--ledger-divider);
   }
   .ledger-cashflow-grid > div:first-child { padding-top: 4px; }
