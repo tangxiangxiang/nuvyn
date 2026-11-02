@@ -3,6 +3,45 @@
 All notable changes to Nuvyn are documented in this file. Entries dated before
 the Nuvyn brand baseline may refer to Nuvyn as the historical product name.
 
+## Nuvyn v0.1.0-alpha.13 — 2026-11-03
+
+Changes since `v0.1.0-alpha.12`.
+
+### Note Mobile
+
+- Opened Note and Board navigation on phones. Phone Note reuses the compact tablet single-document layout, drawers and touch-editing controls, while retaining the existing Monaco editor, document state, save, draft recovery and tracked image insertion paths.
+- Retain the last opened tablet Note when leaving for another workspace. Added tablet Note/Diary pull-to-refresh with visible content displacement, without replacing the editor or discarding unsaved content.
+
+### Diary
+
+- Swipe horizontally on the phone's date title to visit existing Diary entries. Missing dates are not created by a swipe; unsaved-change protections and Diary's single-document policy remain in place.
+
+### Diary Security
+
+- Added an optional, unchecked-by-default seven-day device-unlock memory. Its opaque cookie is HttpOnly and SameSite=Strict, uses Secure on HTTPS, and can restore only an existing process-local Diary authorization belonging to the same valid owner login session.
+- Remembered access stores neither the Diary password nor DEK in browser storage and does not extend the login session or decryption authorization. Manual lock, logout and expiry invalidate access; remembered authorization does not survive a server restart, after which the Diary password is required again.
+
+### Ledger
+
+- Compacted phone asset and cashflow summaries, keeping amounts readable within card padding. Improved tablet filter touch access and transaction-table sizing, with category/note columns hidden and date-only display retaining the complete timestamp in its title.
+- Refined tablet account-detail actions and information/notes layout. Desktop presentation and financial calculation rules remain unchanged.
+
+### Board
+
+- Refined phone gallery cards, complete thumbnail previews and compact folder rows. Simplified mobile pagination and hid the phone sort selector while retaining desktop controls and existing Board data operations.
+
+### Reliability
+
+- Added and aligned responsive browser coverage for Note editing/navigation/refresh, Diary swipe/access, Ledger table/filter geometry, Board phone pagination and the document-export modal. Made tablet header wrapping assertions depend on available space rather than platform font metrics.
+- Preserved the existing PWA manifest, Service Worker and public-static-resource cache policy. Tailscale installation has user-reported validation; Ugreen proxy authentication redirects remain outside this release's code scope.
+- Browser automation is not complete real-device acceptance. iPad Safari/Android system keyboards, native clipboard/file pickers, installed-PWA gestures and touch/scroll behavior still require device testing.
+
+### Migration & Deployment
+
+- No new SQLite migration was added; Schema v39 remains unchanged. The production Compose contract, release workflow and prerelease image-tag policy are unchanged.
+- Before upgrading, make a consistent backup of SQLite (including WAL/SHM), the complete Vault (including hidden directories and Git history), and the AI master-key file or external master-key configuration. Preserve the matching pre-upgrade backup for rollback; browser-local unsaved drafts are not part of a server backup.
+- This release publishes images only. NAS rollout remains a separate manual operation; restarting the server requires Diary password entry even on a previously remembered device.
+
 ## Nuvyn v0.1.0-alpha.12 — 2026-11-01
 
 Changes since `v0.1.0-alpha.11`.
