@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 import { enableAutoUnmount, mount } from '@vue/test-utils'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { NCheckbox } from 'naive-ui'
 import { useI18n } from '../../../composables/useI18n'
 import DiaryAccessDialog from '../DiaryAccessDialog.vue'
 
@@ -55,7 +56,9 @@ describe('DiaryAccessDialog', () => {
     await wrapper.setProps({ open: false })
     await wrapper.setProps({ open: true })
     expect(password().value).toBe('')
-    expect((document.querySelector('[data-testid="diary-remember-device"] input') as HTMLInputElement).checked).toBe(false)
+    // Naive UI's NCheckbox is not guaranteed to contain a native input.
+    // Assert the controlled checkbox prop rather than its internal markup.
+    expect(wrapper.findComponent(NCheckbox).props('checked')).toBe(false)
   })
 
   it('cancels on Escape and only shows one password field in unlock mode', async () => {
@@ -101,12 +104,12 @@ describe('DiaryAccessDialog', () => {
       attachTo: document.body,
     })
     await wrapper.vm.$nextTick()
-    const checkbox = document.querySelector('[data-testid="diary-remember-device"] input[type="checkbox"]') as HTMLInputElement
-    expect(checkbox).toBeTruthy()
-    expect(checkbox.checked).toBe(false)
-    checkbox.click()
-    await wrapper.vm.$nextTick()
-    expect(checkbox.checked).toBe(true)
+    const checkbox = wrapper.findComponent(NCheckbox)
+    expect(checkbox.exists()).toBe(true)
+    expect(checkbox.props('checked')).toBe(false)
+    // Interact with the public component surface; do not assume a native input.
+    await checkbox.trigger('click')
+    expect(checkbox.props('checked')).toBe(true)
     const password = document.getElementById('diary-access-password') as HTMLInputElement
     password.value = 'diary-password'
     password.dispatchEvent(new Event('input', { bubbles: true }))
@@ -118,7 +121,6 @@ describe('DiaryAccessDialog', () => {
     ]])
     await wrapper.setProps({ open: false })
     await wrapper.setProps({ open: true })
-    const reopened = document.querySelector('[data-testid="diary-remember-device"] input[type="checkbox"]') as HTMLInputElement
-    expect(reopened.checked).toBe(false)
+    expect(wrapper.findComponent(NCheckbox).props('checked')).toBe(false)
   })
 })
