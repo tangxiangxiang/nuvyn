@@ -494,3 +494,67 @@ test('native document handoff remains stable across five cycles without dayIndex
   expect(state.pageErrors).toEqual([])
   expect(state.consoleErrors).toEqual([])
 })
+
+test.describe('Diary date title swipe on phones', () => {
+  test.use({ hasTouch: true })
+
+  async function swipeTitle(page: Page, dx: number, dy = 0, fromEdge = false): Promise<void> {
+    await page.locator('.editor-tabs-shell .tab.active .tab-title').evaluate((title, gesture) => {
+      const bounds = title.getBoundingClientRect()
+      const x = gesture.fromEdge ? 10 : Math.max(30, Math.min(innerWidth - 30, bounds.left + bounds.width / 2))
+      const y = bounds.top + bounds.height / 2
+      const start = new Touch({ identifier: 11, target: title, clientX: x, clientY: y })
+      title.dispatchEvent(new TouchEvent('touchstart', {
+        bubbles: true, touches: [start], targetTouches: [start], changedTouches: [start],
+      }))
+      const end = new Touch({ identifier: 11, target: title, clientX: x + gesture.dx, clientY: y + gesture.dy })
+      title.dispatchEvent(new TouchEvent('touchend', {
+        bubbles: true, touches: [], targetTouches: [], changedTouches: [end],
+      }))
+    }, { dx, dy, fromEdge })
+  }
+
+  test('right swipe opens the previous existing Diary, left swipe returns, and other gestures are inert', async ({ page, request }) => {
+    const today = localCivilDate()
+    const missing = shiftCivilDate(today, -1)
+    const previous = shiftCivilDate(missing, -1)
+    try {
+      await seedExistingDiary(request, previous, `# Older ${previous}\n\nPrevious content\n`)
+      await seedExistingDiary(request, today, `# Current ${today}\n\nCurrent content\n`)
+      await page.setViewportSize({ width: 390, height: 844 })
+      await openDiaryScope(page)
+      await clickDiaryDate(page, today)
+      await expect(page).toHaveURL(new RegExp(`/vault/${diaryPath(today)}$`))
+      await expect(page.locator('.reading-pane')).toBeVisible()
+      await expect(page.locator('.editor-tabs-shell .tab.active .tab-title')).toBeVisible()
+      await expect(page.getByTestId('left-panel-toggle')).toHaveAttribute('aria-pressed', 'false')
+
+      await swipeTitle(page, 16, 110)
+      await expect(page).toHaveURL(new RegExp(`/vault/${diaryPath(today)}$`))
+      await swipeTitle(page, 100, 2, true)
+      await expect(page).toHaveURL(new RegExp(`/vault/${diaryPath(today)}$`))
+
+      await swipeTitle(page, 100, 5)
+      await expect(page).toHaveURL(new RegExp(`/vault/${diaryPath(previous)}$`))
+      await expect(page.locator('.reading-pane')).toContainText('Previous content')
+      await page.getByTestId('left-panel-toggle').click()
+      await expect(page.locator('.search-input')).toHaveValue(previous)
+      await page.getByTestId('left-panel-toggle').click()
+      const missingResponse = await request.get(`/api/posts/${diaryPath(missing)}`)
+      expect(missingResponse.status()).toBe(404)
+
+      await swipeTitle(page, -100, 4)
+      await expect(page).toHaveURL(new RegExp(`/vault/${diaryPath(today)}$`))
+      await swipeTitle(page, -100)
+      await expect(page).toHaveURL(new RegExp(`/vault/${diaryPath(today)}$`))
+
+      await page.getByTestId('view-toggle').click()
+      await expect(page.locator('.monaco-host')).toBeVisible()
+      await swipeTitle(page, 100)
+      await expect(page).toHaveURL(new RegExp(`/vault/${diaryPath(today)}$`))
+    } finally {
+      await deleteDiaryDate(request, today)
+      await deleteDiaryDate(request, previous)
+    }
+  })
+})

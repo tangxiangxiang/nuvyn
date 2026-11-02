@@ -104,6 +104,8 @@ import {
 } from '../features/diary/diaryAnalysisExport'
 import DiaryWorkspace from '../components/diary/DiaryWorkspace.vue'
 import DiaryCalendarSurface from '../components/diary/DiaryCalendarSurface.vue'
+import { projectDiaryDaysFromTree } from '../components/diary/diaryCalendarProjection'
+import { adjacentDiaryDate, diaryTitleSwipeDirection } from '../components/diary/diaryTitleSwipe'
 import TagPanel from '../components/vault/TagPanel.vue'
 import TagManagementPanel from '../components/vault/TagManagementPanel.vue'
 import ReadingPane from '../components/vault/ReadingPane.vue'
@@ -1988,6 +1990,74 @@ const isOrdinaryManagedDiaryDocumentActive = computed(() => (
   && activeTab.value?.path === activePath.value
   && !specialWorkspaceSurfaceActive.value
 ))
+// The active Diary tab title is the gesture surface, not the reading pane.
+// Never intercept the OS edge gesture or capture any scroll/editing gestures.
+type DiaryTitleTouch = { id: number; x: number; y: number; startedAt: number; path: string }
+let diaryTitleTouch: DiaryTitleTouch | null = null
+const diaryTitleNavigating = ref(false)
+
+function onDiaryTitleTouchStart(event: TouchEvent): void {
+  diaryTitleTouch = null
+  if (
+    !isMobileDiaryViewport.value || !isOrdinaryManagedDiaryDocumentActive.value
+    || !isReadMode.value || diaryTitleNavigating.value || settingsOpen.value
+    || leftSidebarVisible.value || event.touches.length !== 1
+  ) return
+  if (!(event.target instanceof Element)) return
+  const title = event.target.closest('.tab.active .tab-title')
+  const tab = title?.closest<HTMLElement>('[data-tab-id]')
+  if (!tab || tab.dataset.tabId !== activePath.value) return
+  const finger = event.touches[0]
+  if (!finger || finger.clientX < 24 || finger.clientX > window.innerWidth - 24) return
+  diaryTitleTouch = {
+    id: finger.identifier,
+    x: finger.clientX,
+    y: finger.clientY,
+    startedAt: Date.now(),
+    path: activePath.value!,
+  }
+}
+
+function cancelDiaryTitleTouch(): void { diaryTitleTouch = null }
+
+function onDiaryTitleTouchEnd(event: TouchEvent): void {
+  const start = diaryTitleTouch
+  diaryTitleTouch = null
+  if (
+    !start || !isMobileDiaryViewport.value || !isOrdinaryManagedDiaryDocumentActive.value
+    || !isReadMode.value || diaryTitleNavigating.value || activePath.value !== start.path
+  ) return
+  const finger = Array.from(event.changedTouches).find(touch => touch.identifier === start.id)
+  if (!finger) return
+  const direction = diaryTitleSwipeDirection({
+    deltaX: finger.clientX - start.x,
+    deltaY: finger.clientY - start.y,
+    durationMs: Date.now() - start.startedAt,
+  })
+  if (!direction) return
+  const current = diaryDateFromPath(start.path)
+  if (!current) return
+  const dates = projectDiaryDaysFromTree(tree.value, posts.value).map(day => day.date)
+  const next = adjacentDiaryDate(dates, current, direction)
+  if (next) void navigateDiaryByTitleSwipe(next)
+}
+
+async function navigateDiaryByTitleSwipe(date: DiaryDate): Promise<void> {
+  diaryTitleNavigating.value = true
+  try {
+    const path = diaryLogicalPathForDate(date)
+    await openFileTreeDocument(path)
+    // Keep Calendar-owned FileTree search aligned with the newly visible date;
+    // a user-edited filter remains untouched.
+    if (activePath.value === path && diaryFilterOwnership.value === 'calendar') {
+      diaryFilterSeed.value = date
+      filesFilter.value = date
+    }
+  } finally {
+    diaryTitleNavigating.value = false
+  }
+}
+
 // Diary Back follows the active managed document itself, not the transient
 // presentation mode that Calendar-originated navigation records. This keeps
 // direct routes, reloads, and route-led hydration eligible while special
@@ -3492,6 +3562,9 @@ watch(isReadMode, async (reading) => {
       <EditorTabs
         v-if="workspaceTabs.length > 0 && !noteTabletLayout"
         v-show="workspaceTabStripVisible"
+        @touchstart.passive="onDiaryTitleTouchStart"
+        @touchend.passive="onDiaryTitleTouchEnd"
+        @touchcancel.passive="cancelDiaryTitleTouch"
         ref="editorTabsRef"
         :tabs="workspaceTabs"
         :active-path="activeWorkspaceTabId"
