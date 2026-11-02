@@ -1014,6 +1014,7 @@ const netMovement = computed(() => {
   .ledger-metric-item strong { font-size: .95rem; }
 }
 @media (min-width: 601px) and (max-width: 1199px) and (hover: none) {
-  .ledger-trend-range { visibility: visible; opacity: 1; }
+  /* Hidden visually until focus; keep the control tappable on touch devices. */
+  .ledger-trend-range { visibility: visible; opacity: 0; }
 }
 </style>

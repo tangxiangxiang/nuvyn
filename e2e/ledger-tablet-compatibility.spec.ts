@@ -40,42 +40,59 @@ test('tablet Ledger pages keep navigation, table rows and pagination inside thei
   }
 })
 
-test('tablet touch users can reach period date and account trend controls without hover', async ({ page, request }) => {
+test('tablet touch controls remain hidden at rest and accessible by tapping', async ({ page, request }) => {
   await ensureLedgerDashboardFixtures(request)
   const account = (await getAccounts(request)).find((item) => item.archivedAt === null)!
   await page.setViewportSize({ width: 768, height: 1024 })
   await page.goto('/ledger')
-  const date = page.getByTestId('ledger-period-date-control-today').locator('.ledger-period-date-editor')
-  await expect(date).toHaveCSS('opacity', '1')
-  await expect(date).toHaveCSS('pointer-events', 'auto')
-  await date.locator('input').tap()
-  await expect(page.locator('.n-date-panel').first()).toBeVisible()
+
   const heading = page.getByTestId('ledger-dashboard').locator('h1')
-  await heading.tap()
-  const periodScope = page.locator('.ledger-period-scope')
-  await expect(periodScope).toHaveCSS('opacity', '0')
-  await expect(periodScope).toHaveCSS('pointer-events', 'auto')
-  // A tablet tap can still open the period selector even though it is hidden by default.
-  await periodScope.locator('.n-base-selection').tap()
-  await expect(periodScope).toHaveCSS('opacity', '1')
-  await expect(page.locator('.n-base-select-option').filter({ hasText: '本周' })).toBeVisible()
-  await heading.tap()
-  await expect(periodScope).toHaveCSS('opacity', '0')
-  for (const selector of ['.ledger-category-scope', '.ledger-category-date', '.ledger-trend-date']) {
-    await expect(page.locator(selector).first()).toHaveCSS('opacity', '1')
+  for (const period of ['today', 'week', 'month', 'year']) {
+    const control = page.getByTestId(`ledger-period-date-control-${period}`)
+    await expect(control.locator('.ledger-period-date-label')).toHaveCSS('visibility', 'visible')
+    await expect(control.locator('.ledger-period-date-editor')).toHaveCSS('opacity', '0')
+    await expect(control.locator('.ledger-period-date-editor')).toHaveCSS('pointer-events', 'auto')
   }
+  const date = page.getByTestId('ledger-period-date-control-today').locator('.ledger-period-date-editor')
+  await date.locator('input').tap()
+  await expect(date).toHaveCSS('opacity', '1')
+  await expect(page.locator('.n-date-panel').first()).toBeVisible()
+  await heading.tap()
+  await expect(date).toHaveCSS('opacity', '0')
+
+  for (const [selector, triggerSelector] of [
+    ['.ledger-period-scope', '.n-base-selection'],
+    ['.ledger-category-scope', '.n-base-selection'],
+    ['.ledger-category-date', 'input'],
+    ['.ledger-trend-date', 'input'],
+  ] as const) {
+    const control = page.locator(selector).first()
+    await expect(control).toHaveCSS('opacity', '0')
+    await expect(control).toHaveCSS('pointer-events', 'auto')
+    await control.locator(triggerSelector).tap()
+    await expect(control).toHaveCSS('opacity', '1')
+    await heading.tap()
+    await expect(control).toHaveCSS('opacity', '0')
+  }
+
   await page.goto('/ledger/accounts')
-  await expect(page.locator('.ledger-account-type-filter').first()).toHaveCSS('opacity', '1')
+  const filter = page.locator('.ledger-account-type-filter').first()
+  await expect(filter).toHaveCSS('opacity', '0')
+  await filter.locator('.n-base-selection').tap()
+  await expect(filter).toHaveCSS('opacity', '1')
+
   await page.goto(`/ledger/accounts/${account.id}`)
-  const trend = page.locator('.ledger-trend-range .n-base-selection')
-  await expect(trend).toBeVisible()
+  const trendRange = page.locator('.ledger-trend-range')
+  await expect(trendRange).toHaveCSS('visibility', 'visible')
+  await expect(trendRange).toHaveCSS('opacity', '0')
+  const trend = trendRange.locator('.n-base-selection')
   await trend.tap()
+  await expect(trendRange).toHaveCSS('opacity', '1')
   const week = page.locator('.n-base-select-option').filter({ hasText: '近7天' })
   await expect(week).toBeVisible()
   await week.tap()
   await expect(trend).toContainText('近7天')
 })
-
 
 test('tablet creation, transaction details and account editing remain within portrait and short landscape viewports', async ({ page, request }) => {
   await ensureLedgerDashboardFixtures(request)
