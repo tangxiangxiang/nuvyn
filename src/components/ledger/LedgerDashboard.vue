@@ -2181,7 +2181,7 @@ function animatedMoneyParts(minor: number, currency: string, key: MetricKey): { 
   .ledger-recent-amount { font-size: .74rem; }
 }
 @media (min-width: 601px) and (max-width: 1199px) and (hover: none) {
-  .ledger-period-scope,
+  /* Period scope stays hidden by default, but remains tappable and focusable. */
   .ledger-category-scope,
   .ledger-category-date,
   .ledger-trend-date { opacity: 1; }

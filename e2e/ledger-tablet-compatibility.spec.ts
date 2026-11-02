@@ -50,8 +50,18 @@ test('tablet touch users can reach period date and account trend controls withou
   await expect(date).toHaveCSS('pointer-events', 'auto')
   await date.locator('input').tap()
   await expect(page.locator('.n-date-panel').first()).toBeVisible()
-  await page.getByTestId('ledger-dashboard').locator('h1').tap()
-  for (const selector of ['.ledger-period-scope', '.ledger-category-scope', '.ledger-category-date', '.ledger-trend-date']) {
+  const heading = page.getByTestId('ledger-dashboard').locator('h1')
+  await heading.tap()
+  const periodScope = page.locator('.ledger-period-scope')
+  await expect(periodScope).toHaveCSS('opacity', '0')
+  await expect(periodScope).toHaveCSS('pointer-events', 'auto')
+  // A tablet tap can still open the period selector even though it is hidden by default.
+  await periodScope.locator('.n-base-selection').tap()
+  await expect(periodScope).toHaveCSS('opacity', '1')
+  await expect(page.locator('.n-base-select-option').filter({ hasText: '本周' })).toBeVisible()
+  await heading.tap()
+  await expect(periodScope).toHaveCSS('opacity', '0')
+  for (const selector of ['.ledger-category-scope', '.ledger-category-date', '.ledger-trend-date']) {
     await expect(page.locator(selector).first()).toHaveCSS('opacity', '1')
   }
   await page.goto('/ledger/accounts')
