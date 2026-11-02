@@ -4,7 +4,7 @@ import { useMediaQuery, useStorage } from '@vueuse/core'
 import { onBeforeRouteLeave, onBeforeRouteUpdate, useRoute, useRouter } from 'vue-router'
 import { useShortcutDisplay } from '../composables/useShortcutDisplay'
 import { useVaultLayout } from '../composables/vault/useVaultLayout'
-import { workspaceNoteTabletQuery } from '../lib/workspace'
+import { workspaceNoteCompactQuery, workspaceNoteTabletQuery } from '../lib/workspace'
 import { useFocusTrap } from '../composables/useFocusTrap'
 import { useZenMode } from '../composables/vault/useZenMode'
 import { useSplitterDrag } from '../composables/vault/useSplitterDrag'
@@ -224,6 +224,7 @@ const activityBarLayoutVisible = ref(true)
 const forceSidePanelLayoutOpen = ref(false)
 const noteTabletLayout = ref(false)
 const isTabletViewport = useMediaQuery(workspaceNoteTabletQuery)
+const isCompactNoteViewport = useMediaQuery(workspaceNoteCompactQuery)
 const isMobileDiaryViewport = useMediaQuery('(max-width: 600px)')
 const editorFocusWidthKey = NUVYN_BROWSER_STORAGE_KEYS.editorFocusWidth
 const fileTreeFilterKey = NUVYN_BROWSER_STORAGE_KEYS.fileTreeFilter
@@ -2019,8 +2020,8 @@ let tabletPullStartY = 0
 let tabletRefreshSurface: HTMLElement | null = null
 
 const tabletPullRefreshAvailable = computed(() => (
-  isTabletViewport.value
-  && (activeScope.value === 'note' || isDiaryScope.value)
+  ((isCompactNoteViewport.value && activeScope.value === 'note')
+    || (isTabletViewport.value && isDiaryScope.value))
   && !specialWorkspaceSurfaceActive.value
   && !settingsOpen.value
   && !tabletDrawer.value
@@ -2453,8 +2454,8 @@ const workspaceSidebarVisible = computed(() => (
   && !isDiaryCalendarVisible.value
   && !zenModeActive.value
 ))
-watch([isTabletViewport, activeScope, workspaceSidebarVisible], ([tablet, scope, visible]) => {
-  noteTabletLayout.value = tablet && scope === 'note' && visible
+watch([isCompactNoteViewport, activeScope, workspaceSidebarVisible], ([compact, scope, visible]) => {
+  noteTabletLayout.value = compact && scope === 'note' && visible
 }, { immediate: true, flush: 'sync' })
 
 const tabletLeftRef = ref<HTMLElement | null>(null)

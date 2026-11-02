@@ -48,17 +48,11 @@ async function seed(request: APIRequestContext) {
 async function read(page: Page, path: string) {
   await page.goto(`/vault/${path}`)
   const width = page.viewportSize()!.width
-  if (width > 600 && width < 1200) {
+  if (width < 1200) {
     await expect(page.locator('.editor-tabs-shell')).toHaveCount(0)
     await expect(page.locator('.editor-area')).toHaveClass(/is-no-tab-strip/)
   } else {
     await expect(tab(page, path)).toHaveAttribute('aria-selected', 'true')
-  }
-  // Mobile direct routes remain accessible through their existing controls;
-  // they intentionally retain the pre-tablet sidebar policy.
-  if (page.viewportSize()!.width <= 600) {
-    if (await left(page).getAttribute('aria-pressed') === 'true') await left(page).click()
-    if (await right(page).getAttribute('aria-pressed') === 'true') await right(page).click()
   }
   if (!await page.locator('.reading-pane').isVisible()) await page.getByTestId('view-toggle').click()
   await expect(page.locator('.reading-pane h1')).toBeVisible()
@@ -68,7 +62,7 @@ async function noPageOverflow(page: Page) {
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true)
 }
 
-for (const [width, height] of [[390, 844], [600, 900], [601, 900], [768, 1024], [820, 1180], [899, 900], [900, 900], [1024, 768], [1180, 820], [1199, 900], [1200, 900], [1440, 900]]) {
+for (const [width, height] of [[320, 740], [390, 844], [430, 932], [600, 900], [601, 900], [768, 1024], [820, 1180], [899, 900], [900, 900], [1024, 768], [1180, 820], [1199, 900], [1200, 900], [1440, 900]]) {
   test(`Note viewport boundary ${width}x${height}`, async ({ page, request }) => {
     await page.setViewportSize({ width: width!, height: height! })
     const f = await seed(request)
@@ -77,18 +71,23 @@ for (const [width, height] of [[390, 844], [600, 900], [601, 900], [768, 1024], 
       const note = page.locator('.scope-chip').filter({ hasText: 'note' })
       await expect(note).toHaveCount(1)
       await expect(page.locator('.workspace-board-link')).toHaveCount(1)
-      if (width! > 600 && width! < 1200) {
+      if (width! < 1200) {
         await expect(page.locator('.vault')).toHaveClass(/note-tablet-mode/)
         await expect(page.locator('.navbar')).toHaveClass(/note-tablet-nav/)
-        // Match the compact 28px selection chips used by Ledger and Board.
-        await expect(note).toHaveCSS('height', '28px')
-        await expect(page.locator('.navbar .brand-wordmark')).toBeVisible()
-        for (const name of ['note', 'diary', 'ledger']) {
-          await expect(page.locator('.navbar .scope-chip-label').filter({ hasText: name })).toBeVisible()
+        if (width! > 600) {
+          // Keep tablet navbar labels and chip geometry exactly as before.
+          await expect(note).toHaveCSS('height', '28px')
+          await expect(page.locator('.navbar .brand-wordmark')).toBeVisible()
+          for (const name of ['note', 'diary', 'ledger']) {
+            await expect(page.locator('.navbar .scope-chip-label').filter({ hasText: name })).toBeVisible()
+          }
+          await expect(page.locator('.navbar .workspace-board-link-label')).toBeVisible()
+        } else {
+          await expect(page.locator('.navbar .scope-chip-label').first()).toBeHidden()
+          await expect(page.locator('.navbar .workspace-board-link-label')).toBeHidden()
         }
-        await expect(page.locator('.navbar .workspace-board-link-label')).toBeVisible()
-        // Narrow tablets may scroll the workspace links, not push account/actions
-        // beyond the screen or create document-level horizontal overflow.
+        // Narrow screens may scroll workspace links, but may not create
+        // document-level overflow or displace account/actions.
         await expect(page.locator('.navbar .account-menu-root')).toBeInViewport()
         await noPageOverflow(page)
         await expect(page.locator('.editor-tabs-shell')).toHaveCount(0)

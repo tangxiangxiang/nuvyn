@@ -24,6 +24,9 @@ export const workspaceNavigationAvailability = {
 /** Keep the nav's responsive behavior on Diary's existing 600px boundary. */
 export const workspaceMobileNavigationQuery = '(max-width: 600px)'
 export const workspaceNoteTabletQuery = '(min-width: 601px) and (max-width: 1199px)'
+// Note reuses the established tablet presentation on phones without changing
+// the tablet-only Diary pull-to-refresh and shared mobile navigation boundary.
+export const workspaceNoteCompactQuery = '(max-width: 1199px)'
 
 export function isWorkspaceNavigationAvailable(
   workspace: WorkspaceNavigationKey,

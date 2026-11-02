@@ -156,7 +156,8 @@ test('mobile direct Note route selects Note without activating Diary or Ledger',
 
     await expect(page).toHaveURL(new RegExp(`/vault/${path}$`))
     await expect(page.locator('.vault')).toBeVisible()
-    await expect(page.locator(`[role="tab"][data-tab-id="${path}"]`)).toBeVisible()
+    await expect(page.locator('.vault')).toHaveClass(/note-tablet-mode/)
+    await expect(page.locator('.editor-tabs-shell')).toHaveCount(0)
     await expectMobileNavigation(page)
     await expect(page.locator('.scope-chip[aria-pressed="true"]')).toHaveCount(1)
     await expect(page.locator('.scope-chip').filter({ hasText: 'note' })).toHaveAttribute('aria-pressed', 'true')

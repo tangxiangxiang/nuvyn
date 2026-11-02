@@ -1519,6 +1519,25 @@ main.container.auth-page-shell {
 .note-tablet-mode .article :where(img, video, svg) { max-width: 100%; }
 .note-tablet-mode .article :where(.nuvyn-code-group-tab, summary) { min-height: 40px; }
 
+/* Phones reuse the same drawer/single-document Note presentation as tablets.
+   Only the drawer geometry and reading insets shrink for the smaller screen. */
+@media (max-width: 600px) {
+  .note-tablet-mode > .workspace-left-navigation {
+    width: min(340px, calc(100vw - 20px));
+    grid-template-columns: 40px minmax(0, 1fr);
+  }
+  .note-tablet-mode > .workspace-right-navigation {
+    width: min(360px, calc(100vw - 20px));
+  }
+  .note-tablet-mode .activity-bar .ab-btn {
+    width: 40px;
+    min-height: 40px;
+  }
+  .note-tablet-mode .reading-pane {
+    padding: 18px 16px 48px;
+  }
+}
+
 .vault.has-tablet-pull-refresh { background: var(--vs-bg-1); }
 .vault.has-tablet-pull-refresh > .editor-area {
   translate: 0 var(--pull-offset, 0px);

@@ -34,14 +34,14 @@ async function openTreeDocument(page: Page, document: string) {
   await expect(host(page)).toBeVisible()
 }
 
-for (const [width, height] of [[601, 900], [768, 1024], [820, 1180], [1024, 768], [1180, 820], [1200, 900], [390, 844]]) {
+for (const [width, height] of [[320, 740], [390, 844], [430, 932], [600, 900], [601, 900], [768, 1024], [820, 1180], [1024, 768], [1180, 820], [1200, 900]]) {
   test(`touch editing capability is isolated at ${width}x${height}`, async ({ page, request }) => {
     await page.setViewportSize({ width: width!, height: height! })
     const document = `inbox/tablet-edit-${randomUUID()}`
     await createDoc(request, document, '# Tablet edit\n\n中英文 writing', [])
     try {
       await page.goto(`/vault/${document}`)
-      const tablet = width! > 600 && width! < 1200
+      const tablet = width! < 1200
       if (!tablet) {
         await expect(page.locator('.vault')).not.toHaveClass(/note-tablet-mode/)
         await expect(imageButton(page)).toHaveCount(0)
@@ -51,7 +51,7 @@ for (const [width, height] of [[601, 900], [768, 1024], [820, 1180], [1024, 768]
       await expect(imageButton(page)).toBeVisible()
       await expect(page.locator('.editor-tabs-shell')).toHaveCount(0)
       const box = await imageButton(page).boundingBox()
-      // Tablet Note shares the compact 36px Workspace navbar.
+      // Compact Note shares the 36px Workspace navbar on phone and tablet.
       expect(box!.height).toBe(28)
       const navbar = await page.locator('.navbar').boundingBox()
       expect(box!.y).toBeGreaterThanOrEqual(navbar!.y)
