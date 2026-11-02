@@ -298,11 +298,12 @@ test('real Ledger onboarding and expense survive dashboard refresh', async ({ pa
 // This file owns the fresh Ledger onboarding case first. Tests below may call
 // ensureLedgerDashboardFixtures(), but must not move ahead of onboarding
 // because the application E2E server and SQLite database are shared within a shard.
-test('tablet overview keeps three cards in one row with complete single-line amounts', async ({ page, request }) => {
+test('mobile overview keeps compact metric cards while tablet and desktop layouts remain unchanged', async ({ page, request }) => {
   await ensureLedgerDashboardFixtures(request)
   await page.goto('/ledger')
   const cards = page.locator('.ledger-metric-card')
   await expect(cards).toHaveCount(3)
+
   for (const width of [640, 768, 960]) {
     await page.setViewportSize({ width, height: 900 })
     const measurements = await cards.evaluateAll((elements) => elements.map((card, index) => {
@@ -312,14 +313,76 @@ test('tablet overview keeps three cards in one row with complete single-line amo
       range.selectNodeContents(amount)
       const text = range.getBoundingClientRect()
       const bounds = card.getBoundingClientRect()
-      return { top: bounds.top, left: text.left - bounds.left, right: bounds.right - text.right, textHeight: text.height }
+      const layout = card.querySelector<HTMLElement>('.ledger-metric-layout')!
+      const icon = card.querySelector<HTMLElement>('.ledger-metric-icon')!
+      const layoutStyle = getComputedStyle(layout)
+      const iconStyle = getComputedStyle(icon)
+      return {
+        top: bounds.top,
+        left: text.left - bounds.left,
+        right: bounds.right - text.right,
+        textHeight: text.height,
+        layoutPadding: layoutStyle.padding,
+        iconWidth: iconStyle.width,
+        iconHeight: iconStyle.height,
+      }
     }))
-    expect(Math.max(...measurements.map((m) => m.top)) - Math.min(...measurements.map((m) => m.top))).toBeLessThan(1)
+    expect(Math.max(...measurements.map((measurement) => measurement.top))
+      - Math.min(...measurements.map((measurement) => measurement.top))).toBeLessThan(1)
     for (const measurement of measurements) {
       expect(measurement.left).toBeGreaterThan(0)
       expect(measurement.right).toBeGreaterThan(0)
       expect(measurement.textHeight).toBeLessThan(32)
+      expect(measurement.layoutPadding).toBe('16px')
+      expect(measurement.iconWidth).toBe('28px')
+      expect(measurement.iconHeight).toBe('28px')
     }
+  }
+
+  for (const width of [320, 360, 375, 390, 430, 600]) {
+    await page.setViewportSize({ width, height: 900 })
+    const measurements = await cards.evaluateAll((elements) => elements.map((card) => {
+      const layout = card.querySelector<HTMLElement>('.ledger-metric-layout')!
+      const icon = card.querySelector<HTMLElement>('.ledger-metric-icon')!
+      const layoutStyle = getComputedStyle(layout)
+      const iconStyle = getComputedStyle(icon)
+      return {
+        cardHeight: card.getBoundingClientRect().height,
+        layoutHeight: layout.getBoundingClientRect().height,
+        layoutPadding: layoutStyle.padding,
+        layoutGap: layoutStyle.gap,
+        iconWidth: iconStyle.width,
+        iconHeight: iconStyle.height,
+      }
+    }))
+    expect(measurements).toHaveLength(3)
+    for (const measurement of measurements) {
+      expect(measurement.cardHeight).toBeGreaterThanOrEqual(80)
+      expect(measurement.cardHeight).toBeLessThanOrEqual(84)
+      expect(measurement.layoutHeight).toBeGreaterThanOrEqual(78)
+      expect(measurement.layoutPadding).toBe('8px 14px')
+      expect(measurement.layoutGap).toBe('10px')
+      expect(measurement.iconWidth).toBe('36px')
+      expect(measurement.iconHeight).toBe('36px')
+    }
+    const gridGap = await page.locator('.ledger-metric-grid').evaluate((element) => getComputedStyle(element).rowGap)
+    expect(gridGap).toBe('10px')
+  }
+
+  await page.setViewportSize({ width: 1280, height: 900 })
+  const desktopMeasurements = await cards.evaluateAll((elements) => elements.map((card) => {
+    const layout = card.querySelector<HTMLElement>('.ledger-metric-layout')!
+    const icon = card.querySelector<HTMLElement>('.ledger-metric-icon')!
+    return {
+      layoutPadding: getComputedStyle(layout).padding,
+      iconWidth: getComputedStyle(icon).width,
+      iconHeight: getComputedStyle(icon).height,
+    }
+  }))
+  for (const measurement of desktopMeasurements) {
+    expect(measurement.layoutPadding).toBe('10px 16px')
+    expect(measurement.iconWidth).toBe('40px')
+    expect(measurement.iconHeight).toBe('40px')
   }
 })
 

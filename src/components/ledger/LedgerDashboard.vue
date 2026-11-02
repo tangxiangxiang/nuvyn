@@ -2051,16 +2051,24 @@ function animatedMoneyParts(minor: number, currency: string, key: MetricKey): { 
   }
 }
 
-@media (max-width: 440px) {
-  .ledger-dashboard-header h1 { font-size: 1.75rem; }
-  .ledger-metric-card {
-    grid-template-columns: 42px minmax(0, 1fr);
-    padding: 16px;
+@media (max-width: 600px) {
+  .ledger-metric-grid { gap: 10px; }
+  .ledger-metric-card { min-height: 80px; }
+  .ledger-metric-layout {
+    grid-template-columns: 36px minmax(0, 1fr);
+    gap: 10px;
+    min-height: 78px;
+    padding: 8px 14px;
   }
   .ledger-metric-icon {
-    width: 42px;
-    height: 42px;
+    width: 36px;
+    height: 36px;
+    border-radius: 11px;
   }
+}
+
+@media (max-width: 440px) {
+  .ledger-dashboard-header h1 { font-size: 1.75rem; }
   .ledger-period-grid { grid-template-columns: 1fr; }
   .ledger-period-card,
   .ledger-period-card:nth-child(odd),
