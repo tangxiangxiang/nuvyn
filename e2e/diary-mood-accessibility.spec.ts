@@ -220,7 +220,7 @@ test('keyboard grid keeps 4-column geometry across 76 moods and arrows do not mu
     await expectArrow('laughing-tears', 'ArrowDown', 'relieved')
     await expectArrow('devilish', 'ArrowRight', 'devilish')
     await expectArrow('devilish', 'ArrowDown', 'worried')
-    await expectArrow('pleading', 'ArrowDown', 'pensive')
+    await expectArrow('pleading', 'ArrowDown', 'downcast')
     await expectArrow('beam', 'ArrowDown', 'beam')
     await expectArrow('shy', 'ArrowRight', 'happy')
     await expectArrow('shy', 'ArrowLeft', 'afraid')

@@ -110,7 +110,7 @@ describe('DiaryMoodPicker', () => {
     await expectArrow('devilish', 'ArrowRight', 'devilish')
     await expectArrow('devilish', 'ArrowDown', 'worried')
 
-    await expectArrow('pleading', 'ArrowDown', 'pensive')
+    await expectArrow('pleading', 'ArrowDown', 'downcast')
     await expectArrow('beam', 'ArrowDown', 'beam')
     await expectArrow('pleading', 'ArrowRight', 'pleading')
     await expectArrow('shy', 'ArrowRight', 'happy')
