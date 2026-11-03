@@ -71,6 +71,8 @@ const {
   root: pullRoot, distance: pullDistance, refreshing: pullRefreshing,
   armed: pullArmed, offset: pullOffset, indicatorTop: pullIndicatorTop,
 } = usePagePullRefresh(pullAvailable, refreshAccounts)
+// The template ref is consumed by Vue's runtime and has no script-side reads.
+void pullRoot
 
 onMounted(() => {
   document.body.classList.add('ledger-accounts-mode')

@@ -4,7 +4,7 @@ import { useMediaQuery, useStorage } from '@vueuse/core'
 import { onBeforeRouteLeave, onBeforeRouteUpdate, useRoute, useRouter } from 'vue-router'
 import { useShortcutDisplay } from '../composables/useShortcutDisplay'
 import { useVaultLayout } from '../composables/vault/useVaultLayout'
-import { workspaceNoteCompactQuery, workspaceNoteTabletQuery } from '../lib/workspace'
+import { workspaceNoteCompactQuery } from '../lib/workspace'
 import { useFocusTrap } from '../composables/useFocusTrap'
 import { useZenMode } from '../composables/vault/useZenMode'
 import { useSplitterDrag } from '../composables/vault/useSplitterDrag'
@@ -225,7 +225,6 @@ const statusBarLayoutVisible = ref(true)
 const activityBarLayoutVisible = ref(true)
 const forceSidePanelLayoutOpen = ref(false)
 const noteTabletLayout = ref(false)
-const isTabletViewport = useMediaQuery(workspaceNoteTabletQuery)
 const isCompactNoteViewport = useMediaQuery(workspaceNoteCompactQuery)
 const isMobileDiaryViewport = useMediaQuery('(max-width: 600px)')
 const editorFocusWidthKey = NUVYN_BROWSER_STORAGE_KEYS.editorFocusWidth

@@ -259,6 +259,8 @@ const {
   root: pullRoot, distance: pullDistance, refreshing: pullRefreshing,
   armed: pullArmed, offset: pullOffset, indicatorTop: pullIndicatorTop,
 } = usePagePullRefresh(pullAvailable, refreshBoardGallery)
+// The template ref is consumed by Vue's runtime and has no script-side reads.
+void pullRoot
 
 function retryLoad(): void {
   void Promise.all([loadBoards(), loadFolders()])
