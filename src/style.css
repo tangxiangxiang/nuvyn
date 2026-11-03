@@ -1544,6 +1544,20 @@ main.container.auth-page-shell {
   transition: translate 200ms ease;
 }
 .vault.is-pulling-refresh > .editor-area { transition: none; }
+
+/* On phones the status bar belongs to the same Note content sheet.
+   Shift it with the editor during pull-to-refresh so the tiny focus-width
+   control cannot appear stranded at the bottom of the screen. Keep
+   tablet/desktop status bars and the 24px layout track unchanged. */
+@media (max-width: 600px) {
+  .vault.note-tablet-mode.has-tablet-pull-refresh > .status-bar-row {
+    translate: 0 var(--pull-offset, 0px);
+    transition: translate 200ms ease;
+  }
+  .vault.note-tablet-mode.is-pulling-refresh > .status-bar-row {
+    transition: none;
+  }
+}
 .vault-tablet-refresh-indicator {
   position: fixed;
   z-index: 50;
@@ -1593,6 +1607,14 @@ main.container.auth-page-shell {
   .vault.has-tablet-pull-refresh > .editor-area { translate: none; transition: none; }
   .vault-tablet-refresh-icon { transition: none; }
   .vault-tablet-refresh-indicator.is-refreshing .vault-tablet-refresh-icon { animation: none; }
+}
+
+/* Reduced-motion phone layouts also keep the content static. */
+@media (prefers-reduced-motion: reduce) and (max-width: 600px) {
+  .vault.note-tablet-mode.has-tablet-pull-refresh > .status-bar-row {
+    translate: none;
+    transition: none;
+  }
 }
 
 /* Note tablets use the same 36px header and native small action buttons

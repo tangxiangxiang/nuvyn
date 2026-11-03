@@ -74,3 +74,57 @@ for (const mode of ['edit', 'read']) {
     }
   })
 }
+
+test('phone Note focus-width control stays attached to the document sheet while pulling to refresh', async ({ page, request, context }) => {
+  const path = `inbox/phone-refresh-footer-${randomUUID()}`
+  await createDoc(request, path, '# Phone refresh\n\nContent remains readable.', [])
+  try {
+    await page.setViewportSize({ width: 390, height: 844 })
+    await page.goto(`/vault/${path}`)
+    const toggle = page.getByTestId('view-toggle')
+    await expect(toggle).toBeVisible()
+    const label = await toggle.getAttribute('aria-label') ?? ''
+    if (/read|阅读/i.test(label)) await toggle.tap()
+    const surface = page.locator('.reading-pane')
+    const area = page.locator('.editor-area')
+    const footer = page.locator('.status-bar-row')
+    const focusControl = footer.locator('.sb-focus-width')
+    await expect(surface).toBeVisible()
+    await expect(focusControl).toBeVisible()
+    await expect(page.locator('.vault')).toHaveClass(/note-tablet-mode/)
+
+    const areaBefore = (await area.boundingBox())!
+    const footerBefore = (await footer.boundingBox())!
+    const surfaceBox = (await surface.boundingBox())!
+    const x = surfaceBox.x + surfaceBox.width / 2
+    const y = surfaceBox.y + 90
+    const session = await context.newCDPSession(page)
+    try {
+      await session.send('Input.dispatchTouchEvent', {
+        type: 'touchStart', touchPoints: [{ x, y }],
+      })
+      // Below the threshold: test the visual pull without a network refresh.
+      for (let step = 1; step <= 7; step++) {
+        await session.send('Input.dispatchTouchEvent', {
+          type: 'touchMove',
+          touchPoints: [{ x, y: y + step * 10 }],
+        })
+      }
+      await expect(page.locator('.vault.is-pulling-refresh')).toBeVisible()
+      await expect.poll(async () => (await area.boundingBox())!.y - areaBefore.y).toBeGreaterThan(20)
+      const areaOffset = (await area.boundingBox())!.y - areaBefore.y
+      const footerOffset = (await footer.boundingBox())!.y - footerBefore.y
+      expect(Math.abs(footerOffset - areaOffset)).toBeLessThanOrEqual(2)
+
+      await session.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] })
+      await expect.poll(async () => Math.abs((await area.boundingBox())!.y - areaBefore.y)).toBeLessThan(1)
+      await expect.poll(async () => Math.abs((await footer.boundingBox())!.y - footerBefore.y)).toBeLessThan(1)
+      await expect(focusControl).toBeVisible()
+      await expect(page).toHaveURL(new RegExp(`/vault/${path}$`))
+    } finally {
+      await session.detach()
+    }
+  } finally {
+    await request.delete(`/api/posts/${path}`)
+  }
+})
