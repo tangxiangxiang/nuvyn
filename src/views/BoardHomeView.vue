@@ -23,6 +23,8 @@ import { useBoardFavorites } from '../composables/useBoardFavorites'
 import { useConfirm } from '../composables/useConfirm'
 import { useI18n } from '../composables/useI18n'
 import { useToast } from '../composables/useToast'
+import { usePagePullRefresh } from '../composables/usePagePullRefresh'
+import PagePullRefreshIndicator from '../components/PagePullRefreshIndicator.vue'
 import { nuvynBoardDragMime, readDataTransfer } from '../technicalNamespace'
 
 const route = useRoute()
@@ -223,6 +225,40 @@ async function loadFolders(): Promise<void> {
     folderLoading.value = false
   }
 }
+
+async function refreshBoardGallery(): Promise<void> {
+  loading.value = true
+  folderLoading.value = true
+  loadError.value = ''
+  folderLoadError.value = ''
+  try {
+    const results = await Promise.allSettled([
+      boardMetadataSource.refresh(),
+      boardFolderSource.refresh(),
+    ])
+    if (results[0].status === 'rejected') {
+      loadError.value = messageFor(results[0].reason, t('board.load_failed'))
+    }
+    if (results[1].status === 'rejected') {
+      folderLoadError.value = messageFor(results[1].reason, t('board.load_failed'))
+    }
+    if (results.some((result) => result.status === 'rejected')) {
+      toast.error(t('workspace.refresh_failed'))
+    }
+  } finally {
+    loading.value = false
+    folderLoading.value = false
+  }
+}
+
+const pullAvailable = computed(() => (
+  !loading.value && !folderLoading.value && mutationKeys.value.length === 0
+  && !renameOpen.value && !folderModalOpen.value && !moveOpen.value
+))
+const {
+  root: pullRoot, distance: pullDistance, refreshing: pullRefreshing,
+  armed: pullArmed, offset: pullOffset, indicatorTop: pullIndicatorTop,
+} = usePagePullRefresh(pullAvailable, refreshBoardGallery)
 
 function retryLoad(): void {
   void Promise.all([loadBoards(), loadFolders()])
@@ -554,7 +590,20 @@ async function removeBoard(board: BoardMetadata): Promise<void> {
 </script>
 
 <template>
-  <div class="board-home" data-testid="board-home">
+  <div
+    ref="pullRoot"
+    class="board-home page-pull-refresh-root"
+    :class="{ 'is-pulling-refresh': pullDistance > 0 && !pullRefreshing }"
+    :style="{ '--pull-offset': pullOffset }"
+    data-testid="board-home"
+  >
+    <PagePullRefreshIndicator
+      :distance="pullDistance"
+      :refreshing="pullRefreshing"
+      :armed="pullArmed"
+      :offset="pullOffset"
+      :top="pullIndicatorTop"
+    />
     <div class="board-home-content">
       <header class="board-home-header">
         <div class="board-home-heading">

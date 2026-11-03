@@ -38,6 +38,9 @@ import { formatLedgerDateTime, formatLedgerTransactionDateTime, instantFromLedge
 import { ledgerTransactionPresentationKind } from '../features/ledger/presentation'
 import { useLedgerStore } from '../features/ledger/ledgerStore'
 import { useToast } from '../composables/useToast'
+import { useI18n } from '../composables/useI18n'
+import { usePagePullRefresh } from '../composables/usePagePullRefresh'
+import PagePullRefreshIndicator from '../components/PagePullRefreshIndicator.vue'
 import { ledgerSelectNodeProps } from '../features/ledger/naiveControls'
 import LedgerDatePicker from '../components/ledger/LedgerDatePicker.vue'
 import LedgerAnimatedMoney from '../components/ledger/LedgerAnimatedMoney.vue'
@@ -45,6 +48,7 @@ import { ledgerAccountSelectOptions, renderLedgerAccountLabel, renderLedgerCateg
 
 const store = useLedgerStore()
 const toast = useToast()
+const { t } = useI18n()
 const route = useRoute()
 const desktopTableFlexHeight = useMediaQuery('(min-width: 651px)')
 const compactTableScroll = useMediaQuery('(max-width: 720px)')
@@ -316,6 +320,28 @@ function initializeFiltersFromRoute(): void {
   filterSearch.value = queryValue(route.query.search)
   if (filterFrom.value || filterTo.value) filterDatePreset.value = 'custom'
 }
+
+const pullAvailable = computed(() => (
+  store.workspaceState.value === 'READY'
+  && Boolean(store.settings.value)
+  && !loading.value && !filtersLoading.value && !paginationLoading.value
+  && !transactionSheetOpen.value && !detailOpen.value
+  && !contextMenuOpen.value && !store.recoveryGateVisible.value
+))
+async function refreshTransactionPage(): Promise<void> {
+  try {
+    await store.refreshData()
+    if (store.workspaceError.value || store.transactionsError.value) {
+      toast.error(t('workspace.refresh_failed'))
+    }
+  } catch {
+    toast.error(t('workspace.refresh_failed'))
+  }
+}
+const {
+  root: pullRoot, distance: pullDistance, refreshing: pullRefreshing,
+  armed: pullArmed, offset: pullOffset, indicatorTop: pullIndicatorTop,
+} = usePagePullRefresh(pullAvailable, refreshTransactionPage)
 
 onMounted(async () => {
   document.body.classList.add('ledger-transactions-mode')
@@ -719,7 +745,20 @@ const visibleTransactionColumns = computed(() => {
 </script>
 
 <template>
-  <main class="ledger-page ledger-transactions-page" data-testid="ledger-transactions-page">
+  <main
+    ref="pullRoot"
+    class="ledger-page ledger-transactions-page page-pull-refresh-root"
+    :class="{ 'is-pulling-refresh': pullDistance > 0 && !pullRefreshing }"
+    :style="{ '--pull-offset': pullOffset }"
+    data-testid="ledger-transactions-page"
+  >
+    <PagePullRefreshIndicator
+      :distance="pullDistance"
+      :refreshing="pullRefreshing"
+      :armed="pullArmed"
+      :offset="pullOffset"
+      :top="pullIndicatorTop"
+    />
     <header class="ledger-transactions-header">
       <div>
         <p class="ledger-eyebrow">Ledger</p>

@@ -189,6 +189,7 @@ const STRINGS: Strings = {
   'vault.pull_to_refresh': { zh: '下拉刷新', en: 'Pull to refresh' },
   'vault.release_to_refresh': { zh: '松开以刷新', en: 'Release to refresh' },
   'vault.refreshing': { zh: '正在刷新…', en: 'Refreshing…' },
+  'workspace.refresh_failed': { zh: '刷新失败，请重试。', en: 'Refresh failed. Please retry.' },
   'vault.refresh_failed': { zh: '刷新失败，现有文档内容未受影响。', en: 'Refresh failed. Open document content was not affected.' },
   'vault.loading_document': { zh: '正在加载 {path}…', en: 'Loading {path}…' },
   'vault.no_file_open': { zh: '没有打开的文件', en: 'No file open' },

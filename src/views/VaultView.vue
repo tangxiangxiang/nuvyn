@@ -2095,8 +2095,7 @@ let tabletPullStartY = 0
 let tabletRefreshSurface: HTMLElement | null = null
 
 const tabletPullRefreshAvailable = computed(() => (
-  ((isCompactNoteViewport.value && activeScope.value === 'note')
-    || (isTabletViewport.value && isDiaryScope.value))
+  (isCompactNoteViewport.value && (activeScope.value === 'note' || isDiaryScope.value))
   && !specialWorkspaceSurfaceActive.value
   && !settingsOpen.value
   && !tabletDrawer.value

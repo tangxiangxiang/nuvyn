@@ -2,6 +2,10 @@
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { NButton, NCard, NEmpty, NList, NListItem, NModal, NNumberAnimation, NResult, NSelect, NSpin } from 'naive-ui'
 import LedgerFirstAccountForm from '../components/ledger/LedgerFirstAccountForm.vue'
+import PagePullRefreshIndicator from '../components/PagePullRefreshIndicator.vue'
+import { usePagePullRefresh } from '../composables/usePagePullRefresh'
+import { useToast } from '../composables/useToast'
+import { useI18n } from '../composables/useI18n'
 import LedgerAnimatedMoney from '../components/ledger/LedgerAnimatedMoney.vue'
 import LedgerPendingCreateGate from '../components/ledger/LedgerPendingCreateGate.vue'
 import LedgerAccountIcon from '../components/ledger/LedgerAccountIcon.vue'
@@ -10,6 +14,8 @@ import { ledgerWorkspaceReadErrorMessage } from '../features/ledger/ledgerErrors
 import { useLedgerStore } from '../features/ledger/ledgerStore'
 
 const store = useLedgerStore()
+const toast = useToast()
+const { t } = useI18n()
 const createOpen = ref(false)
 const activeAccountTypeFilter = ref<'all' | 'asset' | 'liability'>('all')
 const archivedAccountTypeFilter = ref<'all' | 'asset' | 'liability'>('all')
@@ -49,6 +55,23 @@ function showScrollbarWhileScrolling(event: Event): void {
   }, 700))
 }
 
+const pullAvailable = computed(() => (
+  store.workspaceState.value === 'READY'
+  && !loading.value && !createOpen.value && !store.recoveryGateVisible.value
+))
+async function refreshAccounts(): Promise<void> {
+  try {
+    await store.refreshData()
+    if (store.workspaceError.value) toast.error(t('workspace.refresh_failed'))
+  } catch {
+    toast.error(t('workspace.refresh_failed'))
+  }
+}
+const {
+  root: pullRoot, distance: pullDistance, refreshing: pullRefreshing,
+  armed: pullArmed, offset: pullOffset, indicatorTop: pullIndicatorTop,
+} = usePagePullRefresh(pullAvailable, refreshAccounts)
+
 onMounted(() => {
   document.body.classList.add('ledger-accounts-mode')
   document.documentElement.classList.add('ledger-accounts-mode')
@@ -70,7 +93,20 @@ function onAccountSaved(): void {
 </script>
 
 <template>
-  <main class="ledger-page ledger-accounts-page" data-testid="ledger-accounts-page">
+  <main
+    ref="pullRoot"
+    class="ledger-page ledger-accounts-page page-pull-refresh-root"
+    :class="{ 'is-pulling-refresh': pullDistance > 0 && !pullRefreshing }"
+    :style="{ '--pull-offset': pullOffset }"
+    data-testid="ledger-accounts-page"
+  >
+    <PagePullRefreshIndicator
+      :distance="pullDistance"
+      :refreshing="pullRefreshing"
+      :armed="pullArmed"
+      :offset="pullOffset"
+      :top="pullIndicatorTop"
+    />
     <header class="ledger-page-header">
       <div>
         <p class="ledger-eyebrow">Ledger</p>

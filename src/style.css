@@ -1550,11 +1550,11 @@ main.container.auth-page-shell {
    control cannot appear stranded at the bottom of the screen. Keep
    desktop status bars and the 24px layout track unchanged. */
 @media (max-width: 1199px) {
-  .vault.note-tablet-mode.has-tablet-pull-refresh > .status-bar-row {
+  .vault.has-tablet-pull-refresh > .status-bar-row {
     translate: 0 var(--pull-offset, 0px);
     transition: translate 200ms ease;
   }
-  .vault.note-tablet-mode.is-pulling-refresh > .status-bar-row {
+  .vault.is-pulling-refresh.has-tablet-pull-refresh > .status-bar-row {
     transition: none;
   }
 }
@@ -1611,10 +1611,30 @@ main.container.auth-page-shell {
 
 /* Reduced-motion Note layouts keep both the editor and footer static. */
 @media (prefers-reduced-motion: reduce) and (max-width: 1199px) {
-  .vault.note-tablet-mode.has-tablet-pull-refresh > .status-bar-row {
+  .vault.has-tablet-pull-refresh > .status-bar-row {
     translate: none;
     transition: none;
   }
+}
+
+/* Board and Ledger pages share the same pull geometry, without changing
+   desktop scrollbars or adding a permanent refresh button. */
+@media (max-width: 1199px) {
+  .page-pull-refresh-root {
+    translate: 0 var(--pull-offset, 0px);
+    transition: translate 200ms ease;
+  }
+  .page-pull-refresh-root.is-pulling-refresh { transition: none; }
+}
+.page-pull-refresh-indicator {
+  background: var(--bg);
+  color: var(--text-muted);
+  border-color: var(--border);
+}
+@media (prefers-reduced-motion: reduce) {
+  .page-pull-refresh-root { translate: none; transition: none; }
+  .page-pull-refresh-indicator .vault-tablet-refresh-icon { transition: none; }
+  .page-pull-refresh-indicator.is-refreshing .vault-tablet-refresh-icon { animation: none; }
 }
 
 /* Note tablets use the same 36px header and native small action buttons
