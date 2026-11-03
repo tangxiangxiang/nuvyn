@@ -86,6 +86,29 @@ describe('PDF export helpers', () => {
     expect(__testing__.PDF_DOWNLOAD_STYLES).toContain('size: A4')
   })
 
+  it('removes code-copy controls and standalone frames from the PDF clone only', () => {
+    const article = document.createElement('article')
+    article.className = 'article reading'
+    article.innerHTML = `<h2>Example</h2>
+      <div class="nuvyn-code-frame">
+        <pre class="shiki has-code-copy" data-language="ts"><code>const answer = 42</code></pre>
+        <button class="nuvyn-code-copy" type="button">ts</button>
+      </div>
+      <pre class="shiki has-code-copy" data-language="txt"><code>fallback</code><button class="nuvyn-code-copy" type="button">txt</button></pre>`
+    const original = article.outerHTML
+    const exported = document.createElement('div')
+    exported.innerHTML = preparePdfArticleHtml(article)
+
+    expect(exported.querySelectorAll('.nuvyn-code-copy')).toHaveLength(0)
+    expect(exported.querySelector('.nuvyn-code-frame')).toBeNull()
+    const blocks = exported.querySelectorAll('pre.shiki')
+    expect(blocks).toHaveLength(2)
+    expect(blocks[0]?.parentElement?.matches('.article.reading')).toBe(true)
+    expect(blocks[0]?.textContent).toBe('const answer = 42')
+    expect(blocks[1]?.textContent).toBe('fallback')
+    expect(article.outerHTML).toBe(original)
+  })
+
   it('prints quote-style Alerts separately from plain pastel containers', () => {
     const styles = __testing__.PDF_DOWNLOAD_STYLES
     const quoteStyles = styles.match(/\.pdf-document \.article blockquote \{([^}]+)\}/u)?.[1] ?? ''

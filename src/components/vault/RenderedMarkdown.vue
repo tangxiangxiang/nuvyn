@@ -81,8 +81,12 @@ function onCodeTouchStart(event: TouchEvent): void {
   // must keep its native click-to-copy behavior.
   if (event.target.closest('button.nuvyn-code-copy')) return
   const pre = event.target.closest<HTMLElement>('pre.shiki[data-language]')
-  if (!pre || !articleEl.value?.contains(pre)
-    || !pre.querySelector(':scope > button.nuvyn-code-copy')) return
+  if (!pre || !articleEl.value?.contains(pre)) return
+  // Standalone fences place their action beside the scrollable pre; code
+  // groups still keep their action inside pre. Support both DOM contracts.
+  const parent = pre.parentElement
+  const actionOwner = parent?.classList.contains('nuvyn-code-frame') ? parent : pre
+  if (!actionOwner.querySelector(':scope > button.nuvyn-code-copy')) return
   const finger = event.touches[0]
   if (!finger) return
   codeTouch = { identifier: finger.identifier, x: finger.clientX, y: finger.clientY, startedAt: Date.now(), pre }

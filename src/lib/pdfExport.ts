@@ -937,6 +937,15 @@ function clonePdfNode(node: Node): Node {
 export function preparePdfArticleHtml(article: HTMLElement): string {
   const clone = clonePdfNode(article) as HTMLElement
 
+  // Code language/copy actions are reader-only. Remove them from the clone
+  // and restore standalone pre elements to their original PDF layout, without
+  // modifying the live reader or the code text and Shiki token structure.
+  clone.querySelectorAll('.nuvyn-code-copy').forEach((button) => button.remove())
+  for (const frame of clone.querySelectorAll<HTMLElement>('.nuvyn-code-frame')) {
+    const pre = frame.querySelector<HTMLElement>(':scope > pre.shiki')
+    if (pre && frame.children.length === 1) frame.replaceWith(pre)
+  }
+
   // WebKit/html2canvas can stall on native disabled task inputs. This clone
   // is only painted into a static PDF; keep its state but exclude it from
   // keyboard interaction without changing Reader's disabled controls.
