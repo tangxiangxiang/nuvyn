@@ -63,6 +63,45 @@ describe('RenderedMarkdown code copying', () => {
     wrapper.unmount()
   })
 
+  it('copies the selected code-group panel with one toolbar icon and no duplicate language labels', async () => {
+    const wrapper = mountMarkdown([
+      '::: code-group',
+      '```java [Java]',
+      'System.out.println("Hello");',
+      '```',
+      '```python [Python]',
+      'print("Hello")',
+      '```',
+      ':::',
+    ].join('\n'))
+    await vi.waitFor(() => expect(wrapper.find('button.nuvyn-code-group-copy').exists()).toBe(true))
+    const group = wrapper.get('.nuvyn-code-group')
+    const button = group.get('button.nuvyn-code-group-copy')
+    expect(group.findAll('button.nuvyn-code-copy')).toHaveLength(1)
+    expect(group.findAll('pre.shiki > button.nuvyn-code-copy')).toHaveLength(0)
+    expect(button.element.parentElement).toBe(group.element)
+    expect(button.attributes('aria-label')).toBe('Copy code')
+    expect(button.find('svg[aria-hidden="true"]').exists()).toBe(true)
+    expect(button.element.previousElementSibling?.classList.contains('nuvyn-code-group-tabs')).toBe(true)
+    expect(group.findAll('[role="tab"]').map((tab) => tab.text())).toEqual(['Java', 'Python'])
+
+    await button.trigger('click')
+    await flushPromises()
+    expect(copyTextToClipboard).toHaveBeenLastCalledWith('System.out.println("Hello");\n')
+    const panels = group.findAll('.nuvyn-code-group-panel')
+    panels[0]!.element.classList.remove('is-active')
+    panels[1]!.element.classList.add('is-active')
+    await button.trigger('click')
+    await flushPromises()
+    expect(copyTextToClipboard).toHaveBeenLastCalledWith('print("Hello")\n')
+
+    useI18n().setLocale('zh')
+    await flushPromises()
+    expect(group.findAll('button.nuvyn-code-group-copy')).toHaveLength(1)
+    expect(button.attributes('aria-label')).toBe('复制代码')
+    wrapper.unmount()
+  })
+
   it('does not duplicate controls on locale changes and handles new Markdown', async () => {
     const wrapper = mountMarkdown('```java\nfirst();\n```')
     await flushPromises()

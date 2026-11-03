@@ -46,6 +46,7 @@ const articleEl = ref<HTMLElement | null>(null)
 const { t, locale } = useI18n()
 const toast = useToast()
 const copyButtons = new WeakMap<HTMLButtonElement, HTMLElement>()
+const groupCopyButtons = new WeakMap<HTMLButtonElement, HTMLElement>()
 const vaultContext = useVaultContext()
 const router = inject(routerKey, null)
 let folding: ReaderFolding | null = null
@@ -82,11 +83,11 @@ function onCodeTouchStart(event: TouchEvent): void {
   if (event.target.closest('button.nuvyn-code-copy')) return
   const pre = event.target.closest<HTMLElement>('pre.shiki[data-language]')
   if (!pre || !articleEl.value?.contains(pre)) return
-  // Standalone fences place their action beside the scrollable pre; code
-  // groups still keep their action inside pre. Support both DOM contracts.
-  const parent = pre.parentElement
-  const actionOwner = parent?.classList.contains('nuvyn-code-frame') ? parent : pre
-  if (!actionOwner.querySelector(':scope > button.nuvyn-code-copy')) return
+  // Code groups expose a copy action in their tab bar. Only standalone
+  // fences require a tap to reveal the floating language/copy action.
+  const frame = pre.parentElement
+  if (!frame?.classList.contains('nuvyn-code-frame')
+    || !frame.querySelector(':scope > button.nuvyn-code-copy')) return
   const finger = event.touches[0]
   if (!finger) return
   codeTouch = { identifier: finger.identifier, x: finger.clientX, y: finger.clientY, startedAt: Date.now(), pre }
@@ -109,6 +110,31 @@ function onCodeTouchEnd(event: TouchEvent): void {
     || Date.now() - start.startedAt > 750
     || window.getSelection()?.toString()) return
   revealCodeActions(start.pre)
+}
+
+function createGroupCopyButton(): HTMLButtonElement {
+  const button = document.createElement('button')
+  button.type = 'button'
+  button.className = 'nuvyn-code-copy nuvyn-code-group-copy'
+  const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg')
+  svg.setAttribute('viewBox', '0 0 24 24')
+  svg.setAttribute('width', '16')
+  svg.setAttribute('height', '16')
+  svg.setAttribute('fill', 'none')
+  svg.setAttribute('stroke', 'currentColor')
+  svg.setAttribute('stroke-width', '1.8')
+  svg.setAttribute('stroke-linecap', 'round')
+  svg.setAttribute('stroke-linejoin', 'round')
+  svg.setAttribute('aria-hidden', 'true')
+  const rect = document.createElementNS('http://www.w3.org/2000/svg', 'rect')
+  for (const [name, value] of Object.entries({ x: '8', y: '8', width: '14', height: '14', rx: '2' })) {
+    rect.setAttribute(name, value)
+  }
+  const path = document.createElementNS('http://www.w3.org/2000/svg', 'path')
+  path.setAttribute('d', 'M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2')
+  svg.append(rect, path)
+  button.append(svg)
+  return button
 }
 
 const foldingLabels = () => ({
@@ -154,18 +180,18 @@ watch([ready, html, articleEl, error, locale, () => props.foldingEnabled, () => 
     // placed above it are clipped by overflow-x:auto, so standalone fences
     // get a layout-neutral outer positioning frame. Code groups already
     // display the language in their tab bar and retain their own overflow.
-    const grouped = Boolean(pre.closest('.nuvyn-code-group'))
+    // Group tabs already identify the language; copying belongs to the
+    // group toolbar, never as a duplicate label inside each code panel.
+    if (pre.closest('.nuvyn-code-group')) continue
     let owner: HTMLElement = pre
-    if (!grouped) {
-      const parent = pre.parentElement
-      if (parent?.classList.contains('nuvyn-code-frame')) owner = parent
-      else {
-        const frame = document.createElement('div')
-        frame.className = 'nuvyn-code-frame'
-        pre.before(frame)
-        frame.append(pre)
-        owner = frame
-      }
+    const parent = pre.parentElement
+    if (parent?.classList.contains('nuvyn-code-frame')) owner = parent
+    else {
+      const frame = document.createElement('div')
+      frame.className = 'nuvyn-code-frame'
+      pre.before(frame)
+      frame.append(pre)
+      owner = frame
     }
     let button = Array.from(owner.querySelectorAll<HTMLButtonElement>(':scope > button'))
       .find((candidate) => copyButtons.has(candidate))
@@ -180,6 +206,24 @@ watch([ready, html, articleEl, error, locale, () => props.foldingEnabled, () => 
     }
     button.title = t('editor.copy_code')
     button.setAttribute('aria-label', `${t('editor.copy_code')} (${pre.dataset.language})`)
+  }
+  for (const group of articleEl.value?.querySelectorAll<HTMLElement>('.nuvyn-code-group') ?? []) {
+    const tabs = group.querySelector<HTMLElement>(':scope > .nuvyn-code-group-tabs[role="tablist"]')
+    const activeCode = group.querySelector<HTMLElement>(
+      ':scope > .nuvyn-code-group-panels > .nuvyn-code-group-panel.is-active > pre.shiki > code',
+    )
+    if (!tabs || !activeCode) continue
+    let button = Array.from(group.children).find((child): child is HTMLButtonElement => (
+      child instanceof HTMLButtonElement && groupCopyButtons.has(child)
+    ))
+    if (!button) {
+      button = createGroupCopyButton()
+      // Follow the tablist in keyboard order, before the code panels.
+      tabs.after(button)
+      groupCopyButtons.set(button, group)
+    }
+    button.title = t('editor.copy_code')
+    button.setAttribute('aria-label', t('editor.copy_code'))
   }
   const root = articleEl.value
   if (!props.foldingEnabled || props.raw.length >= MARKDOWN_FOLDING_LIMIT || !root) clearFolding()
@@ -210,7 +254,10 @@ async function onArticleClick(event: MouseEvent) {
     return
   }
   const button = (event.target as HTMLElement | null)?.closest<HTMLButtonElement>('button.nuvyn-code-copy')
-  const code = button && copyButtons.get(button)
+  const group = button && groupCopyButtons.get(button)
+  const code = button && (copyButtons.get(button) ?? group?.querySelector<HTMLElement>(
+    ':scope > .nuvyn-code-group-panels > .nuvyn-code-group-panel.is-active > pre.shiki > code',
+  ))
   if (button && code) {
     event.preventDefault()
     if (button.disabled) return

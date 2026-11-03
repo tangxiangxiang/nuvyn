@@ -299,6 +299,83 @@ for (const theme of ['light', 'dark'] as const) {
   })
 }
 
+for (const theme of ['light', 'dark'] as const) {
+  test('reading ' + theme + ' plain and grouped code use the same compact surface', async ({ page }) => {
+    await page.addInitScript((value) => localStorage.setItem('nuvyn.theme', value), theme)
+    await page.goto('/__markdown-test?mode=reading')
+    const result = await page.evaluate(async () => {
+      const { render } = await import('/src/lib/markdown.ts')
+      const fixture = [
+        '```typescript',
+        'const standalone = 1',
+        '```',
+        '',
+        '```totally-unknown-nuvyn-lang',
+        'plain source',
+        '```',
+        '',
+        '::: code-group',
+        '```java [Java]',
+        'System.out.println("Hello");',
+        '```',
+        '```python [Python]',
+        'print("Hello")',
+        '```',
+        ':::',
+      ].join('\n')
+      const article = document.createElement('article')
+      article.className = 'article reading'
+      article.innerHTML = await render(fixture)
+      const root = document.querySelector('.vault')
+      if (!root) throw new Error('Vault fixture root is missing')
+      root.append(article)
+      try {
+        const standalone = article.querySelector<HTMLElement>('pre.shiki:not(.nuvyn-shiki-plain)')
+        const plain = article.querySelector<HTMLElement>('pre.shiki.nuvyn-shiki-plain')
+        const group = article.querySelector<HTMLElement>('.nuvyn-code-group')
+        const groupPre = group?.querySelector<HTMLElement>('.nuvyn-code-group-panel > pre.shiki')
+        if (!standalone || !plain || !group || !groupPre) throw new Error('Code surface fixture is missing')
+        const regularStyle = getComputedStyle(standalone)
+        const plainStyle = getComputedStyle(plain)
+        const groupStyle = getComputedStyle(group)
+        const groupPreStyle = getComputedStyle(groupPre)
+        return {
+          regularBackground: regularStyle.backgroundColor,
+          plainBackground: plainStyle.backgroundColor,
+          groupBackground: groupStyle.backgroundColor,
+          groupPreBackground: groupPreStyle.backgroundColor,
+          regularRadius: regularStyle.borderRadius,
+          plainRadius: plainStyle.borderRadius,
+          groupRadius: groupStyle.borderRadius,
+          groupBorder: groupStyle.borderTopWidth,
+          plainBorder: plainStyle.borderTopWidth,
+          regularPadding: [regularStyle.paddingTop, regularStyle.paddingLeft],
+          plainPadding: [plainStyle.paddingTop, plainStyle.paddingLeft],
+          groupedPadding: [groupPreStyle.paddingTop, groupPreStyle.paddingLeft],
+          groupMargin: groupStyle.marginTop,
+          regularMargin: regularStyle.marginTop,
+          duplicateLabel: getComputedStyle(groupPre, '::after').content,
+        }
+      } finally {
+        article.remove()
+      }
+    })
+    expect(result.groupBorder).toBe('0px')
+    expect(result.plainBorder).toBe('0px')
+    expect(result.regularRadius).toBe('12px')
+    expect(result.plainRadius).toBe(result.regularRadius)
+    expect(result.groupRadius).toBe(result.regularRadius)
+    expect(result.plainBackground).toBe(result.regularBackground)
+    expect(result.groupBackground).toBe(result.regularBackground)
+    expect(result.groupPreBackground).toBe('rgba(0, 0, 0, 0)')
+    expect(result.regularPadding).toEqual(['16px', '32px'])
+    expect(result.plainPadding).toEqual(result.regularPadding)
+    expect(result.groupedPadding).toEqual(result.regularPadding)
+    expect(result.groupMargin).toBe(result.regularMargin)
+    expect(result.duplicateLabel).toBe('none')
+  })
+}
+
 test('reading code language labels copy only code with mouse and keyboard', async ({ page, context }) => {
   await context.grantPermissions(['clipboard-read', 'clipboard-write'])
   await page.goto('/__markdown-test?mode=reading')
