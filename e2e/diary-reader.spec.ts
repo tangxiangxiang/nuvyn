@@ -600,6 +600,11 @@ test.describe('Diary date title swipe on phones', () => {
       await seedExistingDiary(request, today, `# Current ${today}\n\nCurrent content\n`)
       await page.setViewportSize({ width: 390, height: 844 })
       await openDiaryScope(page)
+      // The title gesture reads the same authoritative Diary tree as Calendar.
+      // Do not race initial Diary-tree hydration when opening a document.
+      await expect(
+        page.locator('[data-diary-day-content][data-date="' + previous + '"] .diary-calendar-visually-hidden').first(),
+      ).toBeAttached({ timeout: 15_000 })
       await clickDiaryDate(page, today)
       await expect(page).toHaveURL(new RegExp(`/vault/${diaryPath(today)}$`))
       await expect(page.locator('.reading-pane')).toBeVisible()

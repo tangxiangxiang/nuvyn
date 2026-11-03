@@ -2028,7 +2028,7 @@ const diaryTitleNavigating = ref(false)
 function onDiaryTitleTouchStart(event: TouchEvent): void {
   diaryTitleTouch = null
   if (
-    !isMobileDiaryViewport.value || !isOrdinaryManagedDiaryDocumentActive.value
+    !isMobileDiaryViewport.value || !canSwipeActiveDiaryDocument()
     || !isReadMode.value || diaryTitleNavigating.value || settingsOpen.value
     || leftSidebarVisible.value || event.touches.length !== 1
   ) return
@@ -2052,13 +2052,23 @@ function onDiaryTitleTouchStart(event: TouchEvent): void {
   }
 }
 
+// The visible native Diary reader, rather than the hidden mobile tab strip,
+// owns title gestures. A route-driven document can be the active reader before
+// the workspace tab-strip ID has finished reconciling.
+function canSwipeActiveDiaryDocument(): boolean {
+  return isDiaryScope.value
+    && classifyDiaryPath(activePath.value ?? '') === 'managed'
+    && activeTab.value?.path === activePath.value
+    && !specialWorkspaceSurfaceActive.value
+}
+
 function cancelDiaryTitleTouch(): void { diaryTitleTouch = null }
 
 function onDiaryTitleTouchEnd(event: TouchEvent): void {
   const start = diaryTitleTouch
   diaryTitleTouch = null
   if (
-    !start || !isMobileDiaryViewport.value || !isOrdinaryManagedDiaryDocumentActive.value
+    !start || !isMobileDiaryViewport.value || !canSwipeActiveDiaryDocument()
     || !isReadMode.value || diaryTitleNavigating.value || activePath.value !== start.path
   ) return
   const finger = Array.from(event.changedTouches).find(touch => touch.identifier === start.id)

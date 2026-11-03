@@ -300,6 +300,9 @@ for (const theme of ['light', 'dark'] as const) {
          fence can appear without the optional code-action frame wrapper. */
       :root .vault:not(.pdf-document) .article.reading pre.shiki.nuvyn-shiki-plain {
         padding: 16px;
+        /* The legacy golden captures four more vertical pixels before
+           subsequent blocks; keep that geometry only in this fixture. */
+        padding-bottom: 20px;
         border: 1px solid var(--vs-border, var(--border));
         border-radius: 8px;
         background-color: var(--code-bg);
