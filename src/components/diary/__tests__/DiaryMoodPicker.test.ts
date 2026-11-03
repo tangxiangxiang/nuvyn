@@ -16,12 +16,17 @@ describe('DiaryMoodPicker', () => {
     useI18n().setLocale('zh')
   })
 
-  it('renders all 48 Fluent icons in row-major 4-column order', () => {
+  it('defaults to 24 common moods and opens all 76 icons on demand', async () => {
     const wrapper = mount(DiaryMoodPicker)
-    const radios = wrapper.findAll('[role="radio"]')
-
     expect(wrapper.get('[role="radiogroup"]')).toBeTruthy()
-    expect(radios).toHaveLength(48)
+    expect(wrapper.get('[data-testid="diary-mood-common"]').attributes('aria-pressed')).toBe('true')
+    expect(wrapper.findAll('[role="radio"]').map((radio) => radio.attributes('data-mood-id')))
+      .toEqual(MOOD_CATALOG.slice(0, 24).map((mood) => mood.id))
+
+    await wrapper.get('[data-testid="diary-mood-all"]').trigger('click')
+    const radios = wrapper.findAll('[role="radio"]')
+    expect(wrapper.get('[data-testid="diary-mood-all"]').attributes('aria-pressed')).toBe('true')
+    expect(radios).toHaveLength(76)
     expect(radios.map((radio) => radio.attributes('data-mood-id')))
       .toEqual(MOOD_CATALOG.map((mood) => mood.id))
     expect(radios.every((radio) => radio.attributes('aria-checked') === 'false')).toBe(true)
@@ -32,6 +37,26 @@ describe('DiaryMoodPicker', () => {
     expect(wrapper.get('[data-testid="diary-mood-picker-close"]').element.classList).toContain('n-button')
     expect(wrapper.get('[data-testid="diary-mood-clear"]').element.classList).toContain('n-button')
     expect(wrapper.get('[data-testid="diary-mood-clear"]').attributes('disabled')).toBeDefined()
+
+    await wrapper.get('[data-testid="diary-mood-common"]').trigger('click')
+    expect(wrapper.findAll('[role="radio"]')).toHaveLength(24)
+    expect(wrapper.find('[data-mood-id="pensive"]').exists()).toBe(false)
+  })
+
+  it('opens All when an existing Diary selected an expanded mood', async () => {
+    const selected = mount(DiaryMoodPicker, {
+      props: { currentMood: 'pensive' },
+      attachTo: document.body,
+    })
+    await flushPromises()
+    expect(selected.get('[data-testid="diary-mood-all"]').attributes('aria-pressed')).toBe('true')
+    expect(selected.findAll('[role="radio"]')).toHaveLength(76)
+    expect(selected.get('[data-mood-id="pensive"]').attributes('aria-checked')).toBe('true')
+    expect(document.activeElement).toBe(selected.get('[data-mood-id="pensive"]').element)
+
+    await selected.get('[data-testid="diary-mood-common"]').trigger('click')
+    expect(selected.find('[data-testid="diary-mood-unknown"]').exists()).toBe(false)
+    expect(selected.findAll('[role="radio"]')).toHaveLength(24)
   })
 
   it('focuses the selected canonical mood, and starts at R1C1 for null or unknown', async () => {
@@ -66,6 +91,8 @@ describe('DiaryMoodPicker', () => {
       attachTo: document.body,
     })
 
+    await wrapper.get('[data-testid="diary-mood-all"]').trigger('click')
+
     async function expectArrow(fromId: string, key: string, toId: string): Promise<void> {
       const source = wrapper.get(`[data-mood-id="${fromId}"]`)
       const sourceElement = source.element as HTMLElement
@@ -83,7 +110,8 @@ describe('DiaryMoodPicker', () => {
     await expectArrow('devilish', 'ArrowRight', 'devilish')
     await expectArrow('devilish', 'ArrowDown', 'worried')
 
-    await expectArrow('pleading', 'ArrowDown', 'pleading')
+    await expectArrow('pleading', 'ArrowDown', 'pensive')
+    await expectArrow('beam', 'ArrowDown', 'beam')
     await expectArrow('pleading', 'ArrowRight', 'pleading')
     await expectArrow('shy', 'ArrowRight', 'happy')
     await expectArrow('shy', 'ArrowLeft', 'afraid')

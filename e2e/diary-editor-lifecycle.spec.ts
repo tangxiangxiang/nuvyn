@@ -839,6 +839,7 @@ test('Calendar Mood picker remains fully usable at 320/375px', async ({ page, re
   async function assertPickerGeometry(width: number, height: number, context: string): Promise<void> {
     const picker = page.getByTestId('diary-mood-picker')
     await expect(picker).toBeVisible()
+    await picker.getByTestId('diary-mood-all').click()
     const metrics = await picker.evaluate((element) => {
       const pickerRect = element.getBoundingClientRect()
       const grid = element.querySelector<HTMLElement>('.diary-mood-picker-grid')
@@ -876,14 +877,14 @@ test('Calendar Mood picker remains fully usable at 320/375px', async ({ page, re
     expect(metrics.picker.width).toBeGreaterThan(0)
     expect(metrics.picker.height).toBeGreaterThan(0)
     expect(metrics.columns, `${width}px ${context} columns`).toBe(4)
-    expect(metrics.rects).toHaveLength(48)
+    expect(metrics.rects).toHaveLength(76)
     expect(metrics.rects.every((rect) => (
       rect.width >= 44
       && rect.height >= 44
       && rect.visibility !== 'hidden'
       && rect.left >= metrics.picker.left - 1
       && rect.right <= metrics.picker.right + 1
-      // A 48-icon picker intentionally scrolls vertically; clipped rows
+      // A 76-icon picker intentionally scrolls vertically; clipped rows
       // remain navigable by touch, wheel and arrow-key focus.
     ))).toBe(true)
   }

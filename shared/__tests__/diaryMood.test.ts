@@ -4,8 +4,8 @@ import path from 'node:path'
 import { getMoodDefinition, isMoodId, MOOD_CATALOG } from '../diaryMood'
 
 describe('D7 Diary Mood registry', () => {
-  it('keeps the original 24 stable mood IDs and extends the catalog to 48 Fluent icons', () => {
-    expect(MOOD_CATALOG).toHaveLength(48)
+  it('keeps the original 48 stable mood IDs and extends the catalog to 76 Fluent icons', () => {
+    expect(MOOD_CATALOG).toHaveLength(76)
     expect(MOOD_CATALOG.slice(0, 24).map((mood) => mood.id)).toEqual([
       'kiss', 'sad', 'surprised-big', 'surprised-small',
       'watching', 'like', 'laughing', 'disappointed',
@@ -14,7 +14,7 @@ describe('D7 Diary Mood registry', () => {
       'dizzy', 'indignant', 'frowning', 'mysterious',
       'laughing-tears', 'playful', 'unwell', 'devilish',
     ])
-    expect(MOOD_CATALOG.slice(24).map((mood) => mood.id)).toEqual([
+    expect(MOOD_CATALOG.slice(24, 48).map((mood) => mood.id)).toEqual([
       'relieved',
       'thinking',
       'confused',
@@ -40,9 +40,39 @@ describe('D7 Diary Mood registry', () => {
       'comforted',
       'pleading',
     ])
+    expect(MOOD_CATALOG.slice(48).map((mood) => mood.id)).toEqual([
+      'pensive',
+      'unamused',
+      'persevering',
+      'downcast',
+      'clouded',
+      'invisible',
+      'skeptical',
+      'zipper',
+      'delicious',
+      'drooling',
+      'nerdy',
+      'woozy',
+      'hot',
+      'cold',
+      'sick',
+      'sneezing',
+      'upside-down',
+      'giggle',
+      'salute',
+      'cowboy',
+      'disguise',
+      'rofl',
+      'silent',
+      'uncertain',
+      'exhale',
+      'monocle',
+      'halo',
+      'beam',
+    ])
     expect(MOOD_CATALOG.every((mood) => mood.column >= 1 && mood.column <= 4)).toBe(true)
-    expect(MOOD_CATALOG.every((mood) => mood.row >= 1 && mood.row <= 12)).toBe(true)
-    expect(new Set(MOOD_CATALOG.map((mood) => `${mood.row}:${mood.column}`)).size).toBe(48)
+    expect(MOOD_CATALOG.every((mood) => mood.row >= 1 && mood.row <= 19)).toBe(true)
+    expect(new Set(MOOD_CATALOG.map((mood) => `${mood.row}:${mood.column}`)).size).toBe(76)
   })
 
   it('uses natural emotion names while preserving surprise mood IDs and image paths', () => {

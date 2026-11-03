@@ -2,7 +2,7 @@
 import { computed, nextTick, onMounted, ref, watch } from 'vue'
 import { NButton, NIcon } from 'naive-ui'
 import { X } from '@vicons/tabler'
-import { getMoodDefinition, isMoodId, type DiaryMoodId } from '../../../shared/diaryMood'
+import { MOOD_CATALOG, type DiaryMoodId } from '../../../shared/diaryMood'
 import { useI18n } from '../../composables/useI18n'
 import { useDiaryMoodIconPreferences } from '../../composables/diary/useDiaryMoodIconPreferences'
 
@@ -24,27 +24,32 @@ const { locale, t } = useI18n()
 const preferences = useDiaryMoodIconPreferences()
 const focusedIndex = ref(0)
 const radioRefs = ref<Array<HTMLButtonElement | null>>([])
+const moodCollection = ref<'common' | 'all'>('common')
+// A small, stable starter selection. This is not inferred from private Diary
+// contents or stored as additional mood data.
+const COMMON_MOOD_IDS = new Set<string>(MOOD_CATALOG.slice(0, 24).map(({ id }) => id))
 let suppressNextClick = false
 
 // Keep the picker in the same four-column geometry as the original mood
 // catalog while allowing managed custom icons to extend it below the defaults.
 const MOOD_GRID_COLUMNS = 4
-const moodOptions = computed(() => preferences.availableIcons.value.flatMap((id, index) => {
-  const presentation = preferences.presentationFor(id, locale.value)
-  if (!presentation) return []
-  const definition = isMoodId(id) ? getMoodDefinition(id) : undefined
-  return [{
-    ...presentation,
-    row: definition?.row ?? Math.floor(index / MOOD_GRID_COLUMNS) + 1,
-    column: definition?.column ?? index % MOOD_GRID_COLUMNS + 1,
-  }]
-}))
+const moodOptions = computed(() => preferences.availableIcons.value
+  .filter((id) => moodCollection.value === 'all' || COMMON_MOOD_IDS.has(id))
+  .flatMap((id, index) => {
+    const presentation = preferences.presentationFor(id, locale.value)
+    if (!presentation) return []
+    return [{
+      ...presentation,
+      row: Math.floor(index / MOOD_GRID_COLUMNS) + 1,
+      column: (index % MOOD_GRID_COLUMNS) + 1,
+    }]
+  }))
 
 const selectedIndex = computed(() => (
   moodOptions.value.findIndex((mood) => mood.id === props.currentMood)
 ))
 const unknownMood = computed(() => (
-  typeof props.currentMood === 'string' && selectedIndex.value < 0
+  typeof props.currentMood === 'string' && !preferences.isAvailable(props.currentMood)
 ))
 
 function setRadioRef(index: number, element: unknown): void {
@@ -78,6 +83,12 @@ function focusInitial(): void {
 
 function isSelected(id: DiaryMoodId): boolean {
   return props.currentMood === id
+}
+
+function setMoodCollection(next: 'common' | 'all'): void {
+  if (moodCollection.value === next) return
+  moodCollection.value = next
+  focusedIndex.value = selectedIndex.value >= 0 ? selectedIndex.value : 0
 }
 
 function selectMood(id: DiaryMoodId): void {
@@ -134,9 +145,14 @@ function onPickerKeydown(event: KeyboardEvent): void {
   emit('close')
 }
 
-watch(() => props.currentMood, () => {
+watch(() => props.currentMood, (mood) => {
+  // When editing a previously selected expanded/custom mood, reveal it in All
+  // before focusing the picker. Never mislabel a filtered mood as unknown.
+  if (mood && preferences.isAvailable(mood) && !COMMON_MOOD_IDS.has(mood)) {
+    moodCollection.value = 'all'
+  }
   focusedIndex.value = selectedIndex.value >= 0 ? selectedIndex.value : 0
-})
+}, { immediate: true })
 
 onMounted(() => {
   focusInitial()
@@ -168,6 +184,25 @@ defineExpose({ focusInitial })
         @keydown="onPickerKeydown"
       ><NIcon aria-hidden="true" :size="18"><X /></NIcon></NButton>
     </header>
+
+    <div class="diary-mood-picker-collections" role="group" :aria-label="t('mood.groups_label')">
+      <button
+        type="button"
+        class="diary-mood-picker-collection"
+        data-testid="diary-mood-common"
+        :class="{ 'is-active': moodCollection === 'common' }"
+        :aria-pressed="moodCollection === 'common'"
+        @click="setMoodCollection('common')"
+      >{{ t('mood.common') }}</button>
+      <button
+        type="button"
+        class="diary-mood-picker-collection"
+        data-testid="diary-mood-all"
+        :class="{ 'is-active': moodCollection === 'all' }"
+        :aria-pressed="moodCollection === 'all'"
+        @click="setMoodCollection('all')"
+      >{{ t('mood.all') }}</button>
+    </div>
 
     <p
       v-if="unknownMood"
@@ -290,11 +325,40 @@ defineExpose({ focusInitial })
 
 .diary-mood-picker-close:focus-visible,
 .diary-mood-clear:focus-visible,
+.diary-mood-picker-collection:focus-visible,
 .diary-mood-option:focus-visible {
   outline: 2px solid var(--vs-accent, #4f6fff);
   outline-offset: 2px;
 }
 
+/* Keep the choice compact and touch-accessible at 320px. */
+.diary-mood-picker-collections {
+  display: grid;
+  flex: 0 0 auto;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 4px;
+  margin-bottom: 8px;
+  padding: 3px;
+  border-radius: 8px;
+  background: var(--vs-bg-2, var(--bg-soft));
+}
+.diary-mood-picker-collection {
+  min-height: 36px;
+  padding: 4px 8px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--vs-text-2, var(--text-muted));
+  font: inherit;
+  font-size: 0.78rem;
+  cursor: pointer;
+}
+.diary-mood-picker-collection.is-active {
+  background: var(--vs-bg-1, var(--bg));
+  color: var(--vs-text-1, var(--text-h));
+  font-weight: 650;
+  box-shadow: 0 1px 3px rgb(0 0 0 / 8%);
+}
 .diary-mood-picker-grid {
   display: grid;
   min-height: 0;

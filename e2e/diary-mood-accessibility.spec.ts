@@ -164,7 +164,7 @@ function assertVisibleFocusIndicator(style: Awaited<ReturnType<typeof focusIndic
   if (outlineVisible) expect(style.outlineColor).not.toMatch(/transparent|rgba\([^)]*,\s*0\)$/i)
 }
 
-test('keyboard grid keeps 4-column geometry across 48 moods and arrows do not mutate Mood', async ({ page, request }) => {
+test('keyboard grid keeps 4-column geometry across 76 moods and arrows do not mutate Mood', async ({ page, request }) => {
   const date = localCivilDate()
   const diagnostics = captureDiagnostics(page)
   const moodPatchCount = startMoodPatchCounter(page)
@@ -179,9 +179,12 @@ test('keyboard grid keeps 4-column geometry across 48 moods and arrows do not mu
     const picker = page.getByTestId('diary-mood-picker')
     const radios = picker.getByRole('radio')
     await expect(picker).toBeVisible()
-    await expect(radios).toHaveCount(48)
+    await expect(picker.getByTestId('diary-mood-common')).toHaveAttribute('aria-pressed', 'true')
+    await expect(radios).toHaveCount(24)
     await expect(picker.getByRole('radiogroup')).toHaveCount(1)
     await expect(picker.getByRole('radio', { name: '开心 / Happy' })).toBeFocused()
+    await picker.getByTestId('diary-mood-all').click()
+    await expect(radios).toHaveCount(76)
     await expect(picker.locator('[aria-checked="true"]')).toHaveCount(1)
 
     const roving = await radios.evaluateAll((elements) => elements.map((element) => ({
@@ -192,9 +195,9 @@ test('keyboard grid keeps 4-column geometry across 48 moods and arrows do not mu
       checked: element.getAttribute('aria-checked'),
     })))
     expect(roving.filter((radio) => radio.tabIndex === '0')).toHaveLength(1)
-    expect(roving.filter((radio) => radio.tabIndex === '-1')).toHaveLength(47)
+    expect(roving.filter((radio) => radio.tabIndex === '-1')).toHaveLength(75)
     expect(roving.map((radio) => [radio.row, radio.column])).toEqual(
-      Array.from({ length: 48 }, (_, index) => [
+      Array.from({ length: 76 }, (_, index) => [
         String(Math.floor(index / 4) + 1),
         String(index % 4 + 1),
       ]),
@@ -217,7 +220,8 @@ test('keyboard grid keeps 4-column geometry across 48 moods and arrows do not mu
     await expectArrow('laughing-tears', 'ArrowDown', 'relieved')
     await expectArrow('devilish', 'ArrowRight', 'devilish')
     await expectArrow('devilish', 'ArrowDown', 'worried')
-    await expectArrow('pleading', 'ArrowDown', 'pleading')
+    await expectArrow('pleading', 'ArrowDown', 'pensive')
+    await expectArrow('beam', 'ArrowDown', 'beam')
     await expectArrow('shy', 'ArrowRight', 'happy')
     await expectArrow('shy', 'ArrowLeft', 'afraid')
     await expectArrow('shy', 'ArrowDown', 'angry')
@@ -413,8 +417,9 @@ test('Calendar Mood trigger exposes truthful popup semantics and complete radio 
     await expect(picker).toHaveAccessibleName(/选择心情|Choose a mood/)
     await expect(picker.getByRole('radiogroup')).toHaveAccessibleName(/心情选项|Mood options/)
 
+    await picker.getByTestId('diary-mood-all').click()
     const radios = picker.getByRole('radio')
-    await expect(radios).toHaveCount(48)
+    await expect(radios).toHaveCount(76)
     const radioState = await radios.evaluateAll((elements) => elements.map((element) => ({
       name: element.getAttribute('aria-label') ?? '',
       checked: element.getAttribute('aria-checked'),
@@ -423,12 +428,12 @@ test('Calendar Mood trigger exposes truthful popup semantics and complete radio 
       setSize: element.getAttribute('aria-setsize'),
     })))
     expect(radioState.every((radio) => radio.name.length > 0)).toBe(true)
-    expect(new Set(radioState.map((radio) => radio.name)).size).toBe(48)
+    expect(new Set(radioState.map((radio) => radio.name)).size).toBe(76)
     expect(radioState.every((radio) => radio.checked === 'true' || radio.checked === 'false')).toBe(true)
     expect(radioState.filter((radio) => radio.checked === 'true')).toHaveLength(1)
     expect(radioState.filter((radio) => radio.tabIndex === '0')).toHaveLength(1)
-    expect(radioState.map((radio) => radio.posInSet)).toEqual(Array.from({ length: 48 }, (_, index) => String(index + 1)))
-    expect(radioState.every((radio) => radio.setSize === '48')).toBe(true)
+    expect(radioState.map((radio) => radio.posInSet)).toEqual(Array.from({ length: 76 }, (_, index) => String(index + 1)))
+    expect(radioState.every((radio) => radio.setSize === '76')).toBe(true)
     await expect(picker.getByTestId('diary-mood-picker-close')).toHaveAccessibleName(/关闭心情选择器|Close mood picker/)
     await expect(picker.getByTestId('diary-mood-clear')).toHaveAccessibleName(/清空心情|Clear mood/)
     expect(await picker.textContent()).not.toContain('✓')

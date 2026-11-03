@@ -167,6 +167,7 @@ type PickerMetrics = {
 }
 
 async function readPickerMetrics(page: Page): Promise<PickerMetrics> {
+  await page.getByTestId('diary-mood-all').click()
   const metrics = await page.evaluate(() => {
     const toBox = (element: Element | null): Box => {
       const rect = element?.getBoundingClientRect()
@@ -273,10 +274,10 @@ function assertPickerGeometry(metrics: PickerMetrics, viewport: Viewport): void 
   expect(metrics.options.map((option) => option.id), `${viewport.name} canonical row-major order`)
     .toEqual(CANONICAL_MOOD_IDS)
   expect(metrics.options.every((option) => option.visible), `${viewport.name} option visibility`).toBe(true)
-  expect(metrics.rowTops, `${viewport.name} real browser row count`).toHaveLength(12)
+  expect(metrics.rowTops, `${viewport.name} real browser row count`).toHaveLength(19)
   expect(metrics.columnLefts, `${viewport.name} real browser column count`).toHaveLength(4)
-  expect(metrics.rowCounts, `${viewport.name} four options per row`).toEqual(Array(12).fill(4))
-  expect(metrics.columnCounts, `${viewport.name} six options per column`).toEqual(Array(4).fill(12))
+  expect(metrics.rowCounts, `${viewport.name} four options per row`).toEqual(Array(19).fill(4))
+  expect(metrics.columnCounts, `${viewport.name} nineteen options per column`).toEqual(Array(4).fill(19))
   expect(metrics.picker.left, `${viewport.name} picker left containment`).toBeGreaterThanOrEqual(-1)
   expect(metrics.picker.right, `${viewport.name} picker right containment`).toBeLessThanOrEqual(viewport.width + 1)
   expect(metrics.picker.width, `${viewport.name} picker width`).toBeGreaterThan(0)
