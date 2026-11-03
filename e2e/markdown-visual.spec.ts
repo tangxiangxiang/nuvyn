@@ -296,6 +296,9 @@ test('reading code language labels copy only code with mouse and keyboard', asyn
     await expect(button).toBeVisible()
     await expect(button).toHaveCSS('opacity', '0')
     await expect(button).toHaveCSS('pointer-events', 'none')
+    // Hiding and revealing the action must not enlarge the compact code label.
+    await expect(button).toHaveCSS('padding-top', '0px')
+    await expect(button).toHaveCSS('padding-bottom', '0px')
     const expected = await block.locator(':scope > code').evaluate((code) => {
       const clone = code.cloneNode(true) as HTMLElement
       clone.querySelectorAll('.nuvyn-line-number').forEach((number) => number.remove())

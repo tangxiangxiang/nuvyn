@@ -206,13 +206,23 @@
 :root .vault:not(.pdf-document) .article pre.shiki > .nuvyn-code-copy {
   opacity: 0;
   transition: opacity 150ms ease;
-  padding: 0.3rem 0.45rem;
+  /* The label's visual height stays at its original 0.75rem line box.
+     Larger invisible hit area is supplied only to the interactive button. */
+  padding: 0 0.25rem;
   border-radius: 0.35rem;
   background: var(--vs-bg-2, var(--code-bg));
 }
 
 :root .vault:not(.pdf-document) .article pre.shiki > .nuvyn-code-copy {
   pointer-events: none;
+}
+
+/* Extend the touch/click target without changing the visual badge height
+   or the code block's padding/line height. */
+:root .vault:not(.pdf-document) .article pre.shiki > .nuvyn-code-copy::before {
+  content: '';
+  position: absolute;
+  inset: -0.75rem -0.5rem;
 }
 
 /* Desktop pointer hover reveals the label without moving code or changing
