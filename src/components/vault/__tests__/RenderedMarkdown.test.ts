@@ -102,6 +102,60 @@ describe('RenderedMarkdown code copying', () => {
     expect(feedback.success).not.toHaveBeenCalled()
   })
 
+  it('reveals touch code actions for 3 seconds without copying on the first tap', async () => {
+    const wrapper = mountMarkdown('```js\nconsole.log(1);\n```')
+    await flushPromises()
+    const pre = wrapper.get('pre.shiki').element as HTMLElement
+    const touch = (x: number, y: number) => ({ identifier: 7, clientX: x, clientY: y })
+    const dispatch = (type: string, touches: ReturnType<typeof touch>[]) => {
+      const event = new Event(type, { bubbles: true, cancelable: true })
+      Object.defineProperty(event, type === 'touchend' ? 'changedTouches' : 'touches', { value: touches })
+      pre.dispatchEvent(event)
+    }
+    window.getSelection()?.removeAllRanges()
+    vi.useFakeTimers()
+    try {
+      dispatch('touchstart', [touch(42, 30)])
+      dispatch('touchend', [touch(42, 30)])
+      expect(pre.classList.contains('is-code-actions-visible')).toBe(true)
+      expect(copyTextToClipboard).not.toHaveBeenCalled()
+
+      vi.advanceTimersByTime(2999)
+      expect(pre.classList.contains('is-code-actions-visible')).toBe(true)
+      vi.advanceTimersByTime(1)
+      expect(pre.classList.contains('is-code-actions-visible')).toBe(false)
+
+      // Both horizontal code scrolling and vertical page scrolling cancel
+      // gesture recognition without revealing or copying anything.
+      for (const [x, y] of [[110, 34], [42, 90]]) {
+        dispatch('touchstart', [touch(42, 30)])
+        dispatch('touchmove', [touch(x, y)])
+        dispatch('touchend', [touch(x, y)])
+        expect(pre.classList.contains('is-code-actions-visible')).toBe(false)
+      }
+      expect(copyTextToClipboard).not.toHaveBeenCalled()
+    } finally {
+      wrapper.unmount()
+      vi.useRealTimers()
+    }
+  })
+
+  it('clears the touch reveal when a reading surface is unmounted', async () => {
+    const wrapper = mountMarkdown('```ts\nconst x = 1\n```')
+    await flushPromises()
+    const pre = wrapper.get('pre.shiki').element as HTMLElement
+    const point = { identifier: 1, clientX: 50, clientY: 50 }
+    const start = new Event('touchstart', { bubbles: true })
+    Object.defineProperty(start, 'touches', { value: [point] })
+    const end = new Event('touchend', { bubbles: true })
+    Object.defineProperty(end, 'changedTouches', { value: [point] })
+    pre.dispatchEvent(start)
+    pre.dispatchEvent(end)
+    expect(pre.classList.contains('is-code-actions-visible')).toBe(true)
+    wrapper.unmount()
+    expect(pre.classList.contains('is-code-actions-visible')).toBe(false)
+  })
+
   it('does not turn inline code into a copy control', async () => {
     const wrapper = mountMarkdown('`const value = 1`')
     await flushPromises()

@@ -52,6 +52,61 @@ let folding: ReaderFolding | null = null
 let foldedRoot: HTMLElement | null = null
 let foldedHtml: string | null = null
 let foldedPath: string | undefined
+
+const CODE_ACTION_REVEAL_MS = 3000
+type CodeTouch = { identifier: number; x: number; y: number; startedAt: number; pre: HTMLElement }
+let codeTouch: CodeTouch | null = null
+let visibleCodeBlock: HTMLElement | null = null
+let codeRevealTimer: ReturnType<typeof setTimeout> | null = null
+
+function clearCodeActionReveal(): void {
+  if (codeRevealTimer !== null) clearTimeout(codeRevealTimer)
+  codeRevealTimer = null
+  visibleCodeBlock?.classList.remove('is-code-actions-visible')
+  visibleCodeBlock = null
+  codeTouch = null
+}
+
+function revealCodeActions(pre: HTMLElement): void {
+  clearCodeActionReveal()
+  visibleCodeBlock = pre
+  pre.classList.add('is-code-actions-visible')
+  codeRevealTimer = setTimeout(clearCodeActionReveal, CODE_ACTION_REVEAL_MS)
+}
+
+function onCodeTouchStart(event: TouchEvent): void {
+  codeTouch = null
+  if (event.touches.length !== 1 || !(event.target instanceof Element)) return
+  // Only interactive code blocks get a reveal; touching the copy button
+  // must keep its native click-to-copy behavior.
+  if (event.target.closest('button.nuvyn-code-copy')) return
+  const pre = event.target.closest<HTMLElement>('pre.shiki[data-language]')
+  if (!pre || !articleEl.value?.contains(pre)
+    || !pre.querySelector(':scope > button.nuvyn-code-copy')) return
+  const finger = event.touches[0]
+  if (!finger) return
+  codeTouch = { identifier: finger.identifier, x: finger.clientX, y: finger.clientY, startedAt: Date.now(), pre }
+}
+
+function onCodeTouchMove(event: TouchEvent): void {
+  if (!codeTouch) return
+  const finger = Array.from(event.touches).find(touch => touch.identifier === codeTouch?.identifier)
+  if (!finger || Math.abs(finger.clientX - codeTouch.x) > 10
+    || Math.abs(finger.clientY - codeTouch.y) > 10) codeTouch = null
+}
+
+function onCodeTouchEnd(event: TouchEvent): void {
+  const start = codeTouch
+  codeTouch = null
+  if (!start || !articleEl.value?.contains(start.pre)) return
+  const finger = Array.from(event.changedTouches).find(touch => touch.identifier === start.identifier)
+  if (!finger || Math.abs(finger.clientX - start.x) > 10
+    || Math.abs(finger.clientY - start.y) > 10
+    || Date.now() - start.startedAt > 750
+    || window.getSelection()?.toString()) return
+  revealCodeActions(start.pre)
+}
+
 const foldingLabels = () => ({
   expand: t('ai.tool_expand'), collapse: t('ai.tool_collapse'),
 })
@@ -61,7 +116,12 @@ function clearFolding() {
   foldedRoot = null
   foldedHtml = null
 }
-onBeforeUnmount(clearFolding)
+onBeforeUnmount(() => {
+  clearFolding()
+  clearCodeActionReveal()
+})
+// A new article cannot inherit the previous document's transient action.
+watch([html, () => props.sourcePath], clearCodeActionReveal)
 useMarkmapMount(articleEl, toRef(props, 'renderTheme'), props.deferImages)
 useMermaidMount(articleEl, toRef(props, 'renderTheme'), props.deferImages)
 useMathMount(articleEl)
@@ -168,5 +228,9 @@ defineExpose({ el: articleEl })
     class="article reading"
     v-html="html"
     @click="onArticleClick"
+    @touchstart.passive="onCodeTouchStart"
+    @touchmove.passive="onCodeTouchMove"
+    @touchend.passive="onCodeTouchEnd"
+    @touchcancel.passive="clearCodeActionReveal"
   />
 </template>

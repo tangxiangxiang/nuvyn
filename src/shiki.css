@@ -183,7 +183,7 @@
 :root .vault:not(.pdf-document) .article pre.shiki > .nuvyn-code-copy {
   position: absolute;
   top: 0.75rem;
-  right: 1rem;
+  right: 0.75rem;
   color: var(--vs-text-3, var(--text-muted));
   font: 0.75rem/1 var(--mono);
   pointer-events: none;
@@ -199,15 +199,55 @@
   pointer-events: auto;
 }
 
+/* Language and copy are secondary actions. Keep their box in the top-right
+   for single- and multi-line blocks alike; never center it over a line.
+   Opacity (not visibility/display) keeps the copy button keyboard focusable. */
+:root .vault:not(.pdf-document) .article pre.shiki:not(.nuvyn-shiki-plain)[data-language]::after,
+:root .vault:not(.pdf-document) .article pre.shiki > .nuvyn-code-copy {
+  opacity: 0;
+  transition: opacity 150ms ease;
+  padding: 0.3rem 0.45rem;
+  border-radius: 0.35rem;
+  background: var(--vs-bg-2, var(--code-bg));
+}
+
+:root .vault:not(.pdf-document) .article pre.shiki > .nuvyn-code-copy {
+  pointer-events: none;
+}
+
+/* Desktop pointer hover reveals the label without moving code or changing
+   its scroll position. Touch devices do not depend on synthetic :hover. */
+@media (hover: hover) and (pointer: fine) {
+  :root .vault:not(.pdf-document) .article pre.shiki:hover:not(.nuvyn-shiki-plain)[data-language]::after,
+  :root .vault:not(.pdf-document) .article pre.shiki:hover > .nuvyn-code-copy {
+    opacity: 1;
+  }
+  :root .vault:not(.pdf-document) .article pre.shiki:hover > .nuvyn-code-copy {
+    pointer-events: auto;
+  }
+}
+
+/* Touch activation is managed by RenderedMarkdown and expires after 3s.
+   :focus-visible ensures the hidden button can still be reached by Tab. */
+:root .vault:not(.pdf-document) .article pre.shiki.is-code-actions-visible:not(.nuvyn-shiki-plain)[data-language]::after,
+:root .vault:not(.pdf-document) .article pre.shiki.is-code-actions-visible > .nuvyn-code-copy,
+:root .vault:not(.pdf-document) .article pre.shiki > .nuvyn-code-copy:focus-visible {
+  opacity: 1;
+}
+:root .vault:not(.pdf-document) .article pre.shiki.is-code-actions-visible > .nuvyn-code-copy,
+:root .vault:not(.pdf-document) .article pre.shiki > .nuvyn-code-copy:focus-visible {
+  pointer-events: auto;
+}
 :root .vault:not(.pdf-document) .article pre.shiki > .nuvyn-code-copy:focus-visible {
   outline: 1px solid currentColor;
   outline-offset: 3px;
 }
 
-:root .vault:not(.pdf-document) .article pre.shiki.nuvyn-code-single-line:not(.nuvyn-shiki-plain)[data-language]::after,
-:root .vault:not(.pdf-document) .article pre.shiki.nuvyn-code-single-line > .nuvyn-code-copy {
-  top: 50%;
-  transform: translateY(-50%);
+@media (prefers-reduced-motion: reduce) {
+  :root .vault:not(.pdf-document) .article pre.shiki:not(.nuvyn-shiki-plain)[data-language]::after,
+  :root .vault:not(.pdf-document) .article pre.shiki > .nuvyn-code-copy {
+    transition: none;
+  }
 }
 
 :root .vault:not(.pdf-document) .article pre.shiki:not(.nuvyn-line-numbers):not(.nuvyn-shiki-plain) .line {

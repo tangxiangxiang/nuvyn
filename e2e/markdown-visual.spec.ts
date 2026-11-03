@@ -233,8 +233,10 @@ for (const theme of ['light', 'dark'] as const) {
       return result
     })
     expect(singleLineCode).not.toBeNull()
-    expect(Number.parseFloat(singleLineCode!.labelTop)).toBeCloseTo(singleLineCode!.preHeight / 2, 1)
-    expect(singleLineCode?.labelTransform).toBe(`matrix(1, 0, 0, 1, 0, ${-Number.parseFloat(singleLineCode!.labelHeight) / 2})`)
+    // Single-line labels use the same top-right anchor as multiline labels;
+    // the old vertical centering obscured the code on narrow viewports.
+    expect(singleLineCode?.labelTop).toBe('12px')
+    expect(singleLineCode?.labelTransform).toBe('none')
     expect(singleLineCode?.paddingTop).toBe('16px')
     expect(singleLineCode?.paddingBottom).toBe('16px')
     expect(singleLineCode?.marginTop).toBe('16px')
@@ -292,6 +294,8 @@ test('reading code language labels copy only code with mouse and keyboard', asyn
   for (const [index, block] of blocks.entries()) {
     const button = block.locator(':scope > button.nuvyn-code-copy')
     await expect(button).toBeVisible()
+    await expect(button).toHaveCSS('opacity', '0')
+    await expect(button).toHaveCSS('pointer-events', 'none')
     const expected = await block.locator(':scope > code').evaluate((code) => {
       const clone = code.cloneNode(true) as HTMLElement
       clone.querySelectorAll('.nuvyn-line-number').forEach((number) => number.remove())
@@ -304,13 +308,45 @@ test('reading code language labels copy only code with mouse and keyboard', asyn
         const rect = label.getBoundingClientRect()
         return { label: rect.y + rect.height / 2, pre: pre.y + pre.height / 2 }
       })
-      expect(position.label).toBeCloseTo(position.pre, 1)
+      // The language action is positioned at the top-right even for a
+      // single-line fence, rather than in the vertical center.
+      expect(position.label).toBeLessThan(position.pre)
+      await block.hover()
+      await expect(button).toHaveCSS('opacity', '1')
+      await expect(button).toHaveCSS('pointer-events', 'auto')
       await button.click()
     } else {
+      await page.keyboard.press('Tab')
       await button.focus()
+      await expect(button).toHaveCSS('opacity', '1')
       await button.press(index === 1 ? 'Enter' : 'Space')
     }
     await expect.poll(() => page.evaluate(() => navigator.clipboard.readText())).toBe(expected)
+  }
+})
+
+test.describe('touch code language actions', () => {
+  test.use({ hasTouch: true, isMobile: true })
+
+  for (const viewport of [
+    { name: 'phone', width: 390, height: 844 },
+    { name: 'Pad', width: 820, height: 1180 },
+  ]) {
+    test(`${viewport.name} reveals code copy on tap, not on scroll, and hides it after 3 seconds`, async ({ page, context }) => {
+      await context.grantPermissions(['clipboard-read', 'clipboard-write'])
+      await page.setViewportSize({ width: viewport.width, height: viewport.height })
+      await page.goto('/__markdown-test?mode=reading')
+      const block = page.locator('.article.reading pre.shiki[data-language]').first()
+      const button = block.locator(':scope > button.nuvyn-code-copy')
+      await expect(button).toHaveCSS('opacity', '0')
+      await block.tap({ position: { x: 16, y: 16 } })
+      await expect(button).toHaveCSS('opacity', '1')
+      const code = await block.locator(':scope > code').evaluate((node) => node.textContent ?? '')
+      await button.tap()
+      await expect.poll(() => page.evaluate(() => navigator.clipboard.readText())).toBe(code)
+      await expect(button).toHaveCSS('opacity', '0', { timeout: 6000 })
+      await expect(button).toHaveCSS('pointer-events', 'none')
+    })
   }
 })
 
