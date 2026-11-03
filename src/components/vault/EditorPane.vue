@@ -8,6 +8,7 @@ import { acquireMarkdownModel } from './monacoModels'
 import { registerEditorPasteHandler } from './editorPasteRegistry'
 import { bindMarkdownProviderContext, unbindMarkdownProviderContext } from './monacoMarkdownProviders'
 import { resolveWikiTarget } from '../../../shared/linkResolve'
+import { isManagedDiaryPath } from '../../../shared/diaryProtocol'
 import { getPost } from '../../lib/api'
 import { parseDoc } from '../../lib/frontmatter'
 import { findMarkdownHeadingSourceLine } from '../../composables/vault/useMarkdownRender'
@@ -1077,6 +1078,8 @@ const completionProvider: monaco.languages.CompletionItemProvider = {
     if (anchorMatch) {
       const targetPath = resolvedWikiPath(anchorMatch[1])
       if (!targetPath) return { suggestions: [] }
+      // Note must not offer private Diary headings as completion suggestions.
+      if (!isManagedDiaryPath(props.path) && isManagedDiaryPath(targetPath)) return { suggestions: [] }
       const query = anchorMatch[2].toLocaleLowerCase()
       const headings = await headingsFor(targetPath)
       const range = wikiCompletionRange(currentModel, position, anchorMatch[2].length)
@@ -1094,8 +1097,13 @@ const completionProvider: monaco.languages.CompletionItemProvider = {
     }
     const range = wikiCompletionRange(currentModel, position, match[1].length)
     const recency = recentLinks()
+    // Only filter autocomplete candidates in Note. Keep the full link index
+    // untouched so existing manually written links still resolve/navigate.
+    const completionTargets = isManagedDiaryPath(props.path)
+      ? (props.linkTargets ?? [])
+      : (props.linkTargets ?? []).filter((target) => !isManagedDiaryPath(target.path))
     return {
-      suggestions: rankWikiTargets(props.linkTargets ?? [], match[1], recency, props.path)
+      suggestions: rankWikiTargets(completionTargets, match[1], recency, props.path)
         .flatMap((target) => {
           const common = {
             filterText: `${target.title} ${target.path}`,

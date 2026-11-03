@@ -1283,6 +1283,67 @@ describe('Monaco EditorPane', () => {
     wrapper.unmount()
   })
 
+  it('never recommends Diary documents or their aliases in Note Wiki Link completion', async () => {
+    const wrapper = mount(EditorPane, {
+      props: {
+        modelValue: '[[',
+        path: 'inbox/source',
+        linkTargets: [
+          { path: 'diary/2026-11-03', title: '2026-11-03' },
+          { path: 'inbox/java-concurrency', title: 'Java Concurrency' },
+          { path: 'literature/core-java', title: 'Core Java' },
+        ],
+      },
+    })
+    const provider = mocks.completionProviders.at(-1)
+    const result = await provider.provideCompletionItems(mocks.model, { lineNumber: 1, column: 3 })
+    const insertions = result.suggestions.map((item: any) => item.insertText)
+    expect(insertions).toContain('inbox/java-concurrency]]')
+    expect(insertions).toContain('literature/core-java]]')
+    expect(insertions).not.toContain('diary/2026-11-03]]')
+    expect(insertions).not.toContain('diary/2026-11-03|2026-11-03]]')
+    expect(insertions.every((value: string) => !value.startsWith('diary/'))).toBe(true)
+    wrapper.unmount()
+  })
+
+  it('keeps Diary Wiki Link candidates unchanged when editing a Diary', async () => {
+    const wrapper = mount(EditorPane, {
+      props: {
+        modelValue: '[[',
+        path: 'diary/2026-11-03',
+        linkTargets: [
+          { path: 'diary/2026-11-02', title: '2026-11-02' },
+          { path: 'inbox/java-concurrency', title: 'Java Concurrency' },
+        ],
+      },
+    })
+    const provider = mocks.completionProviders.at(-1)
+    const result = await provider.provideCompletionItems(mocks.model, { lineNumber: 1, column: 3 })
+    const insertions = result.suggestions.map((item: any) => item.insertText)
+    expect(insertions).toContain('diary/2026-11-02]]')
+    expect(insertions).toContain('inbox/java-concurrency]]')
+    wrapper.unmount()
+  })
+
+  it('does not fetch private Diary headings for explicit Wiki Link hash completion in Note', async () => {
+    const value = '[[diary/2026-11-03#'
+    const wrapper = mount(EditorPane, {
+      props: {
+        modelValue: value,
+        path: 'inbox/source',
+        linkTargets: [{ path: 'diary/2026-11-03', title: '2026-11-03' }],
+      },
+    })
+    const provider = mocks.completionProviders.at(-1)
+    const result = await provider.provideCompletionItems(mocks.model, {
+      lineNumber: 1,
+      column: value.length + 1,
+    })
+    expect(result.suggestions).toEqual([])
+    expect(mocks.getPost).not.toHaveBeenCalled()
+    wrapper.unmount()
+  })
+
   it('replaces an existing Wiki Link closing pair during completion', async () => {
     const wrapper = mount(EditorPane, {
       props: { modelValue: '[[]]', path: 'inbox/source', linkTargets: [{ path: 'docs/guide', title: 'Guide' }] },
