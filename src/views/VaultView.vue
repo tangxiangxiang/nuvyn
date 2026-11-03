@@ -2069,11 +2069,20 @@ async function navigateDiaryByTitleSwipe(date: DiaryDate): Promise<void> {
 const canBackToDiaryHome = computed(() => (
   isOrdinaryManagedDiaryDocumentActive.value
 ))
-// Keep an inactive Diary tab from trapping the user in a hidden document when
-// they return to Diary with a Note selected. That state safely returns Home;
-// an active managed path continues to own the native document surface.
+// A direct Diary URL is authoritative presentation intent even while its tab
+// and activePath are still restoring. Never paint Calendar Home in that gap.
+const isManagedDiaryDocumentRoute = computed(() => {
+  if (route.name !== 'vault-doc') return false
+  const segments = route.params.pathMatch
+  const path = Array.isArray(segments) ? segments.join('/') : typeof segments === 'string' ? segments : ''
+  return classifyDiaryPath(path) === 'managed'
+})
+// Inactive Diary tabs still return Home on /vault; direct document routes
+// must not fall back to Home before the document has been adopted.
 const isDiaryCalendarVisible = computed(() => (
-  isDiaryCalendarMode.value && !isManagedDiaryDocumentActive.value
+  isDiaryCalendarMode.value
+  && !isManagedDiaryDocumentActive.value
+  && !isManagedDiaryDocumentRoute.value
 ))
 const workspaceTabStripVisible = computed(() => {
   if (zenModeActive.value) return false
@@ -3636,7 +3645,7 @@ watch(isReadMode, async (reading) => {
             @exit-zen-mode="exitZenMode"
           />
         </div>
-        <div v-if="!tabs.length" class="content-empty">
+        <div v-if="!tabs.length && !(isDiaryScope && isManagedDiaryDocumentRoute)" class="content-empty">
           <EmptyState :title="t('vault.no_file_open')">
             <span v-for="a in emptyActions" :key="a.label" class="hint-row">
               <span class="hint-label">{{ a.label }}</span>
@@ -3678,7 +3687,7 @@ watch(isReadMode, async (reading) => {
             @rendered="onReadingPaneRendered"
           />
         </div>
-        <div v-if="!tabs.length" class="content-empty">
+        <div v-if="!tabs.length && !(isDiaryScope && isManagedDiaryDocumentRoute)" class="content-empty">
           <EmptyState :title="t('vault.no_file_open')">
             <span v-for="a in emptyActions" :key="a.label" class="hint-row">
               <span class="hint-label">{{ a.label }}</span>

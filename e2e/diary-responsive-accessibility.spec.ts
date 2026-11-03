@@ -187,6 +187,28 @@ test('active Diary re-selection after a direct route reload returns to Calendar 
   const date = localCivilDate()
   const path = diaryPath(date)
 
+  // Capture any visible Calendar Home during the full browser bootstrap.
+  // Checking only after reload settles would miss the reported flash.
+  await page.addInitScript(() => {
+    const state = window as Window & { __nuvynDiaryCalendarFlashed?: boolean }
+    state.__nuvynDiaryCalendarFlashed = false
+    const check = () => {
+      if (!/^\/vault\/diary\/\d{4}-\d{2}-\d{2}$/u.test(location.pathname)) return
+      const home = document.querySelector<HTMLElement>('[data-testid="diary-workspace-home"]')
+      if (home?.getClientRects().length) state.__nuvynDiaryCalendarFlashed = true
+    }
+    const observe = () => {
+      if (!document.documentElement) return
+      const observer = new MutationObserver(check)
+      observer.observe(document.documentElement, {
+        attributes: true, childList: true, subtree: true, attributeFilter: ['class', 'style'],
+      })
+      check()
+    }
+    if (document.documentElement) observe()
+    else document.addEventListener('DOMContentLoaded', observe, { once: true })
+  })
+
   try {
     await seedDiary(request, date, `# Direct route Diary re-select ${Date.now()}\n`)
     await openDiaryHome(page)
@@ -195,6 +217,9 @@ test('active Diary re-selection after a direct route reload returns to Calendar 
     await expect(diaryTab).toHaveAttribute('aria-selected', 'true')
     await page.reload()
     await expect(diaryTab).toHaveAttribute('aria-selected', 'true')
+    expect(await page.evaluate(() => (
+      window as Window & { __nuvynDiaryCalendarFlashed?: boolean }
+    ).__nuvynDiaryCalendarFlashed)).toBe(false)
 
     await goBackFromDiaryDocument(page)
     await expect(page.getByTestId('diary-calendar')).toBeVisible()
