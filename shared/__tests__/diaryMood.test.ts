@@ -45,6 +45,21 @@ describe('D7 Diary Mood registry', () => {
     expect(new Set(MOOD_CATALOG.map((mood) => `${mood.row}:${mood.column}`)).size).toBe(48)
   })
 
+  it('uses natural emotion names while preserving surprise mood IDs and image paths', () => {
+    expect(getMoodDefinition('surprised-big')).toMatchObject({
+      zhLabel: '震惊',
+      enLabel: 'Astonished',
+      accessibilityName: '震惊 / Astonished',
+      asset: 'public/emoji/吃惊-大.svg',
+    })
+    expect(getMoodDefinition('surprised-small')).toMatchObject({
+      zhLabel: '诧异',
+      enLabel: 'Surprised',
+      accessibilityName: '诧异 / Surprised',
+      asset: 'public/emoji/吃惊-小.svg',
+    })
+  })
+
   it('maps every stable ID to its real repository asset and accessible labels', () => {
     for (const mood of MOOD_CATALOG) {
       expect(isMoodId(mood.id)).toBe(true)

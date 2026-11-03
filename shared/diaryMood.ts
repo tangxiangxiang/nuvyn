@@ -20,8 +20,8 @@ export type DiaryMoodDefinition = {
 export const MOOD_CATALOG = [
   { id: 'kiss', zhLabel: '亲亲', enLabel: 'Kiss', accessibilityName: '亲亲 / Kiss', row: 1, column: 1, asset: 'public/emoji/亲亲.svg' },
   { id: 'sad', zhLabel: '伤心', enLabel: 'Sad', accessibilityName: '伤心 / Sad', row: 1, column: 2, asset: 'public/emoji/伤心.svg' },
-  { id: 'surprised-big', zhLabel: '吃惊-大', enLabel: 'Big surprise', accessibilityName: '大幅吃惊 / Big surprise', row: 1, column: 3, asset: 'public/emoji/吃惊-大.svg' },
-  { id: 'surprised-small', zhLabel: '吃惊-小', enLabel: 'Small surprise', accessibilityName: '小幅吃惊 / Small surprise', row: 1, column: 4, asset: 'public/emoji/吃惊-小.svg' },
+  { id: 'surprised-big', zhLabel: '震惊', enLabel: 'Astonished', accessibilityName: '震惊 / Astonished', row: 1, column: 3, asset: 'public/emoji/吃惊-大.svg' },
+  { id: 'surprised-small', zhLabel: '诧异', enLabel: 'Surprised', accessibilityName: '诧异 / Surprised', row: 1, column: 4, asset: 'public/emoji/吃惊-小.svg' },
   { id: 'watching', zhLabel: '吃瓜', enLabel: 'Watching the drama', accessibilityName: '吃瓜 / Watching the drama', row: 2, column: 1, asset: 'public/emoji/吃瓜.svg' },
   { id: 'like', zhLabel: '喜欢', enLabel: 'Like', accessibilityName: '喜欢 / Like', row: 2, column: 2, asset: 'public/emoji/喜欢.svg' },
   { id: 'laughing', zhLabel: '大笑', enLabel: 'Laughing', accessibilityName: '大笑 / Laughing', row: 2, column: 3, asset: 'public/emoji/大笑.svg' },
