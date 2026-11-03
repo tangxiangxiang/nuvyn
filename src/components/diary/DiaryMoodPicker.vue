@@ -18,6 +18,7 @@ const emit = defineEmits<{
   select: [mood: DiaryMoodId]
   clear: []
   close: []
+  layoutChange: []
 }>()
 
 const { locale, t } = useI18n()
@@ -89,6 +90,8 @@ function setMoodCollection(next: 'common' | 'all'): void {
   if (moodCollection.value === next) return
   moodCollection.value = next
   focusedIndex.value = selectedIndex.value >= 0 ? selectedIndex.value : 0
+  // The popup changes height between Common and All.
+  emit('layoutChange')
 }
 
 function selectMood(id: DiaryMoodId): void {

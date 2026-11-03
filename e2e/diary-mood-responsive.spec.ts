@@ -258,8 +258,15 @@ async function readPickerMetrics(page: Page): Promise<PickerMetrics> {
         && clearBox.top >= pickerBox.top - 1
         && clearBox.bottom <= pickerBox.bottom + 1,
       optionOverlaps,
-      clearOverlaps: options.filter((option) => option.box.top < gridBox.bottom
-        && option.box.bottom > gridBox.top && overlaps(option.box, clearBox)).map((option) => option.id),
+      // Clip scrolled rows to the visible grid before checking the footer.
+      clearOverlaps: options.filter((option) => {
+        const visibleBox = {
+          ...option.box,
+          top: Math.max(option.box.top, gridBox.top),
+          bottom: Math.min(option.box.bottom, gridBox.bottom),
+        }
+        return visibleBox.top < visibleBox.bottom && overlaps(visibleBox, clearBox)
+      }).map((option) => option.id),
       pickerScrollWidth: picker.scrollWidth,
       pickerClientWidth: picker.clientWidth,
       gridScrollHeight: grid.scrollHeight,

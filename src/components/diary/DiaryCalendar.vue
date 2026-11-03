@@ -551,6 +551,7 @@ defineExpose({ focusDate, closeMoodPicker, clearSelection })
         @select="emitMoodChange"
         @clear="emitMoodChange(null)"
         @close="closeMoodPicker"
+        @layout-change="scheduleMoodPickerPosition"
       />
     </Teleport>
   </section>

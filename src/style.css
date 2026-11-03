@@ -1427,6 +1427,8 @@ main.container.auth-page-shell {
 }
 .article .nuvyn-code-group-tab.is-active {
   border-bottom-color: var(--vs-accent, var(--accent));
+  /* Selection is indicated by the blue underline only, including on hover. */
+  background: transparent;
   color: var(--vs-text-1, var(--text-h));
 }
 .article .nuvyn-code-group-tab:focus-visible {

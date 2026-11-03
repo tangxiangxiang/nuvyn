@@ -296,7 +296,9 @@ for (const theme of ['light', 'dark'] as const) {
     // only the pre-change plain-fence paint for this legacy full-page baseline
     // until its golden images can be regenerated on the macOS runner.
     await page.addStyleTag({ content: `
-      :root .vault:not(.pdf-document) .article.reading .nuvyn-code-frame > pre.shiki.nuvyn-shiki-plain {
+      /* Only for this legacy macOS full-page golden image. The fallback
+         fence can appear without the optional code-action frame wrapper. */
+      :root .vault:not(.pdf-document) .article.reading pre.shiki.nuvyn-shiki-plain {
         padding: 16px;
         border: 1px solid var(--vs-border, var(--border));
         border-radius: 8px;
@@ -621,3 +623,44 @@ for (const theme of ['light', 'dark'] as const) {
     expect(pageErrors).toEqual([])
   })
 }
+
+test('selected code-group tab is underline-only even on hover', async ({ page }) => {
+  await page.goto('/__markdown-test?mode=reading')
+  await page.evaluate(async () => {
+    const { render } = await import('/src/lib/markdown.ts')
+    const source = [
+      '::: code-group',
+      '```java [Java]',
+      'System.out.println("Hello");',
+      '```',
+      '```python [Python]',
+      'print("Hello")',
+      '```',
+      ':::',
+    ].join('\n')
+    const vault = document.createElement('div')
+    vault.className = 'vault'
+    vault.dataset.testFixture = 'code-group-underline'
+    const article = document.createElement('article')
+    article.className = 'article reading'
+    article.innerHTML = await render(source)
+    vault.append(article)
+    document.body.append(vault)
+  })
+  const tab = page.locator('[data-test-fixture="code-group-underline"] .nuvyn-code-group-tab.is-active').first()
+  await expect(tab).toBeVisible()
+  await tab.hover()
+  const style = await tab.evaluate((element) => {
+    const computed = getComputedStyle(element)
+    return {
+      background: computed.backgroundColor,
+      width: computed.borderBottomWidth,
+      borderStyle: computed.borderBottomStyle,
+      color: computed.borderBottomColor,
+    }
+  })
+  expect(style.background).toBe('rgba(0, 0, 0, 0)')
+  expect(style.width).toBe('2px')
+  expect(style.borderStyle).toBe('solid')
+  expect(style.color).not.toBe('rgba(0, 0, 0, 0)')
+})

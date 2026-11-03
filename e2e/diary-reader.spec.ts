@@ -210,9 +210,435 @@ test('Diary Wiki Link opens the Note workspace instead of Calendar Home', async 
     await expect(page.getByTestId('diary-calendar')).toHaveCount(0)
     await expect(page.locator('[role="tab"][data-tab-id="' + note + '"]')).toHaveAttribute('aria-selected', 'true')
     await page.locator('.scope-chip').filter({ hasText: 'diary' }).click()
-    await expect(page.getByTestId('diary-calendar')).toBeVisible()
-    await clickDiaryDate(page, date)
+    // The selected Diary document is retained through cross-scope navigation.
+    await expect(page.locator('.scope-chip').filter({ hasText: 'diary' })).toHaveAttribute('aria-pressed', 'true')
+    await expect(page).toHaveURL(new RegExp('/vault/' + diary + '
+  } finally {
+    await deleteDiaryDate(request, date)
+    await deletePost(request, note)
+  }
+  expect(state.pageErrors).toEqual([])
+  expect(state.consoleErrors).toEqual([])
+})
+
+test('Note Wiki Link switches to an existing Diary reader, then returns to Note', async ({ page, request }) => {
+  const date = localCivilDate()
+  const diary = diaryPath(date)
+  const note = 'inbox/d6-note-diary-link'
+  const state = diagnostics(page)
+  try {
+    await seedExistingDiary(request, date, '# ' + date + '\n\nLinked Diary content.\n')
+    await seedOrdinaryNote(request, note)
+    const initialResponse = await request.get('/api/posts/' + note)
+    expect(initialResponse.status()).toBe(200)
+    const original = await initialResponse.json() as { raw: string }
+    const updated = await request.put('/api/posts/' + note, {
+      data: { baseRaw: original.raw, raw: '# Linked Note\n\n[[' + diary + '|Visit Diary]]\n' },
+    })
+    expect(updated.status(), await updated.text()).toBe(200)
+    await page.goto('/vault/' + note)
+    const noteChip = page.locator('.scope-chip').filter({ hasText: 'note' })
+    if (await noteChip.getAttribute('aria-pressed') !== 'true') await noteChip.click()
+    const toggle = page.getByTestId('view-toggle')
+    if ((await toggle.getAttribute('aria-label'))?.match(/read|阅读/i)) await toggle.click()
+    await expect(page.locator('.reading-pane article')).toContainText('Linked Note')
+    const link = page.locator('.reading-pane a.wiki-link').filter({ hasText: 'Visit Diary' })
+    await expect(link).toBeVisible()
+    await expect(link).not.toHaveClass(/wiki-link-missing/)
+    await link.click()
     await expect(page).toHaveURL(new RegExp('/vault/' + diary + '$'))
+    await expect(page.locator('.scope-chip').filter({ hasText: 'diary' })).toHaveAttribute('aria-pressed', 'true')
+    await expect(page.getByTestId('diary-calendar')).toBeHidden()
+    await expect(page.locator('.reading-pane article')).toContainText('Linked Diary content')
+    await expect(page.locator('[role="tab"][data-tab-id="' + diary + '"]')).toHaveAttribute('aria-selected', 'true')
+    await noteChip.click()
+    await expect(page).toHaveURL(new RegExp('/vault/' + note + '$'))
+    await expect(page.locator('.reading-pane article')).toContainText('Linked Note')
+  } finally {
+    await deleteDiaryDate(request, date)
+    await deletePost(request, note)
+  }
+  expect(state.pageErrors).toEqual([])
+  expect(state.consoleErrors).toEqual([])
+})
+
+test('mobile native Diary documents fill the viewport when the side panel is closed', async ({ page, request }) => {
+  const date = localCivilDate()
+  const other = shiftCivilDate(date, -1)
+  const path = diaryPath(date)
+  const otherPath = diaryPath(other)
+  const state = diagnostics(page)
+
+  try {
+    await seedExistingDiary(request, date, '# Mobile Native Diary\n\nThe document stays usable without the side panel.\n')
+    await seedExistingDiary(request, other, '# Other Mobile Diary\n')
+    await openDiaryScope(page)
+    await clickDiaryDate(page, date)
+    await assertNativeReader(page, date)
+
+    const leftPanelToggle = page.getByTestId('left-panel-toggle')
+    await expect(leftPanelToggle).toHaveAttribute('aria-pressed', 'true')
+
+    await page.setViewportSize({ width: 375, height: 812 })
+    await expect(leftPanelToggle).toHaveAttribute('aria-pressed', 'false')
+    await expect(page.locator('.right-rail-slot, .right-rail-toggle')).toHaveCount(0)
+    await leftPanelToggle.click()
+    await expect(leftPanelToggle).toHaveAttribute('aria-pressed', 'true')
+    const openMetrics = await page.evaluate(() => {
+      const root = document.querySelector<HTMLElement>('.vault')
+      const activityBar = document.querySelector<HTMLElement>('.activity-bar')
+      const fileTree = document.querySelector<HTMLElement>('.file-tree')
+      const editorArea = document.querySelector<HTMLElement>('.editor-area')
+      return {
+        rootClass: root?.className ?? '',
+        fileTreeWidth: fileTree?.getBoundingClientRect().width ?? 0,
+        activityBarWidth: activityBar?.getBoundingClientRect().width ?? 0,
+        editorLeft: editorArea?.getBoundingClientRect().left ?? 0,
+        editorRight: editorArea?.getBoundingClientRect().right ?? 0,
+        editorWidth: editorArea?.getBoundingClientRect().width ?? 0,
+        viewportWidth: window.innerWidth,
+        scrollWidth: document.documentElement.scrollWidth,
+      }
+    })
+    expect(openMetrics.rootClass).toMatch(/side-panel-open/)
+    expect(openMetrics.fileTreeWidth).toBeGreaterThan(100)
+    expect(openMetrics.editorWidth).toBeGreaterThan(0)
+    expect(openMetrics.editorLeft).toBeLessThanOrEqual(1)
+    expect(openMetrics.editorRight).toBeGreaterThanOrEqual(openMetrics.viewportWidth - 1)
+    expect(openMetrics.scrollWidth).toBeLessThanOrEqual(openMetrics.viewportWidth + 1)
+
+    await leftPanelToggle.click()
+    await expect(leftPanelToggle).toHaveAttribute('aria-pressed', 'false')
+    await expect(page.locator('.vault')).not.toHaveClass(/side-panel-open/)
+    await expect(page.locator('.file-tree')).toBeHidden()
+    await expect(page.locator('.reading-pane')).toBeVisible()
+
+    for (const viewport of [
+      { width: 375, height: 812 },
+      { width: 320, height: 700 },
+    ]) {
+      await page.setViewportSize(viewport)
+      const closedMetrics = await page.evaluate(() => {
+        const activityBar = document.querySelector<HTMLElement>('.activity-bar')
+        const editorArea = document.querySelector<HTMLElement>('.editor-area')
+        const editor = editorArea?.getBoundingClientRect()
+        const activity = activityBar?.getBoundingClientRect()
+        return {
+          editorLeft: editor?.left ?? 0,
+          editorRight: editor?.right ?? 0,
+          editorWidth: editor?.width ?? 0,
+          activityRight: activity?.right ?? 0,
+          viewportWidth: window.innerWidth,
+          scrollWidth: document.documentElement.scrollWidth,
+        }
+      })
+      expect(closedMetrics.editorLeft, `${viewport.width}px editor starts after Activity Bar`)
+        .toBeGreaterThanOrEqual(closedMetrics.activityRight - 1)
+      expect(closedMetrics.editorRight, `${viewport.width}px editor reaches viewport edge`)
+        .toBeGreaterThanOrEqual(closedMetrics.viewportWidth - 1)
+      expect(closedMetrics.editorWidth, `${viewport.width}px editor uses remaining width`)
+        .toBeGreaterThanOrEqual(closedMetrics.viewportWidth - closedMetrics.activityRight - 2)
+      expect(closedMetrics.scrollWidth, `${viewport.width}px horizontal overflow`)
+        .toBeLessThanOrEqual(closedMetrics.viewportWidth + 1)
+      await expect(page.locator('.reading-pane')).toBeVisible()
+    }
+
+    await page.setViewportSize({ width: 375, height: 812 })
+    await page.getByTestId('view-toggle').click()
+    await expect(page.getByRole('textbox', { name: 'Editor content' })).toBeVisible()
+    await page.getByTestId('view-toggle').click()
+    await expect(page.locator('.reading-pane')).toBeVisible()
+
+    await leftPanelToggle.click()
+    await expect(leftPanelToggle).toHaveAttribute('aria-pressed', 'true')
+    await expect(page.locator('.file-tree')).toBeVisible()
+    await expect(page.locator('.search-input')).toHaveValue(date)
+    await expect(page.locator(`[data-tree-key="file:${path}"]`)).toHaveCount(1)
+    await expect(page.locator(`[data-tree-key="file:${otherPath}"]`)).toHaveCount(0)
+  } finally {
+    await deleteDiaryDate(request, date)
+    await deleteDiaryDate(request, other)
+  }
+
+  expect(state.pageErrors).toEqual([])
+  expect(state.consoleErrors).toEqual([])
+})
+
+test('existing today/past enter native READ while unsupported future files and missing future stay Home', async ({ page, request }) => {
+  const today = localCivilDate()
+  const past = shiftCivilDate(today, -1)
+  const existingFuture = shiftCivilDate(today, 1)
+  const missingFuture = shiftCivilDate(existingFuture, 1)
+  const state = diagnostics(page, ['status of 503 (Service Unavailable)'])
+  const createdDates = [today, past]
+
+  try {
+    for (const date of [...createdDates, existingFuture, missingFuture]) await deleteDiaryDate(request, date)
+    for (const date of createdDates) await seedExistingDiary(request, date, `# Existing ${date}\n`)
+
+    for (const date of createdDates) {
+      await openDiaryScope(page)
+      await clickDiaryDate(page, date)
+      await assertNativeReader(page, date)
+      const tab = page.locator(`[role="tab"][data-tab-id="${diaryPath(date)}"]`)
+      await goBackFromDiaryDocument(page)
+      await expect(tab).toHaveCount(0)
+      await expect(page.getByTestId('diary-calendar')).toBeVisible()
+    }
+
+    await seedExistingFutureDiary(existingFuture, `# Existing future\n\n${existingFuture}\n`)
+    await openDiaryScope(page)
+    await clickDiaryDate(page, existingFuture)
+    // A direct future file without SQLite identity is intentionally not an
+    // existing Diary under D8.2. The encrypted body route must fail closed
+    // rather than let the browser synthesize a document identity from path.
+    await expect(page.getByTestId('diary-calendar')).toBeVisible()
+    await expect(page.locator(`[role="tab"][data-tab-id="${diaryPath(existingFuture)}"]`)).toHaveCount(0)
+
+    await clickDiaryDate(page, missingFuture)
+    await expect(page.getByTestId('diary-calendar')).toBeVisible()
+    await expect(page.locator(`[role="tab"][data-tab-id="${diaryPath(missingFuture)}"]`)).toHaveCount(0)
+  } finally {
+    for (const date of [...createdDates, existingFuture, missingFuture]) await deleteDiaryDate(request, date)
+  }
+
+  expect(state.pageErrors).toEqual([])
+  expect(state.consoleErrors.filter((message) => !message.includes('404'))).toEqual([])
+})
+
+test('real Browser Back restores the scope-owned Diary document without exposing Note tabs', async ({ page, request }) => {
+  const date = localCivilDate()
+  const source = 'inbox/d6-native-back-source'
+  const intermediate = 'inbox/d6-native-back-intermediate'
+  const state = diagnostics(page)
+
+  try {
+    await seedExistingDiary(request, date, '# Browser Back Diary\n')
+    await seedOrdinaryNote(request, source)
+    await seedOrdinaryNote(request, intermediate)
+    await page.goto('/vault')
+    await page.goto(`/vault/${source}`)
+    await page.goto(`/vault/${intermediate}`)
+    await ensureDiaryScope(page)
+    await clickDiaryDate(page, date)
+    await assertNativeReader(page, date)
+
+    await page.goBack()
+
+    await expect(page).toHaveURL(new RegExp(`/vault/${diaryPath(date).replace('/', '\\/')}(?:[?#]|$)`))
+    await expect(page.locator(`[role="tab"][data-tab-id="${diaryPath(date)}"]`)).toHaveAttribute('aria-selected', 'true')
+    await expect(page.locator(`[role="tab"][data-tab-id="${source}"]`)).toHaveCount(0)
+    await expect(page.getByTestId('diary-calendar')).toBeHidden()
+    await expect(page.locator(`[role="tab"][data-tab-id="${diaryPath(date)}"]`)).toHaveCount(1)
+  } finally {
+    await deleteDiaryDate(request, date)
+    await deletePost(request, source)
+    await deletePost(request, intermediate)
+  }
+
+  expect(state.pageErrors).toEqual([])
+  expect(state.consoleErrors).toEqual([])
+})
+
+test('native Edit keeps the same tab and unsaved raw across presentation toggles', async ({ page, request }) => {
+  const date = localCivilDate()
+  const path = diaryPath(date)
+  const marker = `unsaved-native-${Date.now()}`
+  const state = diagnostics(page)
+  const documentGets: string[] = []
+  page.on('request', (event) => {
+    const url = new URL(event.url())
+    if (event.method() === 'GET' && url.pathname === `/api/posts/${path}`) documentGets.push(url.pathname)
+  })
+
+  try {
+    await seedExistingDiary(request, date, '# Native Edit\n\nOriginal body.\n')
+    await openDiaryScope(page)
+    await clickDiaryDate(page, date)
+    await assertNativeReader(page, date)
+    const getsAfterOpen = documentGets.length
+
+    for (const viewport of [
+      { width: 1280, height: 800 },
+      { width: 768, height: 1024 },
+      { width: 375, height: 812 },
+      { width: 320, height: 700 },
+    ]) {
+      await page.setViewportSize(viewport)
+      // matchMedia changes reach Vue after the browser viewport changes.
+      // Measure only once the navigation has adopted this breakpoint.
+      await expect(page.locator('.workspace-navigation .scope-chip')).toHaveCount(3)
+      await expect(page.locator('.workspace-board-link')).toHaveCount(1)
+      await expect(page.locator('.reading-pane')).toBeVisible()
+      const overflow = await page.evaluate(() => ({
+        viewport: window.innerWidth,
+        document: document.documentElement.scrollWidth,
+        offenders: [...document.querySelectorAll<HTMLElement>('body *')]
+          .filter((element) => element.getBoundingClientRect().right > window.innerWidth + 1)
+          .slice(0, 8)
+          .map((element) => ({
+            tag: element.tagName,
+            className: element.className,
+            right: Math.round(element.getBoundingClientRect().right),
+            width: Math.round(element.getBoundingClientRect().width),
+          })),
+      }))
+      expect(overflow.document, JSON.stringify({ viewport, ...overflow })).toBeLessThanOrEqual(overflow.viewport + 1)
+    }
+
+    await page.setViewportSize({ width: 1280, height: 800 })
+    await page.getByTestId('view-toggle').click()
+    const editor = page.getByRole('textbox', { name: 'Editor content' })
+    await expect(editor).toBeVisible()
+    await editor.focus()
+    await page.keyboard.press('ControlOrMeta+End')
+    await page.keyboard.insertText(`\n${marker}`)
+    await expect(page.locator(`[role="tab"][data-tab-id="${path}"]`)).toHaveCount(1)
+
+    await expect(page.getByTestId('diary-calendar')).toBeHidden()
+    await expect(page.locator(`[role="tab"][data-tab-id="${path}"]`)).toHaveCount(1)
+
+    await page.getByTestId('view-toggle').click()
+    await expect(page.locator('.reading-pane')).toBeVisible()
+    await expect(page.locator('.reading-pane article')).toContainText(marker)
+    // Switching the native surface does not re-run the date command or replace
+    // the existing tab raw, so the unsaved marker remains local to the tab.
+    await expect.poll(() => documentGets.length).toBe(getsAfterOpen)
+  } finally {
+    await deleteDiaryDate(request, date)
+  }
+
+  expect(state.pageErrors).toEqual([])
+  expect(state.consoleErrors).toEqual([])
+})
+
+test('ordinary note, archive, and ledger documents retain the native Vault workspace', async ({ page, request }) => {
+  const cases = [
+    { scope: 'note', path: 'inbox/d6-native-note-smoke' },
+    { scope: 'note', path: 'literature/d6-native-literature-smoke' },
+    { scope: 'note', path: 'archive/d6-native-archive-smoke' },
+    { scope: 'ledger', path: 'ledger/d6-native-ledger-smoke' },
+  ]
+  const state = diagnostics(page)
+
+  try {
+    for (const item of cases) await seedOrdinaryNote(request, item.path)
+
+    for (const item of cases) {
+      await page.goto(`/vault/${item.path}`)
+      const scopeChip = page.locator('.scope-chip').filter({ hasText: item.scope })
+      if (await scopeChip.getAttribute('aria-pressed') !== 'true') await scopeChip.click()
+      await expect(page.locator(`[role="tab"][data-tab-id="${item.path}"]`)).toHaveAttribute('aria-selected', 'true')
+      const toggle = page.getByTestId('view-toggle')
+      if ((await toggle.getAttribute('aria-label'))?.match(/read|阅读/i)) await toggle.click()
+      await expect(page.locator('.reading-pane')).toHaveCount(1)
+      await expect(page.locator('.file-tree')).toBeVisible()
+      await expect(page.locator('.search-input')).toHaveCount(1)
+      await expect(page.getByTestId('diary-reader-dialog')).toHaveCount(0)
+    }
+  } finally {
+    for (const item of cases) await deletePost(request, item.path)
+  }
+
+  expect(state.pageErrors).toEqual([])
+  expect(state.consoleErrors).toEqual([])
+})
+
+test('native document handoff remains stable across five cycles without dayIndex errors', async ({ page, request }) => {
+  const date = localCivilDate()
+  const state = diagnostics(page)
+  await seedExistingDiary(request, date, '# Repeated native document\n')
+
+  try {
+    await openDiaryScope(page)
+    for (let cycle = 0; cycle < 5; cycle += 1) {
+      await clickDiaryDate(page, date)
+      await assertNativeReader(page, date)
+      const tab = page.locator(`[role="tab"][data-tab-id="${diaryPath(date)}"]`)
+      await goBackFromDiaryDocument(page)
+      await expect(tab).toHaveCount(0)
+      await expect(page.getByTestId('diary-calendar')).toBeVisible()
+    }
+  } finally {
+    await deleteDiaryDate(request, date)
+  }
+
+  expect(state.pageErrors).toEqual([])
+  expect(state.consoleErrors).toEqual([])
+})
+
+test.describe('Diary date title swipe on phones', () => {
+  test.use({ hasTouch: true })
+
+  async function swipeTitle(
+    page: Page, dx: number, dy = 0, fromEdge = false,
+    selector = '.reading-slot .reading-pane article h1',
+  ): Promise<void> {
+    await page.locator(selector).first().evaluate((title, gesture) => {
+      const bounds = title.getBoundingClientRect()
+      const x = gesture.fromEdge ? 10 : Math.max(30, Math.min(innerWidth - 30, bounds.left + bounds.width / 2))
+      const y = bounds.top + bounds.height / 2
+      const start = new Touch({ identifier: 11, target: title, clientX: x, clientY: y })
+      title.dispatchEvent(new TouchEvent('touchstart', {
+        bubbles: true, touches: [start], targetTouches: [start], changedTouches: [start],
+      }))
+      const end = new Touch({ identifier: 11, target: title, clientX: x + gesture.dx, clientY: y + gesture.dy })
+      title.dispatchEvent(new TouchEvent('touchend', {
+        bubbles: true, touches: [], targetTouches: [], changedTouches: [end],
+      }))
+    }, { dx, dy, fromEdge })
+  }
+
+  test('right swipe opens the previous existing Diary, left swipe returns, and other gestures are inert', async ({ page, request }) => {
+    const today = localCivilDate()
+    const missing = shiftCivilDate(today, -1)
+    const previous = shiftCivilDate(missing, -1)
+    try {
+      await seedExistingDiary(request, previous, `# Older ${previous}\n\nPrevious content\n`)
+      await seedExistingDiary(request, today, `# Current ${today}\n\nCurrent content\n`)
+      await page.setViewportSize({ width: 390, height: 844 })
+      await openDiaryScope(page)
+      await clickDiaryDate(page, today)
+      await expect(page).toHaveURL(new RegExp(`/vault/${diaryPath(today)}$`))
+      await expect(page.locator('.reading-pane')).toBeVisible()
+      await expect(page.locator('.reading-slot .reading-pane article h1').first()).toBeVisible()
+      await expect(page.locator('.editor-tabs-shell .tab.active')).toBeHidden()
+      await expect(page.getByTestId('left-panel-toggle')).toHaveAttribute('aria-pressed', 'false')
+
+      await swipeTitle(page, 16, 110)
+      await expect(page).toHaveURL(new RegExp(`/vault/${diaryPath(today)}$`))
+      await swipeTitle(page, 100, 2, true)
+      await expect(page).toHaveURL(new RegExp(`/vault/${diaryPath(today)}$`))
+
+      await swipeTitle(page, 100, 5)
+      await expect(page).toHaveURL(new RegExp(`/vault/${diaryPath(previous)}$`))
+      await expect(page.locator('.reading-pane')).toContainText('Previous content')
+      await page.getByTestId('left-panel-toggle').click()
+      await expect(page.locator('.search-input')).toHaveValue(previous)
+      await page.getByTestId('left-panel-toggle').click()
+      const missingResponse = await request.get(`/api/posts/${diaryPath(missing)}`)
+      expect(missingResponse.status()).toBe(404)
+
+      await swipeTitle(page, -100, 4)
+      await expect(page).toHaveURL(new RegExp(`/vault/${diaryPath(today)}$`))
+      await swipeTitle(page, -100)
+      await expect(page).toHaveURL(new RegExp(`/vault/${diaryPath(today)}$`))
+
+      await page.getByTestId('view-toggle').click()
+      await expect(page.locator('.monaco-host')).toBeVisible()
+      await expect(page.locator('.reading-slot .reading-pane article h1')).toHaveCount(0)
+      // In edit mode the reader h1 is unmounted. Simulate touch on the
+      // actual Monaco surface; Diary navigation must remain inactive.
+      await swipeTitle(page, 100, 0, false, '.monaco-host')
+      await expect(page).toHaveURL(new RegExp(`/vault/${diaryPath(today)}$`))
+    } finally {
+      await deleteDiaryDate(request, today)
+      await deleteDiaryDate(request, previous)
+    }
+  })
+})
+))
+    await expect(page.getByTestId('diary-calendar')).toBeHidden()
     await expect(page.locator('.reading-pane article')).toContainText('Linked knowledge')
   } finally {
     await deleteDiaryDate(request, date)

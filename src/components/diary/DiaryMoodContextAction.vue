@@ -186,6 +186,7 @@ defineExpose({ close: closePicker, focusTrigger })
         @select="emit('select', $event)"
         @clear="emit('clear')"
         @close="closePicker"
+        @layout-change="schedulePickerPosition"
       />
     </Teleport>
   </div>
