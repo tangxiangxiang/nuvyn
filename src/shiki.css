@@ -260,6 +260,60 @@
   }
 }
 
+/* Standalone code blocks keep the pre as the horizontal scroll container.
+   The outer frame occupies exactly the old pre margin/height while owning a
+   floating code-language action above the upper-right corner of the surface.
+   No extra document row, code padding, or line-height is introduced. */
+:root .vault:not(.pdf-document) .article .nuvyn-code-frame {
+  position: relative;
+  margin: 1rem 0;
+}
+:root .vault:not(.pdf-document) .article .nuvyn-code-frame > pre.shiki {
+  margin: 0;
+}
+:root .vault:not(.pdf-document) .article .nuvyn-code-frame > .nuvyn-code-copy {
+  all: unset;
+  position: absolute;
+  top: -1rem;
+  right: 0.75rem;
+  z-index: 1;
+  color: var(--vs-text-3, var(--text-muted));
+  font: 0.75rem/1 var(--mono);
+  padding: 0 0.25rem;
+  border-radius: 0.35rem;
+  background: transparent;
+  user-select: none;
+  cursor: pointer;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 150ms ease;
+}
+:root .vault:not(.pdf-document) .article .nuvyn-code-frame > .nuvyn-code-copy::before {
+  content: '';
+  position: absolute;
+  inset: -0.75rem -0.5rem;
+}
+@media (hover: hover) and (pointer: fine) {
+  :root .vault:not(.pdf-document) .article .nuvyn-code-frame:hover > .nuvyn-code-copy {
+    opacity: 1;
+    pointer-events: auto;
+  }
+}
+:root .vault:not(.pdf-document) .article .nuvyn-code-frame > pre.is-code-actions-visible + .nuvyn-code-copy,
+:root .vault:not(.pdf-document) .article .nuvyn-code-frame > .nuvyn-code-copy:focus-visible {
+  opacity: 1;
+  pointer-events: auto;
+}
+:root .vault:not(.pdf-document) .article .nuvyn-code-frame > .nuvyn-code-copy:focus-visible {
+  outline: 1px solid currentColor;
+  outline-offset: 3px;
+}
+@media (prefers-reduced-motion: reduce) {
+  :root .vault:not(.pdf-document) .article .nuvyn-code-frame > .nuvyn-code-copy {
+    transition: none;
+  }
+}
+
 :root .vault:not(.pdf-document) .article pre.shiki:not(.nuvyn-line-numbers):not(.nuvyn-shiki-plain) .line {
   display: block;
   width: auto;

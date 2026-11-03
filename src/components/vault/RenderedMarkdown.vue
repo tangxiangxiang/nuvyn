@@ -145,7 +145,25 @@ watch([ready, html, articleEl, error, locale, () => props.foldingEnabled, () => 
   for (const pre of articleEl.value?.querySelectorAll<HTMLElement>('pre.shiki[data-language]') ?? []) {
     const code = pre.querySelector<HTMLElement>(':scope > code')
     if (!code) continue
-    let button = Array.from(pre.querySelectorAll<HTMLButtonElement>(':scope > button'))
+
+    // The pre must retain native horizontal scrolling. Absolute controls
+    // placed above it are clipped by overflow-x:auto, so standalone fences
+    // get a layout-neutral outer positioning frame. Code groups already
+    // display the language in their tab bar and retain their own overflow.
+    const grouped = Boolean(pre.closest('.nuvyn-code-group'))
+    let owner: HTMLElement = pre
+    if (!grouped) {
+      const parent = pre.parentElement
+      if (parent?.classList.contains('nuvyn-code-frame')) owner = parent
+      else {
+        const frame = document.createElement('div')
+        frame.className = 'nuvyn-code-frame'
+        pre.before(frame)
+        frame.append(pre)
+        owner = frame
+      }
+    }
+    let button = Array.from(owner.querySelectorAll<HTMLButtonElement>(':scope > button'))
       .find((candidate) => copyButtons.has(candidate))
     if (!button) {
       button = document.createElement('button')
@@ -153,7 +171,7 @@ watch([ready, html, articleEl, error, locale, () => props.foldingEnabled, () => 
       button.className = 'nuvyn-code-copy'
       button.textContent = pre.dataset.language ?? ''
       copyButtons.set(button, code)
-      pre.append(button)
+      owner.append(button)
       pre.classList.add('has-code-copy')
     }
     button.title = t('editor.copy_code')

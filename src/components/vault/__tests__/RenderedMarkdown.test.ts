@@ -47,6 +47,13 @@ describe('RenderedMarkdown code copying', () => {
     const wrapper = mountMarkdown(`\`\`\`${info}\n${source}\`\`\``)
     await vi.waitFor(() => expect(wrapper.find('button.nuvyn-code-copy').exists()).toBe(true))
     const button = wrapper.get('button.nuvyn-code-copy')
+    const pre = wrapper.get('pre.shiki').element as HTMLElement
+    const frame = pre.parentElement
+    expect(frame?.classList.contains('nuvyn-code-frame')).toBe(true)
+    expect(frame?.querySelector(':scope > button.nuvyn-code-copy')).toBe(button.element)
+    expect(pre.querySelector(':scope > button.nuvyn-code-copy')).toBeNull()
+    // The scroller remains the original pre, not the floating control frame.
+    expect(pre.querySelector(':scope > code')).toBeTruthy()
     expect(button.text()).toBe('ts')
     expect(button.attributes('aria-label')).toBe('Copy code (ts)')
     await button.trigger('click')

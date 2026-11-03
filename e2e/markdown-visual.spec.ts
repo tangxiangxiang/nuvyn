@@ -176,17 +176,28 @@ for (const theme of ['light', 'dark'] as const) {
         .find((candidate) => candidate.textContent?.includes('metaFirst'))
       const highlighted = pre?.querySelector<HTMLElement>('.line.highlighted')
       if (!pre || !highlighted) return null
+      const frame = pre.parentElement!
+      const button = frame.querySelector<HTMLButtonElement>(':scope > button.nuvyn-code-copy')!
       const preStyle = getComputedStyle(pre)
       const lineStyle = getComputedStyle(highlighted)
+      const preRect = pre.getBoundingClientRect()
+      const labelRect = button.getBoundingClientRect()
       return {
         language: pre.getAttribute('data-language'),
+        wrapper: frame.classList.contains('nuvyn-code-frame'),
         borderTopWidth: preStyle.borderTopWidth,
         borderRadius: preStyle.borderRadius,
-        labelTop: getComputedStyle(pre.querySelector('.nuvyn-code-copy')!).top,
-        labelTransform: getComputedStyle(pre.querySelector('.nuvyn-code-copy')!).transform,
+        labelTop: getComputedStyle(button).top,
+        labelTransform: getComputedStyle(button).transform,
+        labelGap: preRect.top - labelRect.bottom,
+        frameHeight: frame.getBoundingClientRect().height,
+        preHeight: preRect.height,
         background: preStyle.backgroundColor,
         marginTop: preStyle.marginTop,
         marginBottom: preStyle.marginBottom,
+        frameMarginTop: getComputedStyle(frame).marginTop,
+        frameMarginBottom: getComputedStyle(frame).marginBottom,
+        horizontalOverflow: preStyle.overflowX,
         lineBackground: lineStyle.backgroundColor,
         lineShadow: lineStyle.boxShadow,
       }
@@ -195,10 +206,16 @@ for (const theme of ['light', 'dark'] as const) {
     expect(codeSurface?.language).toBe('typescript')
     expect(codeSurface?.borderTopWidth).toBe('0px')
     expect(codeSurface?.borderRadius).toBe('12px')
-    expect(codeSurface?.labelTop).toBe('12px')
+    expect(codeSurface?.wrapper).toBe(true)
+    expect(codeSurface?.labelTop).toBe('-16px')
     expect(codeSurface?.labelTransform).toBe('none')
-    expect(codeSurface?.marginTop).toBe('16px')
-    expect(codeSurface?.marginBottom).toBe('16px')
+    expect(codeSurface?.labelGap).toBeCloseTo(4, 1)
+    expect(codeSurface?.frameHeight).toBeCloseTo(codeSurface?.preHeight ?? 0, 1)
+    expect(codeSurface?.marginTop).toBe('0px')
+    expect(codeSurface?.marginBottom).toBe('0px')
+    expect(codeSurface?.frameMarginTop).toBe('16px')
+    expect(codeSurface?.frameMarginBottom).toBe('16px')
+    expect(codeSurface?.horizontalOverflow).toBe('auto')
     expect(codeSurface?.background).not.toMatch(/^(transparent|rgba\(0, 0, 0, 0\))$/u)
     expect(codeSurface?.lineBackground).not.toBe(codeSurface?.background)
     expect(codeSurface?.lineShadow).toBe('none')
@@ -292,7 +309,9 @@ test('reading code language labels copy only code with mouse and keyboard', asyn
     article.locator('pre.shiki.nuvyn-line-numbers[data-language]').first(),
   ]
   for (const [index, block] of blocks.entries()) {
-    const button = block.locator(':scope > button.nuvyn-code-copy')
+    const frame = block.locator('xpath=..')
+    await expect(frame).toHaveClass(/nuvyn-code-frame/)
+    const button = frame.locator(':scope > button.nuvyn-code-copy')
     await expect(button).toBeVisible()
     await expect(button).toHaveCSS('opacity', '0')
     await expect(button).toHaveCSS('pointer-events', 'none')
@@ -307,13 +326,12 @@ test('reading code language labels copy only code with mouse and keyboard', asyn
     await page.evaluate(() => navigator.clipboard.writeText('sentinel'))
     if (index === 0) {
       const position = await button.evaluate((label) => {
-        const pre = label.parentElement!.getBoundingClientRect()
+        const pre = label.previousElementSibling!.getBoundingClientRect()
         const rect = label.getBoundingClientRect()
-        return { label: rect.y + rect.height / 2, pre: pre.y + pre.height / 2 }
+        return { gap: pre.top - rect.bottom, alignedRight: pre.right - rect.right }
       })
-      // The language action is positioned at the top-right even for a
-      // single-line fence, rather than in the vertical center.
-      expect(position.label).toBeLessThan(position.pre)
+      expect(position.gap).toBeCloseTo(4, 1)
+      expect(position.alignedRight).toBeCloseTo(12, 1)
       await block.hover()
       await expect(button).toHaveCSS('opacity', '1')
       await expect(button).toHaveCSS('pointer-events', 'auto')
@@ -340,7 +358,7 @@ test.describe('touch code language actions', () => {
       await page.setViewportSize({ width: viewport.width, height: viewport.height })
       await page.goto('/__markdown-test?mode=reading')
       const block = page.locator('.article.reading pre.shiki[data-language]').first()
-      const button = block.locator(':scope > button.nuvyn-code-copy')
+      const button = block.locator('xpath=..').locator(':scope > button.nuvyn-code-copy')
       await expect(button).toHaveCSS('opacity', '0')
       await block.tap({ position: { x: 16, y: 16 } })
       await expect(button).toHaveCSS('opacity', '1')
