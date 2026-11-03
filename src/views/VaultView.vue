@@ -1482,10 +1482,29 @@ async function openDiaryDatePost(
 }
 
 async function openLinkedPreviewPost(path: string): Promise<void> {
-  // ReadingPane and EditorPane share this Wiki Link opener. A Diary -> Note
-  // link must switch scope before opening its target, or the loaded Note
-  // remains hidden behind Diary Calendar Home.
-  // The existing transition saves the active Diary and rejects unsafe exits.
+  // A managed Diary link must adopt the Diary presentation explicitly.
+  // Merely loading the tab/route can leave Note selected or show Calendar
+  // Home, because activePath is never authority to open the Diary reader.
+  const diaryDate = diaryDateFromPath(path)
+  if (diaryDate) {
+    const granted = diaryAccessContext
+      ? await diaryAccessContext.requestAccess()
+      : diaryAccess.isUnlocked.value || (await diaryAccess.ensureStatus()) === 'UNLOCKED'
+    if (!granted) return
+
+    if (activeScope.value !== 'diary' && !(await changeVaultScope('diary'))) return
+
+    // Linked navigation opens only an existing Diary. Unlike choosing a
+    // Calendar date, it must never create a missing encrypted entry.
+    diaryWorkspacePresentation.reset()
+    const intent = diaryWorkspacePresentation.beginDateIntent()
+    if (!(await openDiaryDatePost(path))) return
+    await presentDiaryDateResult({ status: 'opened', date: diaryDate, path }, intent, { focusVault: false })
+    return
+  }
+
+  // Reuse the guarded scope transition when a Diary Wiki Link opens a Note.
+  // It saves the Diary first and cancels navigation when that fails.
   if (activeScope.value === 'diary' && scopeForWorkspacePath(path) === 'note') {
     if (!(await changeVaultScope('note'))) return
   }

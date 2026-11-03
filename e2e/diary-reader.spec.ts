@@ -195,420 +195,70 @@ test('Diary Wiki Link opens the Note workspace instead of Calendar Home', async 
   const diary = diaryPath(date)
   const note = 'inbox/d6-diary-note-link'
   const state = diagnostics(page)
-
   try {
     await seedOrdinaryNote(request, note)
-    await seedExistingDiary(request, date, `# ${date}\n\n[[${note}|Linked knowledge]]\n`)
+    await seedExistingDiary(request, date, '# ' + date + '\n\n[[' + note + '|Linked knowledge]]\n')
     await openDiaryScope(page)
     await clickDiaryDate(page, date)
     await assertNativeReader(page, date)
-
     const link = page.locator('.reading-pane a.wiki-link').filter({ hasText: 'Linked knowledge' })
     await expect(link).toBeVisible()
     await link.click()
-
-    await expect(page).toHaveURL(new RegExp(`/vault/${note}import { mkdir, rm, writeFile } from 'node:fs/promises'
-import { join } from 'node:path'
-import { expect, goBackFromDiaryDocument, test, type APIRequestContext, type Page } from './fixtures/diary'
-import { CALENDAR_TEST_DATE, CALENDAR_TEST_TIME_ZONE, calendarDay } from './helpers/calendar-clock'
-
-const TEST_TIME_ZONE = CALENDAR_TEST_TIME_ZONE
-
-test.use({ timezoneId: TEST_TIME_ZONE, trace: 'off', screenshot: 'only-on-failure' })
-
-function civilParts(value: string): { year: number; month: number; day: number } {
-  const [year, month, day] = value.split('-').map(Number)
-  return { year, month, day }
-}
-
-function daysInMonth(year: number, month: number): number {
-  const leap = year % 400 === 0 || (year % 4 === 0 && year % 100 !== 0)
-  if (month === 2) return leap ? 29 : 28
-  return [4, 6, 9, 11].includes(month) ? 30 : 31
-}
-
-function localCivilDate(): string {
-  return CALENDAR_TEST_DATE
-}
-
-function shiftCivilDate(value: string, amount: -1 | 1): string {
-  let { year, month, day } = civilParts(value)
-  day += amount
-  if (day > daysInMonth(year, month)) {
-    day = 1
-    month += 1
-    if (month > 12) { month = 1; year += 1 }
-  } else if (day === 0) {
-    month -= 1
-    if (month === 0) { month = 12; year -= 1 }
-    day = daysInMonth(year, month)
-  }
-  return `${String(year).padStart(4, '0')}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`
-}
-
-function diaryPath(date: string): string {
-  return `diary/${date}`
-}
-
-async function deleteDiaryDate(request: APIRequestContext, date: string): Promise<void> {
-  const response = await request.delete(`/api/posts/${diaryPath(date)}`)
-  if (response.status() === 503) {
-    expect(await response.json()).toMatchObject({ code: 'diary-metadata-unavailable' })
-    const vault = process.env.NUVYN_DRAFT_E2E_VAULT
-    if (!vault) throw new Error('NUVYN_DRAFT_E2E_VAULT is not configured')
-    // A deliberately injected physical-only future file has no authoritative
-    // identity, so the production owner correctly refuses to adopt/delete it.
-    // Remove only that test-owned fixture directly from the temporary vault.
-    await rm(join(vault, 'diary', `${date}.md`), { force: true })
-    return
-  }
-  expect([200, 404]).toContain(response.status())
-}
-
-async function seedExistingDiary(request: APIRequestContext, date: string, raw: string): Promise<void> {
-  await deleteDiaryDate(request, date)
-  const created = await request.post('/api/diary/dates', {
-    data: { date, timeZone: TEST_TIME_ZONE },
-  })
-  expect(created.status(), await created.text()).toBe(201)
-  const saved = await request.put(`/api/posts/${diaryPath(date)}`, {
-    data: { raw, baseRaw: `# ${date}\n` },
-  })
-  expect(saved.status(), await saved.text()).toBe(200)
-}
-
-async function seedOrdinaryNote(request: APIRequestContext, path: string): Promise<void> {
-  const removed = await request.delete(`/api/posts/${path}`)
-  expect([200, 404]).toContain(removed.status())
-  const created = await request.post('/api/posts', { data: { path, title: path.split('/').at(-1) } })
-  expect([200, 201]).toContain(created.status())
-}
-
-async function deletePost(request: APIRequestContext, path: string): Promise<void> {
-  const response = await request.delete(`/api/posts/${path}`)
-  expect([200, 404]).toContain(response.status())
-}
-
-async function seedExistingFutureDiary(date: string, raw: string): Promise<void> {
-  const vault = process.env.NUVYN_DRAFT_E2E_VAULT
-  if (!vault) throw new Error('NUVYN_DRAFT_E2E_VAULT is not configured')
-  const diaryDirectory = join(vault, 'diary')
-  const file = join(diaryDirectory, `${date}.md`)
-  await mkdir(diaryDirectory, { recursive: true })
-  await rm(file, { force: true })
-  await writeFile(file, raw, 'utf8')
-}
-
-async function openDiaryScope(page: Page): Promise<void> {
-  // Closing the current Diary tab already returns this test to Calendar Home;
-  // avoid replacing the browser process with a redundant same-route reload.
-  if (new URL(page.url()).pathname !== '/vault') await page.goto('/vault')
-  const surface = page.getByTestId('diary-calendar-surface')
-  if (await surface.count() === 0) {
-    await page.locator('.scope-chip').filter({ hasText: 'note' }).click()
-    await page.locator('.scope-chip').filter({ hasText: 'diary' }).click()
-  }
-  await expect(surface).toBeVisible({ timeout: 15_000 })
-}
-
-async function ensureDiaryScope(page: Page): Promise<void> {
-  const diaryChip = page.locator('.scope-chip').filter({ hasText: 'diary' })
-  if (await diaryChip.getAttribute('aria-pressed') !== 'true') await diaryChip.click()
-  await expect(page.getByTestId('diary-calendar-surface')).toBeVisible({ timeout: 15_000 })
-}
-
-async function moveToMonth(page: Page, date: string): Promise<void> {
-  const targetMonth = date.slice(0, 7)
-  const calendar = page.getByTestId('diary-calendar')
-  for (let attempt = 0; attempt < 24; attempt += 1) {
-    const currentMonth = await calendar.getAttribute('data-month')
-    if (currentMonth === targetMonth) return
-    if (!currentMonth) throw new Error('Calendar did not expose its current month')
-    await page.getByTestId(currentMonth < targetMonth ? 'diary-calendar-next' : 'diary-calendar-previous').click()
-  }
-  throw new Error(`Calendar did not reach ${targetMonth}`)
-}
-
-async function clickDiaryDate(page: Page, date: string): Promise<void> {
-  await moveToMonth(page, date)
-  // DiaryCalendar exposes the canonical civil date on its native button.
-  const button = calendarDay(page.getByTestId('diary-calendar'), date)
-  await expect(button).toBeVisible()
-  await button.click()
-}
-
-function diagnostics(page: Page, ignoredConsoleErrors: string[] = []): { pageErrors: string[]; consoleErrors: string[] } {
-  const pageErrors: string[] = []
-  const consoleErrors: string[] = []
-  page.on('pageerror', (error) => pageErrors.push(error.stack ?? error.message))
-  page.on('console', (message) => {
-    if (message.type() === 'error' && !ignoredConsoleErrors.some((part) => message.text().includes(part))) {
-      consoleErrors.push(message.text())
-    }
-  })
-  return { pageErrors, consoleErrors }
-}
-
-async function assertNativeReader(page: Page, date: string): Promise<void> {
-  const path = diaryPath(date)
-  await expect(page).toHaveURL(new RegExp(`/vault/${path.replace('/', '\\/')}(?:[?#]|$)`))
-  await expect(page.getByTestId('diary-reader-dialog')).toHaveCount(0)
-  await expect(page.locator(`[role="tab"][data-tab-id="${path}"]`)).toHaveAttribute('aria-selected', 'true')
-  await expect(page.locator('.reading-pane')).toHaveCount(1)
-  await expect(page.locator('.reading-pane')).toBeVisible()
-  await expect(page.locator('.file-tree')).toBeVisible()
-  await expect(page.locator('.search-input')).toHaveValue(date)
-  await expect(page.locator(`[data-tree-key="file:${path}"]`)).toHaveCount(1)
-  await expect(page.getByTestId('diary-calendar')).toBeAttached()
-  await expect(page.getByTestId('diary-calendar')).toBeHidden()
-  await expect(page.getByTestId('view-toggle')).toHaveAttribute('aria-label', /edit/i)
-}
-
-test('Calendar opens the native Vault reader with the Diary date filter', async ({ page, request }) => {
-  const date = localCivilDate()
-  const other = shiftCivilDate(date, -1)
-  const path = diaryPath(date)
-  const state = diagnostics(page)
-
-  try {
-    await seedExistingDiary(request, date, '# Native Reader\n\nCurrent Diary body.\n')
-    await seedExistingDiary(request, other, '# Other Diary\n')
-    await openDiaryScope(page)
-    const monthBefore = await page.getByTestId('diary-calendar').getAttribute('data-month')
-    await clickDiaryDate(page, date)
-    await assertNativeReader(page, date)
-    await expect(page.locator('.reading-pane article')).toContainText('Current Diary body')
-    await expect(page.locator(`[data-tree-key="file:${diaryPath(other)}"]`)).toHaveCount(0)
-    await expect(page.locator('.status-bar-row')).toBeVisible()
-
-    const tab = page.locator(`[role="tab"][data-tab-id="${path}"]`)
-    await goBackFromDiaryDocument(page)
-    await expect(tab).toHaveCount(0)
-    await expect(page.getByTestId('diary-calendar')).toBeVisible()
-    await expect(page.getByTestId('diary-calendar')).toHaveAttribute('data-month', monthBefore ?? '')
-    // Calendar Home hides the explorer sidebar while preserving its filter
-    // state for the next native-document presentation.
-    await expect(page.locator('.search-input')).toHaveCount(0)
-    await expect(page.locator('.activity-bar')).toHaveCount(0)
-  } finally {
-    await deleteDiaryDate(request, date)
-    await deleteDiaryDate(request, other)
-  }
-
-  expect(state.pageErrors).toEqual([])
-  expect(state.consoleErrors).toEqual([])
-})
-
-))
+    await expect(page).toHaveURL(new RegExp('/vault/' + note + '$'))
     await expect(page.locator('.scope-chip').filter({ hasText: 'note' })).toHaveAttribute('aria-pressed', 'true')
     await expect(page.locator('.reading-pane')).toBeVisible()
     await expect(page.getByTestId('diary-calendar')).toHaveCount(0)
-    await expect(page.locator(`[role="tab"][data-tab-id="${note}"]`)).toHaveAttribute('aria-selected', 'true')
-
-    // Existing scope-exit policy returns to Calendar Home on re-entry; the
-    // original Diary date must remain available, not be lost to the Note.
+    await expect(page.locator('[role="tab"][data-tab-id="' + note + '"]')).toHaveAttribute('aria-selected', 'true')
     await page.locator('.scope-chip').filter({ hasText: 'diary' }).click()
     await expect(page.getByTestId('diary-calendar')).toBeVisible()
     await clickDiaryDate(page, date)
-    await expect(page).toHaveURL(new RegExp(`/vault/${diary}import { mkdir, rm, writeFile } from 'node:fs/promises'
-import { join } from 'node:path'
-import { expect, goBackFromDiaryDocument, test, type APIRequestContext, type Page } from './fixtures/diary'
-import { CALENDAR_TEST_DATE, CALENDAR_TEST_TIME_ZONE, calendarDay } from './helpers/calendar-clock'
-
-const TEST_TIME_ZONE = CALENDAR_TEST_TIME_ZONE
-
-test.use({ timezoneId: TEST_TIME_ZONE, trace: 'off', screenshot: 'only-on-failure' })
-
-function civilParts(value: string): { year: number; month: number; day: number } {
-  const [year, month, day] = value.split('-').map(Number)
-  return { year, month, day }
-}
-
-function daysInMonth(year: number, month: number): number {
-  const leap = year % 400 === 0 || (year % 4 === 0 && year % 100 !== 0)
-  if (month === 2) return leap ? 29 : 28
-  return [4, 6, 9, 11].includes(month) ? 30 : 31
-}
-
-function localCivilDate(): string {
-  return CALENDAR_TEST_DATE
-}
-
-function shiftCivilDate(value: string, amount: -1 | 1): string {
-  let { year, month, day } = civilParts(value)
-  day += amount
-  if (day > daysInMonth(year, month)) {
-    day = 1
-    month += 1
-    if (month > 12) { month = 1; year += 1 }
-  } else if (day === 0) {
-    month -= 1
-    if (month === 0) { month = 12; year -= 1 }
-    day = daysInMonth(year, month)
-  }
-  return `${String(year).padStart(4, '0')}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`
-}
-
-function diaryPath(date: string): string {
-  return `diary/${date}`
-}
-
-async function deleteDiaryDate(request: APIRequestContext, date: string): Promise<void> {
-  const response = await request.delete(`/api/posts/${diaryPath(date)}`)
-  if (response.status() === 503) {
-    expect(await response.json()).toMatchObject({ code: 'diary-metadata-unavailable' })
-    const vault = process.env.NUVYN_DRAFT_E2E_VAULT
-    if (!vault) throw new Error('NUVYN_DRAFT_E2E_VAULT is not configured')
-    // A deliberately injected physical-only future file has no authoritative
-    // identity, so the production owner correctly refuses to adopt/delete it.
-    // Remove only that test-owned fixture directly from the temporary vault.
-    await rm(join(vault, 'diary', `${date}.md`), { force: true })
-    return
-  }
-  expect([200, 404]).toContain(response.status())
-}
-
-async function seedExistingDiary(request: APIRequestContext, date: string, raw: string): Promise<void> {
-  await deleteDiaryDate(request, date)
-  const created = await request.post('/api/diary/dates', {
-    data: { date, timeZone: TEST_TIME_ZONE },
-  })
-  expect(created.status(), await created.text()).toBe(201)
-  const saved = await request.put(`/api/posts/${diaryPath(date)}`, {
-    data: { raw, baseRaw: `# ${date}\n` },
-  })
-  expect(saved.status(), await saved.text()).toBe(200)
-}
-
-async function seedOrdinaryNote(request: APIRequestContext, path: string): Promise<void> {
-  const removed = await request.delete(`/api/posts/${path}`)
-  expect([200, 404]).toContain(removed.status())
-  const created = await request.post('/api/posts', { data: { path, title: path.split('/').at(-1) } })
-  expect([200, 201]).toContain(created.status())
-}
-
-async function deletePost(request: APIRequestContext, path: string): Promise<void> {
-  const response = await request.delete(`/api/posts/${path}`)
-  expect([200, 404]).toContain(response.status())
-}
-
-async function seedExistingFutureDiary(date: string, raw: string): Promise<void> {
-  const vault = process.env.NUVYN_DRAFT_E2E_VAULT
-  if (!vault) throw new Error('NUVYN_DRAFT_E2E_VAULT is not configured')
-  const diaryDirectory = join(vault, 'diary')
-  const file = join(diaryDirectory, `${date}.md`)
-  await mkdir(diaryDirectory, { recursive: true })
-  await rm(file, { force: true })
-  await writeFile(file, raw, 'utf8')
-}
-
-async function openDiaryScope(page: Page): Promise<void> {
-  // Closing the current Diary tab already returns this test to Calendar Home;
-  // avoid replacing the browser process with a redundant same-route reload.
-  if (new URL(page.url()).pathname !== '/vault') await page.goto('/vault')
-  const surface = page.getByTestId('diary-calendar-surface')
-  if (await surface.count() === 0) {
-    await page.locator('.scope-chip').filter({ hasText: 'note' }).click()
-    await page.locator('.scope-chip').filter({ hasText: 'diary' }).click()
-  }
-  await expect(surface).toBeVisible({ timeout: 15_000 })
-}
-
-async function ensureDiaryScope(page: Page): Promise<void> {
-  const diaryChip = page.locator('.scope-chip').filter({ hasText: 'diary' })
-  if (await diaryChip.getAttribute('aria-pressed') !== 'true') await diaryChip.click()
-  await expect(page.getByTestId('diary-calendar-surface')).toBeVisible({ timeout: 15_000 })
-}
-
-async function moveToMonth(page: Page, date: string): Promise<void> {
-  const targetMonth = date.slice(0, 7)
-  const calendar = page.getByTestId('diary-calendar')
-  for (let attempt = 0; attempt < 24; attempt += 1) {
-    const currentMonth = await calendar.getAttribute('data-month')
-    if (currentMonth === targetMonth) return
-    if (!currentMonth) throw new Error('Calendar did not expose its current month')
-    await page.getByTestId(currentMonth < targetMonth ? 'diary-calendar-next' : 'diary-calendar-previous').click()
-  }
-  throw new Error(`Calendar did not reach ${targetMonth}`)
-}
-
-async function clickDiaryDate(page: Page, date: string): Promise<void> {
-  await moveToMonth(page, date)
-  // DiaryCalendar exposes the canonical civil date on its native button.
-  const button = calendarDay(page.getByTestId('diary-calendar'), date)
-  await expect(button).toBeVisible()
-  await button.click()
-}
-
-function diagnostics(page: Page, ignoredConsoleErrors: string[] = []): { pageErrors: string[]; consoleErrors: string[] } {
-  const pageErrors: string[] = []
-  const consoleErrors: string[] = []
-  page.on('pageerror', (error) => pageErrors.push(error.stack ?? error.message))
-  page.on('console', (message) => {
-    if (message.type() === 'error' && !ignoredConsoleErrors.some((part) => message.text().includes(part))) {
-      consoleErrors.push(message.text())
-    }
-  })
-  return { pageErrors, consoleErrors }
-}
-
-async function assertNativeReader(page: Page, date: string): Promise<void> {
-  const path = diaryPath(date)
-  await expect(page).toHaveURL(new RegExp(`/vault/${path.replace('/', '\\/')}(?:[?#]|$)`))
-  await expect(page.getByTestId('diary-reader-dialog')).toHaveCount(0)
-  await expect(page.locator(`[role="tab"][data-tab-id="${path}"]`)).toHaveAttribute('aria-selected', 'true')
-  await expect(page.locator('.reading-pane')).toHaveCount(1)
-  await expect(page.locator('.reading-pane')).toBeVisible()
-  await expect(page.locator('.file-tree')).toBeVisible()
-  await expect(page.locator('.search-input')).toHaveValue(date)
-  await expect(page.locator(`[data-tree-key="file:${path}"]`)).toHaveCount(1)
-  await expect(page.getByTestId('diary-calendar')).toBeAttached()
-  await expect(page.getByTestId('diary-calendar')).toBeHidden()
-  await expect(page.getByTestId('view-toggle')).toHaveAttribute('aria-label', /edit/i)
-}
-
-test('Calendar opens the native Vault reader with the Diary date filter', async ({ page, request }) => {
-  const date = localCivilDate()
-  const other = shiftCivilDate(date, -1)
-  const path = diaryPath(date)
-  const state = diagnostics(page)
-
-  try {
-    await seedExistingDiary(request, date, '# Native Reader\n\nCurrent Diary body.\n')
-    await seedExistingDiary(request, other, '# Other Diary\n')
-    await openDiaryScope(page)
-    const monthBefore = await page.getByTestId('diary-calendar').getAttribute('data-month')
-    await clickDiaryDate(page, date)
-    await assertNativeReader(page, date)
-    await expect(page.locator('.reading-pane article')).toContainText('Current Diary body')
-    await expect(page.locator(`[data-tree-key="file:${diaryPath(other)}"]`)).toHaveCount(0)
-    await expect(page.locator('.status-bar-row')).toBeVisible()
-
-    const tab = page.locator(`[role="tab"][data-tab-id="${path}"]`)
-    await goBackFromDiaryDocument(page)
-    await expect(tab).toHaveCount(0)
-    await expect(page.getByTestId('diary-calendar')).toBeVisible()
-    await expect(page.getByTestId('diary-calendar')).toHaveAttribute('data-month', monthBefore ?? '')
-    // Calendar Home hides the explorer sidebar while preserving its filter
-    // state for the next native-document presentation.
-    await expect(page.locator('.search-input')).toHaveCount(0)
-    await expect(page.locator('.activity-bar')).toHaveCount(0)
-  } finally {
-    await deleteDiaryDate(request, date)
-    await deleteDiaryDate(request, other)
-  }
-
-  expect(state.pageErrors).toEqual([])
-  expect(state.consoleErrors).toEqual([])
-})
-
-))
+    await expect(page).toHaveURL(new RegExp('/vault/' + diary + '$'))
     await expect(page.locator('.reading-pane article')).toContainText('Linked knowledge')
   } finally {
     await deleteDiaryDate(request, date)
     await deletePost(request, note)
   }
+  expect(state.pageErrors).toEqual([])
+  expect(state.consoleErrors).toEqual([])
+})
 
+test('Note Wiki Link switches to an existing Diary reader, then returns to Note', async ({ page, request }) => {
+  const date = localCivilDate()
+  const diary = diaryPath(date)
+  const note = 'inbox/d6-note-diary-link'
+  const state = diagnostics(page)
+  try {
+    await seedExistingDiary(request, date, '# ' + date + '\n\nLinked Diary content.\n')
+    await seedOrdinaryNote(request, note)
+    const initialResponse = await request.get('/api/posts/' + note)
+    expect(initialResponse.status()).toBe(200)
+    const original = await initialResponse.json() as { raw: string }
+    const updated = await request.put('/api/posts/' + note, {
+      data: { baseRaw: original.raw, raw: '# Linked Note\n\n[[' + diary + '|Visit Diary]]\n' },
+    })
+    expect(updated.status(), await updated.text()).toBe(200)
+    await page.goto('/vault/' + note)
+    const noteChip = page.locator('.scope-chip').filter({ hasText: 'note' })
+    if (await noteChip.getAttribute('aria-pressed') !== 'true') await noteChip.click()
+    const toggle = page.getByTestId('view-toggle')
+    if ((await toggle.getAttribute('aria-label'))?.match(/read|阅读/i)) await toggle.click()
+    await expect(page.locator('.reading-pane article')).toContainText('Linked Note')
+    const link = page.locator('.reading-pane a.wiki-link').filter({ hasText: 'Visit Diary' })
+    await expect(link).toBeVisible()
+    await expect(link).not.toHaveClass(/wiki-link-missing/)
+    await link.click()
+    await expect(page).toHaveURL(new RegExp('/vault/' + diary + '$'))
+    await expect(page.locator('.scope-chip').filter({ hasText: 'diary' })).toHaveAttribute('aria-pressed', 'true')
+    await expect(page.getByTestId('diary-calendar')).toBeHidden()
+    await expect(page.locator('.reading-pane article')).toContainText('Linked Diary content')
+    await expect(page.locator('[role="tab"][data-tab-id="' + diary + '"]')).toHaveAttribute('aria-selected', 'true')
+    await noteChip.click()
+    await expect(page).toHaveURL(new RegExp('/vault/' + note + '$'))
+    await expect(page.locator('.reading-pane article')).toContainText('Linked Note')
+  } finally {
+    await deleteDiaryDate(request, date)
+    await deletePost(request, note)
+  }
   expect(state.pageErrors).toEqual([])
   expect(state.consoleErrors).toEqual([])
 })
