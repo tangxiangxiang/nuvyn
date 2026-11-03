@@ -705,7 +705,7 @@ const vaultContext = createVaultContext({
   activePath,
   activeTab,
   openPost,
-  openPreviewPost: (path) => openPost(path, { mode: 'preview' }),
+  openPreviewPost: openLinkedPreviewPost,
   captureAiContext: () => captureWorkspaceAiContext(),
   lifecycle: documentLifecycle,
 })
@@ -1479,6 +1479,17 @@ async function openDiaryDatePost(
   await openPost(path, options)
   const tab = tabs.value.find((candidate) => candidate.path === path)
   return activePath.value === path && Boolean(tab && !tab.loading && !tab.loadError)
+}
+
+async function openLinkedPreviewPost(path: string): Promise<void> {
+  // ReadingPane and EditorPane share this Wiki Link opener. A Diary -> Note
+  // link must switch scope before opening its target, or the loaded Note
+  // remains hidden behind Diary Calendar Home.
+  // The existing transition saves the active Diary and rejects unsafe exits.
+  if (activeScope.value === 'diary' && scopeForWorkspacePath(path) === 'note') {
+    if (!(await changeVaultScope('note'))) return
+  }
+  await openPost(path, { mode: 'preview' })
 }
 
 function openLinkedDocument(path: string, anchor?: string): void {
