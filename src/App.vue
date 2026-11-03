@@ -371,6 +371,18 @@ watch(() => auth.state.value, (next) => {
   else accessIntentGeneration += 1
 })
 
+// Restore remembered Diary access as soon as the owner login is ready, even
+// while Note/Ledger is selected. The shared access session remains the only
+// authority: a successful resume updates both the navbar icon and the Diary
+// access path; failed or absent remember grants never claim an unlock.
+watch(() => auth.state.value, (next) => {
+  if (next !== 'authenticated') return
+  void diaryAccess.ensureStatus().catch(() => {
+    // A failed optional status check must not interrupt ordinary workspaces.
+    // Entering Diary still uses the guarded requestDiaryAccess flow.
+  })
+}, { immediate: true })
+
 // A persisted Diary scope is only a user preference, never permission to
 // restore a Diary body. On a fresh browser process the capability is absent,
 // so resolve the access status first and normalize the scope to note before

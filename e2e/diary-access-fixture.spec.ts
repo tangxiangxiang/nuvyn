@@ -210,3 +210,36 @@ test('opt-in remembered Diary access resumes in the same auth session and is rev
   expect(postLock.status(), await postLock.text()).toBe(200)
   expect(await readJson(postLock)).toEqual({ state: 'LOCKED' })
 })
+
+// The browser navigation fixture normally opens Diary after a full navigation.
+// Reload through the browser itself here so no fixture access bootstrap can
+// conceal a stale navbar icon on an ordinary Note workspace refresh.
+test('remembered Diary access restores the unlocked navbar icon on a Note refresh', async ({ page }) => {
+  await page.goto('/vault')
+  const diaryChip = page.locator('.scope-chip').filter({ hasText: 'diary' })
+  const noteChip = page.locator('.scope-chip').filter({ hasText: 'note' })
+  await expect(noteChip).toHaveAttribute('aria-pressed', 'true')
+  const icon = diaryChip.locator('.scope-chip-icon svg')
+  await expect(icon).toBeVisible()
+  const unlockedIcon = await icon.evaluate((node) => node.innerHTML)
+
+  // Use the authenticated browser context, not the separate API fixture
+  // session. The response sets only the server-owned HttpOnly remember cookie.
+  const remember = await page.context().request.post('/api/diary/access/unlock', {
+    data: { password: 'e2e-diary-access-password-strong-123', rememberDevice: true },
+  })
+  expect(remember.status(), await remember.text()).toBe(200)
+
+  const navigation = page.waitForNavigation({ waitUntil: 'domcontentloaded' })
+  await page.evaluate(() => { window.location.reload() })
+  await navigation
+  await expect(diaryChip).toBeVisible()
+  await expect(noteChip).toHaveAttribute('aria-pressed', 'true')
+  // Both the access state and the glyph must resolve before Diary is clicked.
+  await expect.poll(() => page.evaluate(async () => {
+    const { useDiaryAccessSession } = await import('/src/composables/diary/useDiaryAccessSession.ts')
+    return useDiaryAccessSession().state.value
+  })).toBe('UNLOCKED')
+  await expect.poll(() => icon.evaluate((node) => node.innerHTML)).toBe(unlockedIcon)
+  await expect(page.locator('#diary-access-password')).toHaveCount(0)
+})
