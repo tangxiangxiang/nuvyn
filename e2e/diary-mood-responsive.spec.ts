@@ -1,4 +1,5 @@
 import { expect, goBackFromDiaryDocument, test, type APIRequestContext, type Page } from './fixtures/diary'
+import { MOOD_CATALOG } from '../shared/diaryMood'
 import { clearDraftDatabase, gotoVaultReady } from './helpers/edit-program'
 import {
   CALENDAR_TEST_DATE,
@@ -30,14 +31,7 @@ const D75_VIEWPORTS: readonly Viewport[] = [
   { name: 'narrow-mobile', width: 320, height: 700 },
 ]
 
-const CANONICAL_MOOD_IDS = [
-  'kiss', 'sad', 'surprised-big', 'surprised-small',
-  'watching', 'like', 'laughing', 'disappointed',
-  'afraid', 'shy', 'happy', 'smiling',
-  'amazed', 'angry', 'flirty', 'speechless',
-  'dizzy', 'indignant', 'frowning', 'mysterious',
-  'laughing-tears', 'playful', 'unwell', 'devilish',
-] as const
+const CANONICAL_MOOD_IDS = MOOD_CATALOG.map(({ id }) => id)
 
 function localCivilDate(): string {
   return CALENDAR_TEST_DATE
@@ -168,6 +162,8 @@ type PickerMetrics = {
   clearOverlaps: string[]
   pickerScrollWidth: number
   pickerClientWidth: number
+  gridScrollHeight: number
+  gridClientHeight: number
 }
 
 async function readPickerMetrics(page: Page): Promise<PickerMetrics> {
@@ -189,6 +185,9 @@ async function readPickerMetrics(page: Page): Promise<PickerMetrics> {
     if (!picker) throw new Error('Mood Picker is not mounted')
 
     const pickerBox = toBox(picker)
+    const grid = picker.querySelector<HTMLElement>('.diary-mood-picker-grid')
+    if (!grid) throw new Error('Mood grid is not mounted')
+    const gridBox = toBox(grid)
     const optionElements = [...picker.querySelectorAll<HTMLElement>('[role="radio"]')]
     const options = optionElements.map((element) => {
       const style = getComputedStyle(element)
@@ -248,39 +247,42 @@ async function readPickerMetrics(page: Page): Promise<PickerMetrics> {
       columnLefts,
       rowCounts,
       columnCounts,
+      // The additional rows intentionally scroll beneath the fixed header.
       optionWithinPicker: options.every((option) => (
-        option.box.left >= pickerBox.left - 1
-        && option.box.right <= pickerBox.right + 1
-        && option.box.top >= pickerBox.top - 1
-        && option.box.bottom <= pickerBox.bottom + 1
+        option.box.left >= gridBox.left - 1
+        && option.box.right <= gridBox.right + 1
       )),
       clearWithinPicker: clearBox.left >= pickerBox.left - 1
         && clearBox.right <= pickerBox.right + 1
         && clearBox.top >= pickerBox.top - 1
         && clearBox.bottom <= pickerBox.bottom + 1,
       optionOverlaps,
-      clearOverlaps: options.filter((option) => overlaps(option.box, clearBox)).map((option) => option.id),
+      clearOverlaps: options.filter((option) => option.box.top < gridBox.bottom
+        && option.box.bottom > gridBox.top && overlaps(option.box, clearBox)).map((option) => option.id),
       pickerScrollWidth: picker.scrollWidth,
       pickerClientWidth: picker.clientWidth,
+      gridScrollHeight: grid.scrollHeight,
+      gridClientHeight: grid.clientHeight,
     }
   })
   return metrics
 }
 
 function assertPickerGeometry(metrics: PickerMetrics, viewport: Viewport): void {
-  expect(metrics.options, `${viewport.name} picker option count`).toHaveLength(24)
+  expect(metrics.options, `${viewport.name} picker option count`).toHaveLength(CANONICAL_MOOD_IDS.length)
   expect(metrics.options.map((option) => option.id), `${viewport.name} canonical row-major order`)
     .toEqual(CANONICAL_MOOD_IDS)
   expect(metrics.options.every((option) => option.visible), `${viewport.name} option visibility`).toBe(true)
-  expect(metrics.rowTops, `${viewport.name} real browser row count`).toHaveLength(6)
+  expect(metrics.rowTops, `${viewport.name} real browser row count`).toHaveLength(12)
   expect(metrics.columnLefts, `${viewport.name} real browser column count`).toHaveLength(4)
-  expect(metrics.rowCounts, `${viewport.name} four options per row`).toEqual([4, 4, 4, 4, 4, 4])
-  expect(metrics.columnCounts, `${viewport.name} six options per column`).toEqual([6, 6, 6, 6])
+  expect(metrics.rowCounts, `${viewport.name} four options per row`).toEqual(Array(12).fill(4))
+  expect(metrics.columnCounts, `${viewport.name} six options per column`).toEqual(Array(4).fill(12))
   expect(metrics.picker.left, `${viewport.name} picker left containment`).toBeGreaterThanOrEqual(-1)
   expect(metrics.picker.right, `${viewport.name} picker right containment`).toBeLessThanOrEqual(viewport.width + 1)
   expect(metrics.picker.width, `${viewport.name} picker width`).toBeGreaterThan(0)
   expect(metrics.picker.height, `${viewport.name} picker height`).toBeGreaterThan(0)
-  expect(metrics.optionWithinPicker, `${viewport.name} options clipped by picker`).toBe(true)
+  expect(metrics.optionWithinPicker, `${viewport.name} options horizontally contained by scrollable grid`).toBe(true)
+  expect(metrics.gridScrollHeight, `${viewport.name} all mood rows must scroll`).toBeGreaterThan(metrics.gridClientHeight)
   expect(metrics.clear.visible, `${viewport.name} Clear visibility`).toBe(true)
   expect(metrics.clearWithinPicker, `${viewport.name} Clear containment`).toBe(true)
   expect(metrics.optionOverlaps, `${viewport.name} Mood option overlap`).toEqual([])

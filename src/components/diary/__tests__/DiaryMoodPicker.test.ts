@@ -16,12 +16,12 @@ describe('DiaryMoodPicker', () => {
     useI18n().setLocale('zh')
   })
 
-  it('renders the single shared 24-item registry in row-major 4×6 order', () => {
+  it('renders all 48 Fluent icons in row-major 4-column order', () => {
     const wrapper = mount(DiaryMoodPicker)
     const radios = wrapper.findAll('[role="radio"]')
 
     expect(wrapper.get('[role="radiogroup"]')).toBeTruthy()
-    expect(radios).toHaveLength(24)
+    expect(radios).toHaveLength(48)
     expect(radios.map((radio) => radio.attributes('data-mood-id')))
       .toEqual(MOOD_CATALOG.map((mood) => mood.id))
     expect(radios.every((radio) => radio.attributes('aria-checked') === 'false')).toBe(true)
@@ -79,10 +79,12 @@ describe('DiaryMoodPicker', () => {
     await expectArrow('surprised-small', 'ArrowRight', 'surprised-small')
     await expectArrow('surprised-small', 'ArrowUp', 'surprised-small')
     await expectArrow('laughing-tears', 'ArrowLeft', 'laughing-tears')
-    await expectArrow('laughing-tears', 'ArrowDown', 'laughing-tears')
+    await expectArrow('laughing-tears', 'ArrowDown', 'relieved')
     await expectArrow('devilish', 'ArrowRight', 'devilish')
-    await expectArrow('devilish', 'ArrowDown', 'devilish')
+    await expectArrow('devilish', 'ArrowDown', 'worried')
 
+    await expectArrow('pleading', 'ArrowDown', 'pleading')
+    await expectArrow('pleading', 'ArrowRight', 'pleading')
     await expectArrow('shy', 'ArrowRight', 'happy')
     await expectArrow('shy', 'ArrowLeft', 'afraid')
     await expectArrow('shy', 'ArrowDown', 'angry')

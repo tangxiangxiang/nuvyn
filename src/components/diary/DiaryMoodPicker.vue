@@ -236,7 +236,9 @@ defineExpose({ focusInitial })
   z-index: 1000;
   width: min(320px, calc(100vw - 24px));
   max-height: min(620px, calc(100vh - 52px));
-  overflow: auto;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
   box-sizing: border-box;
   padding: 12px;
   border: 1px solid var(--vs-border, var(--border, #d8dce5));
@@ -255,6 +257,7 @@ defineExpose({ focusInitial })
 }
 
 .diary-mood-picker-header {
+  flex: 0 0 auto;
   margin-bottom: 10px;
 }
 
@@ -294,8 +297,14 @@ defineExpose({ focusInitial })
 
 .diary-mood-picker-grid {
   display: grid;
+  min-height: 0;
+  flex: 1 1 auto;
   grid-template-columns: repeat(4, minmax(0, 1fr));
+  align-content: start;
   gap: 6px;
+  overflow-y: auto;
+  overflow-x: hidden;
+  overscroll-behavior: contain;
 }
 
 .diary-mood-option {
@@ -355,6 +364,7 @@ defineExpose({ focusInitial })
 }
 
 .diary-mood-picker-footer {
+  flex: 0 0 auto;
   margin-top: 10px;
 }
 

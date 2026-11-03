@@ -12,7 +12,7 @@ export type DiaryMoodDefinition = {
   readonly zhLabel: string
   readonly enLabel: string
   readonly accessibilityName: string
-  readonly row: 1 | 2 | 3 | 4 | 5 | 6
+  readonly row: number
   readonly column: 1 | 2 | 3 | 4
   readonly asset: string
 }
@@ -42,6 +42,30 @@ export const MOOD_CATALOG = [
   { id: 'playful', zhLabel: '调皮', enLabel: 'Playful', accessibilityName: '调皮 / Playful', row: 6, column: 2, asset: 'public/emoji/调皮.svg' },
   { id: 'unwell', zhLabel: '难受', enLabel: 'Unwell', accessibilityName: '难受 / Unwell', row: 6, column: 3, asset: 'public/emoji/难受.svg' },
   { id: 'devilish', zhLabel: '魔鬼', enLabel: 'Devilish', accessibilityName: '魔鬼 / Devilish', row: 6, column: 4, asset: 'public/emoji/魔鬼.svg' },
+  { id: 'relieved', zhLabel: '放松', enLabel: 'Relieved', accessibilityName: '放松 / Relieved', row: 7, column: 1, asset: 'public/emoji/放松.svg' },
+  { id: 'thinking', zhLabel: '思考', enLabel: 'Thinking', accessibilityName: '思考 / Thinking', row: 7, column: 2, asset: 'public/emoji/思考.svg' },
+  { id: 'confused', zhLabel: '困惑', enLabel: 'Confused', accessibilityName: '困惑 / Confused', row: 7, column: 3, asset: 'public/emoji/困惑.svg' },
+  { id: 'worried', zhLabel: '担忧', enLabel: 'Worried', accessibilityName: '担忧 / Worried', row: 7, column: 4, asset: 'public/emoji/担忧.svg' },
+  { id: 'anxious', zhLabel: '焦虑', enLabel: 'Anxious', accessibilityName: '焦虑 / Anxious', row: 8, column: 1, asset: 'public/emoji/焦虑.svg' },
+  { id: 'tired', zhLabel: '疲惫', enLabel: 'Tired', accessibilityName: '疲惫 / Tired', row: 8, column: 2, asset: 'public/emoji/疲惫.svg' },
+  { id: 'sleepy', zhLabel: '困倦', enLabel: 'Sleepy', accessibilityName: '困倦 / Sleepy', row: 8, column: 3, asset: 'public/emoji/困倦.svg' },
+  { id: 'sleeping', zhLabel: '熟睡', enLabel: 'Sleeping', accessibilityName: '熟睡 / Sleeping', row: 8, column: 4, asset: 'public/emoji/熟睡.svg' },
+  { id: 'yawning', zhLabel: '打哈欠', enLabel: 'Yawning', accessibilityName: '打哈欠 / Yawning', row: 9, column: 1, asset: 'public/emoji/打哈欠.svg' },
+  { id: 'crying', zhLabel: '大哭', enLabel: 'Crying hard', accessibilityName: '大哭 / Crying hard', row: 9, column: 2, asset: 'public/emoji/大哭.svg' },
+  { id: 'teary', zhLabel: '强忍泪水', enLabel: 'Holding back tears', accessibilityName: '强忍泪水 / Holding back tears', row: 9, column: 3, asset: 'public/emoji/强忍泪水.svg' },
+  { id: 'touched', zhLabel: '感动', enLabel: 'Touched', accessibilityName: '感动 / Touched', row: 9, column: 4, asset: 'public/emoji/感动.svg' },
+  { id: 'in-love', zhLabel: '心动', enLabel: 'In love', accessibilityName: '心动 / In love', row: 10, column: 1, asset: 'public/emoji/心动.svg' },
+  { id: 'celebrating', zhLabel: '庆祝', enLabel: 'Celebrating', accessibilityName: '庆祝 / Celebrating', row: 10, column: 2, asset: 'public/emoji/庆祝.svg' },
+  { id: 'cool', zhLabel: '自信', enLabel: 'Cool', accessibilityName: '自信 / Cool', row: 10, column: 3, asset: 'public/emoji/自信.svg' },
+  { id: 'silly', zhLabel: '搞怪', enLabel: 'Silly', accessibilityName: '搞怪 / Silly', row: 10, column: 4, asset: 'public/emoji/搞怪.svg' },
+  { id: 'awkward', zhLabel: '尴尬', enLabel: 'Awkward', accessibilityName: '尴尬 / Awkward', row: 11, column: 1, asset: 'public/emoji/尴尬.svg' },
+  { id: 'eye-roll', zhLabel: '白眼', enLabel: 'Eye roll', accessibilityName: '白眼 / Eye roll', row: 11, column: 2, asset: 'public/emoji/白眼.svg' },
+  { id: 'neutral', zhLabel: '平静', enLabel: 'Neutral', accessibilityName: '平静 / Neutral', row: 11, column: 3, asset: 'public/emoji/平静.svg' },
+  { id: 'melting', zhLabel: '融化', enLabel: 'Melting', accessibilityName: '融化 / Melting', row: 11, column: 4, asset: 'public/emoji/融化.svg' },
+  { id: 'terrified', zhLabel: '惊恐', enLabel: 'Terrified', accessibilityName: '惊恐 / Terrified', row: 12, column: 1, asset: 'public/emoji/惊恐.svg' },
+  { id: 'sweating', zhLabel: '出汗', enLabel: 'Sweating', accessibilityName: '出汗 / Sweating', row: 12, column: 2, asset: 'public/emoji/出汗.svg' },
+  { id: 'comforted', zhLabel: '拥抱', enLabel: 'Hugging', accessibilityName: '拥抱 / Hugging', row: 12, column: 3, asset: 'public/emoji/拥抱.svg' },
+  { id: 'pleading', zhLabel: '可怜', enLabel: 'Pleading', accessibilityName: '可怜 / Pleading', row: 12, column: 4, asset: 'public/emoji/可怜.svg' },
 ] as const satisfies readonly DiaryMoodDefinition[]
 
 export type MoodId = typeof MOOD_CATALOG[number]['id']

@@ -55,6 +55,13 @@ date when you close, reopen, change months, or refresh the page.
 For a missing today or past date, selecting a Mood is the first step that
 creates the Diary. If you cancel the picker, no Diary is created.
 
+Diary includes 48 bundled Microsoft Fluent Emoji Color SVG moods. The
+original 24 stable Mood IDs remain valid, so existing journal entries retain
+their selected emotion while adopting the new artwork. The four-column
+selector scrolls internally to reach additional moods without hiding its
+Clear action. User-uploaded SVG moods remain supported. See
+[Fluent Emoji asset provenance](../third-party/fluent-emoji.md).
+
 ## Editing and saving
 
 Diary content is a normal Nuvyn Markdown document. Use Read mode to read it and
