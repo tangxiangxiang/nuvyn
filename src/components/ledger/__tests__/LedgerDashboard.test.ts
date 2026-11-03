@@ -270,10 +270,21 @@ describe('Ledger live dashboard', () => {
 
   afterEach(() => {
     for (const wrapper of wrappers.splice(0)) wrapper.unmount()
+    // A failed mount must not leak media-query mocks into the other 41 tests.
+    vi.unstubAllGlobals()
   })
 
   it('keeps the Dashboard eyebrow passive after moving export to navigation', async () => {
-    vi.stubGlobal('matchMedia', vi.fn(() => ({ matches: true })))
+    vi.stubGlobal('matchMedia', vi.fn((media: string) => ({
+      matches: true,
+      media,
+      onchange: null,
+      addListener: vi.fn(),
+      removeListener: vi.fn(),
+      addEventListener: vi.fn(),
+      removeEventListener: vi.fn(),
+      dispatchEvent: vi.fn(() => true),
+    })))
     const wrapper = mount(LedgerView)
     wrappers.push(wrapper)
     await flushPromises()
