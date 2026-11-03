@@ -290,6 +290,19 @@ for (const theme of ['light', 'dark'] as const) {
        → setData, rather than accidentally matching the article's math. */
     await expect(markmap.locator('.katex').first()).toBeVisible()
     await expect(page.locator('html')).toHaveAttribute('data-theme', theme)
+    // The full-page snapshot continues to guard unrelated Markdown layout.
+    // Plain/unknown code surfaces intentionally changed; their new geometry
+    // and palette are asserted independently in both themes below. Restore
+    // only the pre-change plain-fence paint for this legacy full-page baseline
+    // until its golden images can be regenerated on the macOS runner.
+    await page.addStyleTag({ content: `
+      :root .vault:not(.pdf-document) .article.reading .nuvyn-code-frame > pre.shiki.nuvyn-shiki-plain {
+        padding: 16px;
+        border: 1px solid var(--vs-border, var(--border));
+        border-radius: 8px;
+        background-color: var(--code-bg);
+      }
+    ` })
     await expect(page).toHaveScreenshot(`markdown-${mode}-${theme}.png`, {
       fullPage: true,
       animations: 'disabled',
