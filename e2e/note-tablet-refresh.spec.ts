@@ -75,11 +75,16 @@ for (const mode of ['edit', 'read']) {
   })
 }
 
-test('phone Note focus-width control stays attached to the document sheet while pulling to refresh', async ({ page, request, context }) => {
-  const path = `inbox/phone-refresh-footer-${randomUUID()}`
+for (const viewport of [
+  { label: 'phone', width: 390, height: 844 },
+  { label: 'portrait Pad', width: 768, height: 1024 },
+  { label: 'landscape Pad', width: 1024, height: 768 },
+]) {
+  test(`${viewport.label} Note status bar follows the document sheet during pull-to-refresh`, async ({ page, request, context }) => {
+  const path = `inbox/note-refresh-footer-${viewport.width}-${randomUUID()}`
   await createDoc(request, path, '# Phone refresh\n\nContent remains readable.', [])
   try {
-    await page.setViewportSize({ width: 390, height: 844 })
+    await page.setViewportSize({ width: viewport.width, height: viewport.height })
     await page.goto(`/vault/${path}`)
     const toggle = page.getByTestId('view-toggle')
     await expect(toggle).toBeVisible()
@@ -127,4 +132,5 @@ test('phone Note focus-width control stays attached to the document sheet while 
   } finally {
     await request.delete(`/api/posts/${path}`)
   }
-})
+  })
+}
