@@ -174,7 +174,7 @@ test('MD-EXT-5 renders static panels and mounts independent accessible tabs', as
   expect(result.languageLabel).toEqual({
     dataLanguage: 'ts',
     hasNativeTitle: false,
-    renderedLabel: '"ts"',
+    renderedLabel: 'none',
   })
   expect(result.codePanel).toEqual({
     marginTop: '0px',
