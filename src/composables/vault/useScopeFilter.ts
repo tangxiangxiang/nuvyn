@@ -12,44 +12,55 @@ import { NUVYN_BROWSER_STORAGE_KEYS, readStorageKey, writeStorageKey } from '../
 const STORAGE_KEY = NUVYN_BROWSER_STORAGE_KEYS.vaultActiveScope
 const DEFAULT_SCOPE: ScopeKey = 'note'
 
-function loadScope(): ScopeKey {
-  if (typeof localStorage === 'undefined') return DEFAULT_SCOPE
+type InitialScope = { active: ScopeKey; pendingDiaryRestore: boolean }
+
+function loadScope(): InitialScope {
+  const fallback = { active: DEFAULT_SCOPE, pendingDiaryRestore: false }
+  if (typeof localStorage === 'undefined') return fallback
   try {
     const raw = readStorageKey(STORAGE_KEY)
-    if (!raw) return DEFAULT_SCOPE
-    // Diary is permission-bearing. A persisted Diary selection is only a
-    // preference from a previous application session, never proof of a live
-    // secondary-password capability. Start safely in note; the shell-level
-    // access coordinator can select Diary only after the current session is
-    // unlocked.
-    if (raw === 'diary') return DEFAULT_SCOPE
-    if (Object.prototype.hasOwnProperty.call(SCOPE_ROOTS, raw)) return raw as ScopeKey
-    // Keep an existing saved root selection useful after the UI changes from
-    // root chips to content scopes. All three legacy roots belong to note.
-    if (SCOPE_ROOTS.note.includes(raw as typeof SCOPE_ROOTS.note[number])) return 'note'
-    return DEFAULT_SCOPE
+    if (!raw) return fallback
+    // A persisted Diary selection is a navigation preference, not an access
+    // grant. Keep a safe in-memory Note scope until server authorization is
+    // resolved, without overwriting the saved Diary preference in storage.
+    if (raw === 'diary') return { active: DEFAULT_SCOPE, pendingDiaryRestore: true }
+    if (Object.prototype.hasOwnProperty.call(SCOPE_ROOTS, raw)) {
+      return { active: raw as ScopeKey, pendingDiaryRestore: false }
+    }
+    if (SCOPE_ROOTS.note.includes(raw as typeof SCOPE_ROOTS.note[number])) return fallback
+    return fallback
   } catch {
-    return DEFAULT_SCOPE
+    return fallback
   }
 }
 
-const activeScope = ref<ScopeKey>(loadScope())
-// One scope policy drives rail mounting, layout width, and toggle commands.
+const initialScope = loadScope()
+const activeScope = ref<ScopeKey>(initialScope.active)
+const diaryScopeRestorePending = ref(initialScope.pendingDiaryRestore)
 const workspaceRightPanelAvailable = computed(() => activeScope.value !== 'diary')
 let persistenceWired = false
 
 export function useScopeFilter() {
   if (!persistenceWired && typeof window !== 'undefined') {
-    watch(activeScope, (v) => {
-      writeStorageKey(STORAGE_KEY, v)
+    watch([activeScope, diaryScopeRestorePending], ([scope, pending]) => {
+      if (!pending) writeStorageKey(STORAGE_KEY, scope)
     }, { immediate: true })
     persistenceWired = true
   }
 
   function selectScope(scope: ScopeKey): void {
+    // Explicit navigation overrides a pending saved Diary preference.
+    diaryScopeRestorePending.value = false
     if (activeScope.value === scope) return
     activeScope.value = scope
   }
 
-  return { activeScope, selectScope, workspaceRightPanelAvailable }
+  function settleDiaryScopeRestore(unlocked: boolean): void {
+    // Late authorization responses must not undo an explicit scope switch.
+    if (!diaryScopeRestorePending.value) return
+    activeScope.value = unlocked ? 'diary' : DEFAULT_SCOPE
+    diaryScopeRestorePending.value = false
+  }
+
+  return { activeScope, selectScope, diaryScopeRestorePending, settleDiaryScopeRestore, workspaceRightPanelAvailable }
 }

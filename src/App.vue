@@ -45,7 +45,7 @@ const { t } = useI18n()
 const toast = useToast()
 const diaryAccess = useDiaryAccessSession()
 const { active: zenModeActive, enter: enterZenMode, exit: exitZenMode } = useZenMode()
-const { activeScope, selectScope } = useScopeFilter()
+const { activeScope, selectScope, diaryScopeRestorePending, settleDiaryScopeRestore } = useScopeFilter()
 const settingsRequestTick = ref(0)
 const noteTabletImageCommand = ref<(() => void) | null>(null)
 const ledgerSettingsOpen = ref(false)
@@ -197,28 +197,36 @@ const isWorkspaceChrome = computed(() => (
 ))
 const isImmersive = computed(() => chromeStyle.value === 'immersive')
 const isPublicDevPreview = computed(() => route.meta.publicDevPreview === true)
+// Do not mount a temporary Note workspace while a remembered Diary scope is
+// waiting for authoritative authorization; that would flash and overwrite it.
+const diaryScopeBootstrap = computed(() => (
+  workspaceKind.value === 'vault'
+  && auth.state.value === 'authenticated'
+  && diaryScopeRestorePending.value
+))
 const showNormalChrome = computed(() => shouldShowNormalChrome(
   auth.state.value,
   route.meta.authPage === true,
   isPublicDevPreview.value,
   !requiresVaultIdentity.value || vaultIdentity.state.value === 'ready',
   initialRouteReady.value,
-) && !isImmersive.value)
+) && !isImmersive.value && !diaryScopeBootstrap.value)
 const identityLoading = computed(() => auth.state.value === 'authenticated'
   && requiresVaultIdentity.value
   && (vaultIdentity.state.value === 'unknown' || vaultIdentity.state.value === 'loading'))
 const identityFailure = computed(() => auth.state.value === 'authenticated'
   && requiresVaultIdentity.value
   && vaultIdentity.state.value === 'error')
-const showRoutedContent = computed(() => initialRouteReady.value && (isPublicDevPreview.value
-  || (auth.state.value !== 'unknown'
-    && (!route.meta.workspace || !requiresVaultIdentity.value || vaultIdentity.state.value === 'ready'))))
+const showRoutedContent = computed(() => initialRouteReady.value && !diaryScopeBootstrap.value
+  && (isPublicDevPreview.value
+    || (auth.state.value !== 'unknown'
+      && (!route.meta.workspace || !requiresVaultIdentity.value || vaultIdentity.state.value === 'ready'))))
 const routeLoading = computed(() => !initialRouteReady.value)
 const authLoading = computed(() => routeLoading.value || auth.hydrating.value || (auth.state.value === 'unknown' && !auth.hydrationError.value))
 const authFailureMessage = computed(() => {
   return auth.hydrationError.value ? t('auth.unavailable') : ''
 })
-const bootstrapBusy = computed(() => authLoading.value || identityLoading.value)
+const bootstrapBusy = computed(() => authLoading.value || identityLoading.value || diaryScopeBootstrap.value)
 const bootstrapFailure = computed(() => Boolean(authFailureMessage.value || identityFailure.value))
 async function retryAuth(): Promise<void> {
   const nextState = await auth.refreshStatus()
@@ -371,15 +379,26 @@ watch(() => auth.state.value, (next) => {
   else accessIntentGeneration += 1
 })
 
-// Restore remembered Diary access as soon as the owner login is ready, even
-// while Note/Ledger is selected. The shared access session remains the only
-// authority: a successful resume updates both the navbar icon and the Diary
-// access path; failed or absent remember grants never claim an unlock.
+// Reconcile remembered Diary access when login is ready, including from Note
+// and Ledger. Only a server-verified capability may restore a saved Diary
+// navigation preference. A stale response cannot override newer auth state.
+let diaryStartupGeneration = 0
 watch(() => auth.state.value, (next) => {
+  const request = ++diaryStartupGeneration
+  if (next === 'unauthenticated' || next === 'setup-required') {
+    settleDiaryScopeRestore(false)
+    return
+  }
   if (next !== 'authenticated') return
-  void diaryAccess.ensureStatus().catch(() => {
-    // A failed optional status check must not interrupt ordinary workspaces.
-    // Entering Diary still uses the guarded requestDiaryAccess flow.
+  void diaryAccess.ensureStatus().then((state) => {
+    if (request === diaryStartupGeneration && auth.state.value === 'authenticated') {
+      settleDiaryScopeRestore(state === 'UNLOCKED')
+    }
+  }).catch(() => {
+    // A failed optional status check cannot authorize or block Note/Ledger.
+    if (request === diaryStartupGeneration && auth.state.value === 'authenticated') {
+      settleDiaryScopeRestore(false)
+    }
   })
 }, { immediate: true })
 
@@ -475,6 +494,7 @@ provide(VaultViewModeKey, { mode: viewMode, set: setViewMode, toggle: toggleView
         <p role="alert">{{ t('auth.vault_identity_unavailable') }}</p>
         <NButton attr-type="button" @click="retryVaultIdentity">{{ t('auth.retry') }}</NButton>
       </template>
+      <p v-else-if="diaryScopeBootstrap" role="status">{{ t('diary_access.working') }}</p>
       <template v-else>
         <p role="alert">{{ authFailureMessage }}</p>
         <NButton attr-type="button" @click="retryAuth">{{ t('auth.retry') }}</NButton>

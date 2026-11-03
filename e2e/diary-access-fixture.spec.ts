@@ -179,6 +179,42 @@ test('full Diary navigation waits for route-led workspace hydration', async ({ p
 })
 
 
+test('remembered Diary Calendar survives native browser reload without reopening Diary', async ({ page }) => {
+  await page.goto('/vault')
+  const diary = page.locator('.scope-chip').filter({ hasText: 'diary' })
+  const note = page.locator('.scope-chip').filter({ hasText: 'note' })
+  if (await diary.getAttribute('aria-pressed') !== 'true') await diary.click()
+  await expect(page.getByTestId('diary-calendar-surface')).toBeVisible()
+
+  // Re-unlock via the actual password dialog and opt in to device memory.
+  // This exercises the real HttpOnly remembered-device grant, not a fake
+  // browser-stored capability or an API fixture with a different session.
+  await page.getByTestId('account-button').click()
+  await page.getByTestId('account-lock-diary').click()
+  await expect(note).toHaveAttribute('aria-pressed', 'true')
+  await diary.click()
+  await expect(page.locator('#diary-access-password')).toBeVisible()
+  await page.locator('#diary-access-password').fill('e2e-diary-access-password-strong-123')
+  await page.getByTestId('diary-remember-device').click()
+  await page.locator('.diary-access-dialog button[type="submit"]').click()
+  await expect(page.getByTestId('diary-calendar-surface')).toBeVisible()
+  await expect(diary).toHaveAttribute('aria-pressed', 'true')
+  await expect.poll(() => page.evaluate(() => localStorage.getItem('nuvyn.vault.activeScope')))
+    .toBe('diary')
+
+  // Bypass the Diary fixture's page.reload override, which automatically
+  // enters Diary and could mask the real application startup regression.
+  const navigation = page.waitForNavigation({ waitUntil: 'domcontentloaded' })
+  await page.evaluate(() => window.location.reload())
+  await navigation
+  await expect(page.getByTestId('diary-calendar-surface')).toBeVisible({ timeout: 15_000 })
+  await expect(diary).toHaveAttribute('aria-pressed', 'true')
+  await expect(note).toHaveAttribute('aria-pressed', 'false')
+  await expect(page.locator('#diary-access-password')).toHaveCount(0)
+  expect(new URL(page.url()).pathname).toBe('/vault')
+  expect(await page.evaluate(() => localStorage.getItem('nuvyn.vault.activeScope'))).toBe('diary')
+})
+
 test('opt-in remembered Diary access resumes in the same auth session and is revoked by lock', async ({ request }) => {
   const password = 'e2e-diary-access-password-strong-123'
   const unlockedResponse = await request.post('/api/diary/access/unlock', {
