@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, inject, nextTick, onBeforeUnmount, onMounted, ref, watch, type ComponentPublicInstance } from 'vue'
-import { NButton, NIcon } from 'naive-ui'
+import { NButton, NDropdown, NIcon } from 'naive-ui'
 import {
   Box,
   Calendar,
@@ -14,6 +14,7 @@ import {
   Notes,
   Search,
   Sun,
+  Volume,
   Wallet,
 } from '@vicons/tabler'
 import { useRoute, useRouter } from 'vue-router'
@@ -147,6 +148,11 @@ watch(activeScope, () => {
 }, { flush: 'sync' })
 const diaryAccess = inject(DiaryAccessContextKey, null)
 const appShell = inject(AppShellContextKey, null)
+const noteSpeechOptions = computed(() => [{ label: t('note.speech_read_all'), key: 'read-all' }])
+
+function onNoteSpeechMenuSelect(): void {
+  appShell?.noteSpeechReadAllCommand?.value?.()
+}
 
 let analysisExportHoveredScope: 'diary' | 'ledger' | null = null
 let analysisExportRunning = false
@@ -1011,6 +1017,26 @@ onBeforeUnmount(() => {
       </div>
       <div class="nav-spacer" />
       <div class="nav-actions">
+        <NDropdown
+          v-if="isVault && appShell?.noteSpeechReadAllCommand?.value"
+          trigger="click"
+          placement="bottom-end"
+          :options="noteSpeechOptions"
+          @select="onNoteSpeechMenuSelect"
+        >
+          <NButton
+            class="note-speech-read-all"
+            attr-type="button"
+            size="small"
+            quaternary
+            :bordered="false"
+            :title="t('note.speech_read_all')"
+            :aria-label="t('note.speech_read_all')"
+            data-testid="note-speech-menu"
+          >
+            <NIcon aria-hidden="true"><Volume /></NIcon>
+          </NButton>
+        </NDropdown>
         <NButton
           v-if="showSearchButton"
           class="nav-search"

@@ -1,12 +1,13 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
-import { NButton, NInput, NSelect } from 'naive-ui'
+import { NButton, NCheckbox, NInput, NSelect } from 'naive-ui'
 import { useI18n } from '../../composables/useI18n'
 import { useConfirm } from '../../composables/useConfirm'
 import { useToast } from '../../composables/useToast'
 import { useAiHistory } from '../../composables/vault/useAiHistory'
 import * as api from '../../lib/ai-api'
 import type { AiProfile, AiProfileInput, AiProvider, AiConnectionState, AiConnectionTestResult } from '../../lib/ai-api'
+import type { AiSpeechSettings } from '../../lib/ai-api'
 
 const { t } = useI18n()
 const { confirmCancellable } = useConfirm()
@@ -21,6 +22,11 @@ async function confirm(...args: Parameters<typeof confirmCancellable>): Promise<
 const toast = useToast()
 const history = useAiHistory()
 const profiles = ref<AiProfile[]>([])
+const speechSettings = ref<AiSpeechSettings>({ profileId: null, privacyConsent: false })
+const speechProfileId = ref<string | null>(null)
+const speechPrivacyConsent = ref(false)
+const speechSaving = ref(false)
+const speechError = ref('')
 const activeId = ref<string | null>(null)
 const selectedId = ref<string | null>(null)
 const loading = ref(true)
@@ -35,6 +41,7 @@ const dirty = computed(() => JSON.stringify(form) !== initial.value)
 const selected = computed(() => profiles.value.find((p) => p.id === selectedId.value))
 const blocked = computed(() => loading.value || saving.value || confirming.value)
 const menuOpen = ref(false)
+const speechMenuOpen = ref(false)
 const connectionState = ref<AiConnectionState>('untested')
 const connectionResult = ref<AiConnectionTestResult | null>(null)
 const connectionError = ref('')
@@ -43,6 +50,17 @@ let testController: AbortController | null = null
 let testRun = 0
 let disposed = false
 const providerOptions = [{ label: 'Anthropic', value: 'anthropic' }, { label: 'OpenAI', value: 'openai' }]
+const speechProfileOptions = computed(() => {
+  const options = profiles.value.map((profile) => ({
+    label: `${profile.name} · ${profile.provider === 'openai' ? 'OpenAI' : 'Anthropic'}`,
+    value: profile.id,
+    disabled: !profile.configured || Boolean(profile.credentialError),
+  }))
+  if (speechProfileId.value && !profiles.value.some((profile) => profile.id === speechProfileId.value)) {
+    options.unshift({ label: t('settings.speech_profile_missing'), value: speechProfileId.value, disabled: true })
+  }
+  return options
+})
 
 function resetTest() {
   ++testRun
@@ -72,12 +90,47 @@ async function choose(profile?: AiProfile) {
   if (await canLeave() && !disposed) select(profile)
 }
 async function reload(preferredId: string | null = selectedId.value) {
-  const data = await api.getAiProfiles(controller.signal)
+  const [data, speech] = await Promise.all([
+    api.getAiProfiles(controller.signal),
+    api.getAiSpeechSettings(controller.signal),
+  ])
   if (disposed) return
   profiles.value = data.profiles
   activeId.value = data.activeProfileId
   migrationError.value = data.migrationError
+  speechSettings.value = speech
+  speechProfileId.value = speech.profileId
+  speechPrivacyConsent.value = speech.privacyConsent
+  speechError.value = ''
   select(data.profiles.find((p) => p.id === preferredId) ?? data.profiles.find((p) => p.id === data.activeProfileId) ?? data.profiles[0])
+}
+async function saveSpeechSettings() {
+  if (blocked.value || speechSaving.value) return
+  speechSaving.value = true
+  speechError.value = ''
+  try {
+    const saved = await api.saveAiSpeechSettings({
+      profileId: speechProfileId.value,
+      privacyConsent: speechPrivacyConsent.value,
+    }, controller.signal)
+    if (disposed) return
+    speechSettings.value = saved
+    speechProfileId.value = saved.profileId
+    speechPrivacyConsent.value = saved.privacyConsent
+    toast.success(t('settings.speech_saved'))
+  } catch (error) {
+    if (disposed) return
+    const code = (error as { code?: string })?.code
+    speechError.value = t(code === 'ai-speech-key-type-invalid'
+      ? 'settings.speech_key_type_invalid'
+      : code === 'ai-speech-profile-unconfigured'
+        ? 'settings.speech_profile_unconfigured'
+        : code === 'ai-profile-not-found'
+          ? 'settings.speech_profile_missing'
+          : 'settings.speech_save_failed')
+  } finally {
+    speechSaving.value = false
+  }
 }
 async function load() {
   loading.value = true
@@ -207,10 +260,11 @@ async function testConnection() {
   } finally { if (run === testRun) testController = null }
 }
 function onKeydown(event: KeyboardEvent) {
-  if (event.key === 'Escape' && menuOpen.value) {
+  if (event.key === 'Escape' && (menuOpen.value || speechMenuOpen.value)) {
     event.preventDefault()
     event.stopPropagation()
     menuOpen.value = false
+    speechMenuOpen.value = false
   }
 }
 onMounted(async () => {
@@ -302,6 +356,27 @@ defineExpose({ canLeave })
             <p v-else-if="connectionState === 'failed'">{{ connectionError }}</p>
             <p v-else>{{ t('settings.connection_untested_detail') }}</p>
           </div>
+        </div>
+      </div>
+      <div class="settings-card settings-speech-card" aria-labelledby="settings-speech-title">
+        <h4 id="settings-speech-title" class="settings-card-title">{{ t('settings.speech_title') }}</h4>
+        <p class="settings-speech-description">{{ t('settings.speech_detail') }}</p>
+        <label class="settings-field">
+          <span class="settings-field-label">{{ t('settings.speech_profile') }}</span>
+          <NSelect data-testid="settings-speech-profile" :aria-label="t('settings.speech_profile')"
+            v-model:value="speechProfileId" v-model:show="speechMenuOpen" to=".settings-backdrop" clearable :options="speechProfileOptions"
+            :disabled="blocked || speechSaving" :placeholder="t('settings.speech_profile_placeholder')" />
+        </label>
+        <NCheckbox v-model:checked="speechPrivacyConsent" :disabled="blocked || speechSaving">
+          {{ t('settings.speech_privacy_consent') }}
+        </NCheckbox>
+        <p v-if="speechError" class="settings-warning-card" role="alert">{{ speechError }}</p>
+        <div class="settings-section-actions">
+          <NButton type="primary" :loading="speechSaving" :disabled="blocked || speechSaving"
+            @click="saveSpeechSettings">{{ t('settings.save') }}</NButton>
+          <span v-if="speechSettings.privacyConsent && !speechPrivacyConsent" class="settings-speech-revoke-hint">
+            {{ t('settings.speech_consent_will_revoke') }}
+          </span>
         </div>
       </div>
     </div>

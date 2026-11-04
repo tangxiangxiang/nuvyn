@@ -61,7 +61,15 @@ import {
 } from './settings.js'
 import type { AssistantBlocks, AiThreadScope, Message } from '../../src/lib/ai-api.js'
 import profileRoutes from './profileRoutes.js'
-import { AiProfileError, initializeAiProfiles, legacyProfileId, profileProbeConfig } from './profiles.js'
+import {
+  AiProfileError,
+  aiSpeechSettings,
+  initializeAiProfiles,
+  legacyProfileId,
+  profileProbeConfig,
+  saveAiSpeechSettings,
+} from './profiles.js'
+import { acquireNoteTtsSlot, NOTE_TTS_LIMITS, NoteTtsError, synthesizeNoteSpeech } from './tts.js'
 
 function bad(c: any, msg: string, status = 400, errorCode?: string) {
   c.header('Cache-Control', 'no-store')
@@ -266,8 +274,118 @@ function threadScopeMatchesContext(scope: AiThreadScope, ctx: ChatContext): bool
   return documentId === scope.documentId && path === scope.path
 }
 
-const ai = new Hono()
+const ai = new Hono<{ Variables: { authUser: { id: number; username: string }; authSessionId: number } }>()
 ai.route('/profiles', profileRoutes)
+
+function requireSpeechUser(c: any): { id: number } | null {
+  const user = c.get('authUser') as { id?: unknown } | undefined
+  return user && typeof user.id === 'number' && Number.isSafeInteger(user.id) && user.id > 0 ? { id: user.id } : null
+}
+
+async function readLimitedJson(request: Request, maxBytes: number): Promise<unknown> {
+  const contentLength = Number(request.headers.get('content-length'))
+  if (Number.isFinite(contentLength) && contentLength > maxBytes) {
+    await request.body?.cancel()
+    throw new NoteTtsError('tts-request-too-large', 'Request body exceeds the size limit', 413)
+  }
+  if (!request.body) throw new NoteTtsError('tts-invalid-request', 'JSON request body required', 400)
+  const reader = request.body.getReader()
+  const decoder = new TextDecoder()
+  let size = 0
+  let raw = ''
+  try {
+    while (true) {
+      const { done, value } = await reader.read()
+      if (done) break
+      size += value.byteLength
+      if (size > maxBytes) {
+        await reader.cancel()
+        throw new NoteTtsError('tts-request-too-large', 'Request body exceeds the size limit', 413)
+      }
+      raw += decoder.decode(value, { stream: true })
+    }
+    raw += decoder.decode()
+    return JSON.parse(raw) as unknown
+  } catch (error) {
+    if (error instanceof NoteTtsError) throw error
+    throw new NoteTtsError('tts-invalid-request', 'Invalid JSON request body', 400)
+  } finally {
+    reader.releaseLock()
+  }
+}
+
+ai.get('/tts/settings', (c) => {
+  c.header('Cache-Control', 'no-store')
+  if (!requireSpeechUser(c)) return bad(c, 'Authentication required', 401, 'auth-session-required')
+  return c.json(aiSpeechSettings(getDb()))
+})
+
+ai.put('/tts/settings', async (c) => {
+  c.header('Cache-Control', 'no-store')
+  try {
+    if (!requireSpeechUser(c)) throw new NoteTtsError('auth-session-required', 'Authentication required', 401)
+    const body = await readLimitedJson(c.req.raw, 2 * 1024)
+    if (!body || typeof body !== 'object' || Array.isArray(body)) {
+      throw new NoteTtsError('tts-invalid-settings', 'Invalid speech settings', 400)
+    }
+    const value = body as Record<string, unknown>
+    if (Object.keys(value).some((key) => !['profileId', 'privacyConsent'].includes(key))
+      || !(value.profileId === null || typeof value.profileId === 'string')
+      || typeof value.privacyConsent !== 'boolean') {
+      throw new NoteTtsError('tts-invalid-settings', 'Invalid speech settings', 400)
+    }
+    return c.json(saveAiSpeechSettings(getDb(), {
+      profileId: value.profileId as string | null,
+      privacyConsent: value.privacyConsent,
+    }))
+  } catch (error) {
+    if (error instanceof NoteTtsError) return bad(c, error.message, error.status, error.code)
+    const response = aiSettingsValidationResponse(c, error)
+    if (response) return response
+    const credential = aiKeyErrorResponse(c, error)
+    if (credential) return credential
+    return bad(c, 'Speech settings could not be saved', 500, 'tts-settings-failed')
+  }
+})
+
+ai.post('/tts/synthesize', async (c) => {
+  c.header('Cache-Control', 'no-store')
+  let release: (() => void) | null = null
+  try {
+    const body = await readLimitedJson(c.req.raw, NOTE_TTS_LIMITS.requestBodyBytes)
+    if (!body || typeof body !== 'object' || Array.isArray(body)) {
+      throw new NoteTtsError('tts-invalid-request', 'JSON request body required', 400)
+    }
+    const value = body as Record<string, unknown>
+    if (Object.keys(value).some((key) => key !== 'text') || typeof value.text !== 'string') {
+      throw new NoteTtsError('tts-invalid-request', 'Only a text field is accepted', 400)
+    }
+    const user = requireSpeechUser(c)
+    if (!user) throw new NoteTtsError('auth-session-required', 'Authentication required', 401)
+    if (!aiSpeechSettings(getDb()).privacyConsent) {
+      throw new NoteTtsError('tts-privacy-consent-required', 'Confirm the speech privacy notice before using this service', 403)
+    }
+    release = acquireNoteTtsSlot(String(user.id))
+    const audio = await synthesizeNoteSpeech(getDb(), value.text, c.req.raw.signal)
+    return c.body(new Uint8Array(audio), 200, {
+      'Content-Type': 'audio/mpeg',
+      'Cache-Control': 'no-store',
+      'X-Content-Type-Options': 'nosniff',
+    })
+  } catch (error) {
+    if (error instanceof NoteTtsError) {
+      if (error.retryAfterSeconds) c.header('Retry-After', String(error.retryAfterSeconds))
+      return bad(c, error.message, error.status, error.code)
+    }
+    if (error instanceof AiProfileError) return bad(c, error.message, error.status, error.code)
+    if (error instanceof AiKeyConfigurationError) {
+      return bad(c, 'The selected speech credential is unavailable', 503, error.code)
+    }
+    return bad(c, 'Speech generation failed', 500, 'tts-internal-error')
+  } finally {
+    release?.()
+  }
+})
 
 // ---- /thread ----
 // The UI addresses one durable thread by document identity. Sessions

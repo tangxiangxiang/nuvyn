@@ -1,5 +1,6 @@
 <script setup lang="ts">
-import { inject, nextTick, onBeforeUnmount, ref, toRef, watch } from 'vue'
+import { inject, nextTick, onBeforeUnmount, onMounted, ref, toRef, watch } from 'vue'
+import { NButton } from 'naive-ui'
 import { routerKey } from 'vue-router'
 import { useMarkdownRender, type Heading } from '../../composables/vault/useMarkdownRender'
 import { useMarkmapMount } from '../../composables/useMarkmapMount'
@@ -27,10 +28,13 @@ const props = withDefaults(defineProps<{
   deferImages?: boolean
   /** Only the interactive reader enables folding; export surfaces stay inert. */
   foldingEnabled?: boolean
+  /** Interactive Note reader only; export renderers leave this disabled. */
+  speechEnabled?: boolean
 }>(), { tag: 'div' })
 const emit = defineEmits<{
   'update:headings': [headings: Heading[]]
   rendered: [el: HTMLElement | null]
+  'read-selection': [text: string]
 }>()
 
 const { html, error, headings, ready } = useMarkdownRender(
@@ -45,6 +49,7 @@ const { html, error, headings, ready } = useMarkdownRender(
 const articleEl = ref<HTMLElement | null>(null)
 const { t, locale } = useI18n()
 const toast = useToast()
+const selectionAction = ref<{ text: string; top: number; left: number } | null>(null)
 const copyButtons = new WeakMap<HTMLButtonElement, HTMLElement>()
 const groupCopyButtons = new WeakMap<HTMLButtonElement, HTMLElement>()
 const vaultContext = useVaultContext()
@@ -59,6 +64,64 @@ type CodeTouch = { identifier: number; x: number; y: number; startedAt: number; 
 let codeTouch: CodeTouch | null = null
 let visibleCodeBlock: HTMLElement | null = null
 let codeRevealTimer: ReturnType<typeof setTimeout> | null = null
+
+function readArticleSelection(): { text: string; top: number; left: number } | null {
+  const root = articleEl.value
+  const selection = window.getSelection()
+  if (!props.speechEnabled || !root || !selection || selection.isCollapsed || !selection.toString().trim()) return null
+  const anchor = selection.anchorNode
+  const focus = selection.focusNode
+  if (!anchor || !focus || !root.contains(anchor) || !root.contains(focus)) return null
+  const range = selection.getRangeAt(0)
+  const rect = range.getBoundingClientRect()
+  const width = 220
+  const left = Math.max(10, Math.min(window.innerWidth - width - 10, rect.left + rect.width / 2 - width / 2))
+  return { text: selection.toString(), top: Math.max(8, rect.top - 44), left }
+}
+
+function updateSelectionAction(): void {
+  selectionAction.value = readArticleSelection()
+}
+
+function onSelectionContextMenu(event: MouseEvent): void {
+  const action = readArticleSelection()
+  if (!action) return
+  const isTouch = typeof window.matchMedia === 'function'
+    && window.matchMedia('(hover: none) and (pointer: coarse)').matches
+  if (!isTouch) event.preventDefault()
+  selectionAction.value = action
+}
+
+function onDocumentPointerDown(event: PointerEvent): void {
+  const target = event.target
+  if (target instanceof Element && target.closest('.note-reading-selection-actions')) return
+  if (target instanceof Node && articleEl.value?.contains(target)) return
+  selectionAction.value = null
+}
+
+async function copySelectedText(): Promise<void> {
+  const text = selectionAction.value?.text
+  if (!text) return
+  const copied = await copyTextToClipboard(text)
+  selectionAction.value = null
+  if (copied) toast.success(t('vault.content_copied'))
+  else toast.error(t('vault.copy_failed'))
+}
+
+function speakSelectedText(): void {
+  const text = selectionAction.value?.text
+  selectionAction.value = null
+  if (text) emit('read-selection', text)
+}
+
+watch(() => props.speechEnabled, (enabled) => {
+  if (enabled) document.addEventListener('selectionchange', updateSelectionAction)
+  else {
+    document.removeEventListener('selectionchange', updateSelectionAction)
+    selectionAction.value = null
+  }
+}, { immediate: true, flush: 'sync' })
+onMounted(() => document.addEventListener('pointerdown', onDocumentPointerDown))
 
 function clearCodeActionReveal(): void {
   if (codeRevealTimer !== null) clearTimeout(codeRevealTimer)
@@ -147,6 +210,9 @@ function clearFolding() {
   foldedHtml = null
 }
 onBeforeUnmount(() => {
+  document.removeEventListener('selectionchange', updateSelectionAction)
+  document.removeEventListener('pointerdown', onDocumentPointerDown)
+  selectionAction.value = null
   clearFolding()
   clearCodeActionReveal()
 })
@@ -297,9 +363,33 @@ defineExpose({ el: articleEl })
     class="article reading"
     v-html="html"
     @click="onArticleClick"
+    @contextmenu="onSelectionContextMenu"
+    @mouseup="updateSelectionAction"
     @touchstart.passive="onCodeTouchStart"
     @touchmove.passive="onCodeTouchMove"
     @touchend.passive="onCodeTouchEnd"
     @touchcancel.passive="clearCodeActionReveal"
   />
+  <Teleport to="body">
+    <div v-if="selectionAction && speechEnabled" class="note-reading-selection-actions"
+      :style="{ top: `${selectionAction.top}px`, left: `${selectionAction.left}px` }"
+      data-testid="note-reading-selection-actions" @pointerdown.stop>
+      <NButton size="small" type="primary" @click="speakSelectedText">{{ t('note.speech_read_selection') }}</NButton>
+      <NButton size="small" quaternary @click="copySelectedText">{{ t('note.speech_copy') }}</NButton>
+    </div>
+  </Teleport>
 </template>
+
+<style scoped>
+.note-reading-selection-actions {
+  position: fixed;
+  z-index: 4000;
+  display: flex;
+  gap: 4px;
+  padding: 4px;
+  border: 1px solid var(--border, #dfe2e8);
+  border-radius: 9px;
+  background: var(--bg, #fff);
+  box-shadow: 0 4px 18px rgb(20 24 40 / 16%);
+}
+</style>

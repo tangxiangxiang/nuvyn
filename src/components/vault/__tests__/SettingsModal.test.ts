@@ -10,6 +10,8 @@ import { useEditorPreferences } from '../../../composables/vault/useEditorPrefer
 import { useFileTreePreferences } from '../../../composables/vault/useFileTreePreferences'
 
 const getAiProfiles = vi.fn()
+const getAiSpeechSettings = vi.fn()
+const saveAiSpeechSettings = vi.fn()
 const createAiProfile = vi.fn()
 const updateAiProfile = vi.fn()
 const activateAiProfile = vi.fn()
@@ -34,6 +36,8 @@ const refreshAttachmentIndex = vi.fn()
 
 vi.mock('../../../lib/ai-api', () => ({
   getAiProfiles: (...args: unknown[]) => getAiProfiles(...args),
+  getAiSpeechSettings: (...args: unknown[]) => getAiSpeechSettings(...args),
+  saveAiSpeechSettings: (...args: unknown[]) => saveAiSpeechSettings(...args),
   createAiProfile: (...args: unknown[]) => createAiProfile(...args),
   updateAiProfile: (...args: unknown[]) => updateAiProfile(...args),
   activateAiProfile: (...args: unknown[]) => activateAiProfile(...args),
@@ -178,6 +182,8 @@ beforeEach(() => {
   localStorage.clear()
   vi.clearAllMocks()
   getAiProfiles.mockResolvedValue({ profiles: [openAiSettings(), anthropicSettings()], activeProfileId: 'openai-profile' })
+  getAiSpeechSettings.mockResolvedValue({ profileId: null, privacyConsent: false })
+  saveAiSpeechSettings.mockImplementation(async (settings: { profileId: string | null; privacyConsent: boolean }) => settings)
   updateAiProfile.mockResolvedValue(openAiSettings())
   createAiProfile.mockResolvedValue({ ...anthropicSettings(), id: 'new-profile', name: 'New' })
   activateAiProfile.mockImplementation(async (id: string) => ({ activeProfileId: id }))
@@ -291,6 +297,37 @@ describe('SettingsModal', () => {
     }, expect.any(AbortSignal))
     expect(document.body.querySelector('.settings-connection-status')?.textContent).toContain('已连接')
     expect(document.body.querySelector('.settings-connection-status')?.textContent).toContain('326 ms')
+  })
+
+  it('saves an explicit speech profile and privacy consent', async () => {
+    const wrapper = mountSettings()
+    await flushPromises()
+
+    wrapper.findAllComponents(NSelect)[1]!.vm.$emit('update:value', 'anthropic-profile')
+    wrapper.getComponent(NCheckbox).vm.$emit('update:checked', true)
+    await flushPromises()
+    const saveButton = Array.from(document.body.querySelectorAll<HTMLButtonElement>('.settings-speech-card button'))
+      .find((button) => button.textContent?.trim() === '保存')!
+    saveButton.click()
+    await flushPromises()
+
+    expect(saveAiSpeechSettings).toHaveBeenCalledWith({ profileId: 'anthropic-profile', privacyConsent: true }, expect.any(AbortSignal))
+  })
+
+  it('persists speech privacy consent revocation', async () => {
+    getAiSpeechSettings.mockResolvedValueOnce({ profileId: 'anthropic-profile', privacyConsent: true })
+    const wrapper = mountSettings()
+    await flushPromises()
+
+    wrapper.getComponent(NCheckbox).vm.$emit('update:checked', false)
+    await flushPromises()
+    expect(document.body.textContent).toContain('保存后将撤回此授权。')
+    const saveButton = Array.from(document.body.querySelectorAll<HTMLButtonElement>('.settings-speech-card button'))
+      .find((button) => button.textContent?.trim() === '保存')!
+    saveButton.click()
+    await flushPromises()
+
+    expect(saveAiSpeechSettings).toHaveBeenCalledWith({ profileId: 'anthropic-profile', privacyConsent: false }, expect.any(AbortSignal))
   })
 
   it('resets a connected status when the displayed configuration changes', async () => {

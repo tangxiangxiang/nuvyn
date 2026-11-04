@@ -4,8 +4,47 @@
 // components import them from this file.
 import type { AiLiveContextSnapshot } from '../composables/vault/aiLiveContext'
 import { authFetch } from './auth-session'
-import type { AiProfile, AiProfileInput, AiProfileList } from '../../shared/aiProfiles'
+import type { AiProfile, AiProfileInput, AiProfileList, AiSpeechSettings } from '../../shared/aiProfiles'
 export type { AiProfile, AiProfileInput, AiProfileList } from '../../shared/aiProfiles'
+export type { AiSpeechSettings } from '../../shared/aiProfiles'
+
+export type NoteSpeechApiError = Error & { status: number; code?: string }
+
+async function noteSpeechError(response: Response): Promise<NoteSpeechApiError> {
+  const body = await response.json().catch(() => ({})) as { error?: unknown; code?: unknown }
+  return Object.assign(
+    new Error(typeof body.error === 'string' ? body.error : `Speech request failed (HTTP ${response.status})`),
+    { status: response.status, ...(typeof body.code === 'string' ? { code: body.code } : {}) },
+  )
+}
+
+export async function getAiSpeechSettings(signal?: AbortSignal): Promise<AiSpeechSettings> {
+  return jsonOrThrow(await authFetch('/api/ai/tts/settings', { signal }))
+}
+
+export async function saveAiSpeechSettings(
+  input: AiSpeechSettings,
+  signal?: AbortSignal,
+): Promise<AiSpeechSettings> {
+  return jsonOrThrow(await authFetch('/api/ai/tts/settings', {
+    method: 'PUT', ...jsonBody(input), signal,
+  }))
+}
+
+export async function synthesizeNoteSpeech(text: string, signal?: AbortSignal): Promise<Blob> {
+  const response = await authFetch('/api/ai/tts/synthesize', {
+    method: 'POST', ...jsonBody({ text }), signal,
+  })
+  if (!response.ok) throw await noteSpeechError(response)
+  const audio = await response.blob()
+  if (audio.size === 0 || audio.type && audio.type !== 'audio/mpeg') {
+    throw Object.assign(new Error('Speech response contained no playable audio'), {
+      status: 502,
+      code: 'tts-invalid-audio',
+    }) as NoteSpeechApiError
+  }
+  return audio
+}
 
 export interface Session {
   id: number

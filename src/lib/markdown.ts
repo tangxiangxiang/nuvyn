@@ -1,4 +1,5 @@
 import MarkdownIt from 'markdown-it'
+import type Token from 'markdown-it/lib/token.mjs'
 import DOMPurify from 'dompurify'
 import taskLists from 'markdown-it-task-lists'
 import anchor from 'markdown-it-anchor'
@@ -28,6 +29,7 @@ import {
 } from './shiki'
 import { parseFenceMeta, type FenceMeta } from './fenceMeta'
 import { parseBoardReference } from './boardReferences'
+import { parseDoc } from './frontmatter'
 import { authenticatedMarkdownResourceResolver } from './authenticatedMarkdownResourceResolver'
 import {
   expandMarkdownResources,
@@ -577,6 +579,76 @@ async function renderWithMetadata(
 
 export async function render(markdown: string, options: MarkdownRenderOptions = {}): Promise<string> {
   return (await renderWithMetadata(markdown, options)).html
+}
+
+function safeHtmlText(source: string): string {
+  if (typeof DOMParser === 'undefined') return ''
+  const html = sanitizeMarkdownHtml(source)
+  const document = new DOMParser().parseFromString(html, 'text/html')
+  document.querySelectorAll('script,style,template,pre,svg,math,img,[hidden],[aria-hidden="true"]').forEach((node) => node.remove())
+  return document.body.textContent ?? ''
+}
+
+function inlineSpeakableText(children: Token[] | null): string {
+  if (!children) return ''
+  let output = ''
+  for (const token of children) {
+    if (token.type === 'image') continue
+    if (token.type === 'html_inline') {
+      output += safeHtmlText(token.content)
+      continue
+    }
+    if (token.type === 'text' || token.type === 'code_inline') {
+      output += token.content
+      continue
+    }
+    if (token.type === 'math_inline' && !/[\\^_{}]/u.test(token.content)) output += token.content
+    if (token.type === 'softbreak' || token.type === 'hardbreak') output += ' '
+  }
+  return output
+}
+
+/** Extract visible prose using the same MarkdownIt and safe Include expansion as Reader. */
+export async function extractSpeakableMarkdown(
+  raw: string,
+  options: MarkdownRenderOptions = {},
+): Promise<string> {
+  const { frontmatter, content } = parseDoc(raw)
+  const title = typeof frontmatter.title === 'string' ? frontmatter.title.trim() : ''
+  const startsWithH1 = /^#\s+\S/.test(content.trimStart())
+  const body = title && !startsWithH1
+    ? `# ${title}\n\n${content.replace(/^\n+/, '')}`
+    : content
+  const md = await getMd()
+  const expanded = await expandMarkdownResources(body, {
+    md,
+    sourcePath: options.sourcePath,
+    resourceResolver: options.resourceResolver
+      ?? (options.sourcePath ? authenticatedMarkdownResourceResolver : undefined),
+    signal: options.signal,
+  })
+  if (options.signal?.aborted) throw new DOMException('Speech text extraction was cancelled', 'AbortError')
+  const env: WikiLinkEnv = {
+    ...(options.resolver ? { wikiResolver: options.resolver } : {}),
+    resourceSourcePathByLine: expanded.sourcePathByLine,
+    deferWikiResolution: expanded.sourcePathByLine.some(Boolean),
+  }
+  const tokens = md.parse(expanded.markdown, env)
+  const blocks: string[] = []
+  for (const token of tokens) {
+    if (token.type === 'fence' || token.type === 'code_block') continue
+    if (token.type === 'inline') {
+      const text = inlineSpeakableText(token.children).replace(/[\t\u00a0]+/gu, ' ').trim()
+      if (text) blocks.push(text)
+      continue
+    }
+    // Block math is commonly TeX source; do not send that source as prose.
+    if (token.type === 'html_block') {
+      const text = safeHtmlText(token.content).replace(/[\t\u00a0]+/gu, ' ').trim()
+      if (text) blocks.push(text)
+    }
+  }
+  return blocks.join('\n\n').replace(/\n{3,}/gu, '\n\n').trim()
 }
 
 export async function renderWithHeadingSources(

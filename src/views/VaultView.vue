@@ -12,6 +12,7 @@ import { useToast } from '../composables/useToast'
 import { NUVYN_BROWSER_STORAGE_KEYS } from '../technicalNamespace'
 import { isNuvynShortcutBlocked } from '../lib/keyboard'
 import { useConfirm } from '../composables/useConfirm'
+import { useNoteSpeech } from '../composables/vault/useNoteSpeech'
 import { useI18n } from '../composables/useI18n'
 import { useAuth, type WorkspaceAuthTransitionAdapter } from '../composables/useAuth'
 import { useEditorTabs } from '../composables/vault/useEditorTabs'
@@ -113,11 +114,14 @@ import PdfExportSurface from '../components/vault/PdfExportSurface.vue'
 import DocumentExportDialog from '../components/vault/DocumentExportDialog.vue'
 import { useDocumentExport } from '../composables/vault/useDocumentExport'
 import { captureDocumentExportSnapshot } from '../lib/documentExport'
+import { extractSpeakableMarkdown } from '../lib/markdown'
+import { getAiSpeechSettings, saveAiSpeechSettings } from '../lib/ai-api'
 import { useHtmlDocumentExport } from '../composables/vault/useHtmlDocumentExport'
 import RightRail from '../components/vault/RightRail.vue'
 import EmptyState from '../components/vault/EmptyState.vue'
 import ActivityBar from '../components/vault/ActivityBar.vue'
 import SettingsModal from '../components/vault/SettingsModal.vue'
+import NoteSpeechPlayer from '../components/vault/NoteSpeechPlayer.vue'
 import type { MetadataContext } from '../components/vault/metadataDraftStore'
 import HistoryPanel from '../components/vault/HistoryPanel.vue'
 import HistoryComparisonPane from '../components/vault/HistoryComparisonPane.vue'
@@ -300,6 +304,17 @@ const tagsFilter = ref('')
 const toast = useToast()
 const { confirm, confirmCancellable } = useConfirm()
 const { locale, t } = useI18n()
+const noteSpeech = useNoteSpeech()
+const {
+  status: noteSpeechStatus,
+  currentIndex: noteSpeechCurrentIndex,
+  totalSegments: noteSpeechTotalSegments,
+  playbackRate: noteSpeechPlaybackRate,
+  error: noteSpeechError,
+  canGoPrevious: noteSpeechCanGoPrevious,
+  canGoNext: noteSpeechCanGoNext,
+} = noteSpeech
+let noteSpeechStartGeneration = 0
 const auth = useAuth()
 const diaryAccess = useDiaryAccessSession()
 const { active: zenModeActive, enter: enterZenMode, exit: exitZenMode, toggle: toggleZenMode } = useZenMode()
@@ -1994,6 +2009,102 @@ const canInsertNoteImage = computed(() => Boolean(
   && !isReadMode.value
   && !specialWorkspaceSurfaceActive.value
 ))
+const canUseNoteSpeech = computed(() => Boolean(
+  route.meta.workspaceKind === 'vault'
+  && activeScope.value === 'note'
+  && activePath.value
+  && scopeForWorkspacePath(activePath.value) === 'note'
+  && activeTab.value?.path === activePath.value
+  && !activeTab.value.loading
+  && !activeTab.value.loadError
+  && !specialWorkspaceSurfaceActive.value
+  && !isMobileDiaryViewport.value
+))
+
+async function startNoteSpeech(sourceText: string, sourcePath: string, markdown: boolean): Promise<void> {
+  if (!canUseNoteSpeech.value || activePath.value !== sourcePath) return
+  const startGeneration = ++noteSpeechStartGeneration
+  noteSpeech.stop()
+  const workspaceTabId = activeWorkspaceTabId.value
+  const stillCurrent = () => (
+    startGeneration === noteSpeechStartGeneration
+    && canUseNoteSpeech.value
+    && activePath.value === sourcePath
+    && activeWorkspaceTabId.value === workspaceTabId
+  )
+  try {
+    const settings = await getAiSpeechSettings()
+    if (!stillCurrent()) return
+    if (!settings.profileId) {
+      toast.error(t('note.speech_profile_missing'))
+      settingsOpen.value = true
+      return
+    }
+    if (!settings.privacyConsent) {
+      const accepted = await confirm(
+        t('note.speech_privacy_title'),
+        t('note.speech_privacy_detail'),
+        { confirmLabel: t('common.confirm'), cancelLabel: t('common.cancel') },
+      )
+      if (!accepted || !stillCurrent()) return
+      await saveAiSpeechSettings({ profileId: settings.profileId, privacyConsent: true })
+      if (!stillCurrent()) return
+    }
+    const speakable = markdown
+      ? await extractSpeakableMarkdown(sourceText, { sourcePath })
+      : sourceText.trim()
+    if (!stillCurrent()) return
+    noteSpeech.start(speakable)
+  } catch (error) {
+    if (!stillCurrent() || (error instanceof DOMException && error.name === 'AbortError')) return
+    const code = (error as { code?: unknown })?.code
+    if (code === 'ai-speech-profile-missing' || code === 'ai-profile-not-found') {
+      toast.error(t('note.speech_profile_missing'))
+      settingsOpen.value = true
+    } else if (code === 'tts-privacy-consent-required') toast.error(t('note.speech_consent_required'))
+    else toast.error(t('note.speech_unavailable'))
+  }
+}
+
+function readSelectedEditorText(text: string): void {
+  const path = activePath.value
+  if (path && canUseNoteSpeech.value) void startNoteSpeech(text, path, true)
+}
+
+function readSelectedVisibleText(text: string): void {
+  const path = activePath.value
+  if (path && canUseNoteSpeech.value) void startNoteSpeech(text, path, false)
+}
+
+const readActiveNoteAloud = (): void => {
+  const tab = activeTab.value
+  if (!tab || !canUseNoteSpeech.value) return
+  // The active tab is authoritative, including unsaved editor content.
+  void startNoteSpeech(tab.raw, tab.path, true)
+}
+
+watch(canUseNoteSpeech, (enabled) => {
+  if (appShell?.noteSpeechReadAllCommand) {
+    appShell.noteSpeechReadAllCommand.value = enabled ? readActiveNoteAloud : null
+  }
+}, { immediate: true, flush: 'sync' })
+watch([canUseNoteSpeech, activePath, activeWorkspaceTabId, activeScope], ([enabled], previous) => {
+  if (!previous) return
+  if (!enabled || canUseNoteSpeech.value !== previous[0]
+    || activePath.value !== previous[1]
+    || activeWorkspaceTabId.value !== previous[2]
+    || activeScope.value !== previous[3]) {
+    noteSpeechStartGeneration += 1
+    noteSpeech.stop()
+  }
+}, { flush: 'sync' })
+onBeforeUnmount(() => {
+  noteSpeechStartGeneration += 1
+  noteSpeech.stop()
+  if (appShell?.noteSpeechReadAllCommand?.value === readActiveNoteAloud) {
+    appShell.noteSpeechReadAllCommand.value = null
+  }
+})
 const tabletEditing = computed(() => noteTabletLayout.value && canInsertNoteImage.value)
 useTabletEditorViewport(vaultRef, computed(() => tabletEditing.value && !tabletDrawer.value && !settingsOpen.value))
 const chooseTabletImage = () => {
@@ -3673,6 +3784,7 @@ watch(isReadMode, async (reading) => {
             :zen-mode-available="canUseZenMode"
             :zen-mode="zenModeActive"
             :allow-image-insertion="canInsertNoteImage"
+            :speech-enabled="canUseNoteSpeech"
             :tablet-editing="tabletEditing"
             :link-targets="editorLinkTargets"
             @update:model-value="(val: string, path: string) => onEditorChange(path, val)"
@@ -3683,6 +3795,7 @@ watch(isReadMode, async (reading) => {
             @toggle-focus-width="toggleEditorFocusWidth"
             @toggle-zen-mode="toggleZenMode"
             @exit-zen-mode="exitZenMode"
+            @read-selection="readSelectedEditorText"
           />
         </div>
         <div v-if="!tabs.length && !(isDiaryScope && isManagedDiaryDocumentRoute)" class="content-empty">
@@ -3724,7 +3837,9 @@ watch(isReadMode, async (reading) => {
             :raw="activeTab.raw"
             :resolver="wikiResolver"
             :source-path="activeTab.path"
+            :speech-enabled="canUseNoteSpeech"
             @rendered="onReadingPaneRendered"
+            @read-selection="readSelectedVisibleText"
           />
         </div>
         <div v-if="!tabs.length && !(isDiaryScope && isManagedDiaryDocumentRoute)" class="content-empty">
@@ -3846,6 +3961,24 @@ watch(isReadMode, async (reading) => {
       :resolver="pdfWikiResolver"
       :source-path="pdfExportRequest.path"
       @rendered="onPdfExportRendered"
+    />
+    <NoteSpeechPlayer
+      v-if="canUseNoteSpeech"
+      :status="noteSpeechStatus"
+      :current-index="noteSpeechCurrentIndex"
+      :total-segments="noteSpeechTotalSegments"
+      :playback-rate="noteSpeechPlaybackRate"
+      :error="noteSpeechError"
+      :can-go-previous="noteSpeechCanGoPrevious"
+      :can-go-next="noteSpeechCanGoNext"
+      @play="noteSpeech.resume"
+      @pause="noteSpeech.pause"
+      @resume="noteSpeech.resume"
+      @stop="noteSpeech.stop"
+      @previous="noteSpeech.previous"
+      @next="noteSpeech.next"
+      @retry="noteSpeech.retry"
+      @rate="noteSpeech.setPlaybackRate"
     />
   </div>
 </template>

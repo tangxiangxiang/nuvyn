@@ -26,9 +26,11 @@ const props = defineProps<{
   sourcePath?: string
   resourceResolver?: MarkdownResourceResolver
   foldingEnabled?: boolean
+  speechEnabled?: boolean
 }>()
 const emit = defineEmits<{
   rendered: [path: string | null, el: HTMLElement | null]
+  'read-selection': [text: string]
 }>()
 const headings = ref<Heading[]>([])
 
@@ -241,8 +243,10 @@ watch(() => props.raw, () => {
           :resource-resolver="resourceResolver"
           tag="article"
           :folding-enabled="foldingEnabled"
+          :speech-enabled="speechEnabled"
           @update:headings="headings = $event"
           @rendered="onArticleRendered"
+          @read-selection="emit('read-selection', $event)"
         />
       </div>
     </template>

@@ -848,6 +848,7 @@ body.brand-constellation-active * {
   gap: 6px;            /* search and theme toggle sit close together as a unit */
 }
 .nav-search,
+.note-speech-read-all,
 .theme-toggle,
 .nav-actions .account-menu-root .ab-btn-account {
   width: 28px;
@@ -867,12 +868,13 @@ body.brand-constellation-active * {
   transition: color 0.15s, border-color 0.15s, background 0.15s;
 }
 .nav-search:hover,
+.note-speech-read-all:hover,
 .theme-toggle:hover {
   color: var(--text-h);
   border-color: var(--border);
   background: var(--bg-soft);
 }
-.nav-actions :where(.nav-search, .theme-toggle, .account-menu-root .ab-btn-account, .left-panel-toggle, .right-rail-toggle, .view-toggle) .n-icon {
+.nav-actions :where(.nav-search, .note-speech-read-all, .theme-toggle, .account-menu-root .ab-btn-account, .left-panel-toggle, .right-rail-toggle, .view-toggle) .n-icon {
   display: flex;
   align-items: center;
   justify-content: center;
@@ -880,13 +882,13 @@ body.brand-constellation-active * {
   height: 18px;
   line-height: 1;
 }
-.nav-actions :where(.nav-search, .theme-toggle, .account-menu-root .ab-btn-account, .left-panel-toggle, .right-rail-toggle, .view-toggle) svg {
+.nav-actions :where(.nav-search, .note-speech-read-all, .theme-toggle, .account-menu-root .ab-btn-account, .left-panel-toggle, .right-rail-toggle, .view-toggle) svg {
   display: block;
   width: 18px;
   height: 18px;
 }
 .nav-actions .account-menu-root .ab-btn-account .ab-btn-icon { transform: translateY(0.5px); }
-.nav-actions :where(.nav-search, .theme-toggle, .account-menu-root .ab-btn-account) .n-button__content {
+.nav-actions :where(.nav-search, .note-speech-read-all, .theme-toggle, .account-menu-root .ab-btn-account) .n-button__content {
   display: flex;
   align-items: center;
   justify-content: center;

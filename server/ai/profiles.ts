@@ -34,6 +34,8 @@ export class AiProfileError extends Error {
 
 const IMPORTED = 'ai.profiles.imported.v1'
 const ACTIVE = 'ai.active.profileId'
+const SPEECH_PROFILE = 'ai.speech.profileId'
+const SPEECH_PRIVACY_CONSENT = 'ai.speech.privacyConsent.v1'
 const failedImports = new WeakMap<Database, AiKeyConfigurationError>()
 function setting(db: Database, key: string): string {
   return (db.prepare('SELECT value FROM settings WHERE key = ?').get(key) as { value: string } | undefined)?.value ?? ''
@@ -230,6 +232,47 @@ export function activeProfileRuntime(db: Database): AiRuntimeConfig {
   initializeAiProfiles(db)
   const id = setting(db, ACTIVE)
   return id ? profileRuntime(db, id) : { provider: 'anthropic', model: DEFAULT_ANTHROPIC_MODEL, source: 'none' }
+}
+
+export function aiSpeechSettings(db: Database): { profileId: string | null; privacyConsent: boolean } {
+  initializeAiProfiles(db)
+  return {
+    profileId: setting(db, SPEECH_PROFILE) || null,
+    privacyConsent: setting(db, SPEECH_PRIVACY_CONSENT) === '1',
+  }
+}
+
+export function saveAiSpeechSettings(
+  db: Database,
+  input: { profileId: string | null; privacyConsent: boolean },
+): { profileId: string | null; privacyConsent: boolean } {
+  initializeAiProfiles(db)
+  if (input.profileId !== null) {
+    if (typeof input.profileId !== 'string' || input.profileId.length > 100) {
+      throw new AiProfileError('ai-speech-profile-invalid', 'Invalid speech profile')
+    }
+    const runtime = profileRuntime(db, input.profileId)
+    if (!runtime.apiKey) throw new AiProfileError('ai-speech-profile-unconfigured', 'Speech profile has no API key', 409)
+    if (!runtime.apiKey.startsWith('sk-cp')) {
+      throw new AiProfileError('ai-speech-key-type-invalid', 'Speech requires a MiniMax subscription API key', 409)
+    }
+  }
+  db.transaction(() => {
+    putSetting(db, SPEECH_PROFILE, input.profileId ?? '')
+    putSetting(db, SPEECH_PRIVACY_CONSENT, input.privacyConsent ? '1' : '0')
+  })()
+  return aiSpeechSettings(db)
+}
+
+export function aiSpeechRuntime(db: Database): AiRuntimeConfig {
+  const { profileId } = aiSpeechSettings(db)
+  if (!profileId) throw new AiProfileError('ai-speech-profile-missing', 'Choose a MiniMax speech profile in AI settings', 503)
+  const runtime = profileRuntime(db, profileId)
+  if (!runtime.apiKey) throw new AiProfileError('ai-speech-profile-unconfigured', 'Speech profile has no API key', 503)
+  if (!runtime.apiKey.startsWith('sk-cp')) {
+    throw new AiProfileError('ai-speech-key-type-invalid', 'Speech requires a MiniMax subscription API key', 409)
+  }
+  return runtime
 }
 export function activateAiProfile(db: Database, id: string): void {
   db.transaction(() => {

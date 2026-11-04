@@ -19,6 +19,11 @@ export interface AiProfileList {
   migrationError?: string
 }
 
+export interface AiSpeechSettings {
+  profileId: string | null
+  privacyConsent: boolean
+}
+
 export interface AiProfileInput {
   name?: string
   provider?: AiProvider

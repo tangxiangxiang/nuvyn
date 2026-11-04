@@ -57,6 +57,7 @@ const props = defineProps<{
   zenMode?: boolean
   allowImageInsertion?: boolean
   tabletEditing?: boolean
+  speechEnabled?: boolean
   linkTargets?: EditorLinkTarget[]
 }>()
 const preferences = useEditorPreferences()
@@ -71,6 +72,7 @@ const emit = defineEmits<{
   'toggle-focus-width': []
   'toggle-zen-mode': []
   'exit-zen-mode': []
+  'read-selection': [text: string]
   'composition-edited': [path: string]
 }>()
 
@@ -83,6 +85,7 @@ let decorationIds: string[] = []
 let pasteHandler: ((event: ClipboardEvent) => void) | null = null
 let unregisterImagePasteHandler: (() => void) | null = null
 let noteImageInsertionAction: { dispose: () => void } | null = null
+let noteSpeechSelectionAction: { dispose: () => void } | null = null
 let imageInput: HTMLInputElement | null = null
 const showAttachmentPicker = ref(false)
 let mounted = false
@@ -366,6 +369,30 @@ function syncNoteImageInsertionAction(): void {
     run() {
       editor?.focus()
       chooseImage()
+    },
+  })
+}
+
+function syncNoteSpeechSelectionAction(): void {
+  if (!editor) return
+  if (props.speechEnabled !== true) {
+    noteSpeechSelectionAction?.dispose()
+    noteSpeechSelectionAction = null
+    return
+  }
+  if (noteSpeechSelectionAction) return
+  noteSpeechSelectionAction = editor.addAction({
+    id: 'nuvyn.read-note-selection',
+    label: t('note.speech_read_selection'),
+    precondition: 'editorHasSelection',
+    contextMenuGroupId: '1_modification',
+    contextMenuOrder: 4,
+    run(instance) {
+      if (!model) return
+      const selection = instance.getSelection()
+      if (!selection || selection.isEmpty()) return
+      const selected = model.getValueInRange(selection)
+      if (selected.trim()) emit('read-selection', selected)
     },
   })
 }
@@ -1285,6 +1312,7 @@ onMounted(() => {
     },
   })
   syncNoteImageInsertionAction()
+  syncNoteSpeechSelectionAction()
   editor.addAction({
     id: 'nuvyn.toggle-view-mode',
     label: 'Toggle Edit / Reading Mode',
@@ -1430,6 +1458,7 @@ watch(() => props.allowImageInsertion, () => {
   syncImagePasteHandler()
   syncNoteImageInsertionAction()
 })
+watch(() => props.speechEnabled, syncNoteSpeechSelectionAction, { flush: 'sync' })
 watch(() => props.allowImageInsertion, (allowed) => {
   if (!allowed && showAttachmentPicker.value) cancelAttachmentPicker()
 })
@@ -1516,6 +1545,8 @@ onBeforeUnmount(() => {
   unregisterImagePasteHandler = null
   noteImageInsertionAction?.dispose()
   noteImageInsertionAction = null
+  noteSpeechSelectionAction?.dispose()
+  noteSpeechSelectionAction = null
   resetFocusWidthChord()
   zenOverlayObserver?.disconnect()
   zenOverlayObserver = null

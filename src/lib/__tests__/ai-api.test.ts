@@ -115,6 +115,54 @@ describe('ai-api', () => {
     expect(calls[0].init.method).toBe('DELETE')
   })
 
+  it('gets and saves explicit speech profile and privacy settings', async () => {
+    responses.push({ status: 200, body: { profileId: null, privacyConsent: false } })
+    expect(await api.getAiSpeechSettings()).toEqual({ profileId: null, privacyConsent: false })
+    expect(calls[0]?.url).toBe('/api/ai/tts/settings')
+    expect(calls[0]?.init.method ?? 'GET').toBe('GET')
+
+    responses.push({ status: 200, body: { profileId: 'profile-1', privacyConsent: true } })
+    expect(await api.saveAiSpeechSettings({ profileId: 'profile-1', privacyConsent: true }))
+      .toEqual({ profileId: 'profile-1', privacyConsent: true })
+    expect(calls[1]?.url).toBe('/api/ai/tts/settings')
+    expect(calls[1]?.init.method).toBe('PUT')
+    expect(JSON.parse(calls[1]?.init.body as string)).toEqual({ profileId: 'profile-1', privacyConsent: true })
+  })
+
+  it('posts text with cancellation and returns an MP3 Blob', async () => {
+    const controller = new AbortController()
+    const bytes = new Uint8Array([73, 68, 51, 4])
+    globalThis.fetch = vi.fn(async (url: string | URL | Request, init?: RequestInit) => {
+      calls.push({ url: String(url), init: init ?? {} })
+      return new Response(bytes, { status: 200, headers: { 'content-type': 'audio/mpeg' } })
+    }) as unknown as typeof fetch
+
+    const blob = await api.synthesizeNoteSpeech('say this', controller.signal)
+    expect(calls[0]?.url).toBe('/api/ai/tts/synthesize')
+    expect(calls[0]?.init.method).toBe('POST')
+    expect(calls[0]?.init.signal).toBe(controller.signal)
+    expect(JSON.parse(calls[0]?.init.body as string)).toEqual({ text: 'say this' })
+    expect(blob.type).toBe('audio/mpeg')
+    expect([...new Uint8Array(await blob.arrayBuffer())]).toEqual([...bytes])
+  })
+
+  it('preserves structured speech errors and rejects empty or wrong-mime audio', async () => {
+    globalThis.fetch = vi.fn(async () => new Response(
+      JSON.stringify({ error: 'consent required', code: 'tts-privacy-consent-required' }),
+      { status: 403, headers: { 'content-type': 'application/json' } },
+    )) as unknown as typeof fetch
+    await expect(api.synthesizeNoteSpeech('say this')).rejects.toMatchObject({
+      status: 403,
+      code: 'tts-privacy-consent-required',
+    })
+
+    globalThis.fetch = vi.fn(async () => new Response('', { status: 200, headers: { 'content-type': 'audio/mpeg' } })) as unknown as typeof fetch
+    await expect(api.synthesizeNoteSpeech('say this')).rejects.toMatchObject({ code: 'tts-invalid-audio' })
+
+    globalThis.fetch = vi.fn(async () => new Response('not audio', { status: 200, headers: { 'content-type': 'text/plain' } })) as unknown as typeof fetch
+    await expect(api.synthesizeNoteSpeech('say this')).rejects.toMatchObject({ code: 'tts-invalid-audio' })
+  })
+
   it('testAiConnection posts transient provider settings and forwards AbortSignal', async () => {
     responses.push({
       status: 200,

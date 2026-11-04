@@ -8,10 +8,11 @@
 // async Shiki language preparation).
 import { afterEach, beforeEach, describe, it, expect, vi } from 'vitest'
 import { createHighlighter, type Highlighter } from 'shiki'
-import { createMarkdownSanitizer, render, renderWithHeadingSources } from '../markdown'
+import { createMarkdownSanitizer, extractSpeakableMarkdown, render, renderWithHeadingSources } from '../markdown'
 import type { Resolver as WikiResolver } from '../wikiLinks'
 import { EXTERNAL_LINK_PROVENANCE_ATTR } from '../wikiLinks'
 import { __testing__ as shikiTesting, getGeneratedShikiCss } from '../shiki'
+import type { MarkdownResourceResolver } from '../markdownResources'
 
 type LanguageInput = Parameters<Highlighter['loadLanguage']>[0]
 
@@ -590,6 +591,119 @@ describe('markdown render()', () => {
     const html = await render('<span onclick="alert(1)">:smile:</span><script>alert(1)</script>')
     expect(html).toContain('<span>😄</span>')
     expect(html).not.toMatch(/<script|onclick=/i)
+  })
+})
+
+describe('extractSpeakableMarkdown', () => {
+  it('keeps prose, headings, emphasis, lists, quotes, visible link labels and inline code', async () => {
+    const result = await extractSpeakableMarkdown([
+      '---',
+      'title: Note title',
+      '---',
+      '',
+      '## About Nuvyn',
+      '',
+      'This is **personal knowledge** and *thoughtful writing*.',
+      '',
+      '- First item',
+      '- Second item',
+      '',
+      '> A quoted sentence.',
+      '',
+      'See [the guide](https://example.test/private-url) and [[Inbox/Ideas|design notes]].',
+      '',
+      'Run `npm run build`.',
+    ].join('\n'))
+
+    expect(result).toContain('Note title')
+    expect(result).toContain('About Nuvyn')
+    expect(result).toContain('This is personal knowledge and thoughtful writing.')
+    expect(result).toContain('First item')
+    expect(result).toContain('A quoted sentence.')
+    expect(result).toContain('the guide')
+    expect(result).toContain('design notes')
+    expect(result).toContain('npm run build')
+    expect(result).not.toContain('https://')
+    expect(result).not.toContain('Inbox/Ideas')
+    expect(result).not.toContain('**')
+  })
+
+  it('skips fenced source, Mermaid, MarkMap, images, and Board references', async () => {
+    const result = await extractSpeakableMarkdown([
+      'Visible introduction.',
+      '',
+      '![secret image text](local.png)',
+      '',
+      '![Board preview](board:550e8400-e29b-41d4-a716-446655440000)',
+      '',
+      '```js',
+      'secretCode()',
+      '```',
+      '',
+      '```mermaid',
+      'graph TD; secret --> graph',
+      '```',
+      '',
+      '```markmap',
+      '# Secret map',
+      '```',
+      '',
+      'Visible ending.',
+    ].join('\n'))
+
+    expect(result).toContain('Visible introduction.')
+    expect(result).toContain('Visible ending.')
+    expect(result).not.toContain('secret image text')
+    expect(result).not.toContain('secretCode')
+    expect(result).not.toContain('graph TD')
+    expect(result).not.toContain('Secret map')
+    expect(result).not.toContain('Board preview')
+  })
+
+  it('keeps callout text and safe visible HTML while dropping hidden, image, and script content', async () => {
+    const result = await extractSpeakableMarkdown([
+      '::: info Custom title',
+      '',
+      'Callout **body**.',
+      '',
+      ':::',
+      '',
+      '<div>Visible HTML <img alt="image label" src="x.png"><script>secretScript()</script><span aria-hidden="true">hidden text</span></div>',
+    ].join('\n'))
+
+    expect(result).toContain('Callout body.')
+    expect(result).toContain('Visible HTML')
+    expect(result).toContain('Custom title')
+    expect(result).not.toContain('image label')
+    expect(result).not.toContain('secretScript')
+    expect(result).not.toContain('hidden text')
+  })
+
+  it('expands safe Include resources using the existing resolver and expansion bounds', async () => {
+    const read = vi.fn(async ({ path, kind }: { path: string; kind: 'snippet' | 'include' | 'image' }) => ({
+      path,
+      kind,
+      content: '# Included section\n\nSpeak this included text.',
+    }))
+    const resourceResolver: MarkdownResourceResolver = { read }
+    const result = await extractSpeakableMarkdown('<!--@include: ./part.md-->', {
+      sourcePath: 'docs/page.md',
+      resourceResolver,
+    })
+
+    expect(result).toContain('Included section')
+    expect(result).toContain('Speak this included text.')
+    expect(read).toHaveBeenCalledWith(expect.objectContaining({
+      kind: 'include',
+      path: 'docs/part.md',
+    }))
+  })
+
+  it('keeps simple inline math text but does not read complex TeX source', async () => {
+    const result = await extractSpeakableMarkdown('Value $x + 1$ is clear, while $\\int_0^1 x^2\\,dx$ is complex.\n\n$$\n\\frac{a}{b}\n$$')
+    expect(result).toContain('x + 1')
+    expect(result).not.toContain('int_0')
+    expect(result).not.toContain('frac')
   })
 })
 

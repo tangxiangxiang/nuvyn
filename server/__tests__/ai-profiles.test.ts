@@ -6,7 +6,7 @@ import path from 'node:path'
 import { applyMigrations } from '../db'
 import { encryptApiKey, decryptApiKey } from '../ai/keyEncryption'
 import { getAiRuntimeConfig, getAiSettingsView, saveAiSettings, getAiCredentialStatus } from '../ai/settings'
-import { activateAiProfile, createAiProfile, deleteAiProfile, initializeAiProfiles, legacyProfileId, listAiProfiles, profileProbeConfig, profileRuntime, updateAiProfile } from '../ai/profiles'
+import { activateAiProfile, aiSpeechRuntime, aiSpeechSettings, createAiProfile, deleteAiProfile, initializeAiProfiles, legacyProfileId, listAiProfiles, profileProbeConfig, profileRuntime, saveAiSpeechSettings, updateAiProfile } from '../ai/profiles'
 
 const KEY = '44'.repeat(32)
 let db: Database.Database
@@ -161,6 +161,48 @@ describe('AI Profile import', () => {
 })
 
 describe('Profile CRUD, runtime and compatibility', () => {
+  it('binds speech to an explicitly selected encrypted subscription profile, independent of chat default', () => {
+    const chat = add('openai', 'Chat')
+    const speech = createAiProfile(db, {
+      name: 'Speech subscription',
+      provider: 'anthropic',
+      apiKey: 'sk-cp-subscription-fixture',
+      model: 'unused-for-speech',
+    })
+    activateAiProfile(db, chat.id)
+
+    expect(aiSpeechSettings(db)).toEqual({ profileId: null, privacyConsent: false })
+    expect(saveAiSpeechSettings(db, { profileId: speech.id, privacyConsent: true }))
+      .toEqual({ profileId: speech.id, privacyConsent: true })
+    expect(aiSpeechRuntime(db).apiKey).toBe('sk-cp-subscription-fixture')
+    expect(listAiProfiles(db).activeProfileId).toBe(chat.id)
+    expect(JSON.stringify(aiSpeechSettings(db))).not.toContain('sk-cp')
+  })
+
+  it('rejects missing, unconfigured, deleted, and non-subscription speech profiles without fallback', () => {
+    expect(() => aiSpeechRuntime(db)).toThrow(expect.objectContaining({ code: 'ai-speech-profile-missing' }))
+    const nonSubscription = add('anthropic', 'Ordinary')
+    expect(() => saveAiSpeechSettings(db, { profileId: nonSubscription.id, privacyConsent: true }))
+      .toThrow(expect.objectContaining({ code: 'ai-speech-key-type-invalid' }))
+
+    const subscription = createAiProfile(db, {
+      name: 'Speech', provider: 'anthropic', apiKey: 'sk-cp-subscription-fixture',
+    })
+    saveAiSpeechSettings(db, { profileId: subscription.id, privacyConsent: true })
+    deleteAiProfile(db, subscription.id, true)
+    expect(() => aiSpeechRuntime(db)).toThrow(expect.objectContaining({ code: 'ai-profile-not-found' }))
+  })
+
+  it('persists privacy consent and supports revoking it without changing the selected profile', () => {
+    const profile = createAiProfile(db, {
+      name: 'Speech', provider: 'anthropic', apiKey: 'sk-cp-subscription-fixture',
+    })
+    saveAiSpeechSettings(db, { profileId: profile.id, privacyConsent: true })
+    expect(aiSpeechSettings(db)).toEqual({ profileId: profile.id, privacyConsent: true })
+    saveAiSpeechSettings(db, { profileId: profile.id, privacyConsent: false })
+    expect(aiSpeechSettings(db)).toEqual({ profileId: profile.id, privacyConsent: false })
+  })
+
   it('keeps multiple profiles per protocol independent and never auto-activates new profiles', () => {
     const profiles = [add('anthropic', 'A'), add('anthropic', 'B'), add('openai', 'C'), add('openai', 'D')]
     expect(new Set(profiles.map((p) => p.id)).size).toBe(4)
