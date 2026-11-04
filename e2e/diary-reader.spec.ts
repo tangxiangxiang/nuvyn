@@ -680,7 +680,24 @@ test.describe('Diary date title swipe on phones', () => {
       page.on('console', (message) => {
         if (message.text().startsWith('DIARY_TOUCH_DEBUG ')) console.log(message.text())
       })
+      const listenerState = await page.locator('.reading-slot').evaluate((slot) => {
+        const anySlot = slot as any
+        const heading = slot.querySelector('article h1')
+        const article = heading?.closest('article')
+        return {
+          debugFlag: (window as any).__nuvynDebugDiarySwipe,
+          rootCount: document.querySelectorAll('.reading-slot').length,
+          listeners: Object.keys(anySlot._vei || {}),
+          symbolNames: Object.getOwnPropertySymbols(slot).map(key => String(key)),
+          heading: Boolean(heading),
+          firstHeading: article?.querySelector('h1') === heading,
+          excluded: Boolean(heading?.closest('a, button, [contenteditable]')),
+          viewport: window.innerWidth,
+        }
+      })
+      console.log('DIARY_LISTENER_STATE', JSON.stringify(listenerState))
       await swipeTitle(page, 100, 5)
+      console.log('DIARY_APP_EVENTS', JSON.stringify(await page.evaluate(() => (window as any).__nuvynDiarySwipeTrace || [])))
       console.log('DIARY_SWIPE_EVENTS', JSON.stringify(await page.evaluate(() => (window as any).__diarySwipeEvents)))
       await expect(page).toHaveURL(new RegExp(`/vault/${diaryPath(previous)}$`))
       await expect(page.locator('.reading-pane')).toContainText('Previous content')

@@ -2149,6 +2149,9 @@ const diaryTitleNavigating = ref(false)
 
 function traceDiarySwipe(stage: string, values: Record<string, unknown>): void {
   if (!(window as Window & { __nuvynDebugDiarySwipe?: boolean }).__nuvynDebugDiarySwipe) return
+  const trace = (window as Window & { __nuvynDiarySwipeTrace?: unknown[] }).__nuvynDiarySwipeTrace ?? []
+  trace.push({ stage, ...values })
+  ;(window as Window & { __nuvynDiarySwipeTrace?: unknown[] }).__nuvynDiarySwipeTrace = trace
   console.info('DIARY_TOUCH_DEBUG ' + JSON.stringify({ stage, ...values }))
 }
 function onDiaryTitleTouchStart(event: TouchEvent): void {
