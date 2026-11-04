@@ -315,6 +315,7 @@ const {
   canGoNext: noteSpeechCanGoNext,
 } = noteSpeech
 let noteSpeechStartGeneration = 0
+let noteSpeechStartController: AbortController | null = null
 const auth = useAuth()
 const diaryAccess = useDiaryAccessSession()
 const { active: zenModeActive, enter: enterZenMode, exit: exitZenMode, toggle: toggleZenMode } = useZenMode()
@@ -2024,16 +2025,20 @@ const canUseNoteSpeech = computed(() => Boolean(
 async function startNoteSpeech(sourceText: string, sourcePath: string, markdown: boolean): Promise<void> {
   if (!canUseNoteSpeech.value || activePath.value !== sourcePath) return
   const startGeneration = ++noteSpeechStartGeneration
+  noteSpeechStartController?.abort()
+  const controller = new AbortController()
+  noteSpeechStartController = controller
   noteSpeech.stop()
   const workspaceTabId = activeWorkspaceTabId.value
   const stillCurrent = () => (
     startGeneration === noteSpeechStartGeneration
+    && !controller.signal.aborted
     && canUseNoteSpeech.value
     && activePath.value === sourcePath
     && activeWorkspaceTabId.value === workspaceTabId
   )
   try {
-    const settings = await getAiSpeechSettings()
+    const settings = await getAiSpeechSettings(controller.signal)
     if (!stillCurrent()) return
     if (!settings.profileId) {
       toast.error(t('note.speech_profile_missing'))
@@ -2051,7 +2056,7 @@ async function startNoteSpeech(sourceText: string, sourcePath: string, markdown:
       if (!stillCurrent()) return
     }
     const speakable = markdown
-      ? await extractSpeakableMarkdown(sourceText, { sourcePath })
+      ? await extractSpeakableMarkdown(sourceText, { sourcePath, signal: controller.signal })
       : sourceText.trim()
     if (!stillCurrent()) return
     noteSpeech.start(speakable)
@@ -2063,6 +2068,8 @@ async function startNoteSpeech(sourceText: string, sourcePath: string, markdown:
       settingsOpen.value = true
     } else if (code === 'tts-privacy-consent-required') toast.error(t('note.speech_consent_required'))
     else toast.error(t('note.speech_unavailable'))
+  } finally {
+    if (noteSpeechStartController === controller) noteSpeechStartController = null
   }
 }
 
@@ -2095,11 +2102,15 @@ watch([canUseNoteSpeech, activePath, activeWorkspaceTabId, activeScope], ([enabl
     || activeWorkspaceTabId.value !== previous[2]
     || activeScope.value !== previous[3]) {
     noteSpeechStartGeneration += 1
+    noteSpeechStartController?.abort()
+    noteSpeechStartController = null
     noteSpeech.stop()
   }
 }, { flush: 'sync' })
 onBeforeUnmount(() => {
   noteSpeechStartGeneration += 1
+  noteSpeechStartController?.abort()
+  noteSpeechStartController = null
   noteSpeech.stop()
   if (appShell?.noteSpeechReadAllCommand?.value === readActiveNoteAloud) {
     appShell.noteSpeechReadAllCommand.value = null

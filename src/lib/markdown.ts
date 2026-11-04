@@ -586,6 +586,14 @@ function safeHtmlText(source: string): string {
   const html = sanitizeMarkdownHtml(source)
   const document = new DOMParser().parseFromString(html, 'text/html')
   document.querySelectorAll('script,style,template,pre,svg,math,img,[hidden],[aria-hidden="true"]').forEach((node) => node.remove())
+  // textContent omits layout semantics: preserve explicit line and block breaks
+  // without reading markup or modifying the note's original Markdown.
+  document.body.querySelectorAll('br').forEach((node) => node.replaceWith(document.createTextNode('\n')))
+  document.body.querySelectorAll('address,article,aside,blockquote,div,dl,dt,dd,h1,h2,h3,h4,h5,h6,li,ol,p,section,ul')
+    .forEach((node) => {
+      node.prepend(document.createTextNode('\n'))
+      node.append(document.createTextNode('\n'))
+    })
   return document.body.textContent ?? ''
 }
 

@@ -215,7 +215,9 @@ export function useNoteSpeech(options: NoteSpeechOptions = {}) {
 
   function pause(): void {
     if (status.value !== 'playing' && status.value !== 'buffering') return
-    playbackAttempt += 1
+    // Pausing an existing source must not invalidate its onended/onerror callbacks.
+    // Only invalidate activation of a segment still waiting for audio.
+    if (!audio?.src) playbackAttempt += 1
     audio?.pause()
     if (pending && pending.index !== currentIndex.value) pending.controller.abort()
     status.value = 'paused'
@@ -225,7 +227,7 @@ export function useNoteSpeech(options: NoteSpeechOptions = {}) {
     if (status.value !== 'paused') return
     const player = getAudio()
     if (player.src && !error.value) {
-      const attempt = ++playbackAttempt
+      const attempt = playbackAttempt
       void player.play().then(() => {
         if (attempt === playbackAttempt && status.value === 'paused') {
           status.value = 'playing'

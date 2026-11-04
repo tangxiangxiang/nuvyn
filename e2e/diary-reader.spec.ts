@@ -576,19 +576,29 @@ test.describe('Diary date title swipe on phones', () => {
     page: Page, dx: number, dy = 0, fromEdge = false,
     selector = '.reading-slot .reading-pane article h1',
   ): Promise<void> {
-    await page.locator(selector).first().evaluate((title, gesture) => {
+    const point = await page.locator(selector).first().evaluate((title, gesture) => {
       const bounds = title.getBoundingClientRect()
       const x = gesture.fromEdge ? 10 : Math.max(30, Math.min(innerWidth - 30, bounds.left + bounds.width / 2))
       const y = bounds.top + bounds.height / 2
-      const start = new Touch({ identifier: 11, target: title, clientX: x, clientY: y })
-      title.dispatchEvent(new TouchEvent('touchstart', {
-        bubbles: true, touches: [start], targetTouches: [start], changedTouches: [start],
-      }))
-      const end = new Touch({ identifier: 11, target: title, clientX: x + gesture.dx, clientY: y + gesture.dy })
-      title.dispatchEvent(new TouchEvent('touchend', {
-        bubbles: true, touches: [], targetTouches: [], changedTouches: [end],
-      }))
-    }, { dx, dy, fromEdge })
+      return { x, y }
+    }, { fromEdge })
+    // Dispatch genuine Chromium touch input: synthesized TouchEvent dispatch
+    // skips browser hit-testing and can diverge from an actual phone gesture.
+    const session = await page.context().newCDPSession(page)
+    try {
+      await session.send('Input.dispatchTouchEvent', {
+        type: 'touchStart', touchPoints: [{ x: point.x, y: point.y, id: 11 }],
+      })
+      await session.send('Input.dispatchTouchEvent', {
+        type: 'touchMove', touchPoints: [{ x: point.x + dx / 2, y: point.y + dy / 2, id: 11 }],
+      })
+      await session.send('Input.dispatchTouchEvent', {
+        type: 'touchMove', touchPoints: [{ x: point.x + dx, y: point.y + dy, id: 11 }],
+      })
+      await session.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] })
+    } finally {
+      await session.detach()
+    }
   }
 
   test('right swipe opens the previous existing Diary, left swipe returns, and other gestures are inert', async ({ page, request }) => {

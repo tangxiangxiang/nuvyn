@@ -679,6 +679,15 @@ describe('extractSpeakableMarkdown', () => {
     expect(result).not.toContain('hidden text')
   })
 
+  it('preserves line breaks in visible HTML instead of merging sentences', async () => {
+    const inline = await extractSpeakableMarkdown('第一句话<br>第二句话')
+    expect(inline).toContain('第一句话\n第二句话')
+
+    const block = await extractSpeakableMarkdown('<div>第一段<br>换行</div><div>第二段</div>')
+    expect(block).toMatch(/第一段\n换行/)
+    expect(block).toMatch(/换行\s+第二段/)
+  })
+
   it('expands safe Include resources using the existing resolver and expansion bounds', async () => {
     const read = vi.fn(async ({ path, kind }: { path: string; kind: 'snippet' | 'include' | 'image' }) => ({
       path,

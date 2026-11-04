@@ -42,7 +42,7 @@ test('creates same-protocol profiles, explicitly selects default, and keeps prof
     await fields(page).url.fill(`https://${model}.example.test`)
     await fields(page).model.fill(model!)
     const saved = page.waitForResponse((r) => r.url().endsWith('/api/ai/profiles') && r.request().method() === 'POST')
-    await settings.getByRole('button', { name: /^(保存|Save)$/ }).click()
+    await settings.locator('.settings-ai-profile-actions').getByRole('button', { name: /^(保存|Save)$/ }).click()
     const result = await saved
     expect(result.status()).toBe(201)
     ids.push((await result.json()).id)
@@ -119,7 +119,7 @@ test('protects unsaved fields and failed saves, tests only the selected profile,
   await page.route(`**/api/ai/profiles/${ids[0]}`, (route) => route.request().method() === 'PATCH'
     ? route.fulfill({ status: 500, json: { error: 'Fixture save failure' } }) : route.continue())
   await current.key.fill('sk-unsaved-test')
-  await settings.getByRole('button', { name: /^(保存|Save)$/ }).click()
+  await settings.locator('.settings-ai-profile-actions').getByRole('button', { name: /^(保存|Save)$/ }).click()
   await expect(page.getByText(/Fixture save failure/)).toBeVisible()
   await expect(current.model).toHaveValue('unsaved-model')
   await expect(current.key).toHaveValue('sk-unsaved-test')

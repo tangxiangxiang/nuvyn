@@ -73,6 +73,32 @@ describe('useNoteSpeech', () => {
     expect(revokeObjectURL).toHaveBeenCalledWith('blob:segment-1')
   })
 
+  it('continues to the next segment and completes after pause/resume', async () => {
+    const audio = new FakeAudio()
+    const synthesize = vi.fn(async (text: string) => new Blob([text], { type: 'audio/mpeg' }))
+    mountSpeech({ synthesize, createAudio: () => audio as unknown as HTMLAudioElement })
+
+    speech.start('完整句子。'.repeat(250))
+    await flushPromises()
+    expect(speech.totalSegments.value).toBeGreaterThan(1)
+    speech.pause()
+    expect(speech.status.value).toBe('paused')
+    speech.resume()
+    await flushPromises()
+    expect(speech.status.value).toBe('playing')
+
+    const segments = speech.totalSegments.value
+    for (let index = 1; index < segments; index += 1) {
+      audio.finish()
+      await flushPromises()
+      expect(speech.currentIndex.value).toBe(index)
+      expect(speech.status.value).toBe('playing')
+    }
+    audio.finish()
+    await flushPromises()
+    expect(speech.status.value).toBe('idle')
+  })
+
   it('replaces a running task and ignores a late response from the previous task', async () => {
     const audio = new FakeAudio()
     const deferred: Array<{ resolve: (blob: Blob) => void; reject: (error: unknown) => void; signal: AbortSignal }> = []
