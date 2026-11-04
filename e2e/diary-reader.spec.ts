@@ -676,6 +676,10 @@ test.describe('Diary date title swipe on phones', () => {
           }, { passive: true })
         }
       })
+      await page.evaluate(() => { (window as any).__nuvynDebugDiarySwipe = true })
+      page.on('console', (message) => {
+        if (message.text().startsWith('DIARY_TOUCH_DEBUG ')) console.log(message.text())
+      })
       await swipeTitle(page, 100, 5)
       console.log('DIARY_SWIPE_EVENTS', JSON.stringify(await page.evaluate(() => (window as any).__diarySwipeEvents)))
       await expect(page).toHaveURL(new RegExp(`/vault/${diaryPath(previous)}$`))
