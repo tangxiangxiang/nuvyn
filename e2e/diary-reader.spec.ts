@@ -655,7 +655,29 @@ test.describe('Diary date title swipe on phones', () => {
         }
       })
       console.log('DIARY_SWIPE_STATE', JSON.stringify(swipeState))
+      await page.evaluate(() => {
+        const slot = document.querySelector('.reading-slot')
+        const state = (slot as any)?.__vueParentComponent?.setupState
+        const entries: unknown[] = []
+        ;(window as any).__diarySwipeEvents = entries
+        for (const type of ['touchstart', 'touchmove', 'touchend', 'touchcancel']) {
+          slot?.addEventListener(type, (event) => {
+            const e = event as TouchEvent
+            const finger = e.changedTouches[0] ?? e.touches[0]
+            entries.push({
+              type,
+              targetTag: (e.target as Element | null)?.tagName,
+              targetHeading: Boolean((e.target as Element | null)?.closest('.reading-slot .reading-pane article h1')),
+              x: finger?.clientX,
+              y: finger?.clientY,
+              touchStored: state?.diaryTitleTouch,
+              navigating: state?.diaryTitleNavigating,
+            })
+          }, { passive: true })
+        }
+      })
       await swipeTitle(page, 100, 5)
+      console.log('DIARY_SWIPE_EVENTS', JSON.stringify(await page.evaluate(() => (window as any).__diarySwipeEvents)))
       await expect(page).toHaveURL(new RegExp(`/vault/${diaryPath(previous)}$`))
       await expect(page.locator('.reading-pane')).toContainText('Previous content')
       await page.getByTestId('left-panel-toggle').click()
