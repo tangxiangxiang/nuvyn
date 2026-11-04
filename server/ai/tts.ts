@@ -1,6 +1,8 @@
 import type { Database } from 'better-sqlite3'
 import { AiKeyConfigurationError } from './settings.js'
 import { aiSpeechRuntime, AiProfileError } from './profiles.js'
+import { matchSpeechPronunciations } from '../../shared/speechPronunciations.js'
+import { readSpeechPronunciations } from './speechPronunciations.js'
 
 export const NOTE_TTS_LIMITS = {
   requestChars: 800,
@@ -24,6 +26,13 @@ export const NOTE_TTS_PARAMETERS = {
   language_boost: 'Chinese',
   subtitle_enable: false,
 } as const
+
+export type NoteTtsParameters = typeof NOTE_TTS_PARAMETERS & { pronunciation_dict?: { tone: string[] } }
+
+export function noteSpeechParameters(db: Database, text: string): NoteTtsParameters {
+  const tone = matchSpeechPronunciations(text, readSpeechPronunciations(db))
+  return tone.length ? { ...NOTE_TTS_PARAMETERS, pronunciation_dict: { tone } } : NOTE_TTS_PARAMETERS
+}
 
 export class NoteTtsError extends Error {
   readonly code: string
@@ -148,6 +157,7 @@ export async function synthesizeNoteSpeech(
   text: string,
   signal?: AbortSignal,
   fetchImpl: typeof fetch = fetch,
+  parameters: NoteTtsParameters = noteSpeechParameters(db, text),
 ): Promise<Uint8Array> {
   validateNoteSpeechText(text)
   const runtime = requireNoteSpeechRuntime(db)
@@ -163,7 +173,7 @@ export async function synthesizeNoteSpeech(
           Authorization: `Bearer ${runtime.apiKey}`,
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify({ ...NOTE_TTS_PARAMETERS, text }),
+        body: JSON.stringify({ ...parameters, text }),
         signal: request.signal,
         redirect: 'error',
       })

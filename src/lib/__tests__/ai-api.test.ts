@@ -21,6 +21,17 @@ beforeEach(() => {
 })
 
 describe('ai-api', () => {
+  it('reads and atomically saves pronunciation entries without provider parameters', async () => {
+    const entries = [{ id: 'tianmu', text: '天姥', pinyin: 'tian1 mu3' }]
+    responses.push({ status: 200, body: entries }, { status: 200, body: entries })
+    const controller = new AbortController()
+    expect(await api.getSpeechPronunciations(controller.signal)).toEqual(entries)
+    expect(calls[0].url).toBe('/api/ai/tts/pronunciations')
+    expect(await api.saveSpeechPronunciations(entries, controller.signal)).toEqual(entries)
+    expect(calls[1].init.method).toBe('PUT')
+    expect(JSON.parse(calls[1].init.body as string)).toEqual(entries)
+    expect(calls[1].init.signal).toBe(controller.signal)
+  })
   it('listSessions GETs /api/ai/sessions', async () => {
     responses.push({ status: 200, body: [{ id: 1, title: 'x', createdAt: 1, updatedAt: 2 }] })
     const list = await api.listSessions()

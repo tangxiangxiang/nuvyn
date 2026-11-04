@@ -27,10 +27,10 @@ const originalFetch = globalThis.fetch
 let db: Database.Database
 
 type Vars = { authUser: { id: number; username: string }; authSessionId: number }
-function authenticatedApp() {
+function authenticatedApp(userId = 1) {
   const app = new Hono<{ Variables: Vars }>()
   app.use('*', async (c, next) => {
-    c.set('authUser', { id: 1, username: 'fixture' })
+    c.set('authUser', { id: userId, username: 'fixture' })
     c.set('authSessionId', 1)
     await next()
   })
@@ -79,6 +79,95 @@ function configuredSpeech() {
 }
 
 describe('Note TTS routes', () => {
+  it('validates and protects persistent pronunciation settings with authentication and Origin checks', async () => {
+    const context = createAuthenticatedTestContext({ db })
+    const app = new Hono()
+    app.use('/api/*', authBoundary)
+    app.route('/api/ai', aiRoutes)
+    try {
+      expect((await request(app, 'GET', '/api/ai/tts/pronunciations')).status).toBe(401)
+      expect((await request(app, 'PUT', '/api/ai/tts/pronunciations', [])).status).toBe(401)
+      const rules = [{ id: 'tianmu', text: '天姥', pinyin: 'tian1 mu3' }]
+      const put = (body: unknown, origin = context.runtime.config.allowedOrigins[0]) => app.fetch(authenticatedRequest(context, '/api/ai/tts/pronunciations', { method: 'PUT', origin, body }))
+      expect((await put(rules, 'https://attacker.example')).status).toBe(403)
+      expect((await put(rules)).status).toBe(200)
+      const get = await app.fetch(authenticatedRequest(context, '/api/ai/tts/pronunciations', { method: 'GET' }))
+      expect(get.headers.get('cache-control')).toBe('no-store')
+      expect(await get.json()).toEqual(rules)
+      expect((await put([...rules, ...rules])).status).toBe(400)
+      expect((await put('x'.repeat(100_000))).status).toBe(413)
+      expect((await put([])).status).toBe(200)
+    } finally { closeAuthTestContext(context) }
+  })
+
+  it('uses only effective pronunciation rules for both cached audio and actual MiniMax requests', async () => {
+    const profile = configuredSpeech()
+    saveAiSpeechSettings(db, { profileId: profile.id, privacyConsent: true })
+    const app = authenticatedApp()
+    const bytes = Buffer.concat([Buffer.from([255, 251, 144, 0]), Buffer.alloc(413)])
+    const upstream = vi.fn(async () => new Response(JSON.stringify({ data: { audio: bytes.toString('hex') }, base_resp: { status_code: 0 } })))
+    globalThis.fetch = upstream as unknown as typeof fetch
+    const speak = async (text = '梦游天姥吟留别。', target = app) => {
+      const response = await request(target, 'POST', '/api/ai/tts/synthesize', { text })
+      expect(response.status).toBe(200)
+      expect(Buffer.from(await response.arrayBuffer())).toEqual(bytes)
+    }
+    const rule = { id: 'tianmu', text: '天姥', pinyin: 'tian1 mu3' }
+    const save = async (rules: unknown) => expect((await request(app, 'PUT', '/api/ai/tts/pronunciations', rules)).status).toBe(200)
+    await speak()
+    await speak()
+    await speak('势拔五岳掩赤城。')
+    expect(upstream).toHaveBeenCalledTimes(2)
+    await save([rule])
+    await Promise.all([speak(), speak()])
+    expect(upstream).toHaveBeenCalledTimes(3)
+    const body = JSON.parse((upstream.mock.calls[2] as unknown as [string, RequestInit])[1].body as string)
+    expect(body).toMatchObject({ text: '梦游天姥吟留别。', pronunciation_dict: { tone: ['天姥/(tian1)(mu3)'] }, model: 'speech-2.8-turbo', voice_setting: { voice_id: 'audiobook_male_1' }, audio_setting: { sample_rate: 32000, format: 'mp3' } })
+    expect(JSON.parse((upstream.mock.calls[0] as unknown as [string, RequestInit])[1].body as string)).not.toHaveProperty('pronunciation_dict')
+    await speak()
+    await speak('势拔五岳掩赤城。')
+    await save([rule, { id: 'chongqing', text: '重庆', pinyin: 'chong2 qing4' }])
+    await speak()
+    expect(upstream).toHaveBeenCalledTimes(3)
+    await save([{ ...rule, pinyin: 'tian1 lao3' }])
+    await speak()
+    expect(upstream).toHaveBeenCalledTimes(4)
+    await save([])
+    await speak()
+    expect(upstream).toHaveBeenCalledTimes(4)
+    await speak('梦游天姥吟留别。', authenticatedApp(2))
+    expect(upstream).toHaveBeenCalledTimes(5)
+    await noteTtsCache.clear(2)
+  })
+
+  it('keeps in-flight rule snapshots and cache identity stable while the dictionary changes', async () => {
+    const profile = configuredSpeech()
+    saveAiSpeechSettings(db, { profileId: profile.id, privacyConsent: true })
+    const app = authenticatedApp()
+    const rule = { id: 'tianmu', text: '天姥', pinyin: 'tian1 mu3' }
+    await request(app, 'PUT', '/api/ai/tts/pronunciations', [rule])
+    const bytes = Buffer.concat([Buffer.from([255, 251, 144, 0]), Buffer.alloc(413)])
+    let release!: () => void
+    const started = new Promise<void>((resolve) => { release = resolve })
+    let complete!: (response: Response) => void
+    const upstream = vi.fn(() => { release(); return new Promise<Response>((resolve) => { complete = resolve }) })
+    globalThis.fetch = upstream as unknown as typeof fetch
+    const pending = request(app, 'POST', '/api/ai/tts/synthesize', { text: '天姥' })
+    await started
+    await request(app, 'PUT', '/api/ai/tts/pronunciations', [{ ...rule, pinyin: 'tian1 lao3' }])
+    complete(new Response(JSON.stringify({ data: { audio: bytes.toString('hex') }, base_resp: { status_code: 0 } })))
+    expect((await pending).status).toBe(200)
+    const next = request(app, 'POST', '/api/ai/tts/synthesize', { text: '天姥' })
+    await vi.waitFor(() => expect(upstream).toHaveBeenCalledTimes(2))
+    complete(new Response(JSON.stringify({ data: { audio: bytes.toString('hex') }, base_resp: { status_code: 0 } })))
+    expect((await next).status).toBe(200)
+    expect(upstream.mock.calls.map((call) => JSON.parse((call as unknown as [string, RequestInit])[1].body as string).pronunciation_dict.tone))
+      .toEqual([['天姥/(tian1)(mu3)'], ['天姥/(tian1)(lao3)']])
+    await request(app, 'PUT', '/api/ai/tts/pronunciations', [rule])
+    expect((await request(app, 'POST', '/api/ai/tts/synthesize', { text: '天姥' })).status).toBe(200)
+    expect(upstream).toHaveBeenCalledTimes(2)
+  })
+
   it('accepts the numeric owner identity from a real authenticated session without invalidating it', async () => {
     const context = createAuthenticatedTestContext({ db })
     const app = new Hono()

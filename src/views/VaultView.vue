@@ -122,6 +122,7 @@ import EmptyState from '../components/vault/EmptyState.vue'
 import ActivityBar from '../components/vault/ActivityBar.vue'
 import SettingsModal from '../components/vault/SettingsModal.vue'
 import NoteSpeechPlayer from '../components/vault/NoteSpeechPlayer.vue'
+import SpeechPronunciationDialog from '../components/vault/SpeechPronunciationDialog.vue'
 import type { MetadataContext } from '../components/vault/metadataDraftStore'
 import HistoryPanel from '../components/vault/HistoryPanel.vue'
 import HistoryComparisonPane from '../components/vault/HistoryComparisonPane.vue'
@@ -305,6 +306,16 @@ const toast = useToast()
 const { confirm, confirmCancellable } = useConfirm()
 const { locale, t } = useI18n()
 const noteSpeech = useNoteSpeech()
+const pronunciationText = ref<string | null>(null)
+function correctNotePronunciation(text: string): void {
+  if (!canUseNoteSpeech.value) return
+  const word = text.trim()
+  if (!/^\p{Script=Han}{1,32}$/u.test(word)) {
+    toast.error(t('speech.dictionary_invalid'))
+    return
+  }
+  pronunciationText.value = word
+}
 const {
   status: noteSpeechStatus,
   currentIndex: noteSpeechCurrentIndex,
@@ -2096,6 +2107,7 @@ watch(canUseNoteSpeech, (enabled) => {
   }
 }, { immediate: true, flush: 'sync' })
 watch([canUseNoteSpeech, activePath, activeWorkspaceTabId, activeScope], ([enabled], previous) => {
+  pronunciationText.value = null
   if (!previous) return
   if (!enabled || canUseNoteSpeech.value !== previous[0]
     || activePath.value !== previous[1]
@@ -3796,6 +3808,7 @@ watch(isReadMode, async (reading) => {
             :zen-mode="zenModeActive"
             :allow-image-insertion="canInsertNoteImage"
             :speech-enabled="canUseNoteSpeech"
+            @correct-pronunciation="correctNotePronunciation"
             :tablet-editing="tabletEditing"
             :link-targets="editorLinkTargets"
             @update:model-value="(val: string, path: string) => onEditorChange(path, val)"
@@ -3851,6 +3864,7 @@ watch(isReadMode, async (reading) => {
             :speech-enabled="canUseNoteSpeech"
             @rendered="onReadingPaneRendered"
             @read-selection="readSelectedVisibleText"
+            @correct-pronunciation="correctNotePronunciation"
           />
         </div>
         <div v-if="!tabs.length && !(isDiaryScope && isManagedDiaryDocumentRoute)" class="content-empty">
@@ -3973,6 +3987,7 @@ watch(isReadMode, async (reading) => {
       :source-path="pdfExportRequest.path"
       @rendered="onPdfExportRendered"
     />
+    <SpeechPronunciationDialog v-if="canUseNoteSpeech && pronunciationText !== null" :initial-text="pronunciationText" @close="pronunciationText = null" />
     <NoteSpeechPlayer
       v-if="canUseNoteSpeech"
       :status="noteSpeechStatus"

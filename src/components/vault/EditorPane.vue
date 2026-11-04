@@ -73,6 +73,7 @@ const emit = defineEmits<{
   'toggle-zen-mode': []
   'exit-zen-mode': []
   'read-selection': [text: string]
+  'correct-pronunciation': [text: string]
   'composition-edited': [path: string]
 }>()
 
@@ -86,6 +87,7 @@ let pasteHandler: ((event: ClipboardEvent) => void) | null = null
 let unregisterImagePasteHandler: (() => void) | null = null
 let noteImageInsertionAction: { dispose: () => void } | null = null
 let noteSpeechSelectionAction: { dispose: () => void } | null = null
+let pronunciationSelectionAction: { dispose: () => void } | null = null
 let imageInput: HTMLInputElement | null = null
 const showAttachmentPicker = ref(false)
 let mounted = false
@@ -378,6 +380,8 @@ function syncNoteSpeechSelectionAction(): void {
   if (props.speechEnabled !== true) {
     noteSpeechSelectionAction?.dispose()
     noteSpeechSelectionAction = null
+    pronunciationSelectionAction?.dispose()
+    pronunciationSelectionAction = null
     return
   }
   if (noteSpeechSelectionAction) return
@@ -393,6 +397,20 @@ function syncNoteSpeechSelectionAction(): void {
       if (!selection || selection.isEmpty()) return
       const selected = model.getValueInRange(selection)
       if (selected.trim()) emit('read-selection', selected)
+    },
+  })
+  pronunciationSelectionAction = editor.addAction({
+    id: 'nuvyn.correct-note-pronunciation',
+    label: t('speech.correct'),
+    precondition: 'editorHasSelection',
+    contextMenuGroupId: '1_modification',
+    contextMenuOrder: 4.1,
+    run(instance) {
+      if (props.speechEnabled !== true || !model) return
+      const selection = instance.getSelection()
+      if (!selection || selection.isEmpty()) return
+      const selected = model.getValueInRange(selection).trim()
+      if (selected) emit('correct-pronunciation', selected)
     },
   })
 }
@@ -1547,6 +1565,8 @@ onBeforeUnmount(() => {
   noteImageInsertionAction = null
   noteSpeechSelectionAction?.dispose()
   noteSpeechSelectionAction = null
+  pronunciationSelectionAction?.dispose()
+  pronunciationSelectionAction = null
   resetFocusWidthChord()
   zenOverlayObserver?.disconnect()
   zenOverlayObserver = null

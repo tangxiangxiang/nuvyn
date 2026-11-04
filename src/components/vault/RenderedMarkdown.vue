@@ -35,6 +35,7 @@ const emit = defineEmits<{
   'update:headings': [headings: Heading[]]
   rendered: [el: HTMLElement | null]
   'read-selection': [text: string]
+  'correct-pronunciation': [text: string]
 }>()
 
 const { html, error, headings, ready } = useMarkdownRender(
@@ -74,7 +75,7 @@ function readArticleSelection(): { text: string; top: number; left: number } | n
   if (!anchor || !focus || !root.contains(anchor) || !root.contains(focus)) return null
   const range = selection.getRangeAt(0)
   const rect = range.getBoundingClientRect()
-  const width = 220
+  const width = 360
   const left = Math.max(10, Math.min(window.innerWidth - width - 10, rect.left + rect.width / 2 - width / 2))
   return { text: selection.toString(), top: Math.max(8, rect.top - 44), left }
 }
@@ -112,6 +113,12 @@ function speakSelectedText(): void {
   const text = selectionAction.value?.text
   selectionAction.value = null
   if (text) emit('read-selection', text)
+}
+
+function correctSelectedPronunciation(): void {
+  const text = selectionAction.value?.text
+  selectionAction.value = null
+  if (text && props.speechEnabled) emit('correct-pronunciation', text.trim())
 }
 
 watch(() => props.speechEnabled, (enabled) => {
@@ -375,6 +382,7 @@ defineExpose({ el: articleEl })
       :style="{ top: `${selectionAction.top}px`, left: `${selectionAction.left}px` }"
       data-testid="note-reading-selection-actions" @pointerdown.stop>
       <NButton size="small" type="primary" @click="speakSelectedText">{{ t('note.speech_read_selection') }}</NButton>
+      <NButton size="small" @click="correctSelectedPronunciation">{{ t('speech.correct') }}</NButton>
       <NButton size="small" quaternary @click="copySelectedText">{{ t('note.speech_copy') }}</NButton>
     </div>
   </Teleport>

@@ -69,8 +69,10 @@ import {
   profileProbeConfig,
   saveAiSpeechSettings,
 } from './profiles.js'
-import { acquireNoteTtsSlot, NOTE_TTS_LIMITS, NoteTtsError, synthesizeNoteSpeech, requireNoteSpeechRuntime, validateNoteSpeechText } from './tts.js'
+import { acquireNoteTtsSlot, NOTE_TTS_LIMITS, NoteTtsError, synthesizeNoteSpeech, requireNoteSpeechRuntime, validateNoteSpeechText, noteSpeechParameters } from './tts.js'
 import { noteTtsCache } from './ttsCache.js'
+import { readSpeechPronunciations, saveSpeechPronunciations } from './speechPronunciations.js'
+import { SpeechPronunciationError, SPEECH_PRONUNCIATION_LIMITS } from '../../shared/speechPronunciations.js'
 
 function bad(c: any, msg: string, status = 400, errorCode?: string) {
   c.header('Cache-Control', 'no-store')
@@ -315,6 +317,22 @@ async function readLimitedJson(request: Request, maxBytes: number): Promise<unkn
   }
 }
 
+for (const method of ['get', 'put'] as const) {
+  ai[method]('/tts/pronunciations', async (c) => {
+    c.header('Cache-Control', 'no-store')
+    if (!requireSpeechUser(c)) return bad(c, 'Authentication required', 401, 'auth-session-required')
+    try {
+      if (method === 'get') return c.json(readSpeechPronunciations(getDb()))
+      const body = await readLimitedJson(c.req.raw, SPEECH_PRONUNCIATION_LIMITS.bodyBytes)
+      return c.json(saveSpeechPronunciations(getDb(), body))
+    } catch (error) {
+      if (error instanceof SpeechPronunciationError) return bad(c, error.message, method === 'get' ? 503 : 400, error.code)
+      if (error instanceof NoteTtsError) return bad(c, error.message, error.status, error.code)
+      return bad(c, 'Pronunciation dictionary is unavailable', 503, 'tts-pronunciations-unavailable')
+    }
+  })
+}
+
 ai.get('/tts/settings', (c) => {
   c.header('Cache-Control', 'no-store')
   if (!requireSpeechUser(c)) return bad(c, 'Authentication required', 401, 'auth-session-required')
@@ -381,16 +399,18 @@ ai.post('/tts/synthesize', async (c) => {
     validateNoteSpeechText(value.text)
     requireNoteSpeechRuntime(getDb()) // Profile/credential validity is required even on cache hits.
     const text = value.text
+    const parameters = noteSpeechParameters(getDb(), text)
     const audio = await noteTtsCache.get(user.id, text, c.req.raw.signal, async (signal) => {
       const release = acquireNoteTtsSlot(String(user.id))
-      try { return await synthesizeNoteSpeech(getDb(), text, signal) } finally { release() }
-    })
+      try { return await synthesizeNoteSpeech(getDb(), text, signal, fetch, parameters) } finally { release() }
+    }, parameters)
     return c.body(new Uint8Array(audio), 200, {
       'Content-Type': 'audio/mpeg',
       'Cache-Control': 'no-store',
       'X-Content-Type-Options': 'nosniff',
     })
   } catch (error) {
+    if (error instanceof SpeechPronunciationError) return bad(c, error.message, 503, error.code)
     if (error instanceof NoteTtsError) {
       if (error.retryAfterSeconds) c.header('Retry-After', String(error.retryAfterSeconds))
       return bad(c, error.message, error.status, error.code)

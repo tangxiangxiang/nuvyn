@@ -3,7 +3,7 @@ import { constants } from 'node:fs'
 import { link, lstat, mkdir, open, opendir, realpath, unlink } from 'node:fs/promises'
 import path from 'node:path'
 import { getDataDir } from '../db.js'
-import { NOTE_TTS_LIMITS, NOTE_TTS_PARAMETERS, NoteTtsError } from './tts.js'
+import { NOTE_TTS_LIMITS, NOTE_TTS_PARAMETERS, NoteTtsError, type NoteTtsParameters } from './tts.js'
 
 export const NOTE_TTS_CACHE_LIMITS = {
   bytesPerUser: 512 * 1024 * 1024,
@@ -193,10 +193,10 @@ export class NoteTtsCache {
     } finally { await unlink(temp).catch(() => {}) }
   }
 
-  async get(user: number, text: string, signal: AbortSignal | undefined, generate: (signal: AbortSignal) => Promise<Uint8Array>): Promise<Uint8Array> {
+  async get(user: number, text: string, signal: AbortSignal | undefined, generate: (signal: AbortSignal) => Promise<Uint8Array>, parameters: NoteTtsParameters = NOTE_TTS_PARAMETERS): Promise<Uint8Array> {
     const scope = this.scope(user)
     if (signal?.aborted) throw new NoteTtsError('tts-cancelled', 'Speech request was cancelled', 499)
-    const key = noteTtsCacheKey(text)
+    const key = noteTtsCacheKey(text, parameters)
     const identity = `${user}:${scope.epoch}:${key}`
     let job = this.jobs.get(identity)
     if (!job) {

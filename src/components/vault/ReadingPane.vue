@@ -31,6 +31,7 @@ const props = defineProps<{
 const emit = defineEmits<{
   rendered: [path: string | null, el: HTMLElement | null]
   'read-selection': [text: string]
+  'correct-pronunciation': [text: string]
 }>()
 const headings = ref<Heading[]>([])
 
@@ -247,6 +248,7 @@ watch(() => props.raw, () => {
           @update:headings="headings = $event"
           @rendered="onArticleRendered"
           @read-selection="emit('read-selection', $event)"
+          @correct-pronunciation="emit('correct-pronunciation', $event)"
         />
       </div>
     </template>

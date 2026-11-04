@@ -9,10 +9,15 @@ type SpeechMock = {
   synthResponses: Array<{ status: number; contentType: string | undefined }>
   settingsWrites: Array<{ profileId: string | null; privacyConsent: boolean }>
   cacheClears: number
+  pronunciations: Array<{ id: string; text: string; pinyin: string }>
 }
 
 async function mockSpeech(page: Page, privacyConsent: boolean): Promise<SpeechMock> {
-  const state: SpeechMock = { settingsReads: 0, syntheses: [], synthResponses: [], settingsWrites: [], cacheClears: 0 }
+  const state: SpeechMock = { settingsReads: 0, syntheses: [], synthResponses: [], settingsWrites: [], cacheClears: 0, pronunciations: [] }
+  await page.route('**/api/ai/tts/pronunciations', async (route) => {
+    if (route.request().method() === 'PUT') state.pronunciations = route.request().postDataJSON()
+    return route.fulfill({ json: state.pronunciations })
+  })
   page.on('response', (response) => {
     if (response.url().endsWith('/api/ai/tts/synthesize')) {
       state.synthResponses.push({ status: response.status(), contentType: response.headers()['content-type'] })
@@ -262,4 +267,85 @@ test('speech profile menu is clickable above the Settings backdrop and saves the
   await confirmation.getByRole('button', { name: /^(确定|Confirm)$/ }).click()
   await expect.poll(() => mock.cacheClears).toBe(1)
   await expect(speech).toContainText(/0\.0 \/ 512 MiB/)
+  await speech.getByRole('button', { name: /发音词典|Pronunciation dictionary/ }).click()
+  let dictionary = page.getByTestId('speech-pronunciations')
+  await expect(dictionary).toBeVisible()
+  await dictionary.getByRole('textbox', { name: /^(词语|Word)$/ }).fill('天姥')
+  await dictionary.getByRole('textbox', { name: /正确拼音|Correct pinyin/ }).fill('tian1 mu3')
+  await dictionary.getByRole('button', { name: /^(保存|Save)$/ }).click()
+  await expect(dictionary).toContainText('天姥 · tian1 mu3')
+  await page.keyboard.press('Escape')
+  await expect(dictionary).toHaveCount(0)
+  await expect(settings).toBeVisible()
+  await speech.getByRole('button', { name: /发音词典|Pronunciation dictionary/ }).click()
+  dictionary = page.getByTestId('speech-pronunciations')
+  await expect(dictionary).toContainText('天姥 · tian1 mu3')
+  await dictionary.getByRole('button', { name: /^(编辑|Edit)$/ }).click()
+  await dictionary.getByRole('textbox', { name: /正确拼音|Correct pinyin/ }).fill('tian1 lao3')
+  await dictionary.getByRole('button', { name: /^(保存|Save)$/ }).click()
+  await expect(dictionary).toContainText('天姥 · tian1 lao3')
+  await dictionary.getByRole('button', { name: /^(删除|Delete)$/ }).click()
+  await expect.poll(() => mock.pronunciations.length).toBe(0)
+  await expect(dictionary.locator('.speech-pronunciation-row')).toHaveCount(0)
+})
+
+test.describe('pronunciation correction with touch capability', () => {
+  test.use({ hasTouch: true })
+
+  test('Note editor and tablet reader correct selected pronunciation without editing or starting speech', async ({ page, request }) => {
+    const documentPath = `inbox/pronunciation-${randomUUID()}`
+    const created: string[] = []
+    const mock = await mockSpeech(page, true)
+    const source = '# 诗词\n\n天姥连天向天横。'
+    try {
+      await createDoc(request, documentPath, source, created)
+      await gotoVaultReady(page)
+      await openDoc(page, documentPath)
+      const host = page.locator('.monaco-host')
+      await expect.poll(() => host.evaluate((element) => Boolean((element as any).__vueParentComponent.setupState.editor.getAction('nuvyn.correct-note-pronunciation')))).toBe(true)
+      const point = await host.evaluate((element) => {
+        const editor = (element as any).__vueParentComponent.setupState.editor
+        editor.setSelection({ startLineNumber: 3, startColumn: 1, endLineNumber: 3, endColumn: 3 })
+        editor.focus()
+        const visible = editor.getScrolledVisiblePosition({ lineNumber: 3, column: 2 })
+        const bounds = editor.getDomNode().getBoundingClientRect()
+        return { x: bounds.left + visible.left + 1, y: bounds.top + visible.top + visible.height / 2 }
+      })
+      await page.mouse.click(point.x, point.y, { button: 'right' })
+      const action = page.getByRole('menuitem', { name: /纠正发音|Correct pronunciation/ })
+      await expect(action).toBeVisible()
+      await action.hover()
+      await page.keyboard.press('Enter')
+      let dictionary = page.getByTestId('speech-pronunciations')
+      await expect(dictionary).toBeVisible()
+      await expect(dictionary.getByRole('textbox', { name: /^(词语|Word)$/ })).toHaveValue('天姥')
+      await dictionary.getByRole('textbox', { name: /正确拼音|Correct pinyin/ }).fill('tian1 mu3')
+      await dictionary.getByRole('button', { name: /^(保存|Save)$/ }).click()
+      await expect(dictionary).toHaveCount(0)
+      expect(mock.syntheses).toHaveLength(0)
+      expect(await host.evaluate((element) => {
+        const editor = (element as any).__vueParentComponent.setupState.editor
+        return { value: editor.getValue(), selected: editor.getModel().getValueInRange(editor.getSelection()) }
+      })).toEqual({ value: source, selected: '天姥' })
+      await page.setViewportSize({ width: 768, height: 1024 })
+      await page.getByTestId('view-toggle').click()
+      const paragraph = page.locator('.reading-pane .article p').filter({ hasText: '天姥连天向天横。' })
+      await paragraph.evaluate((element) => {
+        const range = document.createRange()
+        range.setStart(element.firstChild!, 0)
+        range.setEnd(element.firstChild!, 2)
+        const selection = window.getSelection()!
+        selection.removeAllRanges()
+        selection.addRange(range)
+        document.dispatchEvent(new Event('selectionchange'))
+      })
+      await page.getByTestId('note-reading-selection-actions').getByRole('button', { name: /纠正发音|Correct pronunciation/ }).tap()
+      dictionary = page.getByTestId('speech-pronunciations')
+      await expect(dictionary.getByRole('textbox', { name: /正确拼音|Correct pinyin/ })).toHaveValue('tian1 mu3')
+      expect(mock.syntheses).toHaveLength(0)
+      await page.keyboard.press('Escape')
+      await expect(dictionary).toHaveCount(0)
+      await expect(paragraph).toHaveText('天姥连天向天横。')
+    } finally { await cleanupCreatedPaths(request, created) }
+  })
 })

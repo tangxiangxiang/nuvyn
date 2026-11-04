@@ -8,6 +8,8 @@ import { useAiHistory } from '../../composables/vault/useAiHistory'
 import * as api from '../../lib/ai-api'
 import type { AiProfile, AiProfileInput, AiProvider, AiConnectionState, AiConnectionTestResult } from '../../lib/ai-api'
 import type { AiSpeechSettings } from '../../lib/ai-api'
+import SpeechPronunciationDialog from './SpeechPronunciationDialog.vue'
+const pronunciationDialogOpen = ref(false)
 
 const { t } = useI18n()
 const { confirmCancellable } = useConfirm()
@@ -402,6 +404,8 @@ defineExpose({ canLeave })
           <NButton size="small" :loading="cacheBusy" :disabled="blocked || cacheBusy" @click="clearSpeechCache">{{ t('settings.speech_cache_clear') }}</NButton>
         </div>
         <p v-if="cacheError" class="settings-warning-card" role="alert">{{ t('settings.speech_cache_error') }}</p>
+        <NButton :disabled="blocked" @click="pronunciationDialogOpen = true">{{ t('speech.dictionary') }}</NButton>
+        <SpeechPronunciationDialog v-if="pronunciationDialogOpen" @close="pronunciationDialogOpen = false" />
         <div class="settings-section-actions">
           <NButton type="primary" :loading="speechSaving" :disabled="blocked || speechSaving"
             @click="saveSpeechSettings">{{ t('settings.save') }}</NButton>

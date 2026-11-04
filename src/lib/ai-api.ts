@@ -7,6 +7,16 @@ import { authFetch } from './auth-session'
 import type { AiProfile, AiProfileInput, AiProfileList, AiSpeechSettings } from '../../shared/aiProfiles'
 export type { AiProfile, AiProfileInput, AiProfileList } from '../../shared/aiProfiles'
 export type { AiSpeechSettings } from '../../shared/aiProfiles'
+import type { SpeechPronunciationEntry } from '../../shared/speechPronunciations'
+export type { SpeechPronunciationEntry } from '../../shared/speechPronunciations'
+
+export async function getSpeechPronunciations(signal?: AbortSignal): Promise<SpeechPronunciationEntry[]> {
+  return jsonOrThrow(await authFetch('/api/ai/tts/pronunciations', { signal }))
+}
+
+export async function saveSpeechPronunciations(entries: SpeechPronunciationEntry[], signal?: AbortSignal): Promise<SpeechPronunciationEntry[]> {
+  return jsonOrThrow(await authFetch('/api/ai/tts/pronunciations', { method: 'PUT', ...jsonBody(entries), signal }))
+}
 
 export type NoteSpeechApiError = Error & { status: number; code?: string }
 
