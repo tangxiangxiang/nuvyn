@@ -27,6 +27,30 @@ const speechProfileId = ref<string | null>(null)
 const speechPrivacyConsent = ref(false)
 const speechSaving = ref(false)
 const speechError = ref('')
+const speechCache = ref<api.NoteSpeechCacheUsage | null>(null)
+const cacheBusy = ref(false)
+const cacheError = ref(false)
+async function loadSpeechCache() {
+  try {
+    const usage = await api.getNoteSpeechCacheUsage(controller.signal)
+    if (!disposed) speechCache.value = usage
+  } catch { if (!disposed) cacheError.value = true }
+}
+async function clearSpeechCache() {
+  if (blocked.value || cacheBusy.value) return
+  cacheBusy.value = true
+  try {
+    confirming.value = true
+    let accepted = false
+    try { accepted = await confirm(t('settings.speech_cache_clear'), t('settings.speech_cache_confirm'), { destructive: true }) }
+    finally { confirming.value = false }
+    if (!accepted || disposed) return
+    cacheError.value = false
+    const usage = await api.clearNoteSpeechCache(controller.signal)
+    if (!disposed) { speechCache.value = usage; toast.success(t('settings.speech_cache_cleared')) }
+  } catch { if (!disposed) cacheError.value = true }
+  finally { cacheBusy.value = false }
+}
 const activeId = ref<string | null>(null)
 const selectedId = ref<string | null>(null)
 const loading = ref(true)
@@ -268,6 +292,7 @@ function onKeydown(event: KeyboardEvent) {
   }
 }
 onMounted(async () => {
+  void loadSpeechCache()
   await load()
   await nextTick()
   if (!disposed) sectionEl.value?.querySelector<HTMLInputElement>('input:not([disabled])')?.focus()
@@ -361,6 +386,7 @@ defineExpose({ canLeave })
       <div class="settings-card settings-speech-card" aria-labelledby="settings-speech-title">
         <h4 id="settings-speech-title" class="settings-card-title">{{ t('settings.speech_title') }}</h4>
         <p class="settings-speech-description">{{ t('settings.speech_detail') }}</p>
+        <p class="settings-speech-description">{{ t('settings.speech_cache_detail') }}</p>
         <label class="settings-field">
           <span class="settings-field-label">{{ t('settings.speech_profile') }}</span>
           <NSelect data-testid="settings-speech-profile" :aria-label="t('settings.speech_profile')"
@@ -371,6 +397,11 @@ defineExpose({ canLeave })
           {{ t('settings.speech_privacy_consent') }}
         </NCheckbox>
         <p v-if="speechError" class="settings-warning-card" role="alert">{{ speechError }}</p>
+        <div class="settings-section-actions settings-ai-profile-actions">
+          <span v-if="speechCache">{{ t('settings.speech_cache_usage', { used: (speechCache.bytes / 1048576).toFixed(1), limit: (speechCache.limitBytes / 1048576).toFixed(0) }) }}</span>
+          <NButton size="small" :loading="cacheBusy" :disabled="blocked || cacheBusy" @click="clearSpeechCache">{{ t('settings.speech_cache_clear') }}</NButton>
+        </div>
+        <p v-if="cacheError" class="settings-warning-card" role="alert">{{ t('settings.speech_cache_error') }}</p>
         <div class="settings-section-actions">
           <NButton type="primary" :loading="speechSaving" :disabled="blocked || speechSaving"
             @click="saveSpeechSettings">{{ t('settings.save') }}</NButton>

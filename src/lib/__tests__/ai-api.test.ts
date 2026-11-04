@@ -146,6 +146,17 @@ describe('ai-api', () => {
     expect([...new Uint8Array(await blob.arrayBuffer())]).toEqual([...bytes])
   })
 
+  it('reads and clears the authenticated speech cache without accepting a path or user identifier', async () => {
+    const usage = { bytes: 1234, limitBytes: 536870912 }
+    responses.push({ status: 200, body: usage })
+    expect(await api.getNoteSpeechCacheUsage()).toEqual(usage)
+    expect(calls[0]?.url).toBe('/api/ai/tts/cache')
+    responses.push({ status: 200, body: { ...usage, bytes: 0 } })
+    expect(await api.clearNoteSpeechCache()).toEqual({ ...usage, bytes: 0 })
+    expect(calls[1]?.init.method).toBe('DELETE')
+    expect(calls[1]?.init.body).toBeUndefined()
+  })
+
   it('preserves structured speech errors and rejects empty or wrong-mime audio', async () => {
     globalThis.fetch = vi.fn(async () => new Response(
       JSON.stringify({ error: 'consent required', code: 'tts-privacy-consent-required' }),

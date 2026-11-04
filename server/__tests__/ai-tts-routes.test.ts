@@ -1,17 +1,21 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import Database from 'better-sqlite3'
 import { Hono } from 'hono'
+import { mkdtempSync, rmSync } from 'node:fs'
+import os from 'node:os'
+import path from 'node:path'
 import { applyMigrations } from '../db'
 import { createAiProfile, saveAiSpeechSettings } from '../ai/profiles'
-import { resetNoteTtsLimitsForTesting } from '../ai/tts'
+import { acquireNoteTtsSlot, resetNoteTtsLimitsForTesting } from '../ai/tts'
+import { noteTtsCache } from '../ai/ttsCache'
 import { authBoundary } from '../auth/middleware'
 import { authenticatedRequest, closeAuthTestContext, createAuthenticatedTestContext } from './helpers/auth'
 
-const { testDbRef } = vi.hoisted(() => ({ testDbRef: { value: null as Database.Database | null } }))
+const { testDbRef, cacheRoot } = vi.hoisted(() => ({ testDbRef: { value: null as Database.Database | null }, cacheRoot: { value: '' } }))
 
 vi.mock('../db', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../db')>()
-  return { ...actual, getDb: () => testDbRef.value! }
+  return { ...actual, getDb: () => testDbRef.value!, getDataDir: () => cacheRoot.value }
 })
 
 import aiRoutes from '../ai/routes'
@@ -35,6 +39,7 @@ function authenticatedApp() {
 }
 
 beforeEach(() => {
+  cacheRoot.value = mkdtempSync(path.join(os.tmpdir(), 'nuvyn-tts-route-'))
   process.env.NUVYN_MASTER_KEY = MASTER_KEY
   delete process.env.NUVYN_MASTER_KEY_FILE
   db = new Database(':memory:')
@@ -43,7 +48,9 @@ beforeEach(() => {
   resetNoteTtsLimitsForTesting()
 })
 
-afterEach(() => {
+afterEach(async () => {
+  await noteTtsCache.clear(1)
+  rmSync(cacheRoot.value, { recursive: true, force: true })
   db.close()
   testDbRef.value = null
   resetNoteTtsLimitsForTesting()
@@ -128,7 +135,7 @@ describe('Note TTS routes', () => {
     expect(save.status).toBe(200)
     expect(await save.json()).toEqual({ profileId: profile.id, privacyConsent: true })
 
-    const bytes = Buffer.from('4944330400000000', 'hex')
+    const bytes = Buffer.concat([Buffer.from([255, 251, 144, 0]), Buffer.alloc(413)])
     const upstream = vi.fn(async () => new Response(JSON.stringify({
       data: { audio: bytes.toString('hex') },
       base_resp: { status_code: 0 },
@@ -142,11 +149,40 @@ describe('Note TTS routes', () => {
     expect(Buffer.from(await response.arrayBuffer())).toEqual(bytes)
     expect(upstream).toHaveBeenCalledTimes(1)
 
+    // Hits bypass synthesis quota/concurrency but still enforce consent below.
+    const release = acquireNoteTtsSlot('1')
+    try {
+      const hit = await request(app, 'POST', '/api/ai/tts/synthesize', { text: '已同意的内容' })
+      expect(hit.status).toBe(200)
+      expect(hit.headers.get('content-type')).toBe('audio/mpeg')
+      expect(Buffer.from(await hit.arrayBuffer())).toEqual(bytes)
+      const miss = await request(app, 'POST', '/api/ai/tts/synthesize', { text: 'different' })
+      expect(miss.status).toBe(429)
+      expect(upstream).toHaveBeenCalledTimes(1)
+    } finally { release() }
+    expect(await (await request(app, 'GET', '/api/ai/tts/cache')).json()).toMatchObject({ bytes: bytes.length })
+
     const revoke = await request(app, 'PUT', '/api/ai/tts/settings', { profileId: profile.id, privacyConsent: false })
     expect(revoke.status).toBe(200)
-    const revoked = await request(app, 'POST', '/api/ai/tts/synthesize', { text: 'now blocked' })
+    const revoked = await request(app, 'POST', '/api/ai/tts/synthesize', { text: '已同意的内容' })
     expect(revoked.status).toBe(403)
     expect(upstream).toHaveBeenCalledTimes(1)
+  })
+
+  it('protects cache administration with the real authentication and Origin boundary', async () => {
+    const context = createAuthenticatedTestContext({ db })
+    const app = new Hono()
+    app.use('/api/*', authBoundary)
+    app.route('/api/ai', aiRoutes)
+    try {
+      expect((await request(app, 'GET', '/api/ai/tts/cache')).status).toBe(401)
+      expect((await request(app, 'DELETE', '/api/ai/tts/cache')).status).toBe(401)
+      const denied = await app.fetch(authenticatedRequest(context, '/api/ai/tts/cache', { method: 'DELETE', origin: 'https://attacker.example' }))
+      expect(denied.status).toBe(403)
+      const clear = await app.fetch(authenticatedRequest(context, '/api/ai/tts/cache', { method: 'DELETE', origin: context.runtime.config.allowedOrigins[0] }))
+      expect(clear.status).toBe(200)
+      expect(await clear.json()).toMatchObject({ bytes: 0 })
+    } finally { closeAuthTestContext(context) }
   })
 
   it('rejects unbound profiles, extra credential fields, and oversized text', async () => {

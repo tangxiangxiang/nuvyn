@@ -22,6 +22,16 @@ export async function getAiSpeechSettings(signal?: AbortSignal): Promise<AiSpeec
   return jsonOrThrow(await authFetch('/api/ai/tts/settings', { signal }))
 }
 
+export type NoteSpeechCacheUsage = { bytes: number; limitBytes: number }
+
+export async function getNoteSpeechCacheUsage(signal?: AbortSignal): Promise<NoteSpeechCacheUsage> {
+  return jsonOrThrow(await authFetch('/api/ai/tts/cache', { signal }))
+}
+
+export async function clearNoteSpeechCache(signal?: AbortSignal): Promise<NoteSpeechCacheUsage> {
+  return jsonOrThrow(await authFetch('/api/ai/tts/cache', { method: 'DELETE', signal }))
+}
+
 export async function saveAiSpeechSettings(
   input: AiSpeechSettings,
   signal?: AbortSignal,

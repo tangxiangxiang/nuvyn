@@ -4,6 +4,22 @@ import { NOTE_SPEECH_LIMITS, NoteSpeechTextError, splitNoteSpeechText } from '..
 const countCharacters = (value: string) => [...value].length
 
 describe('splitNoteSpeechText', () => {
+  it('keeps unrelated paragraphs stable when inserting, changing or deleting a paragraph', () => {
+    const paragraphs = ['Java 的基本概念。', 'JVM 的作用。', '垃圾回收机制。']
+    const original = splitNoteSpeechText(paragraphs.join('\n\n'))
+    const changed = splitNoteSpeechText([paragraphs[0], 'JVM 的内存管理机制。'.repeat(90), paragraphs[2]].join('\n\n'))
+    expect(changed[0]).toBe(original[0])
+    expect(changed.at(-1)).toBe(original.at(-1))
+    expect(splitNoteSpeechText(['新段落。', ...paragraphs].join('\n\n')).slice(1)).toEqual(original)
+    expect(splitNoteSpeechText([paragraphs[0], paragraphs[2]].join('\n\n'))).toEqual([original[0], original[2]])
+    expect(original.join('')).toBe(paragraphs.join('\n\n'))
+  })
+
+  it('preserves short paragraphs, CRLF separators and mixed Unicode content', () => {
+    const text = '标题\r\n\r\n短段落。\r\n\r\nEnglish e\u0301 与中文👩‍👩‍👧‍👦。'
+    expect(splitNoteSpeechText(text)).toHaveLength(3)
+    expect(splitNoteSpeechText(text).join('')).toBe(text)
+  })
   it('rejects empty and whitespace-only input', () => {
     expect(() => splitNoteSpeechText('')).toThrowError(new NoteSpeechTextError('empty'))
     expect(() => splitNoteSpeechText(' \n\t ')).toThrowError(new NoteSpeechTextError('empty'))
@@ -30,6 +46,14 @@ describe('splitNoteSpeechText', () => {
     expect(segments.join('')).toBe(source.trim())
     expect(segments.slice(0, -1).every((segment) => /\s$/u.test(segment))).toBe(true)
     expect(segments.every((segment) => countCharacters(segment) <= NOTE_SPEECH_LIMITS.requestChars)).toBe(true)
+  })
+
+  it('splits an oversized English paragraph at sentence boundaries', () => {
+    const text = 'This is one complete English sentence.'.repeat(35)
+    const parts = splitNoteSpeechText(text)
+    expect(parts.join('')).toBe(text)
+    expect(parts.slice(0, -1).every((part) => part.endsWith('.'))).toBe(true)
+    expect(parts.every((part) => countCharacters(part) <= 800)).toBe(true)
   })
 
   it('keeps grapheme clusters intact while measuring the API limit in Unicode code points', () => {

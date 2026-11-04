@@ -69,7 +69,8 @@ import {
   profileProbeConfig,
   saveAiSpeechSettings,
 } from './profiles.js'
-import { acquireNoteTtsSlot, NOTE_TTS_LIMITS, NoteTtsError, synthesizeNoteSpeech } from './tts.js'
+import { acquireNoteTtsSlot, NOTE_TTS_LIMITS, NoteTtsError, synthesizeNoteSpeech, requireNoteSpeechRuntime, validateNoteSpeechText } from './tts.js'
+import { noteTtsCache } from './ttsCache.js'
 
 function bad(c: any, msg: string, status = 400, errorCode?: string) {
   c.header('Cache-Control', 'no-store')
@@ -348,9 +349,21 @@ ai.put('/tts/settings', async (c) => {
   }
 })
 
+for (const method of ['get', 'delete'] as const) {
+  ai[method]('/tts/cache', async (c) => {
+    c.header('Cache-Control', 'no-store')
+    const user = requireSpeechUser(c)
+    if (!user) return bad(c, 'Authentication required', 401, 'auth-session-required')
+    try {
+      return c.json(await (method === 'delete' ? noteTtsCache.clear(user.id) : noteTtsCache.usage(user.id)))
+    } catch {
+      return bad(c, 'Speech cache is unavailable', 503, 'tts-cache-unavailable')
+    }
+  })
+}
+
 ai.post('/tts/synthesize', async (c) => {
   c.header('Cache-Control', 'no-store')
-  let release: (() => void) | null = null
   try {
     const body = await readLimitedJson(c.req.raw, NOTE_TTS_LIMITS.requestBodyBytes)
     if (!body || typeof body !== 'object' || Array.isArray(body)) {
@@ -365,8 +378,13 @@ ai.post('/tts/synthesize', async (c) => {
     if (!aiSpeechSettings(getDb()).privacyConsent) {
       throw new NoteTtsError('tts-privacy-consent-required', 'Confirm the speech privacy notice before using this service', 403)
     }
-    release = acquireNoteTtsSlot(String(user.id))
-    const audio = await synthesizeNoteSpeech(getDb(), value.text, c.req.raw.signal)
+    validateNoteSpeechText(value.text)
+    requireNoteSpeechRuntime(getDb()) // Profile/credential validity is required even on cache hits.
+    const text = value.text
+    const audio = await noteTtsCache.get(user.id, text, c.req.raw.signal, async (signal) => {
+      const release = acquireNoteTtsSlot(String(user.id))
+      try { return await synthesizeNoteSpeech(getDb(), text, signal) } finally { release() }
+    })
     return c.body(new Uint8Array(audio), 200, {
       'Content-Type': 'audio/mpeg',
       'Cache-Control': 'no-store',
@@ -382,8 +400,6 @@ ai.post('/tts/synthesize', async (c) => {
       return bad(c, 'The selected speech credential is unavailable', 503, error.code)
     }
     return bad(c, 'Speech generation failed', 500, 'tts-internal-error')
-  } finally {
-    release?.()
   }
 })
 

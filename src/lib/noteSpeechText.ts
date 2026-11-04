@@ -25,12 +25,20 @@ function graphemes(text: string): string[] {
   return Array.from(text)
 }
 
-const SENTENCE_END = /^[。！？!?；;]$/u
+const SENTENCE_END = /^[。！？.!?；;]$/u
 const SPACE = /^\s$/u
 
 /** Split without dropping source characters or splitting a grapheme cluster. */
 export function splitNoteSpeechText(text: string): string[] {
   const source = text.trim()
+  if (!source) throw new NoteSpeechTextError('empty')
+  if ([...source].length > NOTE_SPEECH_LIMITS.maxDocumentChars) throw new NoteSpeechTextError('too-long')
+  // Never pack adjacent paragraphs: edits cannot shift unrelated paragraph boundaries.
+  // Keep separators with their preceding paragraph to retain natural pauses.
+  return (source.match(/[\s\S]+?(?:\r?\n[\t ]*\r?\n+|$)/g) ?? []).flatMap(splitParagraph)
+}
+
+function splitParagraph(source: string): string[] {
   const units = graphemes(source)
   const lengths = units.map((unit) => [...unit].length)
   const prefix = [0]

@@ -15,6 +15,16 @@ const MINIMAX_TTS_URL = 'https://api.minimaxi.com/v1/t2a_v2'
 const TTS_MODEL = 'speech-2.8-turbo'
 const TTS_VOICE = 'audiobook_male_1'
 
+// The provider request and persistent cache identity share exactly these settings.
+export const NOTE_TTS_PARAMETERS = {
+  model: TTS_MODEL,
+  stream: false,
+  voice_setting: { voice_id: TTS_VOICE, speed: 1, vol: 1, pitch: 0 },
+  audio_setting: { sample_rate: 32_000, bitrate: 128_000, format: 'mp3', channel: 1 },
+  language_boost: 'Chinese',
+  subtitle_enable: false,
+} as const
+
 export class NoteTtsError extends Error {
   readonly code: string
   readonly status: number
@@ -139,21 +149,8 @@ export async function synthesizeNoteSpeech(
   signal?: AbortSignal,
   fetchImpl: typeof fetch = fetch,
 ): Promise<Uint8Array> {
-  const textLength = [...text].length
-  if (textLength === 0 || !text.trim()) throw new NoteTtsError('tts-empty-text', 'Text is empty', 400)
-  if (textLength > NOTE_TTS_LIMITS.requestChars) {
-    throw new NoteTtsError('tts-text-too-long', 'Speech segment exceeds 800 Unicode characters', 413)
-  }
-  let runtime
-  try {
-    runtime = aiSpeechRuntime(db)
-  } catch (error) {
-    if (error instanceof AiProfileError) throw error
-    if (error instanceof AiKeyConfigurationError) {
-      throw new NoteTtsError(error.code, 'The selected speech credential is unavailable', 503)
-    }
-    throw error
-  }
+  validateNoteSpeechText(text)
+  const runtime = requireNoteSpeechRuntime(db)
 
   const request = linkedTimeout(signal, NOTE_TTS_LIMITS.requestTimeoutMs)
   try {
@@ -166,15 +163,7 @@ export async function synthesizeNoteSpeech(
           Authorization: `Bearer ${runtime.apiKey}`,
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify({
-          model: TTS_MODEL,
-          text,
-          stream: false,
-          voice_setting: { voice_id: TTS_VOICE, speed: 1, vol: 1, pitch: 0 },
-          audio_setting: { sample_rate: 32_000, bitrate: 128_000, format: 'mp3', channel: 1 },
-          language_boost: 'Chinese',
-          subtitle_enable: false,
-        }),
+        body: JSON.stringify({ ...NOTE_TTS_PARAMETERS, text }),
         signal: request.signal,
         redirect: 'error',
       })
@@ -199,6 +188,26 @@ export async function synthesizeNoteSpeech(
     return decodeAudioHex(result.data?.audio)
   } finally {
     request.cleanup()
+  }
+}
+
+export function validateNoteSpeechText(text: string): void {
+  const textLength = [...text].length
+  if (textLength === 0 || !text.trim()) throw new NoteTtsError('tts-empty-text', 'Text is empty', 400)
+  if (textLength > NOTE_TTS_LIMITS.requestChars) {
+    throw new NoteTtsError('tts-text-too-long', 'Speech segment exceeds 800 Unicode characters', 413)
+  }
+}
+
+export function requireNoteSpeechRuntime(db: Database): ReturnType<typeof aiSpeechRuntime> {
+  try {
+    return aiSpeechRuntime(db)
+  } catch (error) {
+    if (error instanceof AiProfileError) throw error
+    if (error instanceof AiKeyConfigurationError) {
+      throw new NoteTtsError(error.code, 'The selected speech credential is unavailable', 503)
+    }
+    throw error
   }
 }
 

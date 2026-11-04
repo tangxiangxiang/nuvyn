@@ -12,6 +12,7 @@ import { useFileTreePreferences } from '../../../composables/vault/useFileTreePr
 const getAiProfiles = vi.fn()
 const getAiSpeechSettings = vi.fn()
 const saveAiSpeechSettings = vi.fn()
+const clearNoteSpeechCache = vi.fn(async (_signal?: AbortSignal) => ({ bytes: 0, limitBytes: 536870912 }))
 const createAiProfile = vi.fn()
 const updateAiProfile = vi.fn()
 const activateAiProfile = vi.fn()
@@ -35,6 +36,8 @@ const listAttachments = vi.fn()
 const refreshAttachmentIndex = vi.fn()
 
 vi.mock('../../../lib/ai-api', () => ({
+  getNoteSpeechCacheUsage: vi.fn(async () => ({ bytes: 0, limitBytes: 536870912 })),
+  clearNoteSpeechCache: (signal?: AbortSignal) => clearNoteSpeechCache(signal),
   getAiProfiles: (...args: unknown[]) => getAiProfiles(...args),
   getAiSpeechSettings: (...args: unknown[]) => getAiSpeechSettings(...args),
   saveAiSpeechSettings: (...args: unknown[]) => saveAiSpeechSettings(...args),
@@ -312,6 +315,23 @@ describe('SettingsModal', () => {
     await flushPromises()
 
     expect(saveAiSpeechSettings).toHaveBeenCalledWith({ profileId: 'anthropic-profile', privacyConsent: true }, expect.any(AbortSignal))
+  })
+
+  it('confirms before clearing speech audio and refreshes usage without changing speech settings', async () => {
+    mountSettings()
+    await flushPromises()
+    expect(document.body.textContent).toContain('朗读缓存：0.0 / 512 MiB')
+    const button = findButton('清除朗读缓存')
+    confirm.mockResolvedValueOnce(false)
+    button.click()
+    await flushPromises()
+    expect(clearNoteSpeechCache).not.toHaveBeenCalled()
+    confirm.mockResolvedValueOnce(true)
+    button.click()
+    await flushPromises()
+    expect(clearNoteSpeechCache).toHaveBeenCalledTimes(1)
+    expect(saveAiSpeechSettings).not.toHaveBeenCalled()
+    expect(toastSuccess).toHaveBeenCalledWith('朗读缓存已清除')
   })
 
   it('persists speech privacy consent revocation', async () => {

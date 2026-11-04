@@ -8,16 +8,21 @@ type SpeechMock = {
   syntheses: Array<{ text: string }>
   synthResponses: Array<{ status: number; contentType: string | undefined }>
   settingsWrites: Array<{ profileId: string | null; privacyConsent: boolean }>
+  cacheClears: number
 }
 
 async function mockSpeech(page: Page, privacyConsent: boolean): Promise<SpeechMock> {
-  const state: SpeechMock = { settingsReads: 0, syntheses: [], synthResponses: [], settingsWrites: [] }
+  const state: SpeechMock = { settingsReads: 0, syntheses: [], synthResponses: [], settingsWrites: [], cacheClears: 0 }
   page.on('response', (response) => {
     if (response.url().endsWith('/api/ai/tts/synthesize')) {
       state.synthResponses.push({ status: response.status(), contentType: response.headers()['content-type'] })
     }
   })
   let settings = { profileId: 'speech-profile-fixture', privacyConsent }
+  await page.route('**/api/ai/tts/cache', async (route) => {
+    if (route.request().method() === 'DELETE') state.cacheClears++
+    return route.fulfill({ json: { bytes: state.cacheClears ? 0 : 1048576, limitBytes: 536870912 } })
+  })
   await page.addInitScript(() => {
     const sources = new WeakMap<HTMLMediaElement, string>()
     Object.defineProperty(HTMLMediaElement.prototype, 'src', {
@@ -98,13 +103,13 @@ test('reads the active unsaved Markdown snapshot, asks consent once, and control
     await privacyDialog.getByRole('button', { name: /确认|Confirm/i }).click()
 
     await expect.poll(() => mock.settingsWrites.length).toBe(1)
-    await expect.poll(() => mock.syntheses.length).toBe(1)
+    await expect.poll(() => mock.syntheses.length).toBe(2)
     expect(mock.settingsWrites[0]).toEqual({ profileId: 'speech-profile-fixture', privacyConsent: true })
-    expect(mock.syntheses[0]?.text).toContain('Unsaved reading')
-    expect(mock.syntheses[0]?.text).toContain('This sentence was not saved yet.')
-    expect(mock.syntheses[0]?.text).not.toContain('Saved title')
-    expect(mock.syntheses[0]?.text).not.toContain('private code block')
-    expect(mock.syntheses[0]?.text).not.toContain('Do not speak this image alt')
+    expect(mock.syntheses.map(({ text }) => text)).toEqual(['Unsaved reading\n\n', 'This sentence was not saved yet.'])
+    const spoken = mock.syntheses.map(({ text }) => text).join('')
+    expect(spoken).not.toContain('Saved title')
+    expect(spoken).not.toContain('private code block')
+    expect(spoken).not.toContain('Do not speak this image alt')
     expect(mock.synthResponses).toContainEqual({ status: 200, contentType: 'audio/mpeg' })
 
     const player = page.getByTestId('note-speech-player')
@@ -248,4 +253,13 @@ test('speech profile menu is clickable above the Settings backdrop and saves the
   await expect(settings).toBeVisible()
   await settings.locator('.settings-speech-card').getByRole('button', { name: /^(保存|Save)$/ }).click()
   await expect.poll(() => mock.settingsWrites).toEqual([{ profileId: 'speech-profile-fixture', privacyConsent: false }])
+  const speech = settings.locator('.settings-speech-card')
+  await expect(speech).toContainText(/1\.0 \/ 512 MiB/)
+  await speech.getByRole('button', { name: /清除朗读缓存|Clear speech cache/ }).click()
+  const confirmation = page.getByRole('dialog').filter({ hasText: /重新生成音频|regenerate audio/ })
+  await expect(confirmation).toBeVisible()
+  expect(mock.cacheClears).toBe(0)
+  await confirmation.getByRole('button', { name: /^(确定|Confirm)$/ }).click()
+  await expect.poll(() => mock.cacheClears).toBe(1)
+  await expect(speech).toContainText(/0\.0 \/ 512 MiB/)
 })
