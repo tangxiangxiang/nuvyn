@@ -2147,22 +2147,8 @@ type DiaryTitleTouch = { id: number; x: number; y: number; startedAt: number; pa
 let diaryTitleTouch: DiaryTitleTouch | null = null
 const diaryTitleNavigating = ref(false)
 
-function traceDiarySwipe(stage: string, values: Record<string, unknown>): void {
-  if (!(window as Window & { __nuvynDebugDiarySwipe?: boolean }).__nuvynDebugDiarySwipe) return
-  const trace = (window as Window & { __nuvynDiarySwipeTrace?: unknown[] }).__nuvynDiarySwipeTrace ?? []
-  trace.push({ stage, ...values })
-  ;(window as Window & { __nuvynDiarySwipeTrace?: unknown[] }).__nuvynDiarySwipeTrace = trace
-  console.info('DIARY_TOUCH_DEBUG ' + JSON.stringify({ stage, ...values }))
-}
 function onDiaryTitleTouchStart(event: TouchEvent): void {
   diaryTitleTouch = null
-  traceDiarySwipe('start', {
-    isMobile: isMobileDiaryViewport.value, canSwipe: canSwipeActiveDiaryDocument(),
-    isReadMode: isReadMode.value, navigating: diaryTitleNavigating.value,
-    settings: settingsOpen.value, sidebar: leftSidebarVisible.value,
-    touches: event.touches.length, target: (event.target as Element | null)?.tagName,
-    targetIsElement: event.target instanceof Element,
-  })
   if (
     !isMobileDiaryViewport.value || !canSwipeActiveDiaryDocument()
     || !isReadMode.value || diaryTitleNavigating.value || settingsOpen.value
@@ -2175,11 +2161,6 @@ function onDiaryTitleTouchStart(event: TouchEvent): void {
   // as date navigation targets.
   const heading = event.target.closest('.reading-slot .reading-pane article h1')
   const article = heading?.closest('article')
-  traceDiarySwipe('heading', {
-    heading: Boolean(heading), article: Boolean(article),
-    first: article?.querySelector('h1') === heading,
-    excluded: Boolean(event.target.closest('a, button, [contenteditable]')),
-  })
   if (!heading || !article || article.querySelector('h1') !== heading
     || event.target.closest('a, button, [contenteditable]')) return
   const finger = event.touches[0]
@@ -2191,7 +2172,6 @@ function onDiaryTitleTouchStart(event: TouchEvent): void {
     startedAt: Date.now(),
     path: activePath.value!,
   }
-  traceDiarySwipe('armed', { x: finger.clientX, y: finger.clientY, id: finger.identifier })
 }
 
 // The visible native Diary reader, rather than the hidden mobile tab strip,
@@ -2209,12 +2189,6 @@ function cancelDiaryTitleTouch(): void { diaryTitleTouch = null }
 function onDiaryTitleTouchEnd(event: TouchEvent): void {
   const start = diaryTitleTouch
   diaryTitleTouch = null
-  traceDiarySwipe('end', {
-    armed: Boolean(start), isMobile: isMobileDiaryViewport.value,
-    canSwipe: canSwipeActiveDiaryDocument(), isReadMode: isReadMode.value,
-    navigating: diaryTitleNavigating.value, pathMatches: activePath.value === start?.path,
-    changedTouchCount: event.changedTouches.length,
-  })
   if (
     !start || !isMobileDiaryViewport.value || !canSwipeActiveDiaryDocument()
     || !isReadMode.value || diaryTitleNavigating.value || activePath.value !== start.path
@@ -2231,7 +2205,6 @@ function onDiaryTitleTouchEnd(event: TouchEvent): void {
   if (!current) return
   const dates = projectDiaryDaysFromTree(tree.value, posts.value).map(day => day.date)
   const next = adjacentDiaryDate(dates, current, direction)
-  traceDiarySwipe('candidate', { direction, current, dates, next })
   if (next) void navigateDiaryByTitleSwipe(next)
 }
 
@@ -3865,9 +3838,9 @@ watch(isReadMode, async (reading) => {
           v-if="activeTab"
           :key="activeTab.path"
           class="reading-slot"
-          @touchstart.passive="onDiaryTitleTouchStart"
-          @touchend.passive="onDiaryTitleTouchEnd"
-          @touchcancel.passive="cancelDiaryTitleTouch"
+          @touchstart.capture.passive="onDiaryTitleTouchStart"
+          @touchend.capture.passive="onDiaryTitleTouchEnd"
+          @touchcancel.capture.passive="cancelDiaryTitleTouch"
         >
           <ReadingPane
             ref="readingPaneRef"

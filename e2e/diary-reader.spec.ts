@@ -627,78 +627,7 @@ test.describe('Diary date title swipe on phones', () => {
       await swipeTitle(page, 100, 2, true)
       await expect(page).toHaveURL(new RegExp(`/vault/${diaryPath(today)}$`))
 
-      const swipeState = await page.locator('.reading-slot').evaluate((slot) => {
-        const component = (slot as any).__vueParentComponent
-        const state = (component?.setupState ?? {}) as Record<string, any>
-        const deref = (value: any) => value && typeof value === 'object' && 'value' in value ? value.value : value
-        const diaryTreePaths: string[] = []
-        const inspect = (nodes: any): void => {
-          if (!Array.isArray(nodes)) return
-          for (const node of nodes) {
-            if (typeof node.path === 'string' && node.path.startsWith('diary/')) diaryTreePaths.push(node.path)
-            if (node.children) inspect(node.children)
-          }
-        }
-        inspect(deref(state.tree))
-        return {
-          keys: Object.keys(state).filter(key => /diary|tree|readmode|mobile|sidebar|activepath|activetab|swipe/i.test(key)).slice(0, 50),
-          activePath: deref(state.activePath),
-          activeTabPath: deref(state.activeTab)?.path,
-          isDiaryScope: deref(state.isDiaryScope),
-          isReadMode: deref(state.isReadMode),
-          isMobileDiaryViewport: deref(state.isMobileDiaryViewport),
-          leftSidebarVisible: deref(state.leftSidebarVisible),
-          specialWorkspaceSurfaceActive: deref(state.specialWorkspaceSurfaceActive),
-          canSwipe: typeof state.canSwipeActiveDiaryDocument === 'function'
-            ? state.canSwipeActiveDiaryDocument() : 'unavailable',
-          diaryTreePaths: diaryTreePaths.slice(0, 30),
-        }
-      })
-      console.log('DIARY_SWIPE_STATE', JSON.stringify(swipeState))
-      await page.evaluate(() => {
-        const slot = document.querySelector('.reading-slot')
-        const state = (slot as any)?.__vueParentComponent?.setupState
-        const entries: unknown[] = []
-        ;(window as any).__diarySwipeEvents = entries
-        for (const type of ['touchstart', 'touchmove', 'touchend', 'touchcancel']) {
-          slot?.addEventListener(type, (event) => {
-            const e = event as TouchEvent
-            const finger = e.changedTouches[0] ?? e.touches[0]
-            entries.push({
-              type,
-              targetTag: (e.target as Element | null)?.tagName,
-              targetHeading: Boolean((e.target as Element | null)?.closest('.reading-slot .reading-pane article h1')),
-              x: finger?.clientX,
-              y: finger?.clientY,
-              touchStored: state?.diaryTitleTouch,
-              navigating: state?.diaryTitleNavigating,
-            })
-          }, { passive: true })
-        }
-      })
-      await page.evaluate(() => { (window as any).__nuvynDebugDiarySwipe = true })
-      page.on('console', (message) => {
-        if (message.text().startsWith('DIARY_TOUCH_DEBUG ')) console.log(message.text())
-      })
-      const listenerState = await page.locator('.reading-slot').evaluate((slot) => {
-        const anySlot = slot as any
-        const heading = slot.querySelector('article h1')
-        const article = heading?.closest('article')
-        return {
-          debugFlag: (window as any).__nuvynDebugDiarySwipe,
-          rootCount: document.querySelectorAll('.reading-slot').length,
-          listeners: Object.keys(anySlot._vei || {}),
-          symbolNames: Object.getOwnPropertySymbols(slot).map(key => String(key)),
-          heading: Boolean(heading),
-          firstHeading: article?.querySelector('h1') === heading,
-          excluded: Boolean(heading?.closest('a, button, [contenteditable]')),
-          viewport: window.innerWidth,
-        }
-      })
-      console.log('DIARY_LISTENER_STATE', JSON.stringify(listenerState))
       await swipeTitle(page, 100, 5)
-      console.log('DIARY_APP_EVENTS', JSON.stringify(await page.evaluate(() => (window as any).__nuvynDiarySwipeTrace || [])))
-      console.log('DIARY_SWIPE_EVENTS', JSON.stringify(await page.evaluate(() => (window as any).__diarySwipeEvents)))
       await expect(page).toHaveURL(new RegExp(`/vault/${diaryPath(previous)}$`))
       await expect(page.locator('.reading-pane')).toContainText('Previous content')
       await page.getByTestId('left-panel-toggle').click()
