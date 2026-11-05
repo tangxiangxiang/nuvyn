@@ -60,6 +60,7 @@ const mocks = vi.hoisted(() => {
     restoreViewState: vi.fn(),
     deltaDecorations: vi.fn(() => []),
     onDidChangeModelContent: vi.fn((fn: (event?: { changes: Array<{ range: { startLineNumber: number } }> }) => void) => { changeListeners.push(fn) }),
+    onDidChangeCursorSelection: vi.fn((_fn: (event: { selection: { isEmpty: () => boolean } }) => void) => ({ dispose: vi.fn() })),
     onDidBlurEditorWidget: vi.fn((fn: () => void) => { blurListeners.push(fn) }),
     onDidCompositionStart: vi.fn((fn: () => void) => { compositionStartListeners.push(fn) }),
     onDidCompositionEnd: vi.fn((fn: () => void) => { compositionEndListeners.push(fn) }),
@@ -412,6 +413,22 @@ describe('Monaco EditorPane', () => {
       isEmpty: () => column === endColumn,
     }
   }
+
+  it('tracks whether the current editor selection can be read aloud', () => {
+    const wrapper = mount(EditorPane, { props: { modelValue: 'Hello', path: 'inbox/speech', speechEnabled: true } })
+    try {
+      const [onSelectionChange] = mocks.editor.onDidChangeCursorSelection.mock.calls[0]!
+      expect(wrapper.vm.hasSpeechSelection).toBe(false)
+
+      onSelectionChange({ selection: cursorSelection(1, 6) })
+      expect(wrapper.vm.hasSpeechSelection).toBe(true)
+
+      onSelectionChange({ selection: cursorSelection(6) })
+      expect(wrapper.vm.hasSpeechSelection).toBe(false)
+    } finally {
+      wrapper.unmount()
+    }
+  })
 
   function pasteImage(
     file: File,
