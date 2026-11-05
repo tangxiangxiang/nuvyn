@@ -22,6 +22,14 @@ export interface AiProfileList {
 export interface AiSpeechSettings {
   profileId: string | null
   privacyConsent: boolean
+  voiceId: SpeechVoiceId
+}
+
+export const SPEECH_VOICE_IDS = ['audiobook_male_1', 'audiobook_female_1', 'male-qn-qingse', 'male-qn-jingying', 'female-shaonv', 'female-yujie'] as const
+export type SpeechVoiceId = typeof SPEECH_VOICE_IDS[number]
+export const DEFAULT_SPEECH_VOICE: SpeechVoiceId = 'audiobook_male_1'
+export function isSpeechVoiceId(value: unknown): value is SpeechVoiceId {
+  return SPEECH_VOICE_IDS.some((id) => id === value)
 }
 
 export interface AiProfileInput {

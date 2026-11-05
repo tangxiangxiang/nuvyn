@@ -6,8 +6,8 @@ import os from 'node:os'
 import path from 'node:path'
 import { applyMigrations } from '../db'
 import { createAiProfile, saveAiSpeechSettings } from '../ai/profiles'
-import { acquireNoteTtsSlot, resetNoteTtsLimitsForTesting } from '../ai/tts'
-import { noteTtsCache } from '../ai/ttsCache'
+import { acquireNoteTtsSlot, resetNoteTtsLimitsForTesting, noteSpeechParameters, NOTE_TTS_PARAMETERS } from '../ai/tts'
+import { noteTtsCache, noteTtsCacheKey } from '../ai/ttsCache'
 import { authBoundary } from '../auth/middleware'
 import { authenticatedRequest, closeAuthTestContext, createAuthenticatedTestContext } from './helpers/auth'
 
@@ -100,6 +100,59 @@ describe('Note TTS routes', () => {
     } finally { closeAuthTestContext(context) }
   })
 
+
+  it('validates voices, preserves old-client settings, and reuses the matching voice cache', async () => {
+    const profile = configuredSpeech()
+    const app = authenticatedApp()
+    const settings = '/api/ai/tts/settings'
+    const save = (voiceId?: string, privacyConsent = true) => request(app, 'PUT', settings, { profileId: profile.id, privacyConsent, ...(voiceId ? { voiceId } : {}) })
+    expect((await save('invalid')).status).toBe(400)
+    expect((await save()).status).toBe(200)
+    const bytes = Buffer.concat([Buffer.from([255, 251, 144, 0]), Buffer.alloc(413)])
+    const upstream = vi.fn(async (_url: unknown, _init: RequestInit) => new Response(JSON.stringify({ data: { audio: bytes.toString('hex') }, base_resp: { status_code: 0 } })))
+    globalThis.fetch = upstream as typeof fetch
+    const speak = async (voiceId?: string) => {
+      const response = await request(app, 'POST', '/api/ai/tts/synthesize', { text: '天姥连天向天横。', ...(voiceId ? { voiceId } : {}) })
+      expect(response.status).toBe(200)
+      await response.arrayBuffer()
+    }
+    expect(noteTtsCacheKey('正文', noteSpeechParameters(db, '正文'))).toBe(noteTtsCacheKey('正文', NOTE_TTS_PARAMETERS))
+    await speak(); await speak()
+    expect(upstream).toHaveBeenCalledTimes(1)
+    await save('audiobook_female_1')
+    await speak(); await speak()
+    expect(upstream).toHaveBeenCalledTimes(2)
+    await speak('audiobook_male_1') // Existing task snapshot survives settings changes.
+    expect(upstream).toHaveBeenCalledTimes(2)
+    await save(undefined, false)
+    expect(await (await request(app, 'GET', settings)).json()).toEqual({ profileId: profile.id, privacyConsent: false, voiceId: 'audiobook_female_1' })
+    await save('audiobook_male_1')
+    await speak()
+    expect(upstream).toHaveBeenCalledTimes(2)
+    expect(upstream.mock.calls.map((call) => JSON.parse(call[1].body as string).voice_setting.voice_id)).toEqual(['audiobook_male_1', 'audiobook_female_1'])
+    expect(JSON.parse(upstream.mock.calls[1]![1].body as string)).toMatchObject({ model: 'speech-2.8-turbo', audio_setting: { sample_rate: 32000, bitrate: 128000, format: 'mp3', channel: 1 } })
+    expect((await request(app, 'POST', '/api/ai/tts/synthesize', { text: 'test', voiceId: 'arbitrary' })).status).toBe(400)
+  })
+
+  it('restricts corrupt dictionary recovery to authenticated same-origin users', async () => {
+    const context = createAuthenticatedTestContext({ db })
+    const app = new Hono()
+    app.use('/api/*', authBoundary)
+    app.route('/api/ai', aiRoutes)
+    const endpoint = '/api/ai/tts/pronunciations/reset'
+    try {
+      expect((await request(app, 'POST', endpoint)).status).toBe(401)
+      db.prepare('INSERT INTO settings (key, value) VALUES (?, ?)').run('ai.speech.pronunciations.v1', '{broken')
+      const send = (origin: string) => app.fetch(authenticatedRequest(context, endpoint, { method: 'POST', origin }))
+      expect((await send('https://attacker.example')).status).toBe(403)
+      const error = await app.fetch(authenticatedRequest(context, '/api/ai/tts/pronunciations', { method: 'GET' }))
+      expect(await error.json()).toMatchObject({ code: 'tts-pronunciations-corrupt' })
+      const recovered = await send(context.runtime.config.allowedOrigins[0]!)
+      expect(recovered.status).toBe(200)
+      expect(await recovered.json()).toEqual([])
+      expect((await send(context.runtime.config.allowedOrigins[0]!)).status).toBe(409)
+    } finally { closeAuthTestContext(context) }
+  })
   it('uses only effective pronunciation rules for both cached audio and actual MiniMax requests', async () => {
     const profile = configuredSpeech()
     saveAiSpeechSettings(db, { profileId: profile.id, privacyConsent: true })
@@ -214,7 +267,7 @@ describe('Note TTS routes', () => {
     const app = authenticatedApp()
     const settings = await request(app, 'GET', '/api/ai/tts/settings')
     expect(settings.status).toBe(200)
-    expect(await settings.json()).toEqual({ profileId: null, privacyConsent: false })
+    expect(await settings.json()).toEqual({ profileId: null, privacyConsent: false, voiceId: 'audiobook_male_1' })
 
     const blocked = await request(app, 'POST', '/api/ai/tts/synthesize', { text: 'must not be sent' })
     expect(blocked.status).toBe(403)
@@ -222,7 +275,7 @@ describe('Note TTS routes', () => {
 
     const save = await request(app, 'PUT', '/api/ai/tts/settings', { profileId: profile.id, privacyConsent: true })
     expect(save.status).toBe(200)
-    expect(await save.json()).toEqual({ profileId: profile.id, privacyConsent: true })
+    expect(await save.json()).toEqual({ profileId: profile.id, privacyConsent: true, voiceId: 'audiobook_male_1' })
 
     const bytes = Buffer.concat([Buffer.from([255, 251, 144, 0]), Buffer.alloc(413)])
     const upstream = vi.fn(async () => new Response(JSON.stringify({

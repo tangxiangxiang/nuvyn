@@ -4,7 +4,7 @@ import os from 'node:os'
 import path from 'node:path'
 import { describe, expect, it } from 'vitest'
 import { validateSpeechPronunciations, matchSpeechPronunciations } from '../../shared/speechPronunciations'
-import { readSpeechPronunciations, saveSpeechPronunciations } from '../ai/speechPronunciations'
+import { readSpeechPronunciations, saveSpeechPronunciations, resetCorruptSpeechPronunciations } from '../ai/speechPronunciations'
 
 const entry = (text = '天姥', pinyin = 'tian1 mu3', id = 'entry-1') => ({ id, text, pinyin })
 
@@ -69,4 +69,32 @@ describe('speech pronunciations', () => {
       expect(readSpeechPronunciations(db)).toEqual([])
     } finally { db.close() }
   })
+  it('matches configured words without inferring single characters or other readings', () => {
+    const rules = validateSpeechPronunciations([
+      entry(), entry('行长', 'hang2 zhang3', 'b'), entry('银行行长', 'yin2 hang2 hang2 zhang3', 'c'),
+      entry('还行', 'hai2 xing2', 'd'), entry('长大', 'zhang3 da4', 'e'), entry('重复', 'chong2 fu4', 'f'),
+    ])
+    for (const text of ['梦游天姥吟留别', '越人语天姥', '天姥连天向天横']) expect(matchSpeechPronunciations(text, rules)).toEqual(['天姥/(tian1)(mu3)'])
+    expect(matchSpeechPronunciations('姥姥，银行，行走，长江，归还', rules)).toEqual([])
+    expect(matchSpeechPronunciations('银行行长', rules)).toEqual(['银行行长/(yin2)(hang2)(hang2)(zhang3)'])
+    for (const word of ['行长', '还行', '长大', '重复']) expect(matchSpeechPronunciations(word, rules)).toHaveLength(1)
+    // A configured single character intentionally matches all contexts; the UI warns about this.
+    expect(matchSpeechPronunciations('长大长江', [entry('长', 'chang2')])).toEqual(['长/(chang2)'])
+  })
+
+  it('explicitly resets corrupt data only and preserves all other settings', () => {
+    const db = new Database(':memory:')
+    db.exec('CREATE TABLE settings (key TEXT PRIMARY KEY, value TEXT NOT NULL)')
+    try {
+      db.prepare('INSERT INTO settings VALUES (?, ?)').run('unrelated', 'preserve')
+      db.prepare('INSERT INTO settings VALUES (?, ?)').run('ai.speech.pronunciations.v1', '{broken')
+      expect(() => readSpeechPronunciations(db)).toThrow(expect.objectContaining({ code: 'tts-pronunciations-corrupt' }))
+      expect(resetCorruptSpeechPronunciations(db)).toEqual([])
+      expect(db.prepare('SELECT value FROM settings WHERE key = ?').get('unrelated')).toEqual({ value: 'preserve' })
+      saveSpeechPronunciations(db, [entry()])
+      expect(() => resetCorruptSpeechPronunciations(db)).toThrow()
+      expect(readSpeechPronunciations(db)).toEqual([entry()])
+    } finally { db.close() }
+  })
+
 })

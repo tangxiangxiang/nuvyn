@@ -2070,7 +2070,7 @@ async function startNoteSpeech(sourceText: string, sourcePath: string, markdown:
       ? await extractSpeakableMarkdown(sourceText, { sourcePath, signal: controller.signal })
       : sourceText.trim()
     if (!stillCurrent()) return
-    noteSpeech.start(speakable)
+    noteSpeech.start(speakable, settings.voiceId)
   } catch (error) {
     if (!stillCurrent() || (error instanceof DOMException && error.name === 'AbortError')) return
     const code = (error as { code?: unknown })?.code

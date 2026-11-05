@@ -1,3 +1,4 @@
+import { DEFAULT_SPEECH_VOICE, type SpeechVoiceId } from '../../../shared/aiProfiles'
 import { computed, onBeforeUnmount, ref } from 'vue'
 import { NoteSpeechTextError, splitNoteSpeechText } from '../../lib/noteSpeechText'
 import { synthesizeNoteSpeech } from '../../lib/ai-api'
@@ -13,7 +14,7 @@ type PendingRequest = {
 }
 
 export type NoteSpeechOptions = {
-  synthesize?: (text: string, signal: AbortSignal) => Promise<Blob>
+  synthesize?: (text: string, signal: AbortSignal, voiceId?: SpeechVoiceId) => Promise<Blob>
   createAudio?: () => HTMLAudioElement
   createObjectURL?: (blob: Blob) => string
   revokeObjectURL?: (url: string) => void
@@ -48,6 +49,7 @@ export function useNoteSpeech(options: NoteSpeechOptions = {}) {
   let audio: HTMLAudioElement | null = null
   let currentObjectUrl: string | null = null
   let pending: PendingRequest | null = null
+  let taskVoiceId: SpeechVoiceId = DEFAULT_SPEECH_VOICE
   let taskId = 0
   let playbackAttempt = 0
   let disposed = false
@@ -108,12 +110,14 @@ export function useNoteSpeech(options: NoteSpeechOptions = {}) {
       if (afterWait) return afterWait
     }
 
+    const text = segments.value[index]!
+    const voiceId = taskVoiceId
     const controller = new AbortController()
     const entry: PendingRequest = {
       task,
       index,
       controller,
-      promise: Promise.resolve().then(() => synthesize(segments.value[index]!, controller.signal)),
+      promise: Promise.resolve().then(() => synthesize(text, controller.signal, voiceId)),
     }
     pending = entry
     try {
@@ -196,8 +200,9 @@ export function useNoteSpeech(options: NoteSpeechOptions = {}) {
     }
   }
 
-  function start(text: string): void {
+  function start(text: string, voiceId: SpeechVoiceId = DEFAULT_SPEECH_VOICE): void {
     stop()
+    taskVoiceId = voiceId
     const task = ++taskId
     try {
       segments.value = splitNoteSpeechText(text)

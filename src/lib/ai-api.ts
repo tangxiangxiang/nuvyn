@@ -1,3 +1,4 @@
+import type { SpeechVoiceId } from '../../shared/aiProfiles'
 // Wire types + typed fetch wrappers for /api/ai/*. The shapes
 // (Session, Message) are the single source of truth — the server
 // imports them via `from '../../src/lib/ai-api.js'` and the
@@ -16,6 +17,10 @@ export async function getSpeechPronunciations(signal?: AbortSignal): Promise<Spe
 
 export async function saveSpeechPronunciations(entries: SpeechPronunciationEntry[], signal?: AbortSignal): Promise<SpeechPronunciationEntry[]> {
   return jsonOrThrow(await authFetch('/api/ai/tts/pronunciations', { method: 'PUT', ...jsonBody(entries), signal }))
+}
+
+export async function resetSpeechPronunciations(signal?: AbortSignal): Promise<SpeechPronunciationEntry[]> {
+  return jsonOrThrow(await authFetch('/api/ai/tts/pronunciations/reset', { method: 'POST', signal }))
 }
 
 export type NoteSpeechApiError = Error & { status: number; code?: string }
@@ -43,7 +48,7 @@ export async function clearNoteSpeechCache(signal?: AbortSignal): Promise<NoteSp
 }
 
 export async function saveAiSpeechSettings(
-  input: AiSpeechSettings,
+  input: Omit<AiSpeechSettings, 'voiceId'> & { voiceId?: SpeechVoiceId },
   signal?: AbortSignal,
 ): Promise<AiSpeechSettings> {
   return jsonOrThrow(await authFetch('/api/ai/tts/settings', {
@@ -51,9 +56,9 @@ export async function saveAiSpeechSettings(
   }))
 }
 
-export async function synthesizeNoteSpeech(text: string, signal?: AbortSignal): Promise<Blob> {
+export async function synthesizeNoteSpeech(text: string, signal?: AbortSignal, voiceId?: SpeechVoiceId): Promise<Blob> {
   const response = await authFetch('/api/ai/tts/synthesize', {
-    method: 'POST', ...jsonBody({ text }), signal,
+    method: 'POST', ...jsonBody({ text, ...(voiceId ? { voiceId } : {}) }), signal,
   })
   if (!response.ok) throw await noteSpeechError(response)
   const audio = await response.blob()

@@ -2,10 +2,11 @@
 import { mount, flushPromises } from '@vue/test-utils'
 import { defineComponent, h } from 'vue'
 import { afterEach, describe, expect, it, vi } from 'vitest'
+import { useConfirm } from '../../../composables/useConfirm'
 import SpeechPronunciationDialog from '../SpeechPronunciationDialog.vue'
 
-const api = vi.hoisted(() => ({ get: vi.fn(), save: vi.fn(), success: vi.fn(), error: vi.fn() }))
-vi.mock('../../../lib/ai-api', () => ({ getSpeechPronunciations: api.get, saveSpeechPronunciations: api.save }))
+const api = vi.hoisted(() => ({ get: vi.fn(), save: vi.fn(), recover: vi.fn(), success: vi.fn(), error: vi.fn() }))
+vi.mock('../../../lib/ai-api', () => ({ getSpeechPronunciations: api.get, saveSpeechPronunciations: api.save, resetSpeechPronunciations: api.recover }))
 vi.mock('../../../composables/useToast', () => ({ useToast: () => ({ success: api.success, error: api.error }) }))
 const Input = defineComponent({ props: ['value'], emits: ['update:value'], template: '<input :value="value" @input="$emit(\'update:value\', $event.target.value)" />' })
 const global = { stubs: {
@@ -13,7 +14,11 @@ const global = { stubs: {
   Input,
   Button: { props: ['disabled'], template: '<button :disabled="disabled"><slot /></button>' },
 } }
-afterEach(() => vi.clearAllMocks())
+afterEach(() => {
+  const { queue, answer } = useConfirm()
+  for (const item of [...queue.value]) answer(item.id, false)
+  vi.clearAllMocks()
+})
 const rule = { id: 'tianmu', text: '天姥', pinyin: 'tian1 mu3' }
 const button = (wrapper: ReturnType<typeof mount>, label: RegExp) => wrapper.findAll('button').find((item) => label.test(item.text()))!
 
@@ -32,6 +37,9 @@ describe('SpeechPronunciationDialog', () => {
     await flushPromises()
     expect(api.save).toHaveBeenLastCalledWith([{ ...rule, pinyin: 'tian1 lao3' }], expect.any(AbortSignal))
     await button(wrapper, /^(删除|Delete)$/).trigger('click')
+    expect(api.save).toHaveBeenCalledTimes(1)
+    const { queue, answer } = useConfirm()
+    answer(queue.value[0]!.id, true)
     await flushPromises()
     expect(api.save).toHaveBeenLastCalledWith([], expect.any(AbortSignal))
     await inputs[0]!.setValue('重庆')
@@ -78,4 +86,43 @@ describe('SpeechPronunciationDialog', () => {
     expect(wrapper.text()).toContain('天姥 · tian1 mu3')
     wrapper.unmount()
   })
+  it('cancels deletion, retains failed deletes, and disposes pending confirmation on unmount', async () => {
+    api.get.mockResolvedValue([rule])
+    const wrapper = mount(SpeechPronunciationDialog, { global })
+    await flushPromises()
+    const { queue, answer } = useConfirm()
+    await button(wrapper, /^(删除|Delete)$/).trigger('click')
+    answer(queue.value[0]!.id, false)
+    await flushPromises()
+    expect(api.save).not.toHaveBeenCalled()
+    api.save.mockRejectedValueOnce(new Error('network'))
+    await button(wrapper, /^(删除|Delete)$/).trigger('click')
+    answer(queue.value[0]!.id, true)
+    await flushPromises()
+    expect(wrapper.text()).toContain('天姥 · tian1 mu3')
+    await button(wrapper, /^(删除|Delete)$/).trigger('click')
+    wrapper.unmount()
+    expect(queue.value).toHaveLength(0)
+    await flushPromises()
+    expect(api.save).toHaveBeenCalledTimes(1)
+  })
+
+  it('offers confirmed recovery only for corrupt dictionaries and allows adding entries afterward', async () => {
+    api.get.mockRejectedValueOnce(Object.assign(new Error('corrupt'), { code: 'tts-pronunciations-corrupt' }))
+    api.recover.mockResolvedValue([])
+    const wrapper = mount(SpeechPronunciationDialog, { global })
+    await flushPromises()
+    const { queue, answer } = useConfirm()
+    await button(wrapper, /重置发音词典|Reset pronunciation dictionary/).trigger('click')
+    answer(queue.value[0]!.id, false)
+    await flushPromises()
+    expect(api.recover).not.toHaveBeenCalled()
+    await button(wrapper, /重置发音词典|Reset pronunciation dictionary/).trigger('click')
+    answer(queue.value[0]!.id, true)
+    await flushPromises()
+    expect(api.recover).toHaveBeenCalledTimes(1)
+    expect(button(wrapper, /^(保存|Save)$/).attributes('disabled')).toBeUndefined()
+    wrapper.unmount()
+  })
+
 })

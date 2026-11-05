@@ -43,6 +43,21 @@ afterEach(() => {
 })
 
 describe('useNoteSpeech', () => {
+
+  it('keeps one voice for every segment, retry and prefetch until a new task starts', async () => {
+    const audio = new FakeAudio()
+    const synthesize = vi.fn(async (_text: string, _signal: AbortSignal, _voice?: string) => new Blob(['mp3']))
+    mountSpeech({ synthesize, createAudio: () => audio as unknown as HTMLAudioElement })
+    speech.start('完整句子。'.repeat(400), 'audiobook_male_1')
+    await flushPromises()
+    const count = speech.totalSegments.value
+    for (let i = 1; i < count; i++) { audio.finish(); await flushPromises() }
+    expect(synthesize.mock.calls.length).toBeGreaterThan(1)
+    expect(synthesize.mock.calls.every((call) => call[2] === 'audiobook_male_1')).toBe(true)
+    speech.start(plainText, 'audiobook_female_1')
+    await flushPromises()
+    expect(synthesize.mock.calls.at(-1)?.[2]).toBe('audiobook_female_1')
+  })
   it('prepares, plays, pauses, resumes, changes valid rates, and releases audio on stop', async () => {
     const audio = new FakeAudio()
     const synthesize = vi.fn(async () => new Blob(['mp3'], { type: 'audio/mpeg' }))

@@ -171,9 +171,9 @@ describe('Profile CRUD, runtime and compatibility', () => {
     })
     activateAiProfile(db, chat.id)
 
-    expect(aiSpeechSettings(db)).toEqual({ profileId: null, privacyConsent: false })
+    expect(aiSpeechSettings(db)).toEqual({ profileId: null, privacyConsent: false, voiceId: 'audiobook_male_1' })
     expect(saveAiSpeechSettings(db, { profileId: speech.id, privacyConsent: true }))
-      .toEqual({ profileId: speech.id, privacyConsent: true })
+      .toEqual({ profileId: speech.id, privacyConsent: true, voiceId: 'audiobook_male_1' })
     expect(aiSpeechRuntime(db).apiKey).toBe('sk-cp-subscription-fixture')
     expect(listAiProfiles(db).activeProfileId).toBe(chat.id)
     expect(JSON.stringify(aiSpeechSettings(db))).not.toContain('sk-cp')
@@ -193,14 +193,28 @@ describe('Profile CRUD, runtime and compatibility', () => {
     expect(() => aiSpeechRuntime(db)).toThrow(expect.objectContaining({ code: 'ai-profile-not-found' }))
   })
 
+
+  it('persists voice selection across database reopen and preserves it for old-client consent updates', async () => {
+    const file = path.join(root, 'voice.db')
+    const first = new Database(file)
+    applyMigrations(first)
+    saveAiSpeechSettings(first, { profileId: null, privacyConsent: false, voiceId: 'audiobook_female_1' })
+    first.close()
+    const reopened = new Database(file)
+    try {
+      expect(aiSpeechSettings(reopened).voiceId).toBe('audiobook_female_1')
+      saveAiSpeechSettings(reopened, { profileId: null, privacyConsent: true })
+      expect(aiSpeechSettings(reopened).voiceId).toBe('audiobook_female_1')
+    } finally { reopened.close() }
+  })
   it('persists privacy consent and supports revoking it without changing the selected profile', () => {
     const profile = createAiProfile(db, {
       name: 'Speech', provider: 'anthropic', apiKey: 'sk-cp-subscription-fixture',
     })
     saveAiSpeechSettings(db, { profileId: profile.id, privacyConsent: true })
-    expect(aiSpeechSettings(db)).toEqual({ profileId: profile.id, privacyConsent: true })
+    expect(aiSpeechSettings(db)).toEqual({ profileId: profile.id, privacyConsent: true, voiceId: 'audiobook_male_1' })
     saveAiSpeechSettings(db, { profileId: profile.id, privacyConsent: false })
-    expect(aiSpeechSettings(db)).toEqual({ profileId: profile.id, privacyConsent: false })
+    expect(aiSpeechSettings(db)).toEqual({ profileId: profile.id, privacyConsent: false, voiceId: 'audiobook_male_1' })
   })
 
   it('keeps multiple profiles per protocol independent and never auto-activates new profiles', () => {

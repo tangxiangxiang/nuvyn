@@ -23,7 +23,7 @@ async function mockSpeech(page: Page, privacyConsent: boolean): Promise<SpeechMo
       state.synthResponses.push({ status: response.status(), contentType: response.headers()['content-type'] })
     }
   })
-  let settings = { profileId: 'speech-profile-fixture', privacyConsent }
+  let settings = { profileId: 'speech-profile-fixture', privacyConsent, voiceId: 'audiobook_male_1' }
   await page.route('**/api/ai/tts/cache', async (route) => {
     if (route.request().method() === 'DELETE') state.cacheClears++
     return route.fulfill({ json: { bytes: state.cacheClears ? 0 : 1048576, limitBytes: 536870912 } })
@@ -256,8 +256,19 @@ test('speech profile menu is clickable above the Settings backdrop and saves the
   await page.keyboard.press('Escape')
   await expect(page.locator('.n-base-select-menu:visible')).toHaveCount(0)
   await expect(settings).toBeVisible()
+  await page.getByTestId('settings-speech-voice').click()
+  await page.locator('.n-base-select-option').filter({ hasText: /有声书女声|Audiobook female/ }).click()
   await settings.locator('.settings-speech-card').getByRole('button', { name: /^(保存|Save)$/ }).click()
-  await expect.poll(() => mock.settingsWrites).toEqual([{ profileId: 'speech-profile-fixture', privacyConsent: false }])
+  await expect.poll(() => mock.settingsWrites).toEqual([{ profileId: 'speech-profile-fixture', privacyConsent: false, voiceId: 'audiobook_female_1' }])
+  await settings.getByRole('button', { name: /^(关闭|Close)$/ }).click()
+  await expect(settings).toHaveCount(0)
+  await page.getByTestId('account-button').click()
+  await page.getByTestId('account-settings').click()
+  await expect(page.getByTestId('settings-speech-voice')).toContainText(/有声书女声|Audiobook female/)
+  await page.getByTestId('settings-speech-voice').click()
+  await page.keyboard.press('Escape')
+  await expect(settings).toBeVisible()
+
   const speech = settings.locator('.settings-speech-card')
   await expect(speech).toContainText(/1\.0 \/ 512 MiB/)
   await speech.getByRole('button', { name: /清除朗读缓存|Clear speech cache/ }).click()
@@ -285,8 +296,50 @@ test('speech profile menu is clickable above the Settings backdrop and saves the
   await dictionary.getByRole('button', { name: /^(保存|Save)$/ }).click()
   await expect(dictionary).toContainText('天姥 · tian1 lao3')
   await dictionary.getByRole('button', { name: /^(删除|Delete)$/ }).click()
+  const deleteConfirm = page.getByRole('dialog').filter({ hasText: /确认删除|Delete “/ })
+  await expect(deleteConfirm).toBeVisible()
+  expect(mock.pronunciations).toHaveLength(1)
+  await deleteConfirm.getByRole('button', { name: /^(确定|Confirm)$/ }).click()
   await expect.poll(() => mock.pronunciations.length).toBe(0)
   await expect(dictionary.locator('.speech-pronunciation-row')).toHaveCount(0)
+})
+
+
+test('corrupt pronunciation recovery requires confirmation and works above Settings on a tablet', async ({ page }) => {
+  await page.setViewportSize({ width: 768, height: 1024 })
+  const mock = await mockSpeech(page, false)
+  let corrupt = true
+  let resets = 0
+  await page.route('**/api/ai/tts/pronunciations', async (route) => {
+    if (corrupt) return route.fulfill({ status: 503, json: { error: 'Dictionary is corrupt', code: 'tts-pronunciations-corrupt' } })
+    if (route.request().method() === 'PUT') mock.pronunciations = route.request().postDataJSON()
+    return route.fulfill({ json: mock.pronunciations })
+  })
+  await page.route('**/api/ai/tts/pronunciations/reset', async (route) => {
+    resets++
+    corrupt = false
+    return route.fulfill({ json: [] })
+  })
+  await gotoVaultReady(page)
+  await page.getByTestId('account-button').click()
+  await page.getByTestId('account-settings').click()
+  await page.locator('.settings-speech-card').getByRole('button', { name: /发音词典|Pronunciation dictionary/ }).click()
+  const dictionary = page.getByTestId('speech-pronunciations')
+  await expect(dictionary.getByRole('alert')).toContainText(/损坏|corrupt/)
+  const recover = dictionary.getByRole('button', { name: /重置发音词典|Reset pronunciation dictionary/ })
+  await recover.click()
+  const confirmation = page.getByRole('dialog').filter({ hasText: /确认重置损坏|Reset the corrupt/ })
+  await confirmation.getByRole('button', { name: /^(取消|Cancel)$/ }).click()
+  expect(resets).toBe(0)
+  await recover.click()
+  await confirmation.getByRole('button', { name: /^(确定|Confirm)$/ }).click()
+  await expect.poll(() => resets).toBe(1)
+  await expect(dictionary.getByRole('alert')).toHaveCount(0)
+  await dictionary.getByRole('textbox', { name: /^(词语|Word)$/ }).fill('天姥')
+  await dictionary.getByRole('textbox', { name: /正确拼音|Correct pinyin/ }).fill('tian1 mu3')
+  await dictionary.getByRole('button', { name: /^(保存|Save)$/ }).click()
+  await expect(dictionary).toContainText('天姥 · tian1 mu3')
+  expect(mock.syntheses).toHaveLength(0)
 })
 
 test.describe('pronunciation correction with touch capability', () => {

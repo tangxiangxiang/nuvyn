@@ -1,6 +1,7 @@
+import type { SpeechVoiceId } from '../../shared/aiProfiles.js'
 import type { Database } from 'better-sqlite3'
 import { AiKeyConfigurationError } from './settings.js'
-import { aiSpeechRuntime, AiProfileError } from './profiles.js'
+import { aiSpeechRuntime, aiSpeechSettings, AiProfileError } from './profiles.js'
 import { matchSpeechPronunciations } from '../../shared/speechPronunciations.js'
 import { readSpeechPronunciations } from './speechPronunciations.js'
 
@@ -27,11 +28,15 @@ export const NOTE_TTS_PARAMETERS = {
   subtitle_enable: false,
 } as const
 
-export type NoteTtsParameters = typeof NOTE_TTS_PARAMETERS & { pronunciation_dict?: { tone: string[] } }
+export type NoteTtsParameters = Omit<typeof NOTE_TTS_PARAMETERS, 'voice_setting'> & {
+  voice_setting: Omit<typeof NOTE_TTS_PARAMETERS.voice_setting, 'voice_id'> & { voice_id: SpeechVoiceId }
+  pronunciation_dict?: { tone: string[] }
+}
 
-export function noteSpeechParameters(db: Database, text: string): NoteTtsParameters {
+export function noteSpeechParameters(db: Database, text: string, voiceId: SpeechVoiceId = aiSpeechSettings(db).voiceId): NoteTtsParameters {
   const tone = matchSpeechPronunciations(text, readSpeechPronunciations(db))
-  return tone.length ? { ...NOTE_TTS_PARAMETERS, pronunciation_dict: { tone } } : NOTE_TTS_PARAMETERS
+  const parameters = { ...NOTE_TTS_PARAMETERS, voice_setting: { ...NOTE_TTS_PARAMETERS.voice_setting, voice_id: voiceId } }
+  return tone.length ? { ...parameters, pronunciation_dict: { tone } } : parameters
 }
 
 export class NoteTtsError extends Error {

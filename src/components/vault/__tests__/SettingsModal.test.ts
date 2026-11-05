@@ -314,7 +314,7 @@ describe('SettingsModal', () => {
     saveButton.click()
     await flushPromises()
 
-    expect(saveAiSpeechSettings).toHaveBeenCalledWith({ profileId: 'anthropic-profile', privacyConsent: true }, expect.any(AbortSignal))
+    expect(saveAiSpeechSettings).toHaveBeenCalledWith({ profileId: 'anthropic-profile', privacyConsent: true, voiceId: 'audiobook_male_1' }, expect.any(AbortSignal))
   })
 
   it('confirms before clearing speech audio and refreshes usage without changing speech settings', async () => {
@@ -347,7 +347,7 @@ describe('SettingsModal', () => {
     saveButton.click()
     await flushPromises()
 
-    expect(saveAiSpeechSettings).toHaveBeenCalledWith({ profileId: 'anthropic-profile', privacyConsent: false }, expect.any(AbortSignal))
+    expect(saveAiSpeechSettings).toHaveBeenCalledWith({ profileId: 'anthropic-profile', privacyConsent: false, voiceId: 'audiobook_male_1' }, expect.any(AbortSignal))
   })
 
   it('resets a connected status when the displayed configuration changes', async () => {

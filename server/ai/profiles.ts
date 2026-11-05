@@ -1,3 +1,4 @@
+import { DEFAULT_SPEECH_VOICE, isSpeechVoiceId, type AiSpeechSettings } from '../../shared/aiProfiles.js'
 import { randomUUID } from 'node:crypto'
 import type { Database } from 'better-sqlite3'
 import type { AiProfile, AiProfileInput, AiProfileList, AiProvider } from '../../shared/aiProfiles.js'
@@ -234,18 +235,20 @@ export function activeProfileRuntime(db: Database): AiRuntimeConfig {
   return id ? profileRuntime(db, id) : { provider: 'anthropic', model: DEFAULT_ANTHROPIC_MODEL, source: 'none' }
 }
 
-export function aiSpeechSettings(db: Database): { profileId: string | null; privacyConsent: boolean } {
+export function aiSpeechSettings(db: Database): AiSpeechSettings {
   initializeAiProfiles(db)
+  const voiceId = setting(db, 'ai.speech.voiceId')
   return {
     profileId: setting(db, SPEECH_PROFILE) || null,
     privacyConsent: setting(db, SPEECH_PRIVACY_CONSENT) === '1',
+    voiceId: isSpeechVoiceId(voiceId) ? voiceId : DEFAULT_SPEECH_VOICE,
   }
 }
 
 export function saveAiSpeechSettings(
   db: Database,
-  input: { profileId: string | null; privacyConsent: boolean },
-): { profileId: string | null; privacyConsent: boolean } {
+  input: Omit<AiSpeechSettings, 'voiceId'> & { voiceId?: unknown },
+): AiSpeechSettings {
   initializeAiProfiles(db)
   if (input.profileId !== null) {
     if (typeof input.profileId !== 'string' || input.profileId.length > 100) {
@@ -257,7 +260,9 @@ export function saveAiSpeechSettings(
       throw new AiProfileError('ai-speech-key-type-invalid', 'Speech requires a MiniMax subscription API key', 409)
     }
   }
+  if (input.voiceId !== undefined && !isSpeechVoiceId(input.voiceId)) throw new AiProfileError('tts-invalid-voice', 'Invalid speech voice')
   db.transaction(() => {
+    if (isSpeechVoiceId(input.voiceId)) putSetting(db, 'ai.speech.voiceId', input.voiceId)
     putSetting(db, SPEECH_PROFILE, input.profileId ?? '')
     putSetting(db, SPEECH_PRIVACY_CONSENT, input.privacyConsent ? '1' : '0')
   })()

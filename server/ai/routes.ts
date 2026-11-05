@@ -1,3 +1,4 @@
+import { isSpeechVoiceId } from '../../shared/aiProfiles.js'
 // Hono sub-router for /api/ai. The handlers are intentionally thin:
 // parse the request, call the matching service function, translate
 // the service result to an HTTP status + JSON body.
@@ -71,7 +72,7 @@ import {
 } from './profiles.js'
 import { acquireNoteTtsSlot, NOTE_TTS_LIMITS, NoteTtsError, synthesizeNoteSpeech, requireNoteSpeechRuntime, validateNoteSpeechText, noteSpeechParameters } from './tts.js'
 import { noteTtsCache } from './ttsCache.js'
-import { readSpeechPronunciations, saveSpeechPronunciations } from './speechPronunciations.js'
+import { readSpeechPronunciations, saveSpeechPronunciations, resetCorruptSpeechPronunciations } from './speechPronunciations.js'
 import { SpeechPronunciationError, SPEECH_PRONUNCIATION_LIMITS } from '../../shared/speechPronunciations.js'
 
 function bad(c: any, msg: string, status = 400, errorCode?: string) {
@@ -333,6 +334,13 @@ for (const method of ['get', 'put'] as const) {
   })
 }
 
+ai.post('/tts/pronunciations/reset', (c) => {
+  c.header('Cache-Control', 'no-store')
+  if (!requireSpeechUser(c)) return bad(c, 'Authentication required', 401, 'auth-session-required')
+  try { return c.json(resetCorruptSpeechPronunciations(getDb())) }
+  catch { return bad(c, 'Dictionary cannot be reset', 409, 'tts-pronunciations-reset-failed') }
+})
+
 ai.get('/tts/settings', (c) => {
   c.header('Cache-Control', 'no-store')
   if (!requireSpeechUser(c)) return bad(c, 'Authentication required', 401, 'auth-session-required')
@@ -348,14 +356,16 @@ ai.put('/tts/settings', async (c) => {
       throw new NoteTtsError('tts-invalid-settings', 'Invalid speech settings', 400)
     }
     const value = body as Record<string, unknown>
-    if (Object.keys(value).some((key) => !['profileId', 'privacyConsent'].includes(key))
+    if (Object.keys(value).some((key) => !['profileId', 'privacyConsent', 'voiceId'].includes(key))
       || !(value.profileId === null || typeof value.profileId === 'string')
-      || typeof value.privacyConsent !== 'boolean') {
+      || typeof value.privacyConsent !== 'boolean'
+      || value.voiceId !== undefined && !isSpeechVoiceId(value.voiceId)) {
       throw new NoteTtsError('tts-invalid-settings', 'Invalid speech settings', 400)
     }
     return c.json(saveAiSpeechSettings(getDb(), {
       profileId: value.profileId as string | null,
       privacyConsent: value.privacyConsent,
+      voiceId: value.voiceId,
     }))
   } catch (error) {
     if (error instanceof NoteTtsError) return bad(c, error.message, error.status, error.code)
@@ -388,8 +398,9 @@ ai.post('/tts/synthesize', async (c) => {
       throw new NoteTtsError('tts-invalid-request', 'JSON request body required', 400)
     }
     const value = body as Record<string, unknown>
-    if (Object.keys(value).some((key) => key !== 'text') || typeof value.text !== 'string') {
-      throw new NoteTtsError('tts-invalid-request', 'Only a text field is accepted', 400)
+    if (Object.keys(value).some((key) => !['text', 'voiceId'].includes(key)) || typeof value.text !== 'string'
+      || value.voiceId !== undefined && !isSpeechVoiceId(value.voiceId)) {
+      throw new NoteTtsError('tts-invalid-request', 'Text and an optional supported voice are accepted', 400)
     }
     const user = requireSpeechUser(c)
     if (!user) throw new NoteTtsError('auth-session-required', 'Authentication required', 401)
@@ -399,7 +410,7 @@ ai.post('/tts/synthesize', async (c) => {
     validateNoteSpeechText(value.text)
     requireNoteSpeechRuntime(getDb()) // Profile/credential validity is required even on cache hits.
     const text = value.text
-    const parameters = noteSpeechParameters(getDb(), text)
+    const parameters = noteSpeechParameters(getDb(), text, isSpeechVoiceId(value.voiceId) ? value.voiceId : undefined)
     const audio = await noteTtsCache.get(user.id, text, c.req.raw.signal, async (signal) => {
       const release = acquireNoteTtsSlot(String(user.id))
       try { return await synthesizeNoteSpeech(getDb(), text, signal, fetch, parameters) } finally { release() }
