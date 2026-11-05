@@ -156,6 +156,17 @@ html.ledger-mode::-webkit-scrollbar {
   width: 0;
   height: 0;
 }
+/* Board Home and Folder pages keep document scrolling while hiding its bar. */
+body.board-mode,
+html.board-mode {
+  scrollbar-width: none;
+}
+body.board-mode::-webkit-scrollbar,
+html.board-mode::-webkit-scrollbar {
+  display: none;
+  width: 0;
+  height: 0;
+}
 @media (min-width: 651px) {
   html.ledger-accounts-mode,
   body.ledger-accounts-mode,

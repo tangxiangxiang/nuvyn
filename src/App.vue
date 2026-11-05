@@ -115,6 +115,7 @@ const isVaultRoute = computed(() => (
   && vaultIdentity.state.value === 'ready'
 ))
 const isLedgerRoute = computed(() => workspaceKind.value === 'ledger')
+const isBoardHomeRoute = computed(() => route.name === 'board' || route.name === 'board-folder')
 const ledgerZenEligible = computed(() => (
   isLedgerRoute.value
   && auth.state.value === 'authenticated'
@@ -432,6 +433,8 @@ watchEffect(() => {
   document.body.classList.toggle('vault-mode', isVaultRoute.value)
   document.body.classList.toggle('ledger-mode', isLedgerRoute.value)
   document.documentElement.classList.toggle('ledger-mode', isLedgerRoute.value)
+  document.body.classList.toggle('board-mode', isBoardHomeRoute.value)
+  document.documentElement.classList.toggle('board-mode', isBoardHomeRoute.value)
 })
 
 /* View mode for the vault (edit vs read). Persisted to localStorage so

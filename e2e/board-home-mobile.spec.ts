@@ -32,11 +32,18 @@ test('Board Home fits a single canvas on desktop, tablet, and phone', async ({ p
             navbarBorder: getComputedStyle(navbar).borderBottomWidth,
             boardHeight: document.querySelector('.board-home')!.getBoundingClientRect().height,
             overflow: scrollHeight - clientHeight,
+            boardMode: document.documentElement.classList.contains('board-mode')
+              && document.body.classList.contains('board-mode'),
+            scrollbarWidth: getComputedStyle(document.documentElement).scrollbarWidth,
+            webkitScrollbarDisplay: getComputedStyle(document.documentElement, '::-webkit-scrollbar').display,
           }
         })
         await test.info().attach('layout', { body: JSON.stringify(layout), contentType: 'application/json' })
         expect.soft(layout.overflow, JSON.stringify(layout)).toBe(0)
         expect.soft(layout.bodyScrollHeight).toBeLessThanOrEqual(layout.clientHeight)
+        expect(layout.boardMode).toBe(true)
+        expect(layout.scrollbarWidth).toBe('none')
+        expect(layout.webkitScrollbarDisplay).toBe('none')
         await expect(page.locator('.board-new-folder-button')).toBeInViewport({ ratio: 1 })
         await expect(page.locator('.board-new-button')).toBeInViewport({ ratio: 1 })
         await expect(card).toBeInViewport({ ratio: 1 })
@@ -72,8 +79,14 @@ test('Board Home can scroll to the last canvas and pagination on a phone', async
       return scrollHeight - clientHeight
     })
     expect(maxScroll).toBeGreaterThan(0)
+    const scrollbar = await page.evaluate(() => ({
+      width: getComputedStyle(document.documentElement).scrollbarWidth,
+      display: getComputedStyle(document.documentElement, '::-webkit-scrollbar').display,
+    }))
+    expect(scrollbar).toEqual({ width: 'none', display: 'none' })
 
-    await page.keyboard.press('End')
+    await page.mouse.move(180, 400)
+    await page.mouse.wheel(0, maxScroll * 2)
     await expect.poll(() => page.evaluate(() => window.scrollY)).toBe(maxScroll)
     await expect(cards.last()).toBeInViewport({ ratio: 1 })
     await expect(pagination).toBeInViewport({ ratio: 1 })
@@ -85,6 +98,24 @@ test('Board Home can scroll to the last canvas and pagination on a phone', async
   } finally {
     for (const id of boardIds) await deleteBoardIfExists(request, id)
   }
+})
+
+test('Board scrollbar mode is removed outside Board Home and Folder pages', async ({ page }) => {
+  await page.goto('/board')
+  await expect.poll(() => page.locator('html').evaluate((element) => element.classList.contains('board-mode'))).toBe(true)
+  await page.goto('/board/folder/e2e-missing-folder')
+  await expect.poll(() => page.locator('body').evaluate((element) => element.classList.contains('board-mode'))).toBe(true)
+
+  for (const route of ['/ledger', '/vault', '/diary']) {
+    await page.goto(route)
+    await expect.poll(() => page.locator('html').evaluate((element) => element.classList.contains('board-mode'))).toBe(false)
+    await expect(page.locator('body')).not.toHaveClass(/board-mode/)
+    if (route === '/ledger') await expect(page.locator('html')).toHaveClass(/ledger-mode/)
+    else await expect(page.locator('html')).not.toHaveClass(/ledger-mode/)
+  }
+
+  await page.goto('/board')
+  await expect(page.locator('html')).toHaveClass(/board-mode/)
 })
 
 test('Board Home keeps a compact phone toolbar, complete previews, and folder rows', async ({ page, request }) => {
