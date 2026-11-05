@@ -1,5 +1,91 @@
 import { expect, test } from './fixtures/auth'
-import { uniqueBoardTitle } from './helpers/board'
+import { deleteBoardIfExists, uniqueBoardTitle } from './helpers/board'
+
+test('Board Home fits a single canvas on desktop, tablet, and phone', async ({ page, request }) => {
+  const title = uniqueBoardTitle('Short gallery')
+  const response = await request.post('/api/board', { data: { title, folderId: null } })
+  expect(response.status()).toBe(201)
+  const { metadata: { id } } = await response.json()
+
+  try {
+    await page.goto('/board')
+    const card = page.locator('.board-card')
+    await expect(card).toHaveCount(1)
+    await expect(card.getByTestId('board-card-title')).toHaveText(title)
+
+    for (const viewport of [
+      { width: 1440, height: 900 },
+      { width: 768, height: 1024 },
+      { width: 375, height: 812 },
+    ]) {
+      await test.step(`${viewport.width}×${viewport.height}`, async () => {
+        await page.setViewportSize(viewport)
+        const layout = await page.evaluate(() => {
+          const { clientHeight, scrollHeight } = document.documentElement
+          const navbar = document.querySelector('.navbar')!
+          return {
+            innerHeight: window.innerHeight,
+            clientHeight,
+            scrollHeight,
+            bodyScrollHeight: document.body.scrollHeight,
+            navbarHeight: navbar.getBoundingClientRect().height,
+            navbarBorder: getComputedStyle(navbar).borderBottomWidth,
+            boardHeight: document.querySelector('.board-home')!.getBoundingClientRect().height,
+            overflow: scrollHeight - clientHeight,
+          }
+        })
+        await test.info().attach('layout', { body: JSON.stringify(layout), contentType: 'application/json' })
+        expect.soft(layout.overflow, JSON.stringify(layout)).toBe(0)
+        expect.soft(layout.bodyScrollHeight).toBeLessThanOrEqual(layout.clientHeight)
+        await expect(page.locator('.board-new-folder-button')).toBeInViewport({ ratio: 1 })
+        await expect(page.locator('.board-new-button')).toBeInViewport({ ratio: 1 })
+        await expect(card).toBeInViewport({ ratio: 1 })
+        await expect(page.locator('.board-pagination')).toBeInViewport({ ratio: 1 })
+      })
+    }
+  } finally {
+    await deleteBoardIfExists(request, id)
+  }
+})
+
+test('Board Home can scroll to the last canvas and pagination on a phone', async ({ page, request }) => {
+  const boardIds: string[] = []
+  try {
+    for (let index = 0; index < 6; index++) {
+      const response = await request.post('/api/board', {
+        data: { title: uniqueBoardTitle('Long gallery'), folderId: null },
+      })
+      expect(response.status()).toBe(201)
+      const { metadata: { id } } = await response.json()
+      boardIds.push(id)
+    }
+
+    await page.setViewportSize({ width: 375, height: 812 })
+    await page.goto('/board')
+    const cards = page.locator('.board-card')
+    await expect(cards).toHaveCount(boardIds.length)
+    const pagination = page.locator('.board-pagination')
+    await expect(pagination).toBeVisible()
+    await expect(pagination).not.toBeInViewport()
+    const maxScroll = await page.evaluate(() => {
+      const { scrollHeight, clientHeight } = document.documentElement
+      return scrollHeight - clientHeight
+    })
+    expect(maxScroll).toBeGreaterThan(0)
+
+    await page.keyboard.press('End')
+    await expect.poll(() => page.evaluate(() => window.scrollY)).toBe(maxScroll)
+    await expect(cards.last()).toBeInViewport({ ratio: 1 })
+    await expect(pagination).toBeInViewport({ ratio: 1 })
+    const pageButtons = pagination.locator('.n-pagination-item--button')
+    await expect(pageButtons).toHaveCount(2)
+    for (const button of await pageButtons.all()) {
+      await expect(button).toBeInViewport({ ratio: 1 })
+    }
+  } finally {
+    for (const id of boardIds) await deleteBoardIfExists(request, id)
+  }
+})
 
 test('Board Home keeps a compact phone toolbar, complete previews, and folder rows', async ({ page, request }) => {
   const title = uniqueBoardTitle('Mobile layout')

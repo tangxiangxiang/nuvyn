@@ -905,7 +905,9 @@ async function removeBoard(board: BoardMetadata): Promise<void> {
 
 <style scoped>
 .board-home {
-  min-height: calc(100vh - var(--navbar-h, 36px));
+  /* The navbar height variable excludes its 1px bottom border. */
+  min-height: calc(100vh - var(--navbar-h, 36px) - 1px);
+  min-height: calc(100dvh - var(--navbar-h, 36px) - 1px);
   box-sizing: border-box;
   padding: 42px 0 0;
   background: var(--bg);
