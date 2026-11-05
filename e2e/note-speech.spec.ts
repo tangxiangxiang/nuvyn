@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto'
 import type { Page } from '@playwright/test'
 import { expect, test } from './fixtures/auth'
-import { cleanupCreatedPaths, createDoc, gotoVaultReady, openDoc } from './helpers/edit-program'
+import { cleanupCreatedPaths, createDoc, gotoVaultReady, interceptHistory, openDoc } from './helpers/edit-program'
 
 type SpeechMock = {
   settingsReads: number
@@ -12,7 +12,7 @@ type SpeechMock = {
   pronunciations: Array<{ id: string; text: string; pinyin: string }>
 }
 
-async function mockSpeech(page: Page, privacyConsent: boolean): Promise<SpeechMock> {
+async function mockSpeech(page: Page, privacyConsent: boolean, blockFirstPlay = false): Promise<SpeechMock> {
   const state: SpeechMock = { settingsReads: 0, syntheses: [], synthResponses: [], settingsWrites: [], cacheClears: 0, pronunciations: [] }
   await page.route('**/api/ai/tts/pronunciations', async (route) => {
     if (route.request().method() === 'PUT') state.pronunciations = route.request().postDataJSON()
@@ -28,7 +28,7 @@ async function mockSpeech(page: Page, privacyConsent: boolean): Promise<SpeechMo
     if (route.request().method() === 'DELETE') state.cacheClears++
     return route.fulfill({ json: { bytes: state.cacheClears ? 0 : 1048576, limitBytes: 536870912 } })
   })
-  await page.addInitScript(() => {
+  await page.addInitScript((blockFirstPlay) => {
     const sources = new WeakMap<HTMLMediaElement, string>()
     Object.defineProperty(HTMLMediaElement.prototype, 'src', {
       configurable: true,
@@ -43,9 +43,15 @@ async function mockSpeech(page: Page, privacyConsent: boolean): Promise<SpeechMo
       }
       removeAttribute.call(this, name)
     }
-    HTMLMediaElement.prototype.play = function play() { return Promise.resolve() }
+    HTMLMediaElement.prototype.play = function play() {
+      if (blockFirstPlay) {
+        blockFirstPlay = false
+        return Promise.reject(new DOMException('Autoplay blocked', 'NotAllowedError'))
+      }
+      return Promise.resolve()
+    }
     HTMLMediaElement.prototype.load = function load() {}
-  })
+  }, blockFirstPlay)
   await page.route('**/api/ai/tts/settings', async (route) => {
     if (route.request().method() === 'GET') {
       state.settingsReads += 1
@@ -189,7 +195,7 @@ test('Monaco context menu reads only a non-empty selection without editing the d
   }
 })
 
-test('reading selection is scoped to the current article and Note eligibility excludes phone and other workspaces', async ({ page, request }) => {
+test('reading selection is scoped to the current article and Note eligibility excludes other workspaces', async ({ page, request }) => {
   const documentPath = `inbox/reader-speech-${randomUUID()}`
   const created: string[] = []
   const mock = await mockSpeech(page, true)
@@ -199,6 +205,7 @@ test('reading selection is scoped to the current article and Note eligibility ex
     await gotoVaultReady(page)
     await openDoc(page, documentPath)
     await page.setViewportSize({ width: 768, height: 1024 })
+    await expect(page.getByTestId('note-speech-menu')).toBeVisible()
     await page.getByTestId('view-toggle').click()
     const reader = page.locator('.reading-pane .article')
     await expect(reader).toBeVisible()
@@ -219,13 +226,38 @@ test('reading selection is scoped to the current article and Note eligibility ex
     expect(mock.syntheses[0]?.text).toBe('Read this visible selection only.')
 
     await page.setViewportSize({ width: 390, height: 844 })
-    await expect(page.getByTestId('note-speech-menu')).toHaveCount(0)
+    await expect(page.getByTestId('note-speech-menu')).toBeVisible()
     await page.goto('/ledger')
     await expect(page.getByTestId('note-speech-menu')).toHaveCount(0)
     await page.goto('/board')
     await expect(page.getByTestId('note-speech-menu')).toHaveCount(0)
     await page.goto('/vault/diary')
     await expect(page.getByTestId('note-speech-menu')).toHaveCount(0)
+  } finally {
+    await cleanupCreatedPaths(request, created)
+  }
+})
+
+test('a history comparison does not offer Note speech on a phone', async ({ page, request }) => {
+  const name = `speech-history-${randomUUID()}`
+  const path = `inbox/${name}`
+  const created: string[] = []
+  const mock = await mockSpeech(page, true)
+  try {
+    await createDoc(request, path, '# Current Note', created)
+    await interceptHistory(page, { files: [`${path}.md`], raw: '# Historical Note', sha: 'speech-history-fixture' })
+    await gotoVaultReady(page)
+    await openDoc(page, path)
+    const menu = page.getByTestId('note-speech-menu')
+    await expect(menu).toBeVisible()
+    await page.locator('button.ab-btn[aria-label="History"]').click()
+    await page.locator('.history-timeline-group-header').first().click()
+    await page.locator('.history-commit-row').first().click()
+    await page.locator('.history-file-row', { hasText: name }).click()
+    await expect(page.locator('.history-comparison-pane')).toBeVisible()
+    await page.setViewportSize({ width: 390, height: 844 })
+    await expect(menu).toHaveCount(0)
+    expect(mock.syntheses).toHaveLength(0)
   } finally {
     await cleanupCreatedPaths(request, created)
   }
@@ -400,5 +432,157 @@ test.describe('pronunciation correction with touch capability', () => {
       await expect(dictionary).toHaveCount(0)
       await expect(paragraph).toHaveText('天姥连天向天横。')
     } finally { await cleanupCreatedPaths(request, created) }
+  })
+})
+
+test.describe('phone read aloud', () => {
+  test.use({ hasTouch: true })
+
+  for (const [width, height] of [[390, 844], [360, 800], [320, 640], [430, 932], [640, 320]]) {
+    test(`plays a Note and keeps the controls inside ${width} × ${height}`, async ({ page, request }) => {
+      await page.setViewportSize({ width, height })
+      const mock = await mockSpeech(page, true, true)
+      const created: string[] = []
+      const path = `inbox/phone-speech-${randomUUID()}`
+      const menu = page.getByTestId('note-speech-menu')
+      const player = page.getByTestId('note-speech-player')
+      const start = async () => {
+        await menu.tap()
+        await page.locator('.n-dropdown-option').filter({ hasText: /朗读全文|Read note aloud/ }).tap()
+      }
+
+      try {
+        await createDoc(request, path, '# Phone Note\n\nFirst paragraph.\n\nSecond paragraph.', created)
+        await gotoVaultReady(page)
+        await expect(menu).toHaveCount(0)
+        await page.goto(`/vault/${path}`)
+        await expect(menu).toBeInViewport({ ratio: 1 })
+        await start()
+        await expect(player.getByRole('alert')).toContainText(/阻止了自动播放|Playback was blocked/)
+        await expect(player).toBeInViewport({ ratio: 1 })
+        const controls = player.locator('.note-speech-player-controls').locator('button, .note-speech-rate')
+        await expect(controls).toHaveCount(5)
+        const layout = await controls.evaluateAll((elements) => ({
+          overflow: document.documentElement.scrollWidth - document.documentElement.clientWidth,
+          boxes: elements.map((element) => {
+            const { left, right, top, bottom } = element.getBoundingClientRect()
+            return { left, right, top, bottom }
+          }),
+        }))
+        expect(layout.overflow).toBe(0)
+        for (const [index, box] of layout.boxes.entries()) {
+          expect(box.left).toBeGreaterThanOrEqual(0)
+          expect(box.right).toBeLessThanOrEqual(width)
+          expect(box.top).toBeGreaterThanOrEqual(0)
+          expect(box.bottom).toBeLessThanOrEqual(height)
+          for (const other of layout.boxes.slice(index + 1)) {
+            expect(box.right <= other.left || box.bottom <= other.top || other.right <= box.left || other.bottom <= box.top).toBe(true)
+          }
+        }
+
+        expect(mock.syntheses).toHaveLength(1)
+        await player.getByRole('button', { name: /继续|Resume/ }).tap()
+        await expect(player).toContainText(/正在朗读|Reading aloud/)
+        await expect.poll(() => mock.syntheses.map(({ text }) => text)).toEqual(['Phone Note\n\n', 'First paragraph.\n\n'])
+        if (width === 320) {
+          await player.getByRole('button', { name: /下一段|Next segment/ }).tap()
+          await expect(player.getByRole('button', { name: /上一段|Previous segment/ })).toBeEnabled()
+          await player.getByRole('button', { name: /上一段|Previous segment/ }).tap()
+          await expect(player.getByRole('button', { name: /上一段|Previous segment/ })).toBeDisabled()
+          await player.locator('.note-speech-rate').tap()
+          await page.locator('.n-base-select-option').filter({ hasText: '1.25×' }).tap()
+          await expect(player.locator('.note-speech-rate')).toContainText('1.25×')
+          await player.getByRole('button', { name: /暂停|Pause/ }).tap()
+          await player.getByRole('button', { name: /继续|Resume/ }).tap()
+
+          // Chromium viewport emulation has no system IME. Reproduce the
+          // visual viewport resize while Monaco retains focus.
+          await page.locator('.monaco-host').evaluate((element) => {
+            const editor = (element as any).__vueParentComponent.setupState.editor
+            editor.focus()
+            const viewport = window.visualViewport!
+            Object.defineProperty(viewport, 'height', { configurable: true, value: 350 })
+            viewport.dispatchEvent(new Event('resize'))
+          })
+          await expect(player).toBeHidden()
+          await page.evaluate(() => {
+            const viewport = window.visualViewport!
+            Reflect.deleteProperty(viewport, 'height')
+            viewport.dispatchEvent(new Event('resize'))
+          })
+          await expect(player).toBeVisible()
+          await expect(player).toContainText(/正在朗读|Reading aloud/)
+        }
+        await player.getByRole('button', { name: /停止朗读|Stop reading/ }).tap()
+        await expect(player).toHaveCount(0)
+        await start()
+        await expect(player).toContainText(/正在朗读|Reading aloud/)
+        await page.evaluate(() => window.dispatchEvent(new PageTransitionEvent('pagehide')))
+        await expect(player).toHaveCount(0)
+      } finally {
+        await cleanupCreatedPaths(request, created)
+      }
+    })
+  }
+
+  test('reads the active Monaco and article selections and stops on navigation', async ({ page, request }) => {
+    await page.setViewportSize({ width: 390, height: 844 })
+    const mock = await mockSpeech(page, true)
+    const created: string[] = []
+    const path = `inbox/phone-selection-${randomUUID()}`
+    const nextPath = `inbox/phone-next-${randomUUID()}`
+    const source = '# Selection\n\nRead this only.\n\nLeave this out.'
+    const player = page.getByTestId('note-speech-player')
+    const menu = page.getByTestId('note-speech-menu')
+    const actions = page.getByTestId('note-reading-selection-actions')
+    try {
+      await createDoc(request, path, source, created)
+      await createDoc(request, nextPath, source, created)
+      await page.goto(`/vault/${path}`)
+      const host = page.locator('.monaco-host')
+      await expect(host.locator('.view-lines')).toBeVisible()
+      await host.evaluate((element) => {
+        const editor = (element as any).__vueParentComponent.setupState.editor
+        editor.setSelection({ startLineNumber: 3, startColumn: 1, endLineNumber: 3, endColumn: 16 })
+        editor.focus()
+      })
+      await menu.tap()
+      await page.locator('.n-dropdown-option').filter({ hasText: /朗读所选内容|Read selection aloud/ }).tap()
+      await expect(player).toContainText(/正在朗读|Reading aloud/)
+      expect(mock.syntheses.map(({ text }) => text)).toEqual(['Read this only.'])
+      expect(await host.evaluate((element) => (element as any).__vueParentComponent.setupState.editor.getValue())).toBe(source)
+
+      await page.getByTestId('left-panel-toggle').tap()
+      const nextRow = page.locator(`[data-tree-key="file:${nextPath}"] > .row-line`)
+      if (!await nextRow.isVisible()) await page.locator('[data-tree-key="folder:inbox"] > .row-line').tap()
+      await nextRow.tap()
+      await expect(page).toHaveURL(new RegExp(`/vault/${nextPath}$`))
+      await expect(player).toHaveCount(0)
+      await page.getByTestId('view-toggle').tap()
+      const paragraph = page.locator('.reading-pane .article p').filter({ hasText: 'Read this only.' })
+      const select = (element: Element) => {
+        const range = document.createRange()
+        range.selectNodeContents(element)
+        const selection = window.getSelection()!
+        selection.removeAllRanges()
+        selection.addRange(range)
+        document.dispatchEvent(new Event('selectionchange'))
+        return element.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true }))
+      }
+      await menu.evaluate(select)
+      await expect(actions).toHaveCount(0)
+      expect(await paragraph.evaluate(select)).toBe(true)
+      await expect(actions).toBeInViewport({ ratio: 1 })
+      expect(mock.syntheses).toHaveLength(1)
+      await actions.getByRole('button', { name: /朗读所选内容|Read selection aloud/ }).tap()
+      await expect(player).toContainText(/正在朗读|Reading aloud/)
+      expect(mock.syntheses.map(({ text }) => text)).toEqual(['Read this only.', 'Read this only.'])
+      await page.locator('.scope-chip').filter({ hasText: 'ledger' }).tap()
+      await expect(page).toHaveURL(/\/ledger/)
+      await expect(player).toHaveCount(0)
+      await expect(menu).toHaveCount(0)
+    } finally {
+      await cleanupCreatedPaths(request, created)
+    }
   })
 })

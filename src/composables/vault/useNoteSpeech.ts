@@ -231,14 +231,18 @@ export function useNoteSpeech(options: NoteSpeechOptions = {}) {
   function resume(): void {
     if (status.value !== 'paused') return
     const player = getAudio()
-    if (player.src && !error.value) {
+    if (player.src) {
+      // Reuse the loaded source and call play() within the user's gesture.
       const attempt = playbackAttempt
       void player.play().then(() => {
         if (attempt === playbackAttempt && status.value === 'paused') {
+          error.value = null
           status.value = 'playing'
           void prefetchNext(taskId, currentIndex.value + 1)
         }
-      }).catch(() => { error.value = 'tts-playback-blocked' })
+      }).catch(() => {
+        if (attempt === playbackAttempt && status.value === 'paused') error.value = 'tts-playback-blocked'
+      })
       return
     }
     prefetchFailures.delete(currentIndex.value)

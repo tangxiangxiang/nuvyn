@@ -10,8 +10,10 @@ export interface AppShellContext {
   readonly settingsRequestTick: Readonly<Ref<number>>
   /** Open the single App-level search surface from global chrome. */
   readonly openGlobalSearch?: () => void
-  /** Current Note's full-text read-aloud action; only supplied by an eligible desktop/tablet Note. */
+  /** Current Note's full-text read-aloud action. */
   readonly noteSpeechReadAllCommand?: Ref<(() => void) | null>
+  /** Phone menu shortcut for the current editor's selection action. */
+  readonly noteSpeechReadSelectionCommand?: Ref<(() => void) | null>
   /** Capability owned by the active Note tablet editor. */
   readonly noteTabletImageCommand?: Ref<(() => void) | null>
   /**

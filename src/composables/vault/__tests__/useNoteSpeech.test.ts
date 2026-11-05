@@ -217,10 +217,12 @@ describe('useNoteSpeech', () => {
       .mockRejectedValueOnce(new Error('autoplay blocked'))
       .mockResolvedValueOnce(undefined)
     const revokeObjectURL = vi.fn()
+    const createObjectURL = vi.fn(() => 'blob:autoplay')
+    const synthesize = vi.fn(async () => new Blob(['mp3'], { type: 'audio/mpeg' }))
     mountSpeech({
-      synthesize: async () => new Blob(['mp3'], { type: 'audio/mpeg' }),
+      synthesize,
       createAudio: () => audio as unknown as HTMLAudioElement,
-      createObjectURL: () => 'blob:autoplay',
+      createObjectURL,
       revokeObjectURL,
     })
 
@@ -228,9 +230,13 @@ describe('useNoteSpeech', () => {
     await flushPromises()
     expect(speech.status.value).toBe('paused')
     expect(speech.error.value).toBe('tts-playback-blocked')
-    await speech.resume()
+    speech.resume()
+    expect(audio.play).toHaveBeenCalledTimes(2)
     await flushPromises()
     expect(speech.status.value).toBe('playing')
+    expect(speech.error.value).toBeNull()
+    expect(synthesize).toHaveBeenCalledTimes(1)
+    expect(createObjectURL).toHaveBeenCalledTimes(1)
     wrapper?.unmount()
     wrapper = undefined
     expect(speech.status.value).toBe('idle')

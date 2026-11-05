@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, ref, watch } from 'vue'
 import { NButton, NIcon, NSelect } from 'naive-ui'
 import { PlayerPause, PlayerPlay, PlayerSkipBack, PlayerSkipForward, PlayerStop } from '@vicons/tabler'
 import { useI18n } from '../../composables/useI18n'
@@ -13,6 +13,7 @@ const props = defineProps<{
   error: string | null
   canGoPrevious: boolean
   canGoNext: boolean
+  editing: boolean
 }>()
 
 const emit = defineEmits<{
@@ -28,6 +29,25 @@ const emit = defineEmits<{
 
 const { t } = useI18n()
 const active = computed(() => props.status !== 'idle')
+const editorKeyboardOpen = ref(false)
+watch([active, () => props.editing], ([active, editing], _, onCleanup) => {
+  editorKeyboardOpen.value = false
+  const viewport = window.visualViewport
+  if (!active || !editing || !viewport) return
+
+  const update = () => {
+    editorKeyboardOpen.value = viewport.scale === 1
+      && document.documentElement.clientHeight - viewport.height > 100
+      && Boolean(document.activeElement?.closest('.monaco-host'))
+  }
+  viewport.addEventListener('resize', update)
+  document.addEventListener('focusin', update)
+  update()
+  onCleanup(() => {
+    viewport.removeEventListener('resize', update)
+    document.removeEventListener('focusin', update)
+  })
+}, { immediate: true })
 const rates = [0.75, 1, 1.25, 1.5].map((value) => ({ label: `${value}×`, value }))
 const statusLabel = computed(() => {
   if (props.error === 'tts-playback-blocked') return t('note.speech_paused')
@@ -51,7 +71,8 @@ const errorMessage = computed(() => {
 
 <template>
   <Transition name="note-speech-player">
-    <aside v-if="active" class="note-speech-player" aria-live="polite" data-testid="note-speech-player">
+    <aside v-if="active" class="note-speech-player" :class="{ 'editor-keyboard-open': editorKeyboardOpen }"
+      aria-live="polite" data-testid="note-speech-player">
       <div class="note-speech-player-status">
         <strong>{{ statusLabel }}</strong>
         <span v-if="totalSegments > 1">{{ t('note.speech_segment', { current: currentIndex + 1, total: totalSegments }) }}</span>
@@ -107,9 +128,23 @@ const errorMessage = computed(() => {
 .note-speech-rate { width: 76px; }
 .note-speech-player-enter-active, .note-speech-player-leave-active { transition: opacity 120ms ease, transform 120ms ease; }
 .note-speech-player-enter-from, .note-speech-player-leave-to { opacity: 0; transform: translate(-50%, 8px); }
-@media (max-width: 600px) {
-  .note-speech-player { width: calc(100vw - 20px); max-width: none; left: 10px; bottom: calc(10px + env(safe-area-inset-bottom, 0px)); gap: 8px; padding: 8px; transform: none; }
-  .note-speech-player-status { flex: 1; font-size: 12px; }
-  .note-speech-player-rate { width: 68px; }
+@media (max-width: 600px), (max-height: 500px) and (pointer: coarse) {
+  .note-speech-player {
+    left: max(10px, env(safe-area-inset-left, 0px));
+    right: max(10px, env(safe-area-inset-right, 0px));
+    bottom: calc(10px + env(safe-area-inset-bottom, 0px));
+    max-width: none;
+    flex-direction: column;
+    align-items: stretch;
+    gap: 4px;
+    padding: 8px;
+    transform: none;
+  }
+  .note-speech-player.editor-keyboard-open { display: none; }
+  .note-speech-player-status { font-size: 12px; overflow-wrap: anywhere; }
+  .note-speech-player-controls { flex-wrap: wrap; justify-content: space-between; }
+  .note-speech-player-controls :deep(.n-button) { min-width: 44px; min-height: 44px; }
+  .note-speech-rate :deep(.n-base-selection-label) { min-height: 44px; }
+  .note-speech-player-enter-from, .note-speech-player-leave-to { transform: translateY(8px); }
 }
 </style>

@@ -87,6 +87,7 @@ let pasteHandler: ((event: ClipboardEvent) => void) | null = null
 let unregisterImagePasteHandler: (() => void) | null = null
 let noteImageInsertionAction: { dispose: () => void } | null = null
 let noteSpeechSelectionAction: { dispose: () => void } | null = null
+const hasSpeechSelection = ref(false)
 let pronunciationSelectionAction: { dispose: () => void } | null = null
 let imageInput: HTMLInputElement | null = null
 const showAttachmentPicker = ref(false)
@@ -1331,6 +1332,7 @@ onMounted(() => {
   })
   syncNoteImageInsertionAction()
   syncNoteSpeechSelectionAction()
+  editor.onDidChangeCursorSelection(({ selection }) => { hasSpeechSelection.value = !selection.isEmpty() })
   editor.addAction({
     id: 'nuvyn.toggle-view-mode',
     label: 'Toggle Edit / Reading Mode',
@@ -1611,6 +1613,10 @@ async function revealAnchor(anchor: string, isCurrent: () => boolean = () => tru
 }
 
 defineExpose({
+  hasSpeechSelection,
+  readSelectionAloud: (path: string) => {
+    if (path === props.path) void editor?.getAction('nuvyn.read-note-selection')?.run()
+  },
   finishComposition: () => { if (props.tabletEditing) finishTabletComposition() },
   getScrollTop: () => editor?.getScrollTop() ?? 0,
   focus: () => editor?.focus(),

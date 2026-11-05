@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { ref, inject, shallowRef, watch, computed, defineAsyncComponent, onBeforeUnmount, onMounted, nextTick } from 'vue'
-import { useMediaQuery, useStorage } from '@vueuse/core'
+import { useEventListener, useMediaQuery, useStorage } from '@vueuse/core'
 import { onBeforeRouteLeave, onBeforeRouteUpdate, useRoute, useRouter } from 'vue-router'
 import { useShortcutDisplay } from '../composables/useShortcutDisplay'
 import { useVaultLayout } from '../composables/vault/useVaultLayout'
@@ -193,6 +193,8 @@ const EditorPane = defineAsyncComponent(() => import('../components/vault/Editor
 const HtmlExportSurface = defineAsyncComponent(() => import('../components/vault/HtmlExportSurface.vue'))
 const editorPaneRef = ref<{
   chooseImage(): void
+  hasSpeechSelection: boolean
+  readSelectionAloud(path: string): void
   finishComposition(): void
   getScrollTop(): number
   revealText(text: string): boolean
@@ -232,6 +234,7 @@ const forceSidePanelLayoutOpen = ref(false)
 const noteTabletLayout = ref(false)
 const isCompactNoteViewport = useMediaQuery(workspaceNoteCompactQuery)
 const isMobileDiaryViewport = useMediaQuery('(max-width: 600px)')
+const isPhoneSpeechViewport = useMediaQuery('(max-width: 600px), (max-height: 500px) and (pointer: coarse)')
 const editorFocusWidthKey = NUVYN_BROWSER_STORAGE_KEYS.editorFocusWidth
 const fileTreeFilterKey = NUVYN_BROWSER_STORAGE_KEYS.fileTreeFilter
 const diaryFilterSeedKey = NUVYN_BROWSER_STORAGE_KEYS.diaryFilterSeed
@@ -2030,7 +2033,6 @@ const canUseNoteSpeech = computed(() => Boolean(
   && !activeTab.value.loading
   && !activeTab.value.loadError
   && !specialWorkspaceSurfaceActive.value
-  && !isMobileDiaryViewport.value
 ))
 
 async function startNoteSpeech(sourceText: string, sourcePath: string, markdown: boolean): Promise<void> {
@@ -2106,6 +2108,19 @@ watch(canUseNoteSpeech, (enabled) => {
     appShell.noteSpeechReadAllCommand.value = enabled ? readActiveNoteAloud : null
   }
 }, { immediate: true, flush: 'sync' })
+const readActiveEditorSelectionAloud = (): void => {
+  const path = activePath.value
+  if (path && canUseNoteSpeech.value && !isReadMode.value) editorPaneRef.value?.readSelectionAloud(path)
+}
+const canReadMobileEditorSelection = computed(() => (
+  canUseNoteSpeech.value && isPhoneSpeechViewport.value && !isReadMode.value
+  && editorPaneRef.value?.hasSpeechSelection === true
+))
+watch(canReadMobileEditorSelection, (enabled) => {
+  if (appShell?.noteSpeechReadSelectionCommand) {
+    appShell.noteSpeechReadSelectionCommand.value = enabled ? readActiveEditorSelectionAloud : null
+  }
+}, { immediate: true, flush: 'sync' })
 watch([canUseNoteSpeech, activePath, activeWorkspaceTabId, activeScope], ([enabled], previous) => {
   pronunciationText.value = null
   if (!previous) return
@@ -2113,19 +2128,23 @@ watch([canUseNoteSpeech, activePath, activeWorkspaceTabId, activeScope], ([enabl
     || activePath.value !== previous[1]
     || activeWorkspaceTabId.value !== previous[2]
     || activeScope.value !== previous[3]) {
-    noteSpeechStartGeneration += 1
-    noteSpeechStartController?.abort()
-    noteSpeechStartController = null
-    noteSpeech.stop()
+    stopNoteSpeech()
   }
 }, { flush: 'sync' })
-onBeforeUnmount(() => {
+function stopNoteSpeech(): void {
   noteSpeechStartGeneration += 1
   noteSpeechStartController?.abort()
   noteSpeechStartController = null
   noteSpeech.stop()
+}
+useEventListener(window, 'pagehide', stopNoteSpeech)
+onBeforeUnmount(() => {
+  stopNoteSpeech()
   if (appShell?.noteSpeechReadAllCommand?.value === readActiveNoteAloud) {
     appShell.noteSpeechReadAllCommand.value = null
+  }
+  if (appShell?.noteSpeechReadSelectionCommand?.value === readActiveEditorSelectionAloud) {
+    appShell.noteSpeechReadSelectionCommand.value = null
   }
 })
 const tabletEditing = computed(() => noteTabletLayout.value && canInsertNoteImage.value)
@@ -3990,6 +4009,7 @@ watch(isReadMode, async (reading) => {
     <SpeechPronunciationDialog v-if="canUseNoteSpeech && pronunciationText !== null" :initial-text="pronunciationText" @close="pronunciationText = null" />
     <NoteSpeechPlayer
       v-if="canUseNoteSpeech"
+      :editing="!isReadMode"
       :status="noteSpeechStatus"
       :current-index="noteSpeechCurrentIndex"
       :total-segments="noteSpeechTotalSegments"
@@ -4000,7 +4020,7 @@ watch(isReadMode, async (reading) => {
       @play="noteSpeech.resume"
       @pause="noteSpeech.pause"
       @resume="noteSpeech.resume"
-      @stop="noteSpeech.stop"
+      @stop="stopNoteSpeech"
       @previous="noteSpeech.previous"
       @next="noteSpeech.next"
       @retry="noteSpeech.retry"

@@ -148,10 +148,16 @@ watch(activeScope, () => {
 }, { flush: 'sync' })
 const diaryAccess = inject(DiaryAccessContextKey, null)
 const appShell = inject(AppShellContextKey, null)
-const noteSpeechOptions = computed(() => [{ label: t('note.speech_read_all'), key: 'read-all' }])
+const noteSpeechOptions = computed(() => [
+  { label: t('note.speech_read_all'), key: 'read-all' },
+  ...(appShell?.noteSpeechReadSelectionCommand?.value
+    ? [{ label: t('note.speech_read_selection'), key: 'read-selection' }]
+    : []),
+])
 
-function onNoteSpeechMenuSelect(): void {
-  appShell?.noteSpeechReadAllCommand?.value?.()
+function onNoteSpeechMenuSelect(key: string): void {
+  if (key === 'read-selection') appShell?.noteSpeechReadSelectionCommand?.value?.()
+  else if (key === 'read-all') appShell?.noteSpeechReadAllCommand?.value?.()
 }
 
 let analysisExportHoveredScope: 'diary' | 'ledger' | null = null

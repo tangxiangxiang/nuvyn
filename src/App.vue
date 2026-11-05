@@ -56,6 +56,7 @@ const ledgerAnalysisExportCommand = ref<(() => Promise<void>) | null>(null)
 const vaultScopeChangeCommand = ref<((scope: 'note' | 'diary') => Promise<boolean>) | null>(null)
 const zenModeBrandEntry = ref<{ canEnter: () => boolean; enter: () => boolean } | null>(null)
 const noteSpeechReadAllCommand = ref<(() => void) | null>(null)
+const noteSpeechReadSelectionCommand = ref<(() => void) | null>(null)
 const zenModeBrandTransitioning = ref(false)
 const globalSearchHost = ref<{ show: () => void } | null>(null)
 const boardRecoveryStore = createIndexedDbBoardCheckpointStore()
@@ -93,6 +94,7 @@ provide(AppShellContextKey, {
   vaultScopeChangeCommand,
   zenModeBrandEntry,
   noteSpeechReadAllCommand,
+  noteSpeechReadSelectionCommand,
   zenModeBrandTransitioning,
   openGlobalSearch: onOpenSearch,
 })

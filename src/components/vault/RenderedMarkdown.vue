@@ -77,7 +77,13 @@ function readArticleSelection(): { text: string; top: number; left: number } | n
   const rect = range.getBoundingClientRect()
   const width = 360
   const left = Math.max(10, Math.min(window.innerWidth - width - 10, rect.left + rect.width / 2 - width / 2))
-  return { text: selection.toString(), top: Math.max(8, rect.top - 44), left }
+  let top = rect.top - 44
+  if (window.innerWidth <= 600) {
+    // Leave room for the native selection menu, normally above the text.
+    const viewportBottom = window.innerHeight - 80
+    top = rect.bottom + 8 <= viewportBottom ? rect.bottom + 8 : Math.min(viewportBottom, rect.top - 88)
+  }
+  return { text: selection.toString(), top: Math.max(8, top), left }
 }
 
 function updateSelectionAction(): void {
@@ -88,7 +94,7 @@ function onSelectionContextMenu(event: MouseEvent): void {
   const action = readArticleSelection()
   if (!action) return
   const isTouch = typeof window.matchMedia === 'function'
-    && window.matchMedia('(hover: none) and (pointer: coarse)').matches
+    && window.matchMedia('(max-width: 600px), (hover: none) and (pointer: coarse)').matches
   if (!isTouch) event.preventDefault()
   selectionAction.value = action
 }
@@ -399,5 +405,12 @@ defineExpose({ el: articleEl })
   border-radius: 9px;
   background: var(--bg, #fff);
   box-shadow: 0 4px 18px rgb(20 24 40 / 16%);
+}
+@media (max-width: 600px) {
+  .note-reading-selection-actions {
+    box-sizing: border-box;
+    max-width: calc(100vw - 20px);
+    flex-wrap: wrap;
+  }
 }
 </style>
