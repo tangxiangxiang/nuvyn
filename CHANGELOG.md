@@ -3,6 +3,33 @@
 All notable changes to Nuvyn are documented in this file. Entries dated before
 the Nuvyn brand baseline may refer to Nuvyn as the historical product name.
 
+## Nuvyn v0.1.0-alpha.14 — 2026-11-06
+
+Changes since `v0.1.0-alpha.13`.
+
+### Note — Smart Speech
+
+- Added MiniMax Speech 2.8 Turbo read-aloud for selected text and whole Notes, including unsaved edits. Long Notes play in segments with next-segment preloading. The player supports pause, resume, stop, segment navigation, and playback speed. Playback and outstanding requests are cleaned up when leaving the current Note.
+- Added phone read-aloud entry points for the whole Note and for selections in Monaco and the reader. The compact player adapts to narrow and landscape viewports and offers a manual playback action when the browser blocks autoplay.
+
+### Speech Cache, Pronunciation & Voices
+
+- Reuse MP3 audio across sessions when text and synthesis parameters match. The persistent cache is isolated by user, capped at 512 MiB per user, and can be cleared from AI Settings. Duplicate requests for the same audio share a synthesis job.
+- Add custom readings for polyphonic words, names, and places. The dictionary prefers longer matching phrases, asks for confirmation before deleting an entry, and offers an explicit reset if stored dictionary data is damaged. Changes to matching rules affect only the relevant audio cache entries.
+- Choose from six MiniMax voices. Each reading task keeps its starting voice for every segment and each voice has separate cache entries. The default remains `audiobook_male_1`.
+
+### Workspace & Reliability
+
+- Added touch pull-to-refresh in Diary, Ledger, and Board, and kept the Note status bar aligned while pulling on phones and tablets. Board galleries no longer overflow when short and can still scroll with the scrollbar hidden.
+- Expanded the Diary mood picker to 76 bundled Microsoft Fluent Emoji moods with Common and All views. Improved remembered unlock and calendar restoration, date-title swipe reliability, and workspace routing for Note and Diary Wiki Links. Note link suggestions exclude Diary entries.
+- Refined Markdown code and code-group copy controls for hover and touch, removed duplicate language labels in code groups, and cleaned up PDF code frames. Expanded CI coverage for phone playback, navigation, and touch behavior, and updated the Monaco unit-test mock to cover selection events.
+
+### Migration & Deployment
+
+- SQLite schema v39, the AI Profile schema, Vault document formats, and production Compose are unchanged. No new environment variables or irreversible migrations are required. Speech profile selection, consent, voice, and pronunciation settings use the existing SQLite settings store.
+- Read-aloud requires a configured MiniMax subscription profile and explicit consent before selected text or Note content is sent to MiniMax. The server uses the existing encrypted credential store. MP3s are stored under `cache/tts` in the existing persistent data volume (`/app/data` in the production container).
+- Before upgrading NAS, make a consistent backup of SQLite (including WAL/SHM), the complete Vault (including hidden files and `.git`), and the matching AI master key. A rollback to alpha.13 has no schema migration to undo. Retain the backup in case data restoration is needed.
+
 ## Nuvyn v0.1.0-alpha.13 — 2026-11-03
 
 Changes since `v0.1.0-alpha.12`.
