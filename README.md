@@ -176,6 +176,17 @@ coverage remain explicit CI lanes.
 
 `package.json` currently reports version `0.0.0`. Nuvyn is an actively developed application rather than a published stable compatibility contract. Back up real vaults before upgrading, review the [changelog](CHANGELOG.md), and validate deployment changes in a copy of your data.
 
-## License
+## Copyright and Licensing
 
-This repository does not currently include a license file. Do not assume rights to redistribute or reuse the project until the maintainers add explicit license terms.
+Copyright © 2026 Tang Xiangxiang. All rights reserved for the original Nuvyn
+materials owned by Tang Xiangxiang.
+
+Nuvyn's source is publicly visible. No open-source license or personal-use
+license has been published for the original Nuvyn materials. Access to this
+repository or to the GHCR images does not, by itself, grant permission to use,
+self-host, modify, or redistribute those materials. Applicable legal exceptions
+and rights under the [GitHub Terms of Service](https://docs.github.com/en/site-policy/github-terms/github-terms-of-service)
+remain in effect.
+
+Third-party software, fonts, icons, and other materials remain subject to their
+own terms. See [Third-Party Notices](THIRD_PARTY_NOTICES.md).

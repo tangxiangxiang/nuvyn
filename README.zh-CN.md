@@ -179,6 +179,12 @@ CI 使用 Node.js 22 在 Ubuntu 上验证生产版本兼容性，并使用 Node.
 
 `package.json` 当前版本为 `0.0.0`。Nuvyn 仍是持续开发中的应用，而不是已经发布稳定兼容性承诺的产品。升级前请备份真实笔记库，阅读[变更日志](CHANGELOG.md)，并使用数据副本验证部署变更。
 
-## 许可证
+## 版权与许可
 
-仓库当前没有许可证文件。在维护者补充明确许可条款之前，请不要默认拥有再分发或复用本项目的权利。
+Copyright © 2026 Tang Xiangxiang. 对 Tang Xiangxiang 拥有版权的 Nuvyn 原创材料保留所有权利。
+
+Nuvyn 源码公开可见。Nuvyn 原创材料目前未发布开源许可证或个人使用许可。
+能够访问本仓库或 GHCR 镜像，本身不构成使用、自托管、修改或再分发这些材料的授权。
+适用法律规定的例外以及 [GitHub 服务条款](https://docs.github.com/en/site-policy/github-terms/github-terms-of-service) 下的权利继续适用。
+
+第三方软件、字体、图标及其他材料继续适用各自的条款。详见[第三方声明](THIRD_PARTY_NOTICES.md)。
