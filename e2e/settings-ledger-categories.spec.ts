@@ -18,6 +18,7 @@ test('uploaded category icon creates a category in the matching Settings list', 
 
   const settings = page.locator('.settings-modal')
   await expect(settings).toBeVisible()
+  await settings.getByRole('button', { name: 'Ledger', exact: true }).click()
   await settings.getByRole('button', { name: /交易分类|Transaction categories/i }).click()
 
   await settings.getByRole('button', { name: '＋ 添加图标' }).click()

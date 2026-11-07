@@ -1,3 +1,4 @@
+import { openStorageSettings } from './helpers/settings'
 import { randomUUID } from 'node:crypto'
 import { promises as fs } from 'node:fs'
 import { deflateSync } from 'node:zlib'
@@ -556,7 +557,7 @@ test('Attachment Manager lists referenced SVGs and direct reads reject active co
     await page.locator('[data-testid="account-button"]').click()
     await page.locator('[data-testid="account-settings"]').click()
     const settings = page.locator('.settings-modal')
-    await settings.getByRole('button', { name: /存储与附件|Storage & attachments/ }).click()
+    await openStorageSettings(settings)
     await expect(settings.locator('#attachment-manager-title')).toBeVisible()
     await settings.locator('.attachment-toolbar input').fill(path.posix.basename(safePath))
     const resource = settings.locator('.attachment-resource-row').filter({ hasText: safePath })
@@ -640,7 +641,7 @@ test('selects an image, supports undo/redo, renders after reload, and tracks its
     await page.locator('[data-testid="account-button"]').click()
     await page.locator('[data-testid="account-settings"]').click()
     const settings = page.locator('.settings-modal')
-    await settings.getByRole('button', { name: /存储与附件|Storage & attachments/ }).click()
+    await openStorageSettings(settings)
     await expect(settings.locator('#attachment-manager-title')).toBeVisible()
     await settings.locator('.attachment-toolbar input').fill(path.posix.basename(uploadedPath))
     const resource = settings.locator('.attachment-resource-row').filter({ hasText: uploadedPath })

@@ -41,6 +41,7 @@ async function openProductionTagManagementPanel(page: Page): Promise<Locator> {
   await page.locator('[data-testid="account-settings"]').click()
   const settings = page.locator('.settings-modal')
   await expect(settings).toBeVisible()
+  await settings.getByRole('button', { name: 'Note', exact: true }).click()
   await settings.getByRole('button', { name: /^(tags|标签)$/i }).click()
   const panel = settings.locator('[data-tag-management-panel]')
   await expect(panel).toHaveCount(1)

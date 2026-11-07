@@ -1,3 +1,4 @@
+import { openStorageSettings } from './helpers/settings'
 import { randomUUID } from 'node:crypto'
 import { expect, test } from './fixtures/auth'
 
@@ -20,7 +21,7 @@ test('Note image trash preserves authenticated Markdown reads, preview, refresh 
     async function openManager() {
       await page.locator('[data-testid="account-button"]').click()
       await page.locator('[data-testid="account-settings"]').click()
-      await page.locator('.settings-modal').getByRole('button', { name: /存储与附件|Storage & attachments/ }).click()
+      await openStorageSettings(page.locator('.settings-modal'))
     }
     await openManager()
     const settings = page.locator('.settings-modal')

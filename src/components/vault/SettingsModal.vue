@@ -1,7 +1,7 @@
 <script setup lang="ts">
-import { nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { NButton, NIcon } from 'naive-ui'
-import { Book, Edit, FileText, MoodSmile, Paperclip, Robot, Tag, Wallet, X } from '@vicons/tabler'
+import { Book, FileText, Robot, Settings, Wallet, X } from '@vicons/tabler'
 import { useToast } from '../../composables/useToast'
 import { useFocusTrap } from '../../composables/useFocusTrap'
 import { useConfirm } from '../../composables/useConfirm'
@@ -53,25 +53,36 @@ const previewing = ref(false)
 const mutatingMetadata = ref(false)
 const cleanedPaths = ref<string[]>([])
 
-/* Left nav + right detail. Each section is its own .vue file
-   (SettingsAiSection / SettingsEditorSection / SettingsMetadataSection /
-   SettingsTagsSection)
-   so the shell stays a routing layer — no inline form templates.
-   The active pane resets to AI every time the modal opens so a
-   returning user always lands somewhere predictable. */
-type SectionId = 'ai' | 'editor' | 'metadata' | 'diary-migration' | 'tags' | 'ledger-account-icons' | 'ledger-categories' | 'diary-mood-icons' | 'storage-attachments'
-const SECTIONS = [
-  { id: 'ai', labelKey: 'settings.ai', icon: Robot },
-  { id: 'editor', labelKey: 'settings.editor', icon: Edit },
-  { id: 'metadata', labelKey: 'settings.metadata', icon: FileText },
-  { id: 'diary-migration', labelKey: 'settings.diary_migration', icon: Book },
-  { id: 'tags', labelKey: 'settings.tags', icon: Tag },
-  { id: 'ledger-account-icons', labelKey: 'settings.ledger_account_icons', icon: Wallet },
-  { id: 'ledger-categories', labelKey: 'settings.ledger_categories', icon: Tag },
-  { id: 'diary-mood-icons', labelKey: 'settings.diary_mood_icons', icon: MoodSmile },
-  { id: 'storage-attachments', labelKey: 'settings.storage_attachments', icon: Paperclip },
-] as const satisfies ReadonlyArray<{ id: SectionId; labelKey: string; icon: typeof Robot }>
-const active = ref<SectionId>('ai')
+const CATEGORIES = {
+  ai: { label: 'settings.ai', icon: Robot, sections: [{ id: 'ai', label: 'settings.ai' }] },
+  note: { label: 'settings.category_note', icon: FileText, sections: [
+    { id: 'editor', label: 'settings.editor' },
+    { id: 'tags', label: 'settings.tags' },
+  ] },
+  diary: { label: 'settings.category_diary', icon: Book, sections: [
+    { id: 'diary-mood-icons', label: 'settings.diary_mood_icons' },
+  ] },
+  ledger: { label: 'settings.category_ledger', icon: Wallet, sections: [
+    { id: 'ledger-categories', label: 'settings.ledger_categories' },
+    { id: 'ledger-account-icons', label: 'settings.ledger_account_icons' },
+  ] },
+  maintenance: { label: 'settings.category_maintenance', icon: Settings, sections: [
+    { id: 'metadata', label: 'settings.metadata' },
+    { id: 'storage-attachments', label: 'settings.storage_attachments' },
+    { id: 'diary-migration', label: 'settings.diary_migration_nav' },
+  ] },
+} as const
+
+type CategoryId = keyof typeof CATEGORIES
+type SectionId = (typeof CATEGORIES)[CategoryId]['sections'][number]['id']
+
+const activeCategory = ref<CategoryId>('ai')
+const rememberedSections = ref<Partial<Record<CategoryId, SectionId>>>({})
+const sections = computed(() => CATEGORIES[activeCategory.value].sections)
+const active = computed(() => rememberedSections.value[activeCategory.value] ?? sections.value[0].id)
+const closeButton = ref<InstanceType<typeof NButton> | null>(null)
+const detailRef = ref<HTMLElement | null>(null)
+let leaving = false
 
 async function load() {
   const migration = await getMetadataMigrationStatus().catch(() => null)
@@ -147,31 +158,28 @@ async function previewCleanup() {
   }
 }
 
-watch(() => props.open, async (open) => {
-  if (open) {
-    active.value = 'ai'
-    trap.activate()
-    void focusFirstSettingsField()
-    await load()
-    await focusFirstSettingsField()
-  } else {
-    await trap.deactivate()
-  }
+function openSettings() {
+  activeCategory.value = 'ai'
+  rememberedSections.value = {}
+  trap.activate()
+  void nextTick(() => closeButton.value?.$el.focus())
+  void load()
+}
+
+watch(() => props.open, (open) => {
+  if (open) openSettings()
+  else void trap.deactivate()
 })
 
 onMounted(() => {
-  if (props.open) {
-    trap.activate()
-    void focusFirstSettingsField()
-    void load().then(focusFirstSettingsField)
-  }
+  if (props.open) openSettings()
 })
 
-async function focusFirstSettingsField(): Promise<void> {
+async function focusAiField(): Promise<void> {
   await nextTick()
-  if (!props.open) return
-  const first = modalRef.value?.querySelector<HTMLInputElement>('input:not([disabled])')
-  first?.focus()
+  if (!props.open || active.value !== 'ai' || document.activeElement !== closeButton.value?.$el) return
+  if (window.matchMedia?.('(max-width: 600px), (pointer: coarse)').matches) return
+  modalRef.value?.querySelector<HTMLInputElement>('input:not([disabled]):not([type="hidden"])')?.focus()
 }
 
 function onKeydown(e: KeyboardEvent) {
@@ -186,17 +194,48 @@ function onKeydown(e: KeyboardEvent) {
   }
 }
 
-async function selectSection(section: SectionId): Promise<void> {
-  if (section === active.value) return
-  if (active.value === 'tags' && !props.activeSectionCanLeave) return
-  if (aiSection.value && !await aiSection.value.canLeave()) return
-  active.value = section
+async function leaveSection(action: () => void): Promise<void> {
+  const modal = modalRef.value
+  if (!modal || leaving || (active.value === 'tags' && !props.activeSectionCanLeave)) return
+  leaving = true
+  try {
+    if (aiSection.value && !await aiSection.value.canLeave()) return
+    if (props.open && modalRef.value === modal) action()
+  } finally {
+    leaving = false
+  }
 }
 
-async function closeSettings() {
-  if (active.value === 'tags' && !props.activeSectionCanLeave) return
-  if (aiSection.value && !await aiSection.value.canLeave()) return
-  emit('close')
+async function navigate(category: CategoryId, section: SectionId): Promise<void> {
+  if (category === activeCategory.value && section === active.value) return
+  await leaveSection(() => {
+    rememberedSections.value[category] = section
+    activeCategory.value = category
+    void nextTick(() => {
+      if (detailRef.value) detailRef.value.scrollTop = 0
+      const modal = modalRef.value
+      if (modal && !modal.contains(document.activeElement)) {
+        const target = modal.querySelector<HTMLElement>('.settings-subnav [aria-current]') ?? closeButton.value?.$el
+        target?.focus()
+      }
+    })
+  })
+}
+
+function selectCategory(category: CategoryId) {
+  return navigate(category, rememberedSections.value[category] ?? CATEGORIES[category].sections[0].id)
+}
+
+function onCategoryChange(event: Event) {
+  const select = event.target as HTMLSelectElement
+  const category = select.value as CategoryId
+  // Keep the committed selection visible if the leave guard rejects the change.
+  select.value = activeCategory.value
+  void selectCategory(category)
+}
+
+function closeSettings() {
+  return leaveSection(() => emit('close'))
 }
 
 onBeforeUnmount(() => {
@@ -230,6 +269,7 @@ onBeforeUnmount(() => {
             quaternary
             circle
             :bordered="false"
+            ref="closeButton"
             class="settings-icon-btn"
             :title="t('settings.close')"
             :aria-label="t('settings.close')"
@@ -239,48 +279,73 @@ onBeforeUnmount(() => {
 
         <div class="settings-body">
           <nav v-if="active !== 'storage-attachments'" class="settings-nav" :aria-label="t('settings.title')">
-            <NButton
-              v-for="section in SECTIONS"
-              :key="section.id"
-              attr-type="button"
-              size="medium"
-              text
-              class="settings-nav-item"
-              :class="{ active: active === section.id }"
-              :aria-current="active === section.id ? 'page' : undefined"
-              @click="selectSection(section.id)"
+            <div class="settings-category-list">
+              <NButton
+                v-for="(category, id) in CATEGORIES"
+                :key="id"
+                attr-type="button"
+                text
+                class="settings-nav-item"
+                :class="{ active: activeCategory === id }"
+                :aria-current="activeCategory === id ? 'true' : undefined"
+                @click="selectCategory(id)"
+              >
+                <NIcon class="settings-nav-icon" aria-hidden="true"><component :is="category.icon" /></NIcon>
+                <span>{{ t(category.label) }}</span>
+              </NButton>
+            </div>
+            <select
+              class="settings-category-select"
+              :aria-label="t('settings.categories')"
+              :value="activeCategory"
+              @change="onCategoryChange"
             >
-              <NIcon class="settings-nav-icon" aria-hidden="true"><component :is="section.icon" /></NIcon>
-              <span>{{ t(section.labelKey) }}</span>
-            </NButton>
+              <option v-for="(category, id) in CATEGORIES" :key="id" :value="id">{{ t(category.label) }}</option>
+            </select>
           </nav>
 
-          <div class="settings-detail" role="region" aria-live="polite">
-            <SettingsAttachmentManagerSection
-              v-if="active === 'storage-attachments'"
-              @back="active = 'ai'"
-              @navigate-reference="(reference, destination) => emit('navigateReference', reference, destination)"
-            />
-            <SettingsAiSection v-else-if="active === 'ai'" ref="aiSection" />
-            <SettingsEditorSection v-else-if="active === 'editor'" />
-            <SettingsMetadataSection
-              v-else-if="active === 'metadata'"
-              :migrationSummary="migrationSummary"
-              :cleanupPreview="cleanupPreview"
-              :cleanedPaths="cleanedPaths"
-              :previewing="previewing"
-              :mutatingMetadata="mutatingMetadata"
-              @preview="previewCleanup"
-              @restore="restoreOriginalFrontmatter"
-              @remove="removeFrontmatter"
-            />
-            <SettingsDiaryMigrationSection v-else-if="active === 'diary-migration'" />
-            <SettingsLedgerAccountIconsSection v-else-if="active === 'ledger-account-icons'" />
-            <SettingsLedgerCategoriesSection v-else-if="active === 'ledger-categories'" />
-            <SettingsDiaryMoodIconsSection v-else-if="active === 'diary-mood-icons'" />
-            <SettingsTagsSection v-else>
-              <slot name="tags" />
-            </SettingsTagsSection>
+          <div class="settings-main">
+            <nav
+              v-if="active !== 'storage-attachments' && sections.length > 1"
+              class="settings-subnav"
+              :aria-label="t(CATEGORIES[activeCategory].label)"
+            >
+              <NButton
+                v-for="section in sections"
+                :key="section.id"
+                attr-type="button"
+                text
+                :aria-current="active === section.id ? 'page' : undefined"
+                @click="navigate(activeCategory, section.id)"
+              >{{ t(section.label) }}</NButton>
+            </nav>
+            <div ref="detailRef" class="settings-detail" role="region" aria-live="polite">
+              <SettingsAttachmentManagerSection
+                v-if="active === 'storage-attachments'"
+                @back="navigate('maintenance', 'metadata')"
+                @navigate-reference="(reference, destination) => emit('navigateReference', reference, destination)"
+              />
+              <SettingsAiSection v-else-if="active === 'ai'" ref="aiSection" @loaded="focusAiField" />
+              <SettingsEditorSection v-else-if="active === 'editor'" />
+              <SettingsMetadataSection
+                v-else-if="active === 'metadata'"
+                :migrationSummary="migrationSummary"
+                :cleanupPreview="cleanupPreview"
+                :cleanedPaths="cleanedPaths"
+                :previewing="previewing"
+                :mutatingMetadata="mutatingMetadata"
+                @preview="previewCleanup"
+                @restore="restoreOriginalFrontmatter"
+                @remove="removeFrontmatter"
+              />
+              <SettingsDiaryMigrationSection v-else-if="active === 'diary-migration'" />
+              <SettingsLedgerAccountIconsSection v-else-if="active === 'ledger-account-icons'" />
+              <SettingsLedgerCategoriesSection v-else-if="active === 'ledger-categories'" />
+              <SettingsDiaryMoodIconsSection v-else-if="active === 'diary-mood-icons'" />
+              <SettingsTagsSection v-else>
+                <slot name="tags" />
+              </SettingsTagsSection>
+            </div>
           </div>
         </div>
       </section>

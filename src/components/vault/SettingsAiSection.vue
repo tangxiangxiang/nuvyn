@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
+import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import { NButton, NCheckbox, NInput, NSelect } from 'naive-ui'
 import { useI18n } from '../../composables/useI18n'
 import { useConfirm } from '../../composables/useConfirm'
@@ -65,7 +65,7 @@ const loadError = ref(false)
 const migrationError = ref<string | undefined>()
 const form = reactive({ name: '', provider: 'anthropic' as AiProvider, apiKey: '', baseURL: '', model: '' })
 const initial = ref(JSON.stringify(form))
-const sectionEl = ref<HTMLElement | null>(null)
+const emit = defineEmits<{ loaded: [] }>()
 const dirty = computed(() => JSON.stringify(form) !== initial.value)
 const selected = computed(() => profiles.value.find((p) => p.id === selectedId.value))
 const blocked = computed(() => loading.value || saving.value || confirming.value)
@@ -304,15 +304,14 @@ function onKeydown(event: KeyboardEvent) {
 onMounted(async () => {
   void loadSpeechCache()
   await load()
-  await nextTick()
-  if (!disposed) sectionEl.value?.querySelector<HTMLInputElement>('input:not([disabled])')?.focus()
+  if (!disposed) emit('loaded')
 })
 onBeforeUnmount(() => { disposed = true; pendingConfirmation?.cancel(); controller.abort(); resetTest(); form.apiKey = '' })
 defineExpose({ canLeave })
 </script>
 
 <template>
-  <section ref="sectionEl" class="settings-section" aria-labelledby="settings-ai-title" @keydown.capture="onKeydown">
+  <section class="settings-section" aria-labelledby="settings-ai-title" @keydown.capture="onKeydown">
     <header class="settings-section-header">
       <div>
         <h3 id="settings-ai-title">{{ t('settings.ai') }}</h3>

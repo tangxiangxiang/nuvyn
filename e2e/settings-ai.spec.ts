@@ -154,3 +154,40 @@ test.describe('tablet touch', () => {
     await expect.poll(() => settings.evaluate((el) => el.scrollWidth <= el.clientWidth + 1)).toBe(true)
   })
 })
+
+test.describe('phone settings navigation', () => {
+  test.use({ hasTouch: true, isMobile: true, viewport: { width: 375, height: 780 } })
+
+  test('keeps focus out of inputs and switches pages without horizontal overflow', async ({ page }) => {
+    const settings = await openSettings(page)
+    const categories = settings.getByRole('combobox', { name: /设置分类|Settings categories/ })
+    const close = settings.getByRole('button', { name: /^(关闭|Close)$/ })
+    await expect(close).toBeFocused()
+    await expect(settings.locator('.settings-category-list')).toBeHidden()
+    await expect(categories.locator('option')).toHaveCount(5)
+    await expect(categories).toHaveValue('ai')
+    await expect(settings.locator('.settings-subnav')).toHaveCount(0)
+    await page.keyboard.press('Shift+Tab')
+    expect(await settings.evaluate(el => el.contains(document.activeElement))).toBe(true)
+
+    await categories.selectOption('ledger')
+    await expect(settings.locator('.settings-subnav [aria-current]')).toHaveText(/交易分类|Transaction categories/)
+    await settings.locator('.settings-subnav').getByRole('button', { name: /账户图标|Account icons/ }).tap()
+    await expect(settings.locator('.settings-ledger-icon-options')).toBeVisible()
+    await categories.selectOption('diary')
+    await expect(settings.locator('.settings-subnav')).toHaveCount(0)
+    await categories.selectOption('ledger')
+    await expect(settings.locator('.settings-subnav [aria-current]')).toHaveText(/账户图标|Account icons/)
+
+    await categories.selectOption('maintenance')
+    for (const colorScheme of ['light', 'dark'] as const) {
+      await page.emulateMedia({ colorScheme })
+      for (const selector of ['.settings-nav', '.settings-subnav', '.settings-detail']) {
+        const layout = await settings.locator(selector).evaluate(el => el.scrollWidth - el.clientWidth)
+        expect(layout).toBeLessThanOrEqual(1)
+      }
+    }
+    await page.keyboard.press('Escape')
+    await expect(settings).toHaveCount(0)
+  })
+})

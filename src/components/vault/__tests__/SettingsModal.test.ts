@@ -240,7 +240,7 @@ describe('SettingsModal', () => {
     const dialog = document.body.querySelector<HTMLElement>('[role="dialog"]')
     expect(dialog?.getAttribute('aria-modal')).toBe('true')
     expect(dialog?.getAttribute('aria-label')).toBe('设置')
-    expect(document.body.querySelector('[aria-current="page"]')?.textContent?.trim()).toBe('AI')
+    expect(document.body.querySelector('.settings-nav [aria-current]')?.textContent?.trim()).toBe('AI')
     expect(document.body.textContent).toContain('命名配置与默认模型')
     expect(document.body.textContent).toContain('配置')
 
@@ -263,11 +263,65 @@ describe('SettingsModal', () => {
     expect(document.body.querySelector('.settings-key-status')).toBeNull()
   })
 
+  it('shows five categories, remembers the selected page and resets when reopened', async () => {
+    const wrapper = mountSettings()
+    await flushPromises()
+    const labels = (selector: string) => Array.from(document.body.querySelectorAll(selector), el => el.textContent?.trim())
+    expect(labels('.settings-category-list button')).toEqual(['AI', 'Note', 'Diary', 'Ledger', '数据与维护'])
+    expect(labels('.settings-subnav button')).toEqual([])
+
+    for (const [category, pages] of [
+      ['Diary', []],
+      ['Ledger', ['交易分类', '账户图标']],
+      ['数据与维护', ['文档元数据', '存储与附件', '日记迁移']],
+      ['Note', ['编辑器', '标签']],
+    ] as const) {
+      findButton(category).click()
+      await flushPromises()
+      expect(labels('.settings-subnav button')).toEqual(pages)
+      if (category === 'Diary') expect(document.body.querySelector('.settings-section h3')?.textContent).toContain('表情图标')
+    }
+    findButton('标签').click()
+    await flushPromises()
+    findButton('Diary').click()
+    await flushPromises()
+    findButton('Note').click()
+    await flushPromises()
+    expect(labels('.settings-subnav [aria-current]')).toEqual(['标签'])
+
+    await wrapper.setProps({ open: false })
+    await wrapper.setProps({ open: true })
+    await flushPromises()
+    expect(labels('.settings-nav [aria-current]')).toEqual(['AI'])
+    findButton('Note').click()
+    await flushPromises()
+    expect(labels('.settings-subnav [aria-current]')).toEqual(['编辑器'])
+  })
+
+  it('guards category changes before the AI form unmounts and only confirms once', async () => {
+    mountSettings()
+    await flushPromises()
+    inputValue(fieldControl<HTMLInputElement>('API Key', 'input'), 'sk-unsaved')
+    confirm.mockResolvedValueOnce(false)
+    findButton('Note').click()
+    findButton('Ledger').click()
+    await flushPromises()
+    expect(confirm).toHaveBeenCalledTimes(1)
+    expect(fieldControl<HTMLInputElement>('API Key', 'input').value).toBe('sk-unsaved')
+
+    findButton('Note').click()
+    await flushPromises()
+    expect(confirm).toHaveBeenCalledTimes(2)
+    expect(document.body.querySelector('.settings-subnav [aria-current]')?.textContent?.trim()).toBe('编辑器')
+  })
+
   it('opens the Attachment Manager from Storage settings and returns without closing Settings', async () => {
     const wrapper = mountSettings()
     await flushPromises()
     const currentUrl = window.location.href
 
+    findButton('数据与维护').click()
+    await flushPromises()
     findButton('存储与附件').click()
     await flushPromises()
 
@@ -280,7 +334,8 @@ describe('SettingsModal', () => {
     findButton('返回设置').click()
     await flushPromises()
     expect(document.body.querySelector('.settings-modal')?.classList.contains('is-attachment-manager')).toBe(false)
-    expect(document.body.querySelector('[aria-current="page"]')?.textContent?.trim()).toBe('AI')
+    expect(document.body.querySelector('.settings-nav [aria-current]')?.textContent?.trim()).toBe('数据与维护')
+    expect(document.body.querySelector('.settings-subnav [aria-current]')?.textContent?.trim()).toBe('文档元数据')
     expect(wrapper.exists()).toBe(true)
   })
 
@@ -539,20 +594,22 @@ describe('SettingsModal', () => {
     const wrapper = mountSettings({ withTags: true })
     await flushPromises()
 
-    findButton('编辑器').click()
+    findButton('Note').click()
     await flushPromises()
     expect(document.body.querySelector('[aria-current="page"]')?.textContent?.trim()).toBe('编辑器')
     expect(document.body.textContent).toContain('此设备上的 Monaco 偏好设置')
     expect(document.body.textContent).toContain('编辑器偏好')
     expect(wrapper.findAllComponents(NInputNumber)).toHaveLength(3)
 
-    findButton('文档元数据').click()
+    findButton('数据与维护').click()
     await flushPromises()
     expect(document.body.querySelector('[aria-current="page"]')?.textContent?.trim()).toBe('文档元数据')
     expect(document.body.textContent).toContain('SQLite 迁移与 Frontmatter 安全检查')
     expect(document.body.textContent).toContain('迁移状态')
     expect(document.body.textContent).toContain('3 已验证')
 
+    findButton('Note').click()
+    await flushPromises()
     findButton('标签').click()
     await flushPromises()
     expect(document.body.querySelector('[aria-current="page"]')?.textContent?.trim()).toBe('标签')
@@ -563,10 +620,35 @@ describe('SettingsModal', () => {
     expect(document.body.querySelectorAll('[role="dialog"]')).toHaveLength(1)
   })
 
+  it('keeps metadata actions and Diary migration reachable from Data & maintenance', async () => {
+    getFrontmatterCleanupPreview.mockResolvedValueOnce({
+      candidates: [{ path: 'inbox/legacy', customFields: [] }],
+      blocked: [],
+    })
+    mountSettings()
+    await flushPromises()
+    findButton('数据与维护').click()
+    await flushPromises()
+    findButton('检查清理').click()
+    await flushPromises()
+
+    expect(findButton('恢复原始内容（1）').disabled).toBe(false)
+    expect(findButton('移除 Frontmatter（1）').disabled).toBe(false)
+    confirm.mockResolvedValueOnce(false)
+    findButton('恢复原始内容（1）').click()
+    await flushPromises()
+    expect(confirm).toHaveBeenCalledTimes(1)
+    expect(restoreDocumentFrontmatter).not.toHaveBeenCalled()
+
+    findButton('日记迁移').click()
+    await flushPromises()
+    expect(findButton('扫描旧日记状态').disabled).toBe(false)
+  })
+
   it('preserves Naive number bounds and exact numeric/boolean editor preference types', async () => {
     const wrapper = mountSettings()
     await flushPromises()
-    findButton('编辑器').click()
+    findButton('Note').click()
     await flushPromises()
 
     const numberInputs = wrapper.findAllComponents(NInputNumber)
@@ -636,9 +718,13 @@ describe('SettingsModal', () => {
     wrappers.push(wrapper)
     await flushPromises()
 
+    findButton('Note').click()
+    await flushPromises()
     findButton('标签').click()
     await flushPromises()
     findButton('编辑器').click()
+    findButton('Ledger').click()
+    await flushPromises()
     expect(document.body.querySelector('[aria-current="page"]')?.textContent?.trim()).toBe('标签')
 
     document.body.querySelector<HTMLElement>('.settings-icon-btn')!.click()

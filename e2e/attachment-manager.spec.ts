@@ -1,3 +1,4 @@
+import { openStorageSettings } from './helpers/settings'
 import { randomUUID } from 'node:crypto'
 import { promises as fs } from 'node:fs'
 import path from 'node:path'
@@ -126,7 +127,7 @@ test('Attachment Manager lists real sources, filters, refreshes, and preserves t
     await page.locator('[data-testid="account-button"]').click()
     await page.locator('[data-testid="account-settings"]').click()
     const settings = page.locator('.settings-modal')
-    await settings.getByRole('button', { name: /存储与附件|Storage & attachments/ }).click()
+    await openStorageSettings(settings)
     await expect(settings.locator('#attachment-manager-title')).toBeVisible()
     await expect(settings.locator('.attachment-resource-row').filter({ hasText: initialFileName })).toBeVisible()
     await expect(settings.locator('.attachment-resource-row').filter({ hasText: materialName })).toBeVisible()
@@ -179,7 +180,7 @@ test('Attachment Manager lists real sources, filters, refreshes, and preserves t
     // its read-only risk report, and navigation through the existing SPA route.
     await page.locator('[data-testid="account-button"]').click()
     await page.locator('[data-testid="account-settings"]').click()
-    await page.locator('.settings-modal').getByRole('button', { name: /存储与附件|Storage & attachments/ }).click()
+    await openStorageSettings(page.locator('.settings-modal'))
     await expect(settings.locator('#attachment-manager-title')).toBeVisible()
     await settings.locator('.attachment-toolbar input').fill(diagramFileName)
     await expect(settings.locator('.attachment-resource-row')).toHaveCount(1)
@@ -200,7 +201,7 @@ test('Attachment Manager lists real sources, filters, refreshes, and preserves t
 
     await page.locator('[data-testid="account-button"]').click()
     await page.locator('[data-testid="account-settings"]').click()
-    await page.locator('.settings-modal').getByRole('button', { name: /存储与附件|Storage & attachments/ }).click()
+    await openStorageSettings(page.locator('.settings-modal'))
     await expect(settings.locator('#attachment-manager-title')).toBeVisible()
     await settings.locator('.attachment-toolbar input').fill(diagramFileName)
     await expect(settings.locator('.attachment-resource-row')).toHaveCount(1)
@@ -269,7 +270,7 @@ test('Attachment Manager remains reachable in desktop, tablet, and short mobile 
     await page.locator('[data-testid="account-button"]').click()
     await page.locator('[data-testid="account-settings"]').click()
     const settings = page.locator('.settings-modal')
-    await settings.getByRole('button', { name: /存储与附件|Storage & attachments/ }).click()
+    await openStorageSettings(settings)
     await expect(settings.locator('.attachment-resource-row')).toHaveCount(30)
 
     for (const viewport of [
@@ -302,7 +303,7 @@ test('Attachment Manager remains reachable in desktop, tablet, and short mobile 
       await page.locator('[data-testid="account-button"]').click()
       await page.locator('[data-testid="account-settings"]').click()
       await recordGeometry(`${viewport.label}: settings opened`)
-      await page.locator('.settings-modal').getByRole('button', { name: /存储与附件|Storage & attachments/ }).click()
+      await openStorageSettings(page.locator('.settings-modal'))
       await expect(settings.locator('.attachment-resource-row')).toHaveCount(30)
       await recordGeometry(`${viewport.label}: manager opened`)
       const detailScroller = settings.locator('.settings-detail')
