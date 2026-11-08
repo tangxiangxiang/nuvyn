@@ -1,17 +1,12 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
-import { NButton, NCheckbox, NInput, NSelect } from 'naive-ui'
+import { NButton, NInput, NSelect } from 'naive-ui'
 import { useI18n } from '../../composables/useI18n'
 import { useConfirm } from '../../composables/useConfirm'
 import { useToast } from '../../composables/useToast'
 import { useAiHistory } from '../../composables/vault/useAiHistory'
 import * as api from '../../lib/ai-api'
 import type { AiProfile, AiProfileInput, AiProvider, AiConnectionState, AiConnectionTestResult } from '../../lib/ai-api'
-import type { AiSpeechSettings } from '../../lib/ai-api'
-import { DEFAULT_SPEECH_VOICE, SPEECH_VOICE_IDS, type SpeechVoiceId } from '../../../shared/aiProfiles'
-import SpeechPronunciationDialog from './SpeechPronunciationDialog.vue'
-const pronunciationDialogOpen = ref(false)
-
 const { t } = useI18n()
 const { confirmCancellable } = useConfirm()
 let pendingConfirmation: ReturnType<typeof confirmCancellable> | null = null
@@ -25,37 +20,6 @@ async function confirm(...args: Parameters<typeof confirmCancellable>): Promise<
 const toast = useToast()
 const history = useAiHistory()
 const profiles = ref<AiProfile[]>([])
-const speechSettings = ref<AiSpeechSettings>({ profileId: null, privacyConsent: false, voiceId: DEFAULT_SPEECH_VOICE })
-const speechProfileId = ref<string | null>(null)
-const speechPrivacyConsent = ref(false)
-const speechVoiceId = ref<SpeechVoiceId>(DEFAULT_SPEECH_VOICE)
-const speechVoiceOptions = computed(() => SPEECH_VOICE_IDS.map((value) => ({ value, label: t(`speech.voice_${value}`) })))
-const speechSaving = ref(false)
-const speechError = ref('')
-const speechCache = ref<api.NoteSpeechCacheUsage | null>(null)
-const cacheBusy = ref(false)
-const cacheError = ref(false)
-async function loadSpeechCache() {
-  try {
-    const usage = await api.getNoteSpeechCacheUsage(controller.signal)
-    if (!disposed) speechCache.value = usage
-  } catch { if (!disposed) cacheError.value = true }
-}
-async function clearSpeechCache() {
-  if (blocked.value || cacheBusy.value) return
-  cacheBusy.value = true
-  try {
-    confirming.value = true
-    let accepted = false
-    try { accepted = await confirm(t('settings.speech_cache_clear'), t('settings.speech_cache_confirm'), { destructive: true }) }
-    finally { confirming.value = false }
-    if (!accepted || disposed) return
-    cacheError.value = false
-    const usage = await api.clearNoteSpeechCache(controller.signal)
-    if (!disposed) { speechCache.value = usage; toast.success(t('settings.speech_cache_cleared')) }
-  } catch { if (!disposed) cacheError.value = true }
-  finally { cacheBusy.value = false }
-}
 const activeId = ref<string | null>(null)
 const selectedId = ref<string | null>(null)
 const loading = ref(true)
@@ -70,8 +34,6 @@ const dirty = computed(() => JSON.stringify(form) !== initial.value)
 const selected = computed(() => profiles.value.find((p) => p.id === selectedId.value))
 const blocked = computed(() => loading.value || saving.value || confirming.value)
 const menuOpen = ref(false)
-const speechMenuOpen = ref(false)
-const voiceMenuOpen = ref(false)
 const connectionState = ref<AiConnectionState>('untested')
 const connectionResult = ref<AiConnectionTestResult | null>(null)
 const connectionError = ref('')
@@ -80,17 +42,6 @@ let testController: AbortController | null = null
 let testRun = 0
 let disposed = false
 const providerOptions = [{ label: 'Anthropic', value: 'anthropic' }, { label: 'OpenAI', value: 'openai' }]
-const speechProfileOptions = computed(() => {
-  const options = profiles.value.map((profile) => ({
-    label: `${profile.name} · ${profile.provider === 'openai' ? 'OpenAI' : 'Anthropic'}`,
-    value: profile.id,
-    disabled: !profile.configured || Boolean(profile.credentialError),
-  }))
-  if (speechProfileId.value && !profiles.value.some((profile) => profile.id === speechProfileId.value)) {
-    options.unshift({ label: t('settings.speech_profile_missing'), value: speechProfileId.value, disabled: true })
-  }
-  return options
-})
 
 function resetTest() {
   ++testRun
@@ -120,50 +71,12 @@ async function choose(profile?: AiProfile) {
   if (await canLeave() && !disposed) select(profile)
 }
 async function reload(preferredId: string | null = selectedId.value) {
-  const [data, speech] = await Promise.all([
-    api.getAiProfiles(controller.signal),
-    api.getAiSpeechSettings(controller.signal),
-  ])
+  const data = await api.getAiProfiles(controller.signal)
   if (disposed) return
   profiles.value = data.profiles
   activeId.value = data.activeProfileId
   migrationError.value = data.migrationError
-  speechSettings.value = speech
-  speechProfileId.value = speech.profileId
-  speechPrivacyConsent.value = speech.privacyConsent
-  speechVoiceId.value = speech.voiceId ?? DEFAULT_SPEECH_VOICE
-  speechError.value = ''
   select(data.profiles.find((p) => p.id === preferredId) ?? data.profiles.find((p) => p.id === data.activeProfileId) ?? data.profiles[0])
-}
-async function saveSpeechSettings() {
-  if (blocked.value || speechSaving.value) return
-  speechSaving.value = true
-  speechError.value = ''
-  try {
-    const saved = await api.saveAiSpeechSettings({
-      profileId: speechProfileId.value,
-      privacyConsent: speechPrivacyConsent.value,
-      voiceId: speechVoiceId.value,
-    }, controller.signal)
-    if (disposed) return
-    speechSettings.value = saved
-    speechProfileId.value = saved.profileId
-    speechPrivacyConsent.value = saved.privacyConsent
-    speechVoiceId.value = saved.voiceId
-    toast.success(t('settings.speech_saved'))
-  } catch (error) {
-    if (disposed) return
-    const code = (error as { code?: string })?.code
-    speechError.value = t(code === 'ai-speech-key-type-invalid'
-      ? 'settings.speech_key_type_invalid'
-      : code === 'ai-speech-profile-unconfigured'
-        ? 'settings.speech_profile_unconfigured'
-        : code === 'ai-profile-not-found'
-          ? 'settings.speech_profile_missing'
-          : 'settings.speech_save_failed')
-  } finally {
-    speechSaving.value = false
-  }
 }
 async function load() {
   loading.value = true
@@ -293,16 +206,13 @@ async function testConnection() {
   } finally { if (run === testRun) testController = null }
 }
 function onKeydown(event: KeyboardEvent) {
-  if (event.key === 'Escape' && (menuOpen.value || speechMenuOpen.value || voiceMenuOpen.value)) {
+  if (event.key === 'Escape' && menuOpen.value) {
     event.preventDefault()
     event.stopPropagation()
     menuOpen.value = false
-    speechMenuOpen.value = false
-    voiceMenuOpen.value = false
   }
 }
 onMounted(async () => {
-  void loadSpeechCache()
   await load()
   if (!disposed) emit('loaded')
 })
@@ -314,7 +224,7 @@ defineExpose({ canLeave })
   <section class="settings-section" aria-labelledby="settings-ai-title" @keydown.capture="onKeydown">
     <header class="settings-section-header">
       <div>
-        <h3 id="settings-ai-title">{{ t('settings.ai') }}</h3>
+        <h3 id="settings-ai-title">{{ t('settings.ai_profiles') }}</h3>
         <p>{{ t('settings.ai_subtitle') }}</p>
       </div>
       <NButton :disabled="blocked" @click="choose()">{{ t('settings.profile_add') }}</NButton>
@@ -390,39 +300,6 @@ defineExpose({ canLeave })
             <p v-else-if="connectionState === 'failed'">{{ connectionError }}</p>
             <p v-else>{{ t('settings.connection_untested_detail') }}</p>
           </div>
-        </div>
-      </div>
-      <div class="settings-card settings-speech-card" aria-labelledby="settings-speech-title">
-        <h4 id="settings-speech-title" class="settings-card-title">{{ t('settings.speech_title') }}</h4>
-        <p class="settings-speech-description">{{ t('settings.speech_detail') }}</p>
-        <p class="settings-speech-description">{{ t('settings.speech_cache_detail') }}</p>
-        <label class="settings-field">
-          <span class="settings-field-label">{{ t('settings.speech_profile') }}</span>
-          <NSelect data-testid="settings-speech-profile" :aria-label="t('settings.speech_profile')"
-            v-model:value="speechProfileId" v-model:show="speechMenuOpen" to=".settings-backdrop" clearable :options="speechProfileOptions"
-            :disabled="blocked || speechSaving" :placeholder="t('settings.speech_profile_placeholder')" />
-        </label>
-        <label class="settings-field">
-          <span class="settings-field-label">{{ t('speech.voice') }}</span>
-          <NSelect data-testid="settings-speech-voice" :aria-label="t('speech.voice')" v-model:value="speechVoiceId" v-model:show="voiceMenuOpen" to=".settings-backdrop" :options="speechVoiceOptions" :disabled="blocked || speechSaving" />
-        </label>
-        <NCheckbox v-model:checked="speechPrivacyConsent" :disabled="blocked || speechSaving">
-          {{ t('settings.speech_privacy_consent') }}
-        </NCheckbox>
-        <p v-if="speechError" class="settings-warning-card" role="alert">{{ speechError }}</p>
-        <div class="settings-section-actions settings-ai-profile-actions">
-          <span v-if="speechCache">{{ t('settings.speech_cache_usage', { used: (speechCache.bytes / 1048576).toFixed(1), limit: (speechCache.limitBytes / 1048576).toFixed(0) }) }}</span>
-          <NButton size="small" :loading="cacheBusy" :disabled="blocked || cacheBusy" @click="clearSpeechCache">{{ t('settings.speech_cache_clear') }}</NButton>
-        </div>
-        <p v-if="cacheError" class="settings-warning-card" role="alert">{{ t('settings.speech_cache_error') }}</p>
-        <NButton :disabled="blocked" @click="pronunciationDialogOpen = true">{{ t('speech.dictionary') }}</NButton>
-        <SpeechPronunciationDialog v-if="pronunciationDialogOpen" @close="pronunciationDialogOpen = false" />
-        <div class="settings-section-actions">
-          <NButton type="primary" :loading="speechSaving" :disabled="blocked || speechSaving"
-            @click="saveSpeechSettings">{{ t('settings.save') }}</NButton>
-          <span v-if="speechSettings.privacyConsent && !speechPrivacyConsent" class="settings-speech-revoke-hint">
-            {{ t('settings.speech_consent_will_revoke') }}
-          </span>
         </div>
       </div>
     </div>

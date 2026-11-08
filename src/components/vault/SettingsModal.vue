@@ -16,7 +16,8 @@ import {
   type FrontmatterCleanupPreview,
   type MetadataMigrationSummary,
 } from '../../lib/api'
-import SettingsAiSection from './SettingsAiSection.vue'
+import SettingsAiProfilesSection from './SettingsAiProfilesSection.vue'
+import SettingsAiSpeechSection from './SettingsAiSpeechSection.vue'
 import SettingsEditorSection from './SettingsEditorSection.vue'
 import SettingsMetadataSection from './SettingsMetadataSection.vue'
 import SettingsTagsSection from './SettingsTagsSection.vue'
@@ -45,7 +46,7 @@ const { confirm } = useConfirm()
 const { t } = useI18n()
 const vaultContext = useOptionalVaultContext()
 
-const aiSection = ref<InstanceType<typeof SettingsAiSection> | null>(null)
+const aiSection = ref<{ canLeave: () => Promise<boolean> } | null>(null)
 const modalRef = ref<HTMLElement | null>(null)
 const migrationSummary = ref<MetadataMigrationSummary | null>(null)
 const cleanupPreview = ref<FrontmatterCleanupPreview | null>(null)
@@ -54,7 +55,10 @@ const mutatingMetadata = ref(false)
 const cleanedPaths = ref<string[]>([])
 
 const CATEGORIES = {
-  ai: { label: 'settings.ai', icon: Robot, sections: [{ id: 'ai', label: 'settings.ai' }] },
+  ai: { label: 'settings.ai', icon: Robot, sections: [
+    { id: 'ai-profiles', label: 'settings.ai_profiles' },
+    { id: 'ai-speech', label: 'settings.ai_speech' },
+  ] },
   note: { label: 'settings.category_note', icon: FileText, sections: [
     { id: 'editor', label: 'settings.editor' },
     { id: 'tags', label: 'settings.tags' },
@@ -177,7 +181,7 @@ onMounted(() => {
 
 async function focusAiField(): Promise<void> {
   await nextTick()
-  if (!props.open || active.value !== 'ai' || document.activeElement !== closeButton.value?.$el) return
+  if (!props.open || active.value !== 'ai-profiles' || document.activeElement !== closeButton.value?.$el) return
   if (window.matchMedia?.('(max-width: 600px), (pointer: coarse)').matches) return
   modalRef.value?.querySelector<HTMLInputElement>('input:not([disabled]):not([type="hidden"])')?.focus()
 }
@@ -325,7 +329,8 @@ onBeforeUnmount(() => {
                 @back="navigate('maintenance', 'metadata')"
                 @navigate-reference="(reference, destination) => emit('navigateReference', reference, destination)"
               />
-              <SettingsAiSection v-else-if="active === 'ai'" ref="aiSection" @loaded="focusAiField" />
+              <SettingsAiProfilesSection v-else-if="active === 'ai-profiles'" ref="aiSection" @loaded="focusAiField" />
+              <SettingsAiSpeechSection v-else-if="active === 'ai-speech'" ref="aiSection" />
               <SettingsEditorSection v-else-if="active === 'editor'" />
               <SettingsMetadataSection
                 v-else-if="active === 'metadata'"

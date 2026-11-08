@@ -268,7 +268,7 @@ describe('SettingsModal', () => {
     await flushPromises()
     const labels = (selector: string) => Array.from(document.body.querySelectorAll(selector), el => el.textContent?.trim())
     expect(labels('.settings-category-list button')).toEqual(['AI', 'Note', 'Diary', 'Ledger', '数据与维护'])
-    expect(labels('.settings-subnav button')).toEqual([])
+    expect(labels('.settings-subnav button')).toEqual(['模型配置', '智能朗读'])
 
     for (const [category, pages] of [
       ['Diary', []],
@@ -357,11 +357,88 @@ describe('SettingsModal', () => {
     expect(document.body.querySelector('.settings-connection-status')?.textContent).toContain('326 ms')
   })
 
+  it('protects unsaved profiles when entering speech and keeps speech drafts on cancelled navigation', async () => {
+    const wrapper = mountSettings()
+    await flushPromises()
+    inputValue(fieldControl<HTMLInputElement>('API Key', 'input'), 'unsaved-key')
+    confirm.mockResolvedValueOnce(false)
+    findButton('智能朗读').click()
+    await flushPromises()
+    expect(document.body.querySelector('[data-testid="settings-provider"]')).toBeTruthy()
+    expect(fieldControl<HTMLInputElement>('API Key', 'input').value).toBe('unsaved-key')
+    findButton('智能朗读').click()
+    await flushPromises()
+    expect(document.body.querySelector('[data-testid="settings-provider"]')).toBeNull()
+    wrapper.findAllComponents(NSelect)[1]!.vm.$emit('update:value', 'audiobook_female_1')
+    confirm.mockResolvedValueOnce(false)
+    findButton('模型配置').click()
+    await flushPromises()
+    expect(wrapper.findAllComponents(NSelect)[1]!.props('value')).toBe('audiobook_female_1')
+    confirm.mockResolvedValueOnce(false)
+    document.body.querySelector<HTMLButtonElement>('.settings-icon-btn')!.click()
+    await flushPromises()
+    expect(wrapper.emitted('close')).toBeUndefined()
+    findButton('模型配置').click()
+    await flushPromises()
+    findButton('智能朗读').click()
+    await flushPromises()
+    expect(wrapper.findAllComponents(NSelect)[1]!.props('value')).toBe('audiobook_male_1')
+  })
+
+  it('retains failed speech saves and marks a successful voice save clean without changing chat defaults', async () => {
+    getAiSpeechSettings.mockResolvedValue({ profileId: 'anthropic-profile', privacyConsent: false, voiceId: 'audiobook_female_1' })
+    const wrapper = mountSettings()
+    await flushPromises()
+    findButton('智能朗读').click()
+    await flushPromises()
+    const voice = wrapper.findAllComponents(NSelect)[1]!
+    expect(voice.props('value')).toBe('audiobook_female_1')
+    voice.vm.$emit('update:value', 'female-yujie')
+    saveAiSpeechSettings.mockRejectedValueOnce(new Error('save failed'))
+    findButton('保存').click()
+    await flushPromises()
+    expect(voice.props('value')).toBe('female-yujie')
+    expect(document.body.querySelector('[role="alert"]')).toBeTruthy()
+    confirm.mockResolvedValueOnce(false)
+    findButton('Note').click()
+    await flushPromises()
+    expect(document.body.querySelector('.settings-speech-card')).toBeTruthy()
+    findButton('保存').click()
+    await flushPromises()
+    expect(saveAiSpeechSettings).toHaveBeenLastCalledWith({
+      profileId: 'anthropic-profile', privacyConsent: false, voiceId: 'female-yujie',
+    }, expect.any(AbortSignal))
+    const confirmations = confirm.mock.calls.length
+    findButton('Note').click()
+    await flushPromises()
+    expect(confirm.mock.calls).toHaveLength(confirmations)
+    expect(activateAiProfile).not.toHaveBeenCalled()
+    expect(clearNoteSpeechCache).not.toHaveBeenCalled()
+  })
+
+  it('refreshes profiles when speech mounts and preserves a deleted speech selection as an error', async () => {
+    getAiSpeechSettings.mockResolvedValue({ profileId: 'removed-profile', privacyConsent: true, voiceId: 'audiobook_male_1' })
+    const wrapper = mountSettings()
+    await flushPromises()
+    getAiProfiles.mockResolvedValueOnce({ profiles: [], activeProfileId: null })
+    findButton('智能朗读').click()
+    await flushPromises()
+    expect(getAiProfiles).toHaveBeenCalledTimes(2)
+    expect(wrapper.findAllComponents(NSelect)[0]!.props('value')).toBe('removed-profile')
+    expect(wrapper.findAllComponents(NSelect)[0]!.props('options')).toEqual([
+      expect.objectContaining({ value: 'removed-profile', disabled: true }),
+    ])
+    expect(document.body.querySelector('[role="alert"]')).toBeTruthy()
+    expect(saveAiSpeechSettings).not.toHaveBeenCalled()
+  })
+
   it('saves an explicit speech profile and privacy consent', async () => {
     const wrapper = mountSettings()
     await flushPromises()
+    findButton('智能朗读').click()
+    await flushPromises()
 
-    wrapper.findAllComponents(NSelect)[1]!.vm.$emit('update:value', 'anthropic-profile')
+    wrapper.findAllComponents(NSelect)[0]!.vm.$emit('update:value', 'anthropic-profile')
     wrapper.getComponent(NCheckbox).vm.$emit('update:checked', true)
     await flushPromises()
     const saveButton = Array.from(document.body.querySelectorAll<HTMLButtonElement>('.settings-speech-card button'))
@@ -374,6 +451,8 @@ describe('SettingsModal', () => {
 
   it('confirms before clearing speech audio and refreshes usage without changing speech settings', async () => {
     mountSettings()
+    await flushPromises()
+    findButton('智能朗读').click()
     await flushPromises()
     expect(document.body.textContent).toContain('朗读缓存：0.0 / 512 MiB')
     const button = findButton('清除朗读缓存')
@@ -392,6 +471,8 @@ describe('SettingsModal', () => {
   it('persists speech privacy consent revocation', async () => {
     getAiSpeechSettings.mockResolvedValueOnce({ profileId: 'anthropic-profile', privacyConsent: true })
     const wrapper = mountSettings()
+    await flushPromises()
+    findButton('智能朗读').click()
     await flushPromises()
 
     wrapper.getComponent(NCheckbox).vm.$emit('update:checked', false)

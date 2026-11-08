@@ -274,6 +274,7 @@ test('speech profile menu is clickable above the Settings backdrop and saves the
   await page.getByTestId('account-button').click()
   await page.getByTestId('account-settings').click()
   const settings = page.locator('.settings-modal')
+  await settings.locator('.settings-subnav').getByRole('button', { name: /^(智能朗读|Read aloud)$/ }).click()
   const select = page.getByTestId('settings-speech-profile')
   await select.click()
   const option = page.locator('.n-base-select-option').filter({ hasText: 'Speech fixture' })
@@ -296,12 +297,27 @@ test('speech profile menu is clickable above the Settings backdrop and saves the
   await expect(settings).toHaveCount(0)
   await page.getByTestId('account-button').click()
   await page.getByTestId('account-settings').click()
+  await settings.locator('.settings-subnav').getByRole('button', { name: /^(智能朗读|Read aloud)$/ }).click()
   await expect(page.getByTestId('settings-speech-voice')).toContainText(/有声书女声|Audiobook female/)
   await page.getByTestId('settings-speech-voice').click()
   await page.keyboard.press('Escape')
   await expect(settings).toBeVisible()
 
-  const speech = settings.locator('.settings-speech-card')
+  const speech = settings
+  for (const width of [1440, 820, 375]) {
+    await page.setViewportSize({ width, height: 900 })
+    for (const colorScheme of ['light', 'dark'] as const) {
+      await page.emulateMedia({ colorScheme })
+      for (const selector of ['.settings-speech-card', '.settings-speech-dictionary', '.settings-speech-cache']) {
+        const group = settings.locator(selector)
+        await group.scrollIntoViewIfNeeded()
+        await expect(group).toBeVisible()
+        expect(await group.evaluate(el => el.scrollWidth - el.clientWidth)).toBeLessThanOrEqual(1)
+      }
+      expect(await settings.evaluate(el => el.scrollWidth - el.clientWidth)).toBeLessThanOrEqual(1)
+    }
+  }
+  await page.setViewportSize({ width: 1440, height: 900 })
   await expect(speech).toContainText(/1\.0 \/ 512 MiB/)
   await speech.getByRole('button', { name: /清除朗读缓存|Clear speech cache/ }).click()
   const confirmation = page.getByRole('dialog').filter({ hasText: /重新生成音频|regenerate audio/ })
@@ -355,7 +371,8 @@ test('corrupt pronunciation recovery requires confirmation and works above Setti
   await gotoVaultReady(page)
   await page.getByTestId('account-button').click()
   await page.getByTestId('account-settings').click()
-  await page.locator('.settings-speech-card').getByRole('button', { name: /发音词典|Pronunciation dictionary/ }).click()
+  await page.locator('.settings-subnav').getByRole('button', { name: /^(智能朗读|Read aloud)$/ }).click()
+  await page.locator('.settings-speech-dictionary').getByRole('button', { name: /发音词典|Pronunciation dictionary/ }).click()
   const dictionary = page.getByTestId('speech-pronunciations')
   await expect(dictionary.getByRole('alert')).toContainText(/损坏|corrupt/)
   const recover = dictionary.getByRole('button', { name: /重置发音词典|Reset pronunciation dictionary/ })
