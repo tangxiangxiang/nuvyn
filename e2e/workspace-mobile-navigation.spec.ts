@@ -107,11 +107,37 @@ test('tablet and desktop align the first workspace equally beside the Nuvyn bran
     await page.setViewportSize({ width, height: 900 })
     for (const route of ['/vault', '/ledger', '/board']) {
       await page.goto(route)
+      const brand = page.locator('.navbar .brand-content')
+      const { logoInset, gap: brandGap, centerOffset } = await brand.evaluate((element) => {
+        const logo = element.querySelector('.brand-logo')!.getBoundingClientRect()
+        const wordmark = element.querySelector('.brand-wordmark')!.getBoundingClientRect()
+        return {
+          logoInset: logo.left - element.closest('.navbar-inner')!.getBoundingClientRect().left,
+          gap: wordmark.left - logo.right,
+          centerOffset: (wordmark.top + wordmark.height / 2) - (logo.top + logo.height / 2),
+        }
+      })
+      const desktopVault = route === '/vault' && width >= 1200
+      expect(logoInset).toBeCloseTo(desktopVault ? 8.5 : 10, 1)
+      expect(brandGap).toBeCloseTo(desktopVault ? 7.5 : 6, 1)
+      expect(centerOffset).toBeCloseTo(0, 1)
       const gap = await brandWorkspaceGap(page)
       expect(gap, `brand-to-workspace gap on ${route} at ${width}px`).toBeGreaterThanOrEqual(9)
       expect(gap, `brand-to-workspace gap on ${route} at ${width}px`).toBeLessThanOrEqual(11)
     }
   }
+})
+
+test('the Note toolbar folder icon lines up with the brand logo', async ({ page }) => {
+  await page.setViewportSize(DESKTOP_VIEWPORT)
+  await page.goto('/vault')
+  const logo = page.locator('.navbar .brand-logo')
+  const folder = page.locator('.activity-bar .ab-btn').first().locator('.ab-btn-icon')
+  const logoBounds = await logo.boundingBox()
+  const folderBounds = await folder.boundingBox()
+  expect(logoBounds).not.toBeNull()
+  expect(folderBounds).not.toBeNull()
+  expect(logoBounds!.x + logoBounds!.width / 2).toBeCloseTo(folderBounds!.x + folderBounds!.width / 2, 1)
 })
 
 test('mobile nav shows all four workspaces at the 600px boundary and common phone widths', async ({ page }) => {

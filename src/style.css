@@ -516,7 +516,6 @@ hr {
 .brand {
   display: inline-flex;
   align-items: center;
-  gap: 8px;
   padding: 0;
   border: 0;
   background: transparent;
@@ -535,6 +534,11 @@ hr {
   -webkit-touch-callout: none;
 }
 .brand:hover { text-decoration: none; color: var(--accent); }
+.brand-content {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
 .brand-logo {
   width: 24px;
   height: 24px;
@@ -567,6 +571,12 @@ hr {
 .navbar.is-workspace .brand { font-size: 0.95rem; }
 .navbar.is-workspace .brand-logo { width: 24px; height: 24px; }
 .navbar.is-workspace .brand-wordmark { font-size: 0.9rem; }
+@media (min-width: 1200px) {
+  .navbar.is-vault:not(.note-tablet-nav) .brand-logo {
+    /* Align the logo center with the desktop activity bar icons. */
+    transform: translateX(-1.5px);
+  }
+}
 .navbar.is-zen-transitioning {
   opacity: 0;
   pointer-events: none;

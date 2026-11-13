@@ -978,8 +978,10 @@ onBeforeUnmount(() => {
         @selectstart.prevent
         @click="onBrandClick"
       >
-        <img class="brand-logo" :src="'/logo-48.png'" :alt="t('nav.logo_alt')" width="24" height="24" draggable="false" />
-        <span class="brand-wordmark">Nuvyn</span>
+        <span class="brand-content">
+          <img class="brand-logo" :src="'/logo-48.png'" :alt="t('nav.logo_alt')" width="24" height="24" draggable="false" />
+          <span class="brand-wordmark">Nuvyn</span>
+        </span>
       </NButton>
       <!-- Scope filter: lives in the navbar (the file tree header is too
            narrow on 150px sidebars). The Ledger chip opens the Ledger workspace. -->
