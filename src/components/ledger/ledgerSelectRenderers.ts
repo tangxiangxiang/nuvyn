@@ -36,6 +36,30 @@ export function ledgerAccountSelectOptions(
   })
 }
 
+export function ledgerCategorySelectOptions(
+  categories: readonly LedgerCategoryDto[],
+  recentIds: readonly string[],
+): Array<SelectOption | SelectGroupOption> {
+  const options = new Map<string, SelectOption>(categories.map((category) => [category.id, {
+    value: category.id,
+    label: category.name,
+    categoryIcon: category.icon,
+  }]))
+  const recent: SelectOption[] = []
+  for (const id of recentIds) {
+    const option = options.get(id)
+    if (option) {
+      recent.push(option)
+      options.delete(id)
+    }
+  }
+  const other = [...options.values()]
+  if (!recent.length) return other
+  const groups: SelectGroupOption[] = [{ type: 'group', key: 'recent', label: '最近常用', children: recent }]
+  if (other.length) groups.push({ type: 'group', key: 'other', label: '其他分类', children: other })
+  return groups
+}
+
 function customCategoryIconSource(icon: string | undefined): string | undefined {
   if (!icon?.startsWith('custom_category_')) return undefined
   try {
@@ -54,7 +78,7 @@ export function renderLedgerAccountLabel(
   accounts: readonly LedgerAccountDto[],
 ): VNodeChild {
   if (option.type === 'group') {
-    return h('span', { class: 'ledger-account-select-group' }, String(option.label ?? ''))
+    return renderLedgerSelectGroupLabel(option)
   }
 
   const account = accounts.find((item) => item.id === option.value)
@@ -69,10 +93,16 @@ export function renderLedgerAccountLabel(
   ])
 }
 
+function renderLedgerSelectGroupLabel(option: SelectOption | SelectGroupOption): VNodeChild {
+  return h('span', { class: 'ledger-select-group-label' }, String(option.label ?? ''))
+}
+
 export function renderLedgerCategoryLabel(
-  option: SelectOption,
+  option: SelectOption | SelectGroupOption,
   categories: readonly LedgerCategoryDto[],
 ): VNodeChild {
+  if (option.type === 'group') return renderLedgerSelectGroupLabel(option)
+
   const category = categories.find((item) => item.id === option.value)
   if (!category) {
     return h('span', { class: 'ledger-category-select-option' }, [

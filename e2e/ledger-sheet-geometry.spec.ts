@@ -18,6 +18,7 @@ type LedgerCategory = {
 type LedgerTransaction = {
   id: string
   type: 'income' | 'expense' | 'transfer' | 'adjustment'
+  categoryId: string
 }
 
 type Viewport = {
@@ -159,6 +160,51 @@ test('Ledger create sheet keeps full-width bottom-anchored mobile geometry', asy
   await assertMobileGeometry(page.getByTestId('ledger-transaction-sheet'), viewport)
   await dialog.getByRole('button', { name: '取消' }).click()
   await expect(dialog).toBeHidden()
+})
+
+test('Ledger groups and selects frequently used categories across desktop, tablet and mobile', async ({ page, request }) => {
+  const { categoryId } = await ensureLedgerFixture(request)
+  await page.goto('/ledger')
+  const record = page.getByTestId('ledger-record-button')
+  const sheet = page.getByTestId('ledger-transaction-sheet')
+  const categorySelect = sheet.getByRole('combobox', { name: '分类' })
+  const categoryOption = page.locator(`[data-ledger-option="${categoryId}"]`)
+  await record.click()
+  await sheet.locator('input[name="amount"]').fill('12.50')
+  const accountSelect = sheet.getByRole('combobox', { name: '账户' })
+  await accountSelect.click()
+  const accountGroup = page.getByText('资产账户', { exact: true })
+  await expect(accountGroup).toBeVisible()
+  const groupTypography = (label: Element) => {
+    const { fontSize, fontWeight, color } = getComputedStyle(label)
+    return { fontSize, fontWeight, color }
+  }
+  const accountGroupStyle = await accountGroup.evaluate(groupTypography)
+  await page.getByRole('option').first().click()
+  await categorySelect.click()
+  await expect(page.getByText('最近常用', { exact: true })).toHaveCount(0)
+  await categoryOption.click()
+  await sheet.getByRole('button', { name: '保存', exact: true }).click()
+  await expect(sheet).toBeHidden()
+
+  for (const viewport of [{ width: 1280, height: 800 }, { width: 768, height: 1024 }, { width: 390, height: 844 }]) {
+    await page.setViewportSize(viewport)
+    await page.reload()
+    await record.click()
+    await expect(categorySelect).toHaveText('')
+    await categorySelect.click()
+    for (const name of ['最近常用', '其他分类']) {
+      const group = page.getByText(name, { exact: true })
+      await expect(group).toBeVisible()
+      expect(await group.evaluate(groupTypography)).toEqual(accountGroupStyle)
+    }
+    await expect(categoryOption).toHaveCount(1)
+    await expect(categoryOption.locator('.ledger-category-select-icon')).toBeVisible()
+    await categoryOption.click()
+    await expect(categoryOption).toBeHidden()
+    await expect(categorySelect.locator('.ledger-category-select-icon')).toBeVisible()
+    await expect(categorySelect.locator('.ledger-category-select-label')).toHaveText(/\S/)
+  }
 })
 
 test('Ledger detail sheet keeps centered desktop geometry and one labelled dialog', async ({ page, request }) => {

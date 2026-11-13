@@ -13,7 +13,8 @@ import type {
 import { LedgerApiError } from '../../../features/ledger/ledgerErrors'
 import { useConfirm } from '../../../composables/useConfirm'
 import { useToast } from '../../../composables/useToast'
-import { resetLedgerStoreForTesting } from '../../../features/ledger/ledgerStore'
+import { resetLedgerStoreForTesting, useLedgerStore } from '../../../features/ledger/ledgerStore'
+import { recordCategoryUsage } from '../../../features/ledger/categoryUsage'
 import LedgerView from '../../../views/LedgerView.vue'
 import LedgerDateTimePicker from '../LedgerDateTimePicker.vue'
 import LedgerTransactionFormFields from '../LedgerTransactionFormFields.vue'
@@ -30,6 +31,11 @@ const api = vi.hoisted(() => ({
 }))
 
 vi.mock('../../../features/ledger/api', () => api)
+vi.mock('../../../composables/useAuth', async () => {
+  const { ref } = await import('vue')
+  const user = ref({ id: 1, username: 'test-owner' })
+  return { useAuth: () => ({ user }) }
+})
 
 const settings: LedgerSettingsDto = {
   baseCurrency: 'CNY',
@@ -82,7 +88,10 @@ const overview = (): LedgerOverviewDto => ({
   recentTransactions: [],
 })
 
-const savedTransaction = { id: 'tx-1', type: 'expense' } as unknown as LedgerTransactionDto
+const savedTransaction = { id: 'tx-1', type: 'expense', accountId: 'bank-1', categoryId: 'food' } as const
+const recentAccountKey = 'nuvyn.ledger.recent-transaction-account'
+const owner = { id: 1, username: 'test-owner' }
+const usageKey = 'nuvyn.ledger.category-usage:1:test-owner'
 const wrappers: VueWrapper[] = []
 let categories: LedgerCategoryDto[] = [expense, income, category('old', 'expense', '旧分类', 10)]
 
@@ -125,6 +134,7 @@ type OptionRenderer = (option: SelectOption, selected?: boolean) => VNodeChild
 describe('Ledger transaction creation sheet', () => {
   beforeEach(() => {
     sessionStorage.clear()
+    localStorage.clear()
     resetLedgerStoreForTesting()
     vi.clearAllMocks()
     categories = [expense, income, category('old', 'expense', '旧分类', 10)]
@@ -135,11 +145,13 @@ describe('Ledger transaction creation sheet', () => {
     for (const wrapper of wrappers.splice(0)) wrapper.unmount()
   })
 
-  it('opens with Expense as the default and sends CNY decimal input as minor units', async () => {
+  it('saves an expense, remembers its account across mounts, and resets the draft without marking it dirty', async () => {
+    localStorage.setItem(recentAccountKey, 'wallet-1')
     await openSheet()
     const sheet = getSheet()
 
     expect(sheet.get('[role="tab"][aria-selected="true"]').text()).toBe('支出')
+    expect(naiveSelectValue(sheet, '账户')).toBe('wallet-1')
     expect(ledgerDateTimeValue(sheet)).toMatch(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/)
     expect(getNaiveSelect(sheet, '分类').props('placeholder')).toBe('请选择分类')
     expect(getNaiveSelect(sheet, '分类').props('options')).toEqual([{ value: 'food', label: '餐饮' }])
@@ -149,6 +161,7 @@ describe('Ledger transaction creation sheet', () => {
     await setNaiveSelect(sheet, '分类', 'food')
     await setLedgerDateTime(sheet, '2026-09-05T12:30')
     await sheet.get('input[name="location"]').setValue('上海市静安区')
+    await sheet.get('textarea[name="note"]').setValue('午餐备注')
     api.createLedgerTransaction.mockResolvedValue(savedTransaction)
     await sheet.get('form').trigger('submit')
     await flushPromises()
@@ -160,10 +173,55 @@ describe('Ledger transaction creation sheet', () => {
       categoryId: 'food',
       location: '上海市静安区',
       payee: '',
-      note: '',
+      note: '午餐备注',
       occurredAt: expect.any(Number),
     }), expect.any(String))
     expect(document.body.querySelector('.ledger-sheet')).toBeNull()
+    expect(localStorage.getItem(recentAccountKey)).toBe('bank-1')
+    expect(JSON.parse(localStorage.getItem(usageKey)!)).toMatchObject({
+      expense: [{ categoryId: 'food', useCount: 1 }],
+    })
+
+    wrappers.pop()!.unmount()
+    resetLedgerStoreForTesting()
+    await openSheet()
+    const reopened = getSheet()
+    expect(naiveSelectValue(reopened, '账户')).toBe('bank-1')
+    expect(getNaiveSelect(reopened, '分类').props('options')).toEqual([
+      { type: 'group', key: 'recent', label: '最近常用', children: [{ value: 'food', label: '餐饮' }] },
+    ])
+    expect(naiveSelectValue(reopened, '分类')).toBe('')
+    expect((reopened.get('input[name="amount"]').element as HTMLInputElement).value).toBe('')
+    expect((reopened.get('textarea[name="note"]').element as HTMLTextAreaElement).value).toBe('')
+    await reopened.get('.ledger-secondary-button').trigger('click')
+    expect(useConfirm().queue.value).toHaveLength(0)
+    expect(document.body.querySelector('.ledger-sheet')).toBeNull()
+  })
+
+  it('keeps category groups stable on reopen and switches to the other kind without selecting a category', async () => {
+    categories.push(category('shop', 'expense', '购物'), category('travel', 'expense', '交通'), category('bonus', 'income', '奖金'))
+    recordCategoryUsage(owner, savedTransaction as LedgerTransactionDto, 'expense-key')
+    recordCategoryUsage(owner, { ...savedTransaction, type: 'income', categoryId: 'bonus' } as LedgerTransactionDto, 'income-key')
+    const wrapper = await openSheet()
+    const sheet = getSheet()
+    const expenseOptions = getNaiveSelect(sheet, '分类').props('options')
+    expect(expenseOptions).toEqual([
+      { type: 'group', key: 'recent', label: '最近常用', children: [{ value: 'food', label: '餐饮' }] },
+      { type: 'group', key: 'other', label: '其他分类', children: [
+        { value: 'shop', label: '购物' }, { value: 'travel', label: '交通' },
+      ] },
+    ])
+    await sheet.get('.ledger-secondary-button').trigger('click')
+    await wrapper.get('[data-testid="ledger-record-button"]').trigger('click')
+    const reopened = getSheet()
+    expect(getNaiveSelect(reopened, '分类').props('options')).toEqual(expenseOptions)
+    await setNaiveSelect(reopened, '分类', 'food')
+    await reopened.get('[data-ledger-tab="income"]').trigger('click')
+    expect(naiveSelectValue(reopened, '分类')).toBe('')
+    expect(getNaiveSelect(reopened, '分类').props('options')).toEqual([
+      { type: 'group', key: 'recent', label: '最近常用', children: [{ value: 'bonus', label: '奖金' }] },
+      { type: 'group', key: 'other', label: '其他分类', children: [{ value: 'salary', label: '工资' }] },
+    ])
   })
 
   it('keeps account and category renderers as stable option rows', async () => {
@@ -214,9 +272,21 @@ describe('Ledger transaction creation sheet', () => {
   })
 
   it('preselects the only active account', async () => {
+    localStorage.setItem(recentAccountKey, 'deleted-bank')
     setup([account('only-bank', '唯一账户')])
     await openSheet()
     expect(naiveSelectValue(getSheet(), '账户')).toBe('only-bank')
+  })
+
+  it('leaves the selection empty when the remembered account is archived and multiple active accounts remain', async () => {
+    localStorage.setItem(recentAccountKey, 'archived-bank')
+    setup([
+      account('bank-1', '招商银行'),
+      account('wallet-1', '现金钱包'),
+      { ...account('archived-bank', '旧账户'), archivedAt: 10 },
+    ])
+    await openSheet()
+    expect(naiveSelectValue(getSheet(), '账户')).toBe('')
   })
 
   it('does not guess an account when multiple active accounts are available', async () => {
@@ -230,12 +300,15 @@ describe('Ledger transaction creation sheet', () => {
     expect(useToast().toasts.value.at(-1)?.message).toBe('请选择账户。')
     expect(sheet.text()).not.toContain('请选择账户。')
     expect(api.createLedgerTransaction).not.toHaveBeenCalled()
+    expect(localStorage.getItem(usageKey)).toBeNull()
   })
 
   it('closes after confirming that a dirty draft should be discarded', async () => {
+    localStorage.setItem(recentAccountKey, 'wallet-1')
     await openSheet()
     const sheet = getSheet()
     await setNaiveSelect(sheet, '账户', 'bank-1')
+    await setNaiveSelect(sheet, '分类', 'food')
     await sheet.get('[aria-label="关闭记账窗口"]').trigger('click')
     await flushPromises()
 
@@ -245,20 +318,24 @@ describe('Ledger transaction creation sheet', () => {
     await flushPromises()
 
     expect(document.body.querySelector('.ledger-sheet')).toBeNull()
+    expect(localStorage.getItem(recentAccountKey)).toBe('wallet-1')
+    expect(localStorage.getItem(usageKey)).toBeNull()
   })
 
   it('switches to income and transfer with their applicable fields', async () => {
+    localStorage.setItem(recentAccountKey, 'wallet-1')
     const wrapper = await openSheet()
     const sheet = getSheet()
 
     await sheet.findAll('[role="tab"]').find((button) => button.text() === '收入')!.trigger('click')
+    expect(naiveSelectValue(sheet, '账户')).toBe('wallet-1')
     expect(getNaiveSelect(sheet, '分类').props('options')).toEqual([{ value: 'salary', label: '工资' }])
     expect(getNaiveSelect(sheet, '分类').props('placeholder')).toBe('请选择分类')
     await sheet.get('input[name="amount"]').setValue('12.50')
     await setNaiveSelect(sheet, '账户', 'bank-1')
     await setNaiveSelect(sheet, '分类', 'salary')
     await setLedgerDateTime(sheet, '2026-09-05T12:30')
-    api.createLedgerTransaction.mockResolvedValue(savedTransaction)
+    api.createLedgerTransaction.mockResolvedValue({ ...savedTransaction, type: 'income', categoryId: 'salary' })
     await sheet.get('form').trigger('submit')
     await flushPromises()
 
@@ -266,6 +343,7 @@ describe('Ledger transaction creation sheet', () => {
 
     await wrapper.get('[data-testid="ledger-record-button"]').trigger('click')
     const transferSheet = getSheet()
+    expect(naiveSelectValue(transferSheet, '账户')).toBe('bank-1')
     await transferSheet.findAll('[role="tab"]').find((button) => button.text() === '转账')!.trigger('click')
     expect(transferSheet.find('[aria-label="分类"]').exists()).toBe(false)
     expect(transferSheet.find('input[name="payee"]').exists()).toBe(false)
@@ -282,13 +360,20 @@ describe('Ledger transaction creation sheet', () => {
     expect(api.createLedgerTransaction).toHaveBeenLastCalledWith(expect.objectContaining({
       type: 'transfer', transferKind: 'general', amountMinor: 500, fromAccountId: 'bank-1', toAccountId: 'wallet-1', payee: '',
     }), expect.any(String))
+    expect(localStorage.getItem(recentAccountKey)).toBe('bank-1')
   })
 
   it('reveals a lightweight withdrawal fee mode picker only after a positive fee is entered', async () => {
+    localStorage.setItem(recentAccountKey, 'bank-1')
     await openSheet()
     const sheet = getSheet()
     await sheet.findAll('[role="tab"]').find((button) => button.text() === '转账')!.trigger('click')
+    await sheet.findAll('.n-radio-button').find((button) => button.text() === '还款')!.trigger('click')
+    expect(naiveSelectValue(sheet, '转出账户')).toBe('')
+    expect(naiveSelectValue(sheet, '转入账户')).toBe('')
     await sheet.findAll('.n-radio-button').find((button) => button.text() === '提现')!.trigger('click')
+    expect(naiveSelectValue(sheet, '转出账户')).toBe('')
+    expect(naiveSelectValue(sheet, '转入账户')).toBe('')
 
     expect(sheet.find('[aria-label="选择手续费方式"]').exists()).toBe(false)
     await sheet.get('input[name="feeAmount"]').setValue('1')
@@ -324,7 +409,8 @@ describe('Ledger transaction creation sheet', () => {
     }), expect.any(String))
   })
 
-  it('preserves only amount, time, and note across semantic type switches', async () => {
+  it('preserves the selected account across income and expense and resets type-specific fields', async () => {
+    localStorage.setItem(recentAccountKey, 'wallet-1')
     await openSheet()
     const sheet = getSheet()
     await sheet.get('input[name="amount"]').setValue('12.50')
@@ -338,10 +424,12 @@ describe('Ledger transaction creation sheet', () => {
     expect((sheet.get('input[name="amount"]').element as HTMLInputElement).value).toBe('12.50')
     expect(ledgerDateTimeValue(sheet)).toBe('2026-09-05T12:30')
     expect((sheet.get('textarea[name="note"]').element as HTMLTextAreaElement).value).toBe('共同备注')
-    expect(naiveSelectValue(sheet, '账户')).toBe('')
+    expect(naiveSelectValue(sheet, '账户')).toBe('bank-1')
     expect(naiveSelectValue(sheet, '分类')).toBe('')
     expect((sheet.get('input[name="payee"]').element as HTMLInputElement).value).toBe('')
 
+    await sheet.get('[data-ledger-tab="expense"]').trigger('click')
+    expect(naiveSelectValue(sheet, '账户')).toBe('bank-1')
     await sheet.findAll('[role="tab"]').find((button) => button.text() === '转账')!.trigger('click')
     expect((sheet.get('input[name="amount"]').element as HTMLInputElement).value).toBe('12.50')
     expect(ledgerDateTimeValue(sheet)).toBe('2026-09-05T12:30')
@@ -360,6 +448,7 @@ describe('Ledger transaction creation sheet', () => {
   })
 
   it('keeps the same idempotency key and readonly recovery surface after response loss', async () => {
+    localStorage.setItem(recentAccountKey, 'wallet-1')
     const wrapper = await openSheet()
     const sheet = getSheet()
     await sheet.get('input[name="amount"]').setValue('38')
@@ -372,8 +461,11 @@ describe('Ledger transaction creation sheet', () => {
     await nextTick()
 
     expect(wrapper.find('[data-testid="ledger-recovery"]').exists()).toBe(true)
+    expect(localStorage.getItem(recentAccountKey)).toBe('wallet-1')
+    expect(localStorage.getItem(usageKey)).toBeNull()
     expect(document.body.querySelector('input[name="amount"]')).toBeNull()
     const firstKey = api.createLedgerTransaction.mock.calls[0][1]
+    const pending = sessionStorage.getItem('nuvyn.ledger.pending-create')!
     api.createLedgerTransaction.mockResolvedValue(savedTransaction)
     await wrapper.get('[data-testid="ledger-recovery"] button').trigger('click')
     await flushPromises()
@@ -381,7 +473,39 @@ describe('Ledger transaction creation sheet', () => {
 
     expect(api.createLedgerTransaction.mock.calls[1][1]).toBe(firstKey)
     expect(sessionStorage.getItem('nuvyn.ledger.pending-create')).toBeNull()
+    expect(localStorage.getItem(recentAccountKey)).toBe('bank-1')
+    expect(JSON.parse(localStorage.getItem(usageKey)!)).toMatchObject({
+      expense: [{ categoryId: 'food', useCount: 1 }],
+    })
     expect(document.body.querySelector('.ledger-sheet')).toBeNull()
+
+    // The same intent can survive a page interruption after the preference
+    // was written but before Recovery cleared its session record.
+    wrappers.pop()!.unmount()
+    sessionStorage.setItem('nuvyn.ledger.pending-create', pending)
+    resetLedgerStoreForTesting()
+    await useLedgerStore().retryPendingCreate()
+    expect(api.createLedgerTransaction.mock.calls[2][1]).toBe(firstKey)
+    expect(JSON.parse(localStorage.getItem(usageKey)!)).toMatchObject({
+      expense: [{ categoryId: 'food', useCount: 1 }],
+    })
+  })
+
+  it('keeps the remembered account after a rejected save', async () => {
+    localStorage.setItem(recentAccountKey, 'wallet-1')
+    await openSheet()
+    const sheet = getSheet()
+    await sheet.get('input[name="amount"]').setValue('5')
+    await setNaiveSelect(sheet, '账户', 'bank-1')
+    await setNaiveSelect(sheet, '分类', 'food')
+    await setLedgerDateTime(sheet, '2026-09-05T12:30')
+    api.createLedgerTransaction.mockRejectedValueOnce(new LedgerApiError('Invalid transaction', 400, 'ledger-validation-failed'))
+    await sheet.get('form').trigger('submit')
+    await flushPromises()
+
+    expect(sheet.find('[role="alert"]').exists()).toBe(true)
+    expect(localStorage.getItem(recentAccountKey)).toBe('wallet-1')
+    expect(localStorage.getItem(usageKey)).toBeNull()
   })
 
   it('treats a transfer to the same account as a user-correctable validation error', async () => {

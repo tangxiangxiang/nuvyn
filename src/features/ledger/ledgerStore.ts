@@ -20,6 +20,9 @@ import type {
   LedgerTransferCreateRequest,
 } from '../../../shared/ledgerProtocol'
 import { subscribeAuthSessionRequired } from '../../lib/auth-session'
+import type { AuthUser } from '../../lib/auth-api'
+import { useAuth } from '../../composables/useAuth'
+import { recordCategoryUsage } from './categoryUsage'
 import {
   archiveLedgerAccount,
   archiveLedgerCategory,
@@ -56,6 +59,7 @@ import {
   normalizeLedgerError,
   shouldKeepPendingCreate,
 } from './ledgerErrors'
+import { rememberTransactionAccount } from './recentTransactionAccount'
 import {
   clearLedgerPendingCreate,
   createLedgerPendingIntent,
@@ -176,6 +180,7 @@ const state = reactive<LedgerStoreState>({
 })
 
 const ownerIdentity = ref<string | null>(null)
+const authUser = useAuth().user
 let bootstrapPromise: Promise<LedgerOverviewRefreshResult | undefined> | null = null
 let workspaceRecoveryGeneration = 0
 
@@ -633,7 +638,7 @@ async function beginCreate<T>(
     operation,
     payload,
     generatedIdempotencyKey(),
-    ownerIdentity.value,
+    authUser.value?.username ?? ownerIdentity.value,
   )
   const persisted = writeLedgerPendingCreate(intent)
   if (!persisted.ok) {
@@ -683,6 +688,19 @@ async function beginCreate<T>(
   }
 }
 
+async function createAndRememberTransaction(
+  body: LedgerIncomeCreateRequest | LedgerExpenseCreateRequest | LedgerTransferCreateRequest,
+  key: string,
+  owner: AuthUser | null,
+): Promise<LedgerTransactionDto> {
+  const transaction = await createLedgerTransaction(body, key)
+  rememberTransactionAccount(transaction)
+  if (owner && authUser.value?.id === owner.id && authUser.value.username === owner.username) {
+    recordCategoryUsage(owner, transaction, key)
+  }
+  return transaction
+}
+
 async function retryPendingCreate(): Promise<unknown> {
   const intent = state.pendingCreate
   if (!intent) return null
@@ -700,9 +718,10 @@ async function retryPendingCreate(): Promise<unknown> {
         result = await createLedgerCategory(intent.canonicalPayload as LedgerCategoryCreateRequest, intent.idempotencyKey)
         break
       case 'transaction':
-        result = await createLedgerTransaction(
+        result = await createAndRememberTransaction(
           intent.canonicalPayload as LedgerIncomeCreateRequest | LedgerExpenseCreateRequest | LedgerTransferCreateRequest,
           intent.idempotencyKey,
+          authUser.value?.username === intent.ownerIdentity ? authUser.value : null,
         )
         break
     }
@@ -906,7 +925,10 @@ const store: LedgerStore = {
   archiveCategory: async (id, version) => { const result = await archiveLedgerCategory(id, version); await refreshData(); return result },
   restoreCategory: async (id, version) => { const result = await restoreLedgerCategory(id, version); await refreshData(); return result },
   deleteCategory: async (id, version) => { const result = await deleteLedgerCategory(id, version); await refreshData(); return result },
-  createTransaction: (body) => beginCreate('transaction', body, (key) => createLedgerTransaction(body, key)),
+  createTransaction: (body) => {
+    const owner = authUser.value
+    return beginCreate('transaction', body, (key) => createAndRememberTransaction(body, key, owner))
+  },
   patchTransaction: async (id, body) => { const result = await patchLedgerTransaction(id, body); await refreshData(); return result },
   deleteTransaction: async (id, version) => { const result = await deleteLedgerTransaction(id, version); await refreshData(); return result },
   retryPendingCreate,

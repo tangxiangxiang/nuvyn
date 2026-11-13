@@ -8,6 +8,7 @@ export const NUVYN_BROWSER_STORAGE_KEYS = {
   vaultLayout: 'nuvyn.vault.layout',
   boardFavorites: 'nuvyn.board.favorites',
   ledgerCategoryIcons: 'nuvyn.ledger.category-icons',
+  ledgerCategoryUsage: 'nuvyn.ledger.category-usage',
   ledgerCategoryCustomIcons: 'nuvyn.ledger.category-custom-icons',
   ledgerAccountIconCustom: 'nuvyn.ledger.account-icon.custom',
   ledgerAccountIconNames: 'nuvyn.ledger.account-icon.names',

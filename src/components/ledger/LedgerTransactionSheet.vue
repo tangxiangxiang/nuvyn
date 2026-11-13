@@ -13,25 +13,28 @@ import {
 } from 'naive-ui'
 import { X } from '@vicons/tabler'
 import type {
-  LedgerCategoryDto,
   LedgerTransferFeeMode,
   LedgerTransferKind,
   LedgerTransactionDto,
 } from '../../../shared/ledgerProtocol'
 import { useConfirm } from '../../composables/useConfirm'
+import { useAuth } from '../../composables/useAuth'
 import { useToast } from '../../composables/useToast'
+import { recentCategoryIds } from '../../features/ledger/categoryUsage'
 import { ledgerErrorMessage } from '../../features/ledger/ledgerErrors'
 import { currencyExponentFor, parseLedgerMoney } from '../../features/ledger/money'
 import { useLedgerStore } from '../../features/ledger/ledgerStore'
+import { readRecentTransactionAccount } from '../../features/ledger/recentTransactionAccount'
 import { instantFromLocalDateTime, localDateTimeInputFromInstant } from '../../features/ledger/time'
 import LedgerPendingCreateRecovery from './LedgerPendingCreateRecovery.vue'
 import LedgerTransactionFormFields from './LedgerTransactionFormFields.vue'
-import { ledgerAccountSelectOptions, renderLedgerAccountLabel, renderLedgerCategoryLabel } from './ledgerSelectRenderers'
+import { ledgerAccountSelectOptions, ledgerCategorySelectOptions, renderLedgerAccountLabel, renderLedgerCategoryLabel } from './ledgerSelectRenderers'
 
 const props = defineProps<{ open: boolean }>()
 const emit = defineEmits<{ close: []; saved: [transaction: LedgerTransactionDto] }>()
 
 const store = useLedgerStore()
+const { user } = useAuth()
 const toast = useToast()
 const { confirm } = useConfirm()
 const transactionFields = ref<{ focusAmount: () => void } | null>(null)
@@ -76,11 +79,11 @@ const transferToAccountOptions = computed(() => ledgerAccountSelectOptions(activ
   showBalance: false,
   allowedNatures: transferKind.value === 'repayment' ? ['liability'] : transferKind.value === 'withdrawal' ? ['asset'] : undefined,
 }))
-const categoryOptions = computed<SelectOption[]>(() => applicableCategories.value.map((category) => ({
-  value: category.id,
-  label: categoryLabel(category),
-  categoryIcon: category.icon,
-})))
+const categoryOptions = computed(() => {
+  if (!props.open || type.value === 'transfer') return []
+  const categories = applicableCategories.value
+  return ledgerCategorySelectOptions(categories, recentCategoryIds(user.value, type.value, categories))
+})
 const pendingTransaction = computed(() => {
   const pending = store.pendingCreate.value
   return store.mutationState.value === 'UNCERTAIN' && pending?.operation === 'transaction' ? pending : null
@@ -93,7 +96,7 @@ function renderAccountLabel(option: SelectOption | SelectGroupOption) {
   return renderLedgerAccountLabel(option, activeAccounts.value)
 }
 
-function renderCategoryLabel(option: SelectOption) {
+function renderCategoryLabel(option: SelectOption | SelectGroupOption) {
   return renderLedgerCategoryLabel(option, activeCategories.value)
 }
 
@@ -103,12 +106,25 @@ function defaultOccurredAt(): string {
     : ''
 }
 
+function defaultAccountId(): string {
+  const recent = readRecentTransactionAccount()
+  const accounts = activeAccounts.value
+  if (accounts.some((account) => account.id === recent)) return recent
+  return accounts.length === 1 ? accounts[0]!.id : ''
+}
+
+function selectAccount(id: string): void {
+  if (accountId.value === id) return
+  accountId.value = id
+  dirty.value = true
+}
+
 function resetForm(): void {
   resetting = true
   closing.value = false
   type.value = 'expense'
   amount.value = ''
-  accountId.value = activeAccounts.value.length === 1 ? activeAccounts.value[0]!.id : ''
+  accountId.value = defaultAccountId()
   categoryId.value = ''
   fromAccountId.value = ''
   toAccountId.value = ''
@@ -136,18 +152,18 @@ watch(() => props.open, async (open) => {
     await nextTick()
     transactionFields.value?.focusAmount()
   }
-})
+}, { immediate: true })
 
-watch([amount, accountId, categoryId, fromAccountId, toAccountId, transferKind, transferFeeAmount, transferFeeMode, occurredAt, location, payee, note, type], () => {
+watch([amount, categoryId, fromAccountId, toAccountId, transferKind, transferFeeAmount, transferFeeMode, occurredAt, location, payee, note, type], () => {
   if (props.open && !resetting) dirty.value = true
 })
 
 watch(type, (nextType, previousType) => {
   if (resetting || nextType === previousType) return
-  // Only the common draft survives a semantic type switch. Account and
-  // category identities must never be guessed across different transaction
-  // meanings.
-  accountId.value = ''
+  if (nextType === 'transfer') accountId.value = ''
+  else if (previousType === 'transfer' || !activeAccounts.value.some((account) => account.id === accountId.value)) {
+    accountId.value = defaultAccountId()
+  }
   categoryId.value = ''
   payee.value = ''
   fromAccountId.value = ''
@@ -155,9 +171,6 @@ watch(type, (nextType, previousType) => {
   transferKind.value = 'general'
   transferFeeAmount.value = ''
   transferFeeMode.value = null
-  if (nextType !== 'transfer' && activeAccounts.value.length === 1) {
-    accountId.value = activeAccounts.value[0]!.id
-  }
 })
 
 watch(transferKind, () => {
@@ -176,9 +189,9 @@ watch(transferKind, () => {
 })
 
 watch(activeAccounts, (accounts) => {
+  if (!props.open) return
   if (type.value !== 'transfer') {
-    if (accountId.value && !accounts.some((account) => account.id === accountId.value)) accountId.value = ''
-    if (!accountId.value && accounts.length === 1) accountId.value = accounts[0]!.id
+    if (!accounts.some((account) => account.id === accountId.value)) accountId.value = defaultAccountId()
     return
   }
   if (fromAccountId.value && !accounts.some((account) => account.id === fromAccountId.value)) fromAccountId.value = ''
@@ -229,10 +242,6 @@ function handleVisibilityChange(value: boolean): void {
 
 function focusInitialInput(): void {
   void nextTick(() => transactionFields.value?.focusAmount())
-}
-
-function categoryLabel(category: LedgerCategoryDto): string {
-  return category.name
 }
 
 function allowAmountInput(value: string): boolean {
@@ -463,7 +472,8 @@ async function retryPending(): Promise<void> {
             <LedgerTransactionFormFields
               ref="transactionFields"
               v-model:amount="amount"
-              v-model:account-id="accountId"
+              :account-id="accountId"
+              @update:account-id="selectAccount"
               v-model:category-id="categoryId"
               v-model:from-account-id="fromAccountId"
               v-model:to-account-id="toAccountId"

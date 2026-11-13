@@ -7,8 +7,7 @@ import { ledgerSelectNodeProps } from '../../features/ledger/naiveControls'
 import LedgerDateTimePicker from './LedgerDateTimePicker.vue'
 
 type TransactionFormType = 'income' | 'expense' | 'transfer'
-type AccountOptionRenderer = (option: SelectOption | SelectGroupOption, selected?: boolean) => VNodeChild
-type CategoryOptionRenderer = (option: SelectOption) => VNodeChild
+type OptionRenderer = (option: SelectOption | SelectGroupOption, selected?: boolean) => VNodeChild
 
 const props = withDefaults(defineProps<{
   mode: 'create' | 'edit'
@@ -20,9 +19,9 @@ const props = withDefaults(defineProps<{
   transferAccountOptions?: Array<SelectOption | SelectGroupOption>
   transferFromAccountOptions?: Array<SelectOption | SelectGroupOption>
   transferToAccountOptions?: Array<SelectOption | SelectGroupOption>
-  categoryOptions: SelectOption[]
-  renderAccountLabel?: AccountOptionRenderer
-  renderCategoryLabel?: CategoryOptionRenderer
+  categoryOptions: Array<SelectOption | SelectGroupOption>
+  renderAccountLabel?: OptionRenderer
+  renderCategoryLabel?: OptionRenderer
   allowAmountInput?: (value: string) => boolean
   readonlyAmount?: string
   readonlyOccurredAt?: string

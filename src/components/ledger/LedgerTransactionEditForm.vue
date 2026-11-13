@@ -105,7 +105,7 @@ function renderAccountLabel(option: SelectOption | SelectGroupOption) {
   return renderLedgerAccountLabel(option, store.activeAccounts.value)
 }
 
-function renderCategoryLabel(option: SelectOption) {
+function renderCategoryLabel(option: SelectOption | SelectGroupOption) {
   return renderLedgerCategoryLabel(option, categories.value)
 }
 

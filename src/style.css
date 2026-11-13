@@ -233,7 +233,7 @@ html.board-mode::-webkit-scrollbar {
   text-align: right;
   white-space: nowrap;
 }
-.ledger-account-select-group {
+.ledger-select-group-label {
   display: block;
   padding: 2px 0;
   color: var(--text-muted);
