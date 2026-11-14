@@ -22,7 +22,7 @@ export function pagePullDirection(deltaX: number, deltaY: number): boolean {
  * Never takes an edge/system gesture, native input, horizontal scroller,
  * modal or canvas. On a stale/offscreen route the gesture cannot run.
  */
-export function usePagePullRefresh(enabled: Readonly<Ref<boolean>>, refresh: () => Promise<unknown>) {
+export function usePagePullRefresh(enabled: Readonly<Ref<boolean>>) {
   const root = ref<HTMLElement | null>(null)
   const compact = useMediaQuery('(max-width: 1199px)')
   const distance = ref(0)
@@ -87,13 +87,16 @@ export function usePagePullRefresh(enabled: Readonly<Ref<boolean>>, refresh: () 
     if (pagePullDirection(dx, dy) && event.cancelable) event.preventDefault()
   }
 
-  async function triggerRefresh(): Promise<void> {
+  function triggerRefresh(): void {
     if (!available.value || refreshing.value) return
     refreshing.value = true
     distance.value = PULL_THRESHOLD
-    try { await refresh() } finally {
+    try {
+      window.location.reload()
+    } catch (error) {
       refreshing.value = false
       distance.value = 0
+      throw error
     }
   }
 
@@ -101,7 +104,7 @@ export function usePagePullRefresh(enabled: Readonly<Ref<boolean>>, refresh: () 
     if (!fingerFrom(event.changedTouches)) return
     const shouldRefresh = armed.value && available.value
     resetGesture()
-    if (shouldRefresh) void triggerRefresh().catch(() => {})
+    if (shouldRefresh) triggerRefresh()
   }
 
   watch(available, (active) => { if (!active) resetGesture() })

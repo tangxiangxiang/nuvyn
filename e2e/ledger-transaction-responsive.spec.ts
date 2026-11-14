@@ -80,8 +80,6 @@ async function readLayoutMetrics(page: import('@playwright/test').Page): Promise
 
 type MobileLayoutMetrics = {
   bodyHeight: number
-  headerBottom: number
-  rowTop: number
   rowBottom: number
   paginationTop: number
   rowHit: boolean
@@ -89,28 +87,51 @@ type MobileLayoutMetrics = {
 
 async function readMobileLayoutMetrics(page: import('@playwright/test').Page): Promise<MobileLayoutMetrics> {
   return await page.evaluate(() => {
-    const body = document.querySelector<HTMLElement>('.ledger-transaction-table .n-data-table-base-table-body')
-    const header = document.querySelector<HTMLElement>('.ledger-transaction-table .n-data-table-thead')
+    const body = document.querySelector<HTMLElement>('[data-testid="ledger-compact-transaction-list"]')
     const row = document.querySelector<HTMLElement>('.ledger-transaction-row')
     const pagination = document.querySelector<HTMLElement>('.ledger-transaction-pagination')
-    if (!body || !header || !row || !pagination) throw new Error('Mobile transaction history layout nodes are missing')
+    if (!body || !row || !pagination) throw new Error('Mobile transaction history layout nodes are missing')
 
     const bodyBox = body.getBoundingClientRect()
-    const headerBox = header.getBoundingClientRect()
     const rowBox = row.getBoundingClientRect()
     const paginationBox = pagination.getBoundingClientRect()
     const hitX = Math.max(1, Math.min(window.innerWidth - 1, rowBox.left + Math.min(24, rowBox.width / 2)))
     const hitTarget = document.elementFromPoint(hitX, rowBox.top + rowBox.height / 2)
     return {
       bodyHeight: bodyBox.height,
-      headerBottom: headerBox.bottom,
-      rowTop: rowBox.top,
       rowBottom: rowBox.bottom,
       paginationTop: paginationBox.top,
       rowHit: hitTarget?.closest('.ledger-transaction-row') === row,
     }
   })
 }
+
+test('phone transaction filters fit on one row', async ({ page, request }) => {
+  await ensureLedgerDashboardFixtures(request)
+  await page.goto('/ledger/transactions')
+  const filters = page.getByTestId('ledger-filters-form').getByRole('combobox')
+  await expect(filters).toHaveCount(3)
+
+  for (const width of [320, 390, 430, 600]) {
+    await page.setViewportSize({ width, height: 844 })
+    const bounds = await filters.evaluateAll((controls) => controls.map((control) => {
+      const { left, top, right } = control.getBoundingClientRect()
+      return { left, top, right }
+    }))
+    const [account, category, date] = bounds
+    expect(category!.top).toBe(account!.top)
+    expect(date!.top).toBe(account!.top)
+    expect(account!.left).toBeGreaterThanOrEqual(0)
+    expect(account!.right).toBeLessThan(category!.left)
+    expect(category!.right).toBeLessThan(date!.left)
+    expect(date!.right).toBeLessThanOrEqual(width)
+  }
+
+  await filters.nth(2).click()
+  await page.getByRole('option', { name: '自定义' }).click()
+  await expect(page.getByTestId('ledger-filter-from')).toBeVisible()
+  await expect(page.getByTestId('ledger-filter-to')).toBeVisible()
+})
 
 test('transaction table grows with desktop viewport height and keeps pagination at the card bottom', async ({ page, request }) => {
   await ensureTransactionHistoryFixture(request)
@@ -142,7 +163,8 @@ test('transaction table grows with desktop viewport height and keeps pagination 
 
   await page.setViewportSize({ width: 390, height: 844 })
   await page.goto('/ledger/transactions')
-  await expect(page.getByTestId('ledger-transaction-list')).toBeVisible()
+  await expect(page.getByTestId('ledger-compact-transaction-list')).toBeVisible()
+  await expect(page.getByTestId('ledger-transaction-list')).toHaveCount(0)
   const mobileRow = page.locator('.ledger-transaction-row').first()
   await expect(mobileRow).toBeVisible()
   await expect(mobileRow.locator('.ledger-transaction-amount')).toHaveText('-¥1.23')
@@ -150,7 +172,6 @@ test('transaction table grows with desktop viewport height and keeps pagination 
   const mobileLayout = await readMobileLayoutMetrics(page)
 
   expect(mobileLayout.bodyHeight).toBeGreaterThan(0)
-  expect(mobileLayout.headerBottom).toBeLessThanOrEqual(mobileLayout.rowTop + 1)
   expect(mobileLayout.rowBottom).toBeLessThanOrEqual(mobileLayout.paginationTop + 1)
   expect(mobileLayout.rowHit).toBe(true)
 

@@ -881,7 +881,10 @@ function animatedMoneyParts(minor: number, currency: string, key: MetricKey): { 
             <NListItem v-for="transaction in overview.recentTransactions" :key="transaction.id">
               <div v-bind="recentTransactionRowProps(transaction)">
                 <span :class="['ledger-recent-icon', `is-${presentationKind(transaction)}`]" aria-hidden="true">{{ transactionMark(transaction) }}</span>
-                <span class="ledger-recent-info"><strong>{{ transactionTitle(transaction) }}</strong><small>{{ transactionMeta(transaction) }} · {{ formatLedgerDateTime(transaction.occurredAt, store.settings.value?.timezone ?? 'UTC') }}</small></span>
+                <span class="ledger-recent-info">
+                  <strong>{{ transactionTitle(transaction) }}</strong>
+                  <small>{{ formatLedgerDateTime(transaction.occurredAt, ledgerTimezone) }} · {{ transactionMeta(transaction) }}</small>
+                </span>
                 <strong :class="['ledger-recent-amount', `is-${presentationKind(transaction)}`]">{{ transactionAmount(transaction) }}</strong>
               </div>
             </NListItem>

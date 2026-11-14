@@ -37,7 +37,7 @@ test('Ledger transaction entry remains keyboard-usable in a narrow viewport', as
   await expect(recordButton).toBeFocused()
   await page.keyboard.press('Enter')
   await expect(page.getByRole('dialog')).toBeVisible()
-  await expect(page.locator('#ledger-transaction-amount')).toBeFocused()
+  await expect(page.locator('#ledger-transaction-amount')).not.toBeFocused()
 
   await page.keyboard.press('Escape')
   await expect(page.getByRole('dialog')).toBeHidden()

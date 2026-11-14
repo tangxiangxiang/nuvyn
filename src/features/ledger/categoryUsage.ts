@@ -1,6 +1,6 @@
 import type { LedgerCategoryDto, LedgerTransactionDto } from '../../../shared/ledgerProtocol'
 import type { AuthUser } from '../../lib/auth-api'
-import { NUVYN_BROWSER_STORAGE_KEYS, readStorageKey, writeStorageKey } from '../../technicalNamespace'
+import { NUVYN_BROWSER_STORAGE_KEYS, ownerScopedStorageKey, readStorageKey, writeStorageKey } from '../../technicalNamespace'
 
 type CategoryKind = LedgerCategoryDto['kind']
 
@@ -24,7 +24,7 @@ const maxIdLength = 128
 const maxStorageLength = 512 * 1024
 
 function storageKey(owner: AuthUser): string {
-  return `${NUVYN_BROWSER_STORAGE_KEYS.ledgerCategoryUsage}:${owner.id}:${encodeURIComponent(owner.username)}`
+  return ownerScopedStorageKey(NUVYN_BROWSER_STORAGE_KEYS.ledgerCategoryUsage, owner)
 }
 
 function validId(id: unknown): id is string {

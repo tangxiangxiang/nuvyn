@@ -34,13 +34,17 @@ describe('Ledger Naive temporal controls', () => {
     expect((wrapper.get('[data-testid="ledger-datetime-test"] input').element as HTMLInputElement).value).toBe('2026-09-05 12:30')
 
     await picker.vm.$emit('update:formatted-value', '2026-09-06T13:45')
-    await nextTick()
+    expect(wrapper.emitted('update:modelValue')).toBeUndefined()
+    const confirm = Array.from(document.body.querySelectorAll('button')).find(button => button.textContent?.trim() === '确认')
+    expect(confirm).toBeDefined()
+    confirm?.click()
 
     expect(wrapper.emitted('update:modelValue')?.at(-1)).toEqual(['2026-09-06T13:45'])
     expect(wrapper.find('[data-testid="ledger-datetime-test"]').exists()).toBe(true)
+    wrapper.unmount()
   })
 
-  it('clears the canonical model until both fields are complete', async () => {
+  it('cannot confirm an incomplete date and time', async () => {
     const wrapper = mount(LedgerDateTimePicker, {
       props: { modelValue: '2026-09-05T12:30', label: '发生时间' },
     })
@@ -51,6 +55,9 @@ describe('Ledger Naive temporal controls', () => {
     await picker.vm.$emit('update:formatted-value', null)
     await nextTick()
 
-    expect(wrapper.emitted('update:modelValue')?.at(-1)).toEqual([''])
+    const confirm = Array.from(document.body.querySelectorAll('button')).find(button => button.textContent?.trim() === '确认')
+    expect(confirm?.disabled).toBe(true)
+    expect(wrapper.emitted('update:modelValue')).toBeUndefined()
+    wrapper.unmount()
   })
 })

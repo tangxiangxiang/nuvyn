@@ -2,6 +2,7 @@
 import { computed, nextTick, ref, watch } from 'vue'
 import { NAlert, NButton, NCard, NIcon, NModal, NStatistic } from 'naive-ui'
 import { X } from '@vicons/tabler'
+import { ledgerTransactionContributesToStatistics } from '../../../shared/ledgerAnalytics'
 import type { LedgerTransactionDto } from '../../../shared/ledgerProtocol'
 import { useConfirm } from '../../composables/useConfirm'
 import { useToast } from '../../composables/useToast'
@@ -27,11 +28,13 @@ const { confirm } = useConfirm()
 const detailFocusTarget = ref<HTMLElement | null>(null)
 const currentTransaction = ref<LedgerTransactionDto | null>(null)
 const groupTransactions = ref<readonly LedgerTransactionDto[]>([])
+const groupStatus = ref<'loading' | 'ready' | 'error'>('ready')
 let groupRequestSerial = 0
-const editing = ref(false)
+const editSession = ref<{ transaction: LedgerTransactionDto; group: readonly LedgerTransactionDto[] } | null>(null)
 const editDirty = ref(false)
 const actionError = ref('')
 const restoringId = ref<string | null>(null)
+const updatingStatistics = ref(false)
 
 const transaction = computed(() => currentTransaction.value ?? props.transaction)
 const associatedAccounts = computed(() => {
@@ -47,6 +50,9 @@ const ordinaryTransaction = computed(() => transaction.value !== null && transac
 const deleted = computed(() => transaction.value?.deletedAt !== null)
 const groupedCompanion = computed(() => transaction.value?.type === 'expense' && transaction.value.groupId !== undefined)
 const canEdit = computed(() => ordinaryTransaction.value && !deleted.value && !groupedCompanion.value)
+const editReady = computed(() => canEdit.value && (
+  transaction.value?.type !== 'transfer' || !transaction.value.groupId || groupStatus.value === 'ready'
+))
 const groupedExpense = computed(() => groupTransactions.value.find((item) => item.type === 'expense') ?? null)
 const groupedTotalMinor = computed(() => {
   const value = transaction.value
@@ -54,6 +60,8 @@ const groupedTotalMinor = computed(() => {
   return value.amountMinor + groupedExpense.value.amountMinor
 })
 const canDelete = computed(() => canEdit.value && archivedAccounts.value.length === 0)
+const canUpdateStatistics = computed(() => transaction.value?.deletedAt === null
+  && ledgerTransactionContributesToStatistics(transaction.value))
 
 function accountName(id: string): string {
   return store.accounts.value.find((account) => account.id === id)?.name ?? '未知账户'
@@ -83,41 +91,62 @@ function amountLabel(value: LedgerTransactionDto): string {
 async function loadGroup(value: LedgerTransactionDto | null): Promise<void> {
   const serial = ++groupRequestSerial
   groupTransactions.value = []
+  groupStatus.value = value?.groupId ? 'loading' : 'ready'
   if (!value?.groupId) return
   try {
     const group = await store.getTransactionGroup(value.groupId)
-    if (serial === groupRequestSerial) groupTransactions.value = group
+    if (serial !== groupRequestSerial) return
+    if (value.type === 'transfer' && value.deletedAt === null && (
+      !group.some((item) => item.id === value.id && item.type === 'transfer' && item.deletedAt === null)
+      || !group.some((item) => item.type === 'expense' && item.deletedAt === null)
+    )) {
+      groupStatus.value = 'error'
+      return
+    }
+    groupTransactions.value = group
+    groupStatus.value = 'ready'
   } catch {
-    // The primary transaction remains fully usable if the optional companion
-    // read fails; the next open will retry it.
+    if (serial === groupRequestSerial) groupStatus.value = 'error'
   }
 }
 
-watch(() => props.transaction, (value) => {
+watch(() => props.transaction, (value, previous) => {
   currentTransaction.value = value
-  editing.value = false
-  editDirty.value = false
-  actionError.value = ''
-  void loadGroup(value)
+  if (value?.id !== previous?.id) {
+    editSession.value = null
+    editDirty.value = false
+    actionError.value = ''
+  }
+}, { immediate: true })
+
+watch([() => props.open, transaction], ([open, value]) => {
+  void loadGroup(open ? value : null)
 }, { immediate: true })
 
 watch(() => props.open, async (open) => {
-  if (open) {
-    editing.value = false
-    editDirty.value = false
-    actionError.value = ''
-    await loadGroup(transaction.value)
-    await nextTick()
-    detailFocusTarget.value?.focus()
-  }
+  editSession.value = null
+  editDirty.value = false
+  actionError.value = ''
+  if (open) focusInitialDetail()
 })
+
+function startEdit(): void {
+  const current = transaction.value
+  if (!current || !editReady.value || restoringId.value || updatingStatistics.value) return
+  // Use the same group read for the transfer and its fee when both are present.
+  const group = groupTransactions.value
+  const primary = group.find((item) => item.id === current.id && item.type === current.type) ?? current
+  if (primary.deletedAt !== null) return
+  editDirty.value = false
+  editSession.value = { transaction: primary, group }
+}
 
 function focusInitialDetail(): void {
   void nextTick(() => detailFocusTarget.value?.focus())
 }
 
 async function confirmDiscardEdit(): Promise<boolean> {
-  if (!editing.value || !editDirty.value) return true
+  if (!editSession.value || !editDirty.value) return true
   return confirm('放弃这笔尚未保存的修改？', '已填写的内容将不会保存。')
 }
 
@@ -130,7 +159,7 @@ async function requestClose(): Promise<void> {
 async function requestEditCancel(): Promise<void> {
   if (!await confirmDiscardEdit()) return
   editDirty.value = false
-  editing.value = false
+  editSession.value = null
 }
 
 function handleVisibilityChange(value: boolean): void {
@@ -158,18 +187,41 @@ async function restoreAccount(id: string): Promise<void> {
   }
 }
 
-async function onSaved(updated: LedgerTransactionDto): Promise<void> {
+function onSaved(updated: LedgerTransactionDto): void {
+  if (transaction.value?.id !== updated.id) return
   currentTransaction.value = updated
-  editing.value = false
+  editSession.value = null
   editDirty.value = false
   emit('updated', updated)
-  await loadGroup(updated)
   toast.success('交易已更新')
+}
+
+async function toggleStatistics(): Promise<void> {
+  const current = transaction.value
+  if (!current || !canUpdateStatistics.value || updatingStatistics.value || restoringId.value) return
+  updatingStatistics.value = true
+  actionError.value = ''
+  const excluded = !current.excludedFromStatistics
+  try {
+    const result = await store.setTransactionStatisticsExcluded(current.id, excluded)
+    const latest = transaction.value
+    if (!props.open || !latest || latest.id !== current.id) return
+    const updated = { ...latest, excludedFromStatistics: result.excludedFromStatistics }
+    currentTransaction.value = updated
+    emit('updated', updated)
+    toast.success(excluded ? '已设为不计入统计' : '已恢复计入统计')
+  } catch (cause) {
+    if (props.open && transaction.value?.id === current.id) {
+      actionError.value = ledgerErrorMessage(cause, excluded ? '交易没有排除，请刷新后重试。' : '交易没有恢复统计，请刷新后重试。')
+    }
+  } finally {
+    updatingStatistics.value = false
+  }
 }
 
 async function remove(): Promise<void> {
   const current = transaction.value
-  if (!current || !canDelete.value || restoringId.value) return
+  if (!current || !canDelete.value || restoringId.value || updatingStatistics.value) return
   const confirmed = await confirm('删除这笔交易？', '删除记录会影响账户余额和相关汇总；本次操作不会提供恢复入口。', {
     destructive: true,
     confirmLabel: '删除记录',
@@ -220,7 +272,7 @@ async function remove(): Promise<void> {
       </template>
 
       <div ref="detailFocusTarget" class="ledger-detail-content" tabindex="-1">
-        <LedgerTransactionEditForm v-if="editing && canEdit" :transaction="transaction" :group-transactions="groupTransactions" @saved="onSaved" @dirty="editDirty = $event" @cancel="requestEditCancel" />
+        <LedgerTransactionEditForm v-if="editSession" :key="editSession.transaction.id" :transaction="editSession.transaction" :group-transactions="editSession.group" @saved="onSaved" @dirty="editDirty = $event" @cancel="requestEditCancel" />
         <template v-else>
           <NCard class="ledger-transaction-hero" :bordered="false" size="small">
             <NStatistic label="金额" :value="amountLabel(transaction)" :class="`is-${transaction.type}`" />
@@ -269,9 +321,14 @@ async function remove(): Promise<void> {
 
           <NAlert v-if="transaction.type === 'adjustment'" class="ledger-form-info" type="info" :show-icon="false">余额调整为只读记录，不能通过普通交易编辑或删除。</NAlert>
           <NAlert v-if="actionError" class="ledger-form-error" type="error" :show-icon="false" role="alert">{{ actionError }}</NAlert>
+          <NAlert v-if="canEdit && transaction.type === 'transfer' && groupStatus === 'error'" class="ledger-form-error" type="error" :show-icon="false" role="alert">
+            关联交易暂时无法加载。
+            <NButton class="ledger-secondary-button" attr-type="button" size="small" text @click="loadGroup(transaction)">重试</NButton>
+          </NAlert>
           <div class="ledger-form-actions">
-            <NButton v-if="canEdit || groupedCompanion" class="ledger-secondary-button" attr-type="button" size="small" :bordered="false" :disabled="Boolean(restoringId) || groupedCompanion" :title="groupedCompanion ? '请从关联的还款记录中统一操作' : undefined" @click="editDirty = false; editing = true">编辑交易</NButton>
-            <NButton v-if="canDelete" class="ledger-danger-button" attr-type="button" size="small" :bordered="false" :disabled="Boolean(restoringId)" @click="remove">删除记录</NButton>
+            <NButton v-if="canEdit || groupedCompanion" class="ledger-secondary-button" attr-type="button" size="small" :bordered="false" :disabled="Boolean(restoringId) || updatingStatistics || !editReady" :loading="canEdit && groupStatus === 'loading'" :title="groupedCompanion ? '请从关联的还款记录中统一操作' : undefined" @click="startEdit">编辑交易</NButton>
+            <NButton v-if="canUpdateStatistics" class="ledger-secondary-button" attr-type="button" size="small" :bordered="false" :loading="updatingStatistics" :disabled="updatingStatistics || Boolean(restoringId)" @click="toggleStatistics">{{ transaction.excludedFromStatistics ? '恢复计入统计' : '不计入统计' }}</NButton>
+            <NButton v-if="canDelete" class="ledger-danger-button" attr-type="button" size="small" :bordered="false" :disabled="Boolean(restoringId) || updatingStatistics" @click="remove">删除记录</NButton>
             <NButton v-else-if="canEdit && archivedAccounts.length" class="ledger-secondary-button ledger-wide-action" attr-type="button" size="small" :bordered="false" disabled>恢复账户后可删除</NButton>
             <NButton v-else-if="groupedCompanion" class="ledger-danger-button" attr-type="button" size="small" :bordered="false" disabled title="请从关联的还款记录中统一操作">删除记录</NButton>
           </div>

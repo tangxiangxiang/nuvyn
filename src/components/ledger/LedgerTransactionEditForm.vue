@@ -40,6 +40,7 @@ const payee = ref('')
 const note = ref('')
 const error = ref('')
 const saving = ref(false)
+let resetting = false
 type FormSnapshot = {
   amount: string
   accountId: string
@@ -141,7 +142,9 @@ function reset(): void {
   categoryId.value = value.type === 'income' || value.type === 'expense' ? value.categoryId : ''
   fromAccountId.value = value.type === 'transfer' ? value.fromAccountId : ''
   toAccountId.value = value.type === 'transfer' ? value.toAccountId : ''
+  resetting = true
   transferKind.value = value.type === 'transfer' ? value.transferKind : 'general'
+  resetting = false
   transferFeeAmount.value = fee
     ? ledgerDecimalFromMinor(fee.amountMinor, store.settings.value?.baseCurrency ?? 'CNY')
     : ''
@@ -153,14 +156,13 @@ function reset(): void {
 }
 
 watch(() => props.transaction, reset, { immediate: true })
-watch(() => props.groupTransactions, reset)
 watch([amount, accountId, categoryId, fromAccountId, toAccountId, transferKind, transferFeeAmount, transferFeeMode, occurredAt, location, payee, note], () => {
   if (!initialSnapshot.value) return
   emit('dirty', JSON.stringify(snapshot()) !== JSON.stringify(initialSnapshot.value))
 })
 
 watch(transferKind, () => {
-  if (transaction.value.type !== 'transfer') return
+  if (resetting || transaction.value.type !== 'transfer') return
   if (transferKind.value === 'general') {
     transferFeeAmount.value = ''
     transferFeeMode.value = null
@@ -174,7 +176,7 @@ watch(transferKind, () => {
   if (transferKind.value !== 'general' && from?.nature !== 'asset') fromAccountId.value = ''
   if (transferKind.value === 'repayment' && to?.nature !== 'liability') toAccountId.value = ''
   if (transferKind.value === 'withdrawal' && to?.nature !== 'asset') toAccountId.value = ''
-})
+}, { flush: 'sync' })
 
 function snapshot(): FormSnapshot {
   return {

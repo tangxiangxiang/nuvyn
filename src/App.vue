@@ -28,6 +28,7 @@ import { clearSearchReveal } from './composables/useSearchReveal'
 import { clearLinkNavigation } from './composables/useLinkNavigation'
 import { workspaceKindForPath, type ChromeStyle, type WorkspaceKind } from './lib/workspace'
 import { createLedgerAnalysisExportCommand } from './features/ledger/ledgerAnalysisExport'
+import { preventNativePullRefresh } from './lib/preventNativePullRefresh'
 import { createIndexedDbBoardCheckpointStore } from './features/board/checkpointStore'
 import { NUVYN_BROWSER_STORAGE_KEYS, readStorageKey, writeStorageKey } from './technicalNamespace'
 import type { AttachmentReference } from '../shared/attachmentProtocol'
@@ -118,6 +119,7 @@ const isVaultRoute = computed(() => (
 ))
 const isLedgerRoute = computed(() => workspaceKind.value === 'ledger')
 const isBoardHomeRoute = computed(() => route.name === 'board' || route.name === 'board-folder')
+const usesWorkspacePullRefresh = computed(() => isLedgerRoute.value || isBoardHomeRoute.value)
 const ledgerZenEligible = computed(() => (
   isLedgerRoute.value
   && auth.state.value === 'authenticated'
@@ -438,6 +440,10 @@ watchEffect(() => {
   document.body.classList.toggle('board-mode', isBoardHomeRoute.value)
   document.documentElement.classList.toggle('board-mode', isBoardHomeRoute.value)
 })
+
+watch(usesWorkspacePullRefresh, (active, _previous, onCleanup) => {
+  if (active) onCleanup(preventNativePullRefresh())
+}, { immediate: true })
 
 /* View mode for the vault (edit vs read). Persisted to localStorage so
    the user's preference survives reloads. Defaults to 'edit' — the

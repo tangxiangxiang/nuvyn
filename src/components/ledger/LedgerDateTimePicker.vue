@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
-import { NDatePicker, NIcon, NInput, NPopover, type InputInst } from 'naive-ui'
+import { useMediaQuery } from '@vueuse/core'
+import { NButton, NDatePicker, NIcon, NInput, NModal, type InputInst } from 'naive-ui'
 import { Calendar } from '@vicons/tabler'
 
 const props = withDefaults(defineProps<{
@@ -17,6 +18,8 @@ const emit = defineEmits<{ 'update:modelValue': [value: string] }>()
 const input = ref<InputInst | null>(null)
 const show = ref(false)
 const inputValue = ref(props.modelValue.replace('T', ' '))
+const draftValue = ref('')
+const touchScreen = useMediaQuery('(pointer: coarse)')
 
 type LocalDateTimeParts = {
   year: number
@@ -64,18 +67,20 @@ function localDateTimeFromBrowserTimestamp(timestamp: number): string {
   return `${value.getFullYear()}-${pad(value.getMonth() + 1)}-${pad(value.getDate())}T${pad(value.getHours())}:${pad(value.getMinutes())}`
 }
 
-const pickerValue = computed(() => browserTimestamp(props.modelValue))
+const pickerValue = computed(() => browserTimestamp(draftValue.value))
 
 watch(() => props.modelValue, (value) => {
   inputValue.value = value.replace('T', ' ')
 })
 
 function openPicker(): void {
-  if (!props.disabled) show.value = true
+  if (props.disabled || show.value) return
+  draftValue.value = props.modelValue
+  show.value = true
 }
 
 function handleTriggerKeydown(event: KeyboardEvent): void {
-  if (event.key !== 'Enter' && event.key !== ' ') return
+  if (event.key !== 'Enter' && !(touchScreen.value && event.key === ' ')) return
   event.preventDefault()
   openPicker()
 }
@@ -94,12 +99,15 @@ function restoreInputValue(): void {
 }
 
 function updateValue(value: string | null, timestamp: number | null): void {
-  let nextValue = value ?? ''
-  if (typeof timestamp === 'number' && Number.isFinite(timestamp)) {
-    nextValue = localDateTimeFromBrowserTimestamp(timestamp)
-  }
-  inputValue.value = nextValue.replace('T', ' ')
-  emit('update:modelValue', nextValue)
+  draftValue.value = typeof timestamp === 'number' && Number.isFinite(timestamp)
+    ? localDateTimeFromBrowserTimestamp(timestamp)
+    : value ?? ''
+}
+
+function confirmValue(): void {
+  if (!draftValue.value || props.disabled) return
+  inputValue.value = draftValue.value.replace('T', ' ')
+  emit('update:modelValue', draftValue.value)
   show.value = false
 }
 
@@ -111,41 +119,97 @@ defineExpose({
 </script>
 
 <template>
-  <NPopover v-model:show="show" trigger="manual" placement="bottom-start" :show-arrow="false">
-    <template #trigger>
-      <NInput
-        ref="input"
-        class="ledger-date-time-picker"
-        :data-testid="props.testId"
-        :value="inputValue"
-        placeholder="请选择日期时间"
-        :disabled="props.disabled"
-        :aria-label="props.label"
-        aria-haspopup="dialog"
-        @click="openPicker"
-        @keydown="handleTriggerKeydown"
-        @blur="restoreInputValue"
-        @update:value="updateInputValue"
-      >
-        <template #suffix><NIcon :size="16" aria-hidden="true"><Calendar /></NIcon></template>
-      </NInput>
-    </template>
-    <NDatePicker
-      panel
-      type="datetime"
-      format="yyyy-MM-dd HH:mm"
-      value-format="yyyy-MM-dd'T'HH:mm"
-      :value="pickerValue"
-      :clearable="false"
-      :disabled="props.disabled"
+  <NInput
+    ref="input"
+    class="ledger-date-time-picker"
+    :data-testid="props.testId"
+    :value="inputValue"
+    placeholder="请选择日期时间"
+    :disabled="props.disabled"
+    :readonly="touchScreen"
+    :aria-label="props.label"
+    aria-haspopup="dialog"
+    @click="openPicker"
+    @keydown="handleTriggerKeydown"
+    @blur="restoreInputValue"
+    @update:value="updateInputValue"
+  >
+    <template #suffix><NIcon :size="16" aria-hidden="true"><Calendar /></NIcon></template>
+  </NInput>
+  <NModal v-model:show="show">
+    <section
+      class="ledger-date-time-dialog"
+      role="dialog"
+      aria-modal="true"
       :aria-label="props.label"
-      @update:formatted-value="updateValue"
-    />
-  </NPopover>
+    >
+      <NDatePicker
+        panel
+        type="datetime"
+        format="yyyy-MM-dd HH:mm"
+        value-format="yyyy-MM-dd'T'HH:mm"
+        :time-picker-props="{ format: 'HH:mm' }"
+        :actions="[]"
+        :value="pickerValue"
+        :clearable="false"
+        :disabled="props.disabled"
+        @update:formatted-value="updateValue"
+      />
+      <div class="ledger-date-time-actions">
+        <NButton attr-type="button" @click="show = false">取消</NButton>
+        <NButton attr-type="button" type="primary" :disabled="!draftValue || props.disabled" @click="confirmValue">确认</NButton>
+      </div>
+    </section>
+  </NModal>
 </template>
 
-<style>
-.v-binder-follower-container:has(.n-date-panel) {
-  z-index: 10000 !important;
+<style scoped>
+.ledger-date-time-dialog {
+  width: min(400px, calc(100% - 24px));
+  max-height: calc(100dvh - 24px);
+  overflow: auto;
+  border-radius: 16px;
+  background: var(--bg);
+}
+
+.ledger-date-time-dialog :deep(.n-date-panel) {
+  width: 100%;
+  box-sizing: border-box;
+  /* The panel defaults to an intrinsic 0fr track even at full width. */
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.ledger-date-time-dialog :deep(.n-date-panel-weekdays),
+.ledger-date-time-dialog :deep(.n-date-panel-dates) {
+  grid-template-columns: repeat(7, minmax(0, 1fr));
+  margin-inline: 0;
+}
+
+.ledger-date-time-dialog :deep(.n-date-panel-month__text) {
+  white-space: nowrap;
+}
+
+.ledger-date-time-actions {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+  padding: 10px 14px 14px;
+}
+
+@media (max-width: 600px) {
+  .ledger-date-time-dialog {
+    align-self: flex-end;
+    width: 100%;
+    margin: auto 0 0;
+    border-radius: 16px 16px 0 0;
+  }
+
+  .ledger-date-time-actions {
+    padding-bottom: max(14px, env(safe-area-inset-bottom));
+  }
+
+  .ledger-date-time-actions :deep(.n-button) {
+    min-height: 44px;
+  }
 }
 </style>

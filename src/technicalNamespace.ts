@@ -9,6 +9,7 @@ export const NUVYN_BROWSER_STORAGE_KEYS = {
   boardFavorites: 'nuvyn.board.favorites',
   ledgerCategoryIcons: 'nuvyn.ledger.category-icons',
   ledgerCategoryUsage: 'nuvyn.ledger.category-usage',
+  ledgerRecentTransactionAccount: 'nuvyn.ledger.recent-transaction-account',
   ledgerCategoryCustomIcons: 'nuvyn.ledger.category-custom-icons',
   ledgerAccountIconCustom: 'nuvyn.ledger.account-icon.custom',
   ledgerAccountIconNames: 'nuvyn.ledger.account-icon.names',
@@ -64,6 +65,10 @@ export function nuvynMonacoTheme(theme: 'light' | 'dark'): string {
 }
 
 export type BrowserStorageKey = string
+
+export function ownerScopedStorageKey(key: BrowserStorageKey, owner: { id: number; username: string }): string {
+  return `${key}:${owner.id}:${encodeURIComponent(owner.username)}`
+}
 
 export function readStorageKey(
   storageKey: BrowserStorageKey,

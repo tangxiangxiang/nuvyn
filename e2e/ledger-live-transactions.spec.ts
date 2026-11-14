@@ -736,7 +736,7 @@ test.describe(() => {
 test.describe('tablet transaction table scrolling', () => {
   test.use({ hasTouch: true })
 
-  test('shows tablet amounts without horizontal scrolling and preserves mobile/desktop columns', async ({ page, request }) => {
+  test('shows tablet amounts without horizontal scrolling and preserves desktop columns', async ({ page, request }) => {
     await ensureLedgerDashboardFixtures(request)
     const { categoryId } = await ensurePeriodNavigationFixtures(request)
     const account = (await getAccounts(request)).find((item) => item.archivedAt === null)!
@@ -783,17 +783,14 @@ test.describe('tablet transaction table scrolling', () => {
       const pageOverflow = await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth)
       expect(pageOverflow).toBeLessThanOrEqual(1)
     }
-    for (const width of [390, 1440]) {
+    for (const width of [1280, 1440]) {
       await page.setViewportSize({ width, height: 1000 })
       await page.goto('/ledger/transactions')
       const table = page.getByTestId('ledger-transaction-list')
       await expect(table).toBeVisible()
       const bounds = (await table.boundingBox())!
       expect(bounds.x + bounds.width).toBeLessThanOrEqual(width)
-      const overflow = await table.locator('.n-data-table-base-table-body .n-scrollbar-container')
-        .evaluate((element) => element.scrollWidth - element.clientWidth)
-      if (width === 390) expect(overflow).toBeGreaterThan(0)
-      else await expect(table.locator('th')).toHaveText(['交易对象', '类型', '分类', '账户', '备注', '时间', '金额'])
+      await expect(table.locator('th')).toHaveText(['交易对象', '类型', '分类', '账户', '备注', '时间', '金额'])
       await table.locator('.n-data-table-base-table-body .n-scrollbar-container')
         .evaluate((element) => { element.scrollLeft = element.scrollWidth })
       const amountHeader = table.locator('th').last()

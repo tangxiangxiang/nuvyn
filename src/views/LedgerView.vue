@@ -3,8 +3,6 @@ import { computed, onMounted, ref, watch } from 'vue'
 import { NButton, NResult, NSpin } from 'naive-ui'
 import { useRoute, useRouter, type RouteLocationNormalizedLoaded } from 'vue-router'
 import { useAuth } from '../composables/useAuth'
-import { useI18n } from '../composables/useI18n'
-import { useToast } from '../composables/useToast'
 import { usePagePullRefresh } from '../composables/usePagePullRefresh'
 import PagePullRefreshIndicator from '../components/PagePullRefreshIndicator.vue'
 import LedgerDashboard from '../components/ledger/LedgerDashboard.vue'
@@ -27,8 +25,6 @@ const auth = useAuth()
 const router = useRouter() as ReturnType<typeof useRouter> | undefined
 const route = useRoute() as RouteLocationNormalizedLoaded | undefined
 const store = useLedgerStore()
-const toast = useToast()
-const { t } = useI18n()
 const newAccountOpen = ref(false)
 const transactionSheetOpen = ref(false)
 const detailOpen = ref(false)
@@ -148,18 +144,10 @@ const pullAvailable = computed(() => (
   && !store.recoveryGateVisible.value
   && !newAccountOpen.value && !transactionSheetOpen.value && !detailOpen.value
 ))
-async function refreshLedgerOverview(): Promise<void> {
-  try {
-    await store.refreshData()
-    if (store.workspaceError.value || store.overviewError.value) toast.error(t('workspace.refresh_failed'))
-  } catch {
-    toast.error(t('workspace.refresh_failed'))
-  }
-}
 const {
   root: pullRoot, distance: pullDistance, refreshing: pullRefreshing,
   armed: pullArmed, offset: pullOffset, indicatorTop: pullIndicatorTop,
-} = usePagePullRefresh(pullAvailable, refreshLedgerOverview)
+} = usePagePullRefresh(pullAvailable)
 // The template ref is consumed by Vue's runtime and has no script-side reads.
 void pullRoot
 

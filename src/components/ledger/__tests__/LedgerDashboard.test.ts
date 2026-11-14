@@ -382,6 +382,7 @@ describe('Ledger live dashboard', () => {
     expect(repaymentRow.get('.ledger-recent-icon').classes()).toContain('is-repayment')
     expect(repaymentRow.get('.ledger-recent-icon').text()).toBe('↘')
     expect(repaymentRow.get('.ledger-recent-amount').classes()).toContain('is-repayment')
+    expect(repaymentRow.get('.ledger-recent-info small').text()).toBe('2026年9月5日 12:30 · 还款')
   })
 
   it('hydrates local projections from the main overview without duplicate initial reads', async () => {
@@ -1102,7 +1103,7 @@ describe('Ledger live dashboard', () => {
     expect(rows).toHaveLength(5)
     expect(rows[0].element.tagName).toBe('DIV')
     expect(rows[0].element.parentElement?.classList.contains('n-list-item__main')).toBe(true)
-    expect(rows[0].text()).toContain('餐饮 · 现金账户（已归档）')
+    expect(rows[0].get('.ledger-recent-info small').text()).toBe('2026年9月5日 12:30 · 餐饮 · 现金账户（已归档）')
     expect(rows[1].text()).toContain('招商银行 → 现金账户（已归档）')
     expect(rows[2].text()).toContain('现金账户（已归档） → 招商银行')
     expect(rows[3].text()).toContain('现金账户（已归档） → 旧钱包（已归档）')

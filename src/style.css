@@ -150,6 +150,10 @@ body.ledger-mode,
 html.ledger-mode {
   scrollbar-width: none;
 }
+html.ledger-mode,
+html.board-mode {
+  overscroll-behavior-y: none;
+}
 body.ledger-mode::-webkit-scrollbar,
 html.ledger-mode::-webkit-scrollbar {
   display: none;

@@ -1,7 +1,8 @@
 // @vitest-environment jsdom
 import { DOMWrapper, flushPromises, mount, type VueWrapper } from '@vue/test-utils'
 import { beforeEach, afterEach, describe, expect, it, vi } from 'vitest'
-import { nextTick, type VNodeChild } from 'vue'
+import { nextTick, type Ref, type VNodeChild } from 'vue'
+import type { AuthUser } from '../../../lib/auth-api'
 import type { SelectOption } from 'naive-ui'
 import type {
   LedgerAccountDto,
@@ -12,6 +13,7 @@ import type {
 } from '../../../../shared/ledgerProtocol'
 import { LedgerApiError } from '../../../features/ledger/ledgerErrors'
 import { useConfirm } from '../../../composables/useConfirm'
+import { useAuth } from '../../../composables/useAuth'
 import { useToast } from '../../../composables/useToast'
 import { resetLedgerStoreForTesting, useLedgerStore } from '../../../features/ledger/ledgerStore'
 import { recordCategoryUsage } from '../../../features/ledger/categoryUsage'
@@ -89,8 +91,9 @@ const overview = (): LedgerOverviewDto => ({
 })
 
 const savedTransaction = { id: 'tx-1', type: 'expense', accountId: 'bank-1', categoryId: 'food' } as const
-const recentAccountKey = 'nuvyn.ledger.recent-transaction-account'
+const recentAccountKey = 'nuvyn.ledger.recent-transaction-account:1:test-owner'
 const owner = { id: 1, username: 'test-owner' }
+const testUser = useAuth().user as Ref<AuthUser | null>
 const usageKey = 'nuvyn.ledger.category-usage:1:test-owner'
 const wrappers: VueWrapper[] = []
 let categories: LedgerCategoryDto[] = [expense, income, category('old', 'expense', '旧分类', 10)]
@@ -135,10 +138,32 @@ describe('Ledger transaction creation sheet', () => {
   beforeEach(() => {
     sessionStorage.clear()
     localStorage.clear()
+    testUser.value = owner
     resetLedgerStoreForTesting()
     vi.clearAllMocks()
     categories = [expense, income, category('old', 'expense', '旧分类', 10)]
     setup()
+  })
+
+  it('ignores the unscoped key and restores only the current owner’s account', async () => {
+    localStorage.setItem('nuvyn.ledger.recent-transaction-account', 'bank-1')
+    const wrapper = await openSheet()
+    expect(naiveSelectValue(getSheet(), '账户')).toBe('')
+    localStorage.setItem(recentAccountKey, 'bank-1')
+    localStorage.setItem('nuvyn.ledger.recent-transaction-account:2:other-owner', 'wallet-1')
+
+    testUser.value = { id: 2, username: 'other-owner' }
+    await nextTick()
+    expect(naiveSelectValue(getSheet(), '账户')).toBe('wallet-1')
+    testUser.value = null
+    await nextTick()
+    expect(naiveSelectValue(getSheet(), '账户')).toBe('')
+
+    testUser.value = owner
+    await nextTick()
+    await getSheet().get('.ledger-secondary-button').trigger('click')
+    await wrapper.get('[data-testid="ledger-record-button"]').trigger('click')
+    expect(naiveSelectValue(getSheet(), '账户')).toBe('bank-1')
   })
 
   afterEach(() => {

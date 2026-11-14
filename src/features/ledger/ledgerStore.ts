@@ -242,6 +242,10 @@ function beginTransactionsRequest(): number {
   return epoch
 }
 
+export function ledgerTransactionQueryKey(query: LedgerTransactionQuery): string {
+  return JSON.stringify(Object.entries(query).filter(([, value]) => value !== undefined).sort(([left], [right]) => left.localeCompare(right)))
+}
+
 function enterWorkspaceRecovery(error: LedgerApiError): void {
   state.workspaceError = error
   state.workspaceState = 'RECOVERABLE_ERROR'
@@ -318,6 +322,7 @@ function clearPresentation(): void {
   // Invalidate a current-state completion that belongs to the session before
   // this reset. It must not restore a READY lifecycle after session expiry.
   workspaceRecoveryGeneration += 1
+  beginTransactionsRequest()
   state.settings = null
   state.accounts = []
   state.categories = []
@@ -531,20 +536,9 @@ async function refreshData(): Promise<void> {
     )
     if (overviewResult.status !== 'success') return
 
-    // Phase C — the transaction page, only when one is already presented.
-    if (state.transactions !== null) {
-      const transactionsEpoch = beginTransactionsRequest()
-      state.transactionsLoading = true
-      state.transactionsError = null
-      try {
-        const page = await listLedgerTransactions(state.transactionQuery)
-        if (isTransactionsCurrent(transactionsEpoch)) state.transactions = page
-      } catch (error) {
-        if (!isTransactionsCurrent(transactionsEpoch)) return
-        state.transactionsError = normalizeLedgerError(error)
-      } finally {
-        if (isTransactionsCurrent(transactionsEpoch)) state.transactionsLoading = false
-      }
+    // Phase C — refresh the currently requested history page, if any.
+    if (state.transactions !== null || state.transactionsLoading || state.transactionsError) {
+      await refreshTransactions()
     }
   } finally {
     if (isWorkspaceCurrent(workspaceEpoch)) state.workspaceLoading = false
@@ -578,11 +572,12 @@ function setOverviewRequestContext(context: LedgerOverviewRequestContext): void 
 
 async function refreshTransactions(query: LedgerTransactionQuery = state.transactionQuery): Promise<void> {
   const epoch = beginTransactionsRequest()
+  if (ledgerTransactionQueryKey(query) !== ledgerTransactionQueryKey(state.transactionQuery)) state.transactions = null
   state.transactionQuery = { ...query }
   state.transactionsLoading = true
   state.transactionsError = null
   try {
-    const page = await listLedgerTransactions(query)
+    const page = await listLedgerTransactions(state.transactionQuery)
     if (isTransactionsCurrent(epoch)) state.transactions = page
   } catch (error) {
     if (isTransactionsCurrent(epoch)) state.transactionsError = normalizeLedgerError(error)
@@ -694,8 +689,8 @@ async function createAndRememberTransaction(
   owner: AuthUser | null,
 ): Promise<LedgerTransactionDto> {
   const transaction = await createLedgerTransaction(body, key)
-  rememberTransactionAccount(transaction)
   if (owner && authUser.value?.id === owner.id && authUser.value.username === owner.username) {
+    rememberTransactionAccount(owner, transaction)
     recordCategoryUsage(owner, transaction, key)
   }
   return transaction

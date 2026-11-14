@@ -13,9 +13,11 @@ import type {
   LedgerTransactionPageDto,
 } from '../../../shared/ledgerProtocol'
 import { resetLedgerStoreForTesting } from '../../features/ledger/ledgerStore'
+import { LedgerApiError } from '../../features/ledger/ledgerErrors'
 import { LEDGER_PENDING_CREATE_STORAGE_KEY, createLedgerPendingIntent } from '../../features/ledger/recovery'
 import { instantFromLedgerDate } from '../../features/ledger/time'
 import LedgerTransactionsView from '../LedgerTransactionsView.vue'
+import LedgerTransactionDetailSheet from '../../components/ledger/LedgerTransactionDetailSheet.vue'
 import LedgerDatePicker from '../../components/ledger/LedgerDatePicker.vue'
 import { getNaiveSelect, naiveSelectValue, setNaiveSelect } from '../../components/ledger/__tests__/selectTestUtils'
 
@@ -305,6 +307,16 @@ function getDetail(): InstanceType<typeof DOMWrapper> {
   return new DOMWrapper(element)
 }
 
+function deferredPage() {
+  let resolve!: (page: LedgerTransactionPageDto) => void
+  let reject!: (reason: Error) => void
+  const promise = new Promise<LedgerTransactionPageDto>((resolvePage, rejectPage) => {
+    resolve = resolvePage
+    reject = rejectPage
+  })
+  return { promise, resolve, reject }
+}
+
 describe('Ledger live transaction history workspace', () => {
   beforeEach(() => {
     sessionStorage.clear()
@@ -315,8 +327,143 @@ describe('Ledger live transaction history workspace', () => {
 
   afterEach(async () => {
     for (const wrapper of wrappers.splice(0)) wrapper.unmount()
+    vi.unstubAllGlobals()
     document.body.querySelectorAll('.ledger-detail-sheet').forEach((element) => element.remove())
     await flushPromises()
+  })
+
+  it.each([api.getLedgerSettings, api.listLedgerAccounts, api.listLedgerCategories])('shows a recoverable workspace error and can retry', async (read) => {
+    read.mockRejectedValueOnce(new LedgerApiError('offline', 503, 'ledger-write-busy'))
+    const wrapper = await mountView()
+    expect(wrapper.find('[data-testid="ledger-transactions-needs-settings"]').exists()).toBe(false)
+    await wrapper.get('[data-testid="ledger-transactions-retry-bootstrap"]').trigger('click')
+    await flushPromises()
+    expect(wrapper.find('[data-testid="ledger-transaction-list"]').exists()).toBe(true)
+  })
+
+  it('hides rows from the previous filter after a failed request and retries the current filter', async () => {
+    const wrapper = await mountView()
+    api.listLedgerTransactions.mockRejectedValueOnce(new LedgerApiError('offline', 503, 'ledger-write-busy'))
+    await wrapper.get('[data-ledger-filter-type="income"]').trigger('click')
+    await flushPromises()
+    expect(wrapper.find(`[data-testid="ledger-transaction-row-${expense.id}"]`).exists()).toBe(false)
+    expect(wrapper.find('[data-testid="ledger-transactions-empty"]').exists()).toBe(false)
+    api.listLedgerTransactions.mockResolvedValueOnce({ transactions: [income], page: { nextCursor: null } })
+    await wrapper.get('.ledger-inline-error button').trigger('click')
+    await flushPromises()
+    expect(api.listLedgerTransactions).toHaveBeenLastCalledWith({ type: 'income', limit: 25 })
+    expect(wrapper.find(`[data-testid="ledger-transaction-row-${income.id}"]`).exists()).toBe(true)
+  })
+
+  it('only publishes the last filter when responses finish out of order', async () => {
+    const wrapper = await mountView()
+    const first = deferredPage()
+    const second = deferredPage()
+    const third = deferredPage()
+    api.listLedgerTransactions.mockReturnValueOnce(first.promise).mockReturnValueOnce(second.promise).mockReturnValueOnce(third.promise)
+    for (const type of ['expense', 'income', 'transfer']) {
+      await wrapper.get(`[data-ledger-filter-type="${type}"]`).trigger('click')
+    }
+    third.resolve({ transactions: [transfer], page: { nextCursor: null } })
+    first.resolve({ transactions: [expense], page: { nextCursor: null } })
+    second.reject(new Error('obsolete request'))
+    await flushPromises()
+    expect(wrapper.find(`[data-testid="ledger-transaction-row-${transfer.id}"]`).exists()).toBe(true)
+    expect(wrapper.find(`[data-testid="ledger-transaction-row-${expense.id}"]`).exists()).toBe(false)
+    expect(wrapper.find('.ledger-inline-error').exists()).toBe(false)
+  })
+
+  it.each(['pagination', 'sorting'])('retries a failed %s request with the requested page and sort', async (operation) => {
+    setup({ transactions: [expense], page: { nextCursor: null, total: 26 } })
+    const wrapper = await mountView()
+    api.listLedgerTransactions.mockRejectedValueOnce(new Error('offline'))
+    if (operation === 'pagination') await wrapper.getComponent(NPagination).vm.$emit('update:page', 2)
+    else await wrapper.getComponent(NDataTable).vm.$emit('update:sorter', { columnKey: 'amount', order: 'ascend' })
+    await flushPromises()
+    expect(wrapper.find('[data-testid="ledger-transaction-list"]').exists()).toBe(false)
+    expect(wrapper.findComponent(NPagination).exists()).toBe(false)
+    api.listLedgerTransactions.mockResolvedValueOnce({ transactions: [income], page: { nextCursor: null, total: 26 } })
+    await wrapper.get('.ledger-inline-error button').trigger('click')
+    await flushPromises()
+    expect(api.listLedgerTransactions).toHaveBeenLastCalledWith(operation === 'pagination'
+      ? { type: 'all', limit: 25, offset: 25 }
+      : { type: 'all', limit: 25, sortBy: 'amount', sortDirection: 'asc' })
+    expect(wrapper.getComponent(NPagination).props('page')).toBe(operation === 'pagination' ? 2 : 1)
+    expect(wrapper.find(`[data-testid="ledger-transaction-row-${income.id}"]`).exists()).toBe(true)
+  })
+
+  it('hides mismatched rows during search debounce and sends search with the next filter only once', async () => {
+    const wrapper = await mountView()
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
+    try {
+      const calls = api.listLedgerTransactions.mock.calls.length
+      await wrapper.get('#ledger-filter-search').setValue('工资')
+      expect(wrapper.find('[data-testid="ledger-transaction-list"]').exists()).toBe(false)
+      await wrapper.get('[data-ledger-filter-type="income"]').trigger('click')
+      await vi.advanceTimersByTimeAsync(350)
+      expect(api.listLedgerTransactions.mock.calls.slice(calls)).toEqual([[{ type: 'income', limit: 25, search: '工资' }]])
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('shows initialization only for a missing Settings record', async () => {
+    api.getLedgerSettings.mockResolvedValueOnce(null)
+    const wrapper = await mountView()
+    expect(wrapper.find('[data-testid="ledger-transactions-needs-settings"]').exists()).toBe(true)
+    expect(api.listLedgerTransactions).not.toHaveBeenCalled()
+  })
+
+  it('waits for the withdrawal fee before opening the edit form', async () => {
+    const group = deferredPage()
+    setup({ transactions: [withdrawal], page: { nextCursor: null } }, [activeAccount, walletAccount])
+    api.listLedgerTransactions.mockImplementation((query: { groupId?: string }) => query.groupId
+      ? group.promise
+      : Promise.resolve({ transactions: [withdrawal], page: { nextCursor: null } }))
+    const wrapper = await mountView()
+    await wrapper.get(`[data-testid="ledger-transaction-row-${withdrawal.id}"]`).trigger('click')
+    const edit = () => getDetail().findAll('button').find((button) => button.text() === '编辑交易')!
+    expect(edit().attributes('disabled')).toBeDefined()
+    group.resolve({ transactions: [withdrawal, withdrawalFee], page: { nextCursor: null } })
+    await flushPromises()
+    await edit().trigger('click')
+    expect(getDetail().get<HTMLInputElement>('input[name="feeAmount"]').element.value).not.toBe('')
+  })
+
+  it('keeps a dirty group draft through a refresh, then uses fresh data after cancel and resets on a transaction switch', async () => {
+    const nextGroup = deferredPage()
+    setup({ transactions: [withdrawal], page: { nextCursor: null } }, [activeAccount, walletAccount])
+    api.listLedgerTransactions.mockImplementation((query: { groupId?: string }) => Promise.resolve({
+      transactions: query.groupId ? [withdrawal, withdrawalFee] : [withdrawal],
+      page: { nextCursor: null },
+    }))
+    const wrapper = await mountView()
+    await wrapper.get(`[data-testid="ledger-transaction-row-${withdrawal.id}"]`).trigger('click')
+    await flushPromises()
+    const click = (label: string) => getDetail().findAll('button').find((button) => button.text() === label)!.trigger('click')
+    await click('编辑交易')
+    await getDetail().get('textarea[name="note"]').setValue('未保存')
+
+    api.listLedgerTransactions.mockReturnValueOnce(nextGroup.promise)
+    const detail = wrapper.getComponent(LedgerTransactionDetailSheet)
+    const refreshed = { ...withdrawal, version: withdrawal.version + 1, note: '最新备注' }
+    detail.vm.$.props.transaction = refreshed
+    await nextTick()
+    nextGroup.resolve({ transactions: [refreshed, { ...withdrawalFee, amountMinor: 250 }], page: { nextCursor: null } })
+    await flushPromises()
+    expect(getDetail().get<HTMLTextAreaElement>('textarea[name="note"]').element.value).toBe('未保存')
+
+    await click('取消')
+    await flushPromises()
+    expect(confirm).toHaveBeenCalled()
+    await click('编辑交易')
+    expect(getDetail().get<HTMLInputElement>('input[name="feeAmount"]').element.value).toBe('2.50')
+    expect(getDetail().get<HTMLTextAreaElement>('textarea[name="note"]').element.value).toBe('最新备注')
+    detail.vm.$.props.transaction = income
+    await nextTick()
+    expect(getDetail().find('[data-testid="ledger-transaction-edit-form"]').exists()).toBe(false)
+    await click('编辑交易')
+    expect(getDetail().get<HTMLInputElement>('input[name="payee"]').element.value).toBe(income.payee)
   })
 
   it('renders real transactions and exposes archived accounts/categories in history filters', async () => {
@@ -372,7 +519,7 @@ describe('Ledger live transaction history workspace', () => {
       sortDirection: 'desc',
     })
 
-    await table.vm.$emit('update:sorter', {
+    await wrapper.getComponent(NDataTable).vm.$emit('update:sorter', {
       columnKey: 'time',
       order: 'ascend',
       sorter: true,
@@ -436,6 +583,29 @@ describe('Ledger live transaction history workspace', () => {
       to: instantFromLedgerDate('2026-08-31', 'Asia/Shanghai', 'end'),
       limit: 25,
     })
+  })
+
+  it('defaults to ten transactions per page on phones and uses that count for the next offset', async () => {
+    vi.stubGlobal('matchMedia', (query: string) => Object.assign(new EventTarget(), {
+      matches: query === '(max-width: 600px)',
+    }))
+    setup({
+      transactions: [expense],
+      page: { nextCursor: null, total: 11 },
+    })
+    const wrapper = await mountView()
+    const pagination = wrapper.getComponent(NPagination)
+    expect(pagination.props('pageSize')).toBe(10)
+    expect(api.listLedgerTransactions).toHaveBeenLastCalledWith({ type: 'all', limit: 10 })
+
+    await pagination.vm.$emit('update:page', 2)
+    await flushPromises()
+    expect(api.listLedgerTransactions).toHaveBeenLastCalledWith({ type: 'all', limit: 10, offset: 10 })
+
+    await wrapper.getComponent(NPagination).vm.$emit('update:pageSize', 5)
+    await flushPromises()
+    expect(wrapper.getComponent(NPagination).props('page')).toBe(1)
+    expect(api.listLedgerTransactions).toHaveBeenLastCalledWith({ type: 'all', limit: 5 })
   })
 
   it('requests the selected server-side page with the correct offset', async () => {
@@ -878,7 +1048,7 @@ describe('Ledger live transaction history workspace', () => {
   })
 
   it('defaults a withdrawal without a feeMode or existing fee to deducted when adding its first fee', async () => {
-    const legacyWithdrawal = { ...withdrawal, amountMinor: 10_000, feeMode: undefined }
+    const legacyWithdrawal = { ...withdrawal, amountMinor: 10_000, feeMode: undefined, groupId: undefined }
     setup({ transactions: [legacyWithdrawal], page: { nextCursor: null } }, [activeAccount, walletAccount])
     api.listLedgerTransactions.mockImplementation((query: { groupId?: string }) => Promise.resolve(
       query.groupId === legacyWithdrawal.groupId

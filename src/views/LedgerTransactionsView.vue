@@ -6,21 +6,24 @@ import {
   NButton,
   NCard,
   NDataTable,
+  NDropdown,
   NEmpty,
   NForm,
   NIcon,
   NInput,
   NNumberAnimation,
   NPagination,
+  NResult,
   NSelect,
   NSpin,
   type DataTableColumns,
   type DataTableSortOrder,
   type DataTableSortState,
+  type DropdownOption,
   type SelectGroupOption,
   type SelectOption,
 } from 'naive-ui'
-import { ArrowDown, ArrowDownRight, ArrowRight, ArrowUp, ArrowsVertical, Calendar, Search, Tag, Wallet } from '@vicons/tabler'
+import { ArrowDown, ArrowDownRight, ArrowRight, ArrowUp, ArrowsSort, ArrowsVertical, Calendar, Check, Search, Tag, Wallet } from '@vicons/tabler'
 import { Temporal } from '@js-temporal/polyfill'
 import { useRoute } from 'vue-router'
 import type {
@@ -33,12 +36,11 @@ import { ledgerTransactionContributesToStatistics } from '../../shared/ledgerAna
 import LedgerTransactionDetailSheet from '../components/ledger/LedgerTransactionDetailSheet.vue'
 import LedgerPendingCreateGate from '../components/ledger/LedgerPendingCreateGate.vue'
 import LedgerTransactionSheet from '../components/ledger/LedgerTransactionSheet.vue'
-import { ledgerErrorMessage } from '../features/ledger/ledgerErrors'
+import { ledgerErrorMessage, ledgerWorkspaceReadErrorMessage } from '../features/ledger/ledgerErrors'
 import { formatLedgerDateTime, formatLedgerTransactionDateTime, instantFromLedgerDate } from '../features/ledger/time'
 import { ledgerTransactionPresentationKind } from '../features/ledger/presentation'
-import { useLedgerStore } from '../features/ledger/ledgerStore'
+import { ledgerTransactionQueryKey, useLedgerStore } from '../features/ledger/ledgerStore'
 import { useToast } from '../composables/useToast'
-import { useI18n } from '../composables/useI18n'
 import { usePagePullRefresh } from '../composables/usePagePullRefresh'
 import PagePullRefreshIndicator from '../components/PagePullRefreshIndicator.vue'
 import { ledgerSelectNodeProps } from '../features/ledger/naiveControls'
@@ -48,12 +50,13 @@ import { ledgerAccountSelectOptions, renderLedgerAccountLabel, renderLedgerCateg
 
 const store = useLedgerStore()
 const toast = useToast()
-const { t } = useI18n()
 const route = useRoute()
 const desktopTableFlexHeight = useMediaQuery('(min-width: 651px)')
+const phoneLayout = useMediaQuery('(max-width: 600px)')
+const phoneAccountMenuProps = { class: 'ledger-phone-account-menu', style: { width: 'min(280px, calc(100vw - 64px))' } }
 const compactTableScroll = useMediaQuery('(max-width: 720px)')
 const tabletTable = useMediaQuery('(min-width: 601px) and (max-width: 1199px)')
-const paginationPageSlot = computed(() => compactTableScroll.value ? 5 : 7)
+const paginationPageSlot = computed(() => phoneLayout.value ? 3 : compactTableScroll.value ? 5 : 7)
 const transactionSheetOpen = ref(false)
 const detailOpen = ref(false)
 const selectedTransaction = ref<LedgerTransactionDto | null>(null)
@@ -65,15 +68,22 @@ const filterTo = ref('')
 const filterSearch = ref('')
 type DatePreset = 'all' | 'today' | 'week' | 'month' | 'year' | 'custom'
 const filterDatePreset = ref<DatePreset>('all')
-const filtersLoading = ref(false)
-const paginationLoading = ref(false)
-const filterError = ref('')
+const searchPending = ref(false)
 const tablePage = ref(1)
-const tablePageSize = ref(25)
+const selectedPageSize = ref<number | null>(null)
+const tablePageSize = computed(() => selectedPageSize.value ?? (phoneLayout.value ? 10 : 25))
 type TransactionTableSortKey = 'time' | 'amount'
 type TransactionTableSortDirection = 'asc' | 'desc'
 const transactionSortKey = ref<TransactionTableSortKey>('time')
 const transactionSortDirection = ref<TransactionTableSortDirection>('desc')
+const phoneSortOpen = ref(false)
+const phoneSortValue = computed(() => `${transactionSortKey.value}-${transactionSortDirection.value}`)
+const phoneSortOptions: DropdownOption[] = [
+  { key: 'time-desc', label: '时间从新到旧' },
+  { key: 'time-asc', label: '时间从旧到新' },
+  { key: 'amount-desc', label: '金额从高到低' },
+  { key: 'amount-asc', label: '金额从低到高' },
+]
 
 type TransactionContextMenuAction = 'view' | 'exclude' | 'restore'
 const contextMenuOpen = ref(false)
@@ -116,6 +126,7 @@ const datePresetOptions: SelectOption[] = [
 ]
 const pageSizeOptions = [
   { value: 5, label: '5 / 页' },
+  { value: 10, label: '10 / 页' },
   { value: 25, label: '25 / 页' },
   { value: 50, label: '50 / 页' },
   { value: 100, label: '100 / 页' },
@@ -132,8 +143,27 @@ const categoryOptions = computed<SelectOption[]>(() => [
   })),
 ])
 
-const loading = computed(() => store.workspaceState.value === 'BOOTSTRAPPING' || filtersLoading.value)
-const page = computed(() => store.transactions.value)
+const workspaceState = store.workspaceState
+const historyAvailable = computed(() => workspaceState.value === 'READY'
+  || workspaceState.value === 'NO_ACTIVE_ACCOUNT' || workspaceState.value === 'FIRST_ACCOUNT_REQUIRED')
+const currentQuery = computed(() => {
+  try {
+    return buildQuery()
+  } catch {
+    return null
+  }
+})
+const queryMatches = computed(() => currentQuery.value !== null
+  && ledgerTransactionQueryKey(currentQuery.value) === ledgerTransactionQueryKey(store.transactionQuery.value))
+const loading = computed(() => workspaceState.value === 'BOOTSTRAPPING' || searchPending.value || store.transactionsLoading.value)
+const page = computed(() => queryMatches.value ? store.transactions.value : null)
+const filterError = computed(() => {
+  if (!currentQuery.value) return '请选择有效的日期范围。'
+  if (!searchPending.value && queryMatches.value && store.transactionsError.value) {
+    return ledgerErrorMessage(store.transactionsError.value, '交易列表暂时无法加载。')
+  }
+  return ''
+})
 const transactions = computed(() => page.value?.transactions ?? [])
 const transactionTotal = computed(() => page.value?.page.total ?? transactions.value.length)
 const tablePageCount = computed(() => Math.max(1, Math.ceil(transactionTotal.value / tablePageSize.value)))
@@ -322,26 +352,14 @@ function initializeFiltersFromRoute(): void {
 }
 
 const pullAvailable = computed(() => (
-  store.workspaceState.value === 'READY'
-  && Boolean(store.settings.value)
-  && !loading.value && !filtersLoading.value && !paginationLoading.value
+  historyAvailable.value && !loading.value
   && !transactionSheetOpen.value && !detailOpen.value
   && !contextMenuOpen.value && !store.recoveryGateVisible.value
 ))
-async function refreshTransactionPage(): Promise<void> {
-  try {
-    await store.refreshData()
-    if (store.workspaceError.value || store.transactionsError.value) {
-      toast.error(t('workspace.refresh_failed'))
-    }
-  } catch {
-    toast.error(t('workspace.refresh_failed'))
-  }
-}
 const {
   root: pullRoot, distance: pullDistance, refreshing: pullRefreshing,
   armed: pullArmed, offset: pullOffset, indicatorTop: pullIndicatorTop,
-} = usePagePullRefresh(pullAvailable, refreshTransactionPage)
+} = usePagePullRefresh(pullAvailable)
 // The template ref is consumed by Vue's runtime and has no script-side reads.
 void pullRoot
 
@@ -349,9 +367,13 @@ onMounted(async () => {
   document.body.classList.add('ledger-transactions-mode')
   document.documentElement.classList.add('ledger-transactions-mode')
   initializeFiltersFromRoute()
-  await store.bootstrap()
-  if (store.settings.value) await loadTransactions()
+  await bootstrapHistory()
 })
+
+async function bootstrapHistory(): Promise<void> {
+  await store.bootstrap()
+  if (historyAvailable.value) await loadTransactions(tablePage.value)
+}
 
 function accountName(id: string): string {
   return store.accounts.value.find((account) => account.id === id)?.name ?? '未知账户'
@@ -459,10 +481,12 @@ let searchTimer: ReturnType<typeof setTimeout> | undefined
 function cancelSearch(): void {
   if (searchTimer) clearTimeout(searchTimer)
   searchTimer = undefined
+  searchPending.value = false
 }
 
 function scheduleSearch(): void {
   cancelSearch()
+  searchPending.value = true
   searchTimer = setTimeout(() => {
     searchTimer = undefined
     void applyFilters()
@@ -495,6 +519,26 @@ function changeTableSort(sorter: DataTableSortState | DataTableSortState[] | nul
   void loadTransactions(1)
 }
 
+function changePhoneSort(value: string): void {
+  changeTableSort({
+    columnKey: value.startsWith('amount-') ? 'amount' : 'time',
+    order: value.endsWith('-asc') ? 'ascend' : 'descend',
+    sorter: true,
+  })
+}
+
+function phoneTransactionTitle(transaction: LedgerTransactionDto): string {
+  return transaction.type === 'adjustment' ? accountName(transaction.accountId) : transactionTitle(transaction)
+}
+
+function phoneTransactionTime(transaction: LedgerTransactionDto): string {
+  return formatLedgerTransactionDateTime(transaction.occurredAt, store.settings.value?.timezone ?? 'UTC')
+}
+
+function signedAmountMinor(transaction: LedgerTransactionDto): number {
+  return transaction.type === 'expense' ? -transaction.amountMinor : transaction.amountMinor
+}
+
 function buildQuery(pageNumber = tablePage.value): LedgerTransactionQuery {
   const timezone = store.settings.value?.timezone ?? 'UTC'
   const offset = (pageNumber - 1) * tablePageSize.value
@@ -517,28 +561,13 @@ function buildQuery(pageNumber = tablePage.value): LedgerTransactionQuery {
 }
 
 async function loadTransactions(targetPage = 1): Promise<void> {
-  if (!store.settings.value) return
-  filtersLoading.value = true
+  cancelSearch()
+  if (!historyAvailable.value) return
   tablePage.value = targetPage
-  filterError.value = ''
-  try {
-    await store.refreshTransactions(buildQuery(targetPage))
-    if (store.transactionsError.value) filterError.value = ledgerErrorMessage(store.transactionsError.value, '交易列表暂时无法加载。')
-  } catch (cause) {
-    filterError.value = ledgerErrorMessage(cause, '交易列表暂时无法加载。')
-  } finally {
-    filtersLoading.value = false
-  }
+  if (currentQuery.value) await store.refreshTransactions(currentQuery.value)
 }
 
 async function applyFilters(): Promise<void> {
-  cancelSearch()
-  try {
-    buildQuery()
-  } catch {
-    filterError.value = '请选择有效的日期范围。'
-    return
-  }
   await loadTransactions()
 }
 
@@ -550,46 +579,30 @@ async function clearFilters(): Promise<void> {
   filterTo.value = ''
   filterSearch.value = ''
   filterDatePreset.value = 'all'
-  cancelSearch()
   await loadTransactions()
 }
 
 async function changeTablePage(nextPage: number): Promise<void> {
   const targetPage = Math.max(1, Math.min(nextPage, tablePageCount.value))
-  if (targetPage === tablePage.value || paginationLoading.value) return
-  const previousPage = tablePage.value
-  paginationLoading.value = true
-  tablePage.value = targetPage
-  filterError.value = ''
-  try {
-    await store.refreshTransactions(buildQuery(targetPage))
-    if (store.transactionsError.value) {
-      tablePage.value = previousPage
-      filterError.value = ledgerErrorMessage(store.transactionsError.value, '这一页交易暂时无法加载。')
-    }
-  } catch (cause) {
-    tablePage.value = previousPage
-    filterError.value = ledgerErrorMessage(cause, '这一页交易暂时无法加载。')
-  } finally {
-    paginationLoading.value = false
-  }
+  if (targetPage !== tablePage.value && !loading.value) await loadTransactions(targetPage)
 }
 
-async function changePageSize(value: string | number | null): Promise<void> {
+function changePageSize(value: string | number | null): void {
   if (typeof value !== 'number' || value === tablePageSize.value) return
-  tablePageSize.value = value
-  await loadTransactions()
+  selectedPageSize.value = value
 }
 
 async function reconcilePageAfterMutation(): Promise<void> {
-  const total = store.transactions.value?.page.total
+  const total = page.value?.page.total
   if (total === undefined) return
   const maxPage = Math.max(1, Math.ceil(total / tablePageSize.value))
   if (tablePage.value > maxPage) await loadTransactions(maxPage)
 }
 
+watch(tablePageSize, () => loadTransactions())
+
 watch(
-  [filterType, filterAccountId, filterCategoryId, filterFrom, filterTo, filterSearch, tablePage, tablePageSize],
+  [currentQuery, page],
   () => {
     if (contextMenuOpen.value) closeContextMenu(false)
   },
@@ -722,10 +735,9 @@ const transactionColumns = computed<DataTableColumns<LedgerTransactionDto>>(() =
     sortOrder: tableSortOrder('amount'),
     customNextSortOrder: nextTableSortOrder,
     render: (transaction) => {
-      const amountMinor = transaction.type === 'expense' ? -transaction.amountMinor : transaction.amountMinor
       return h('strong', { class: ['ledger-transaction-amount', `is-${presentationKind(transaction)}`] }, [
         h(LedgerAnimatedMoney, {
-          minor: amountMinor,
+          minor: signedAmountMinor(transaction),
           currency: store.settings.value?.baseCurrency ?? 'CNY',
           signed: transaction.type !== 'transfer',
           animateOnMount: false,
@@ -778,7 +790,7 @@ const visibleTransactionColumns = computed(() => {
           <LedgerDatePicker v-model="filterTo" label="到日期" test-id="ledger-filter-to" size="small" clearable placeholder="结束日期" @update:model-value="refreshAfterFilterChange" />
         </div>
         <RouterLink class="ledger-secondary-button" :to="{ name: 'ledger' }" data-testid="ledger-transactions-overview-button">返回总览</RouterLink>
-        <NButton class="ledger-primary-button" attr-type="button" type="primary" size="small" :bordered="false" :disabled="loading || store.hasUnresolvedCreate.value || !store.activeAccounts.value.length" data-testid="ledger-transactions-record-button" @click="transactionSheetOpen = true">＋ 记一笔</NButton>
+        <NButton class="ledger-primary-button" attr-type="button" type="primary" size="small" :bordered="false" :disabled="workspaceState !== 'READY' || loading || store.hasUnresolvedCreate.value || !store.activeAccounts.value.length" data-testid="ledger-transactions-record-button" @click="transactionSheetOpen = true">＋ 记一笔</NButton>
       </div>
     </header>
 
@@ -792,7 +804,21 @@ const visibleTransactionColumns = computed(() => {
               <span class="ledger-filter-icon" aria-hidden="true"><NIcon :size="18"><Wallet /></NIcon></span>
               <div class="ledger-filter-select-copy">
                 <span class="ledger-filter-label">账户</span>
-                <NSelect v-model:value="filterAccountId" class="ledger-filter-control" size="small" :options="accountOptions" :render-label="renderAccountLabel" :node-props="ledgerSelectNodeProps" :input-props="{ id: 'ledger-filter-account', name: 'accountId' }" role="combobox" aria-haspopup="listbox" aria-label="账户" @update:value="refreshAfterFilterChange" />
+                <NSelect
+                  v-model:value="filterAccountId"
+                  class="ledger-filter-control"
+                  size="small"
+                  :options="accountOptions"
+                  :render-label="renderAccountLabel"
+                  :node-props="ledgerSelectNodeProps"
+                  :consistent-menu-width="!phoneLayout"
+                  :menu-props="phoneLayout ? phoneAccountMenuProps : undefined"
+                  :input-props="{ id: 'ledger-filter-account', name: 'accountId' }"
+                  role="combobox"
+                  aria-haspopup="listbox"
+                  aria-label="账户"
+                  @update:value="refreshAfterFilterChange"
+                />
               </div>
             </div>
             <div class="ledger-filter-select-card">
@@ -825,11 +851,16 @@ const visibleTransactionColumns = computed(() => {
       </NForm>
     </NCard>
 
-    <div v-if="!store.hasUnresolvedCreate.value && loading && !page && !store.settings.value" class="ledger-transactions-state ledger-loading-state" data-testid="ledger-transactions-loading" role="status"><NSpin size="medium" description="正在加载交易…" /></div>
-    <NEmpty v-else-if="!store.hasUnresolvedCreate.value && !store.settings.value" class="ledger-transactions-state ledger-empty-state" data-testid="ledger-transactions-needs-settings" :show-icon="false" description="请先完成 Ledger 初始化">
+    <div v-if="!store.hasUnresolvedCreate.value && workspaceState === 'BOOTSTRAPPING'" class="ledger-transactions-state ledger-loading-state" data-testid="ledger-transactions-loading" role="status"><NSpin size="medium" description="正在加载交易…" /></div>
+    <section v-else-if="!store.hasUnresolvedCreate.value && workspaceState === 'RECOVERABLE_ERROR'" class="ledger-transactions-state" role="alert">
+      <NResult status="error" title="交易记录暂时无法加载" :description="ledgerWorkspaceReadErrorMessage(store.workspaceError.value)">
+        <template #footer><NButton class="ledger-primary-button" attr-type="button" type="primary" size="small" :bordered="false" data-testid="ledger-transactions-retry-bootstrap" @click="bootstrapHistory">重新加载</NButton></template>
+      </NResult>
+    </section>
+    <NEmpty v-else-if="!store.hasUnresolvedCreate.value && workspaceState === 'UNINITIALIZED'" class="ledger-transactions-state ledger-empty-state" data-testid="ledger-transactions-needs-settings" :show-icon="false" description="请先完成 Ledger 初始化">
       <template #extra><div class="ledger-state-extra">设置基础货币、时区并创建账户后，交易记录才会出现在这里。</div></template>
     </NEmpty>
-    <NCard v-else-if="!store.hasUnresolvedCreate.value && store.settings.value" class="ledger-transaction-history" :bordered="false" size="small" aria-label="交易记录列表">
+    <NCard v-else-if="!store.hasUnresolvedCreate.value && historyAvailable" class="ledger-transaction-history" :bordered="false" size="small" aria-label="交易记录列表">
       <div v-if="!store.activeAccounts.value.length" class="ledger-no-active-account-notice" data-testid="ledger-transactions-no-account" role="status">
         <div>
           <strong>当前没有可用于新增交易的账户。</strong>
@@ -872,8 +903,32 @@ const visibleTransactionColumns = computed(() => {
           >
             <template #prefix><NIcon :size="18" aria-hidden="true"><Search /></NIcon></template>
           </NInput>
+          <NDropdown
+            v-if="phoneLayout"
+            v-model:show="phoneSortOpen"
+            size="small"
+            trigger="click"
+            placement="bottom-end"
+            :value="phoneSortValue"
+            :options="phoneSortOptions"
+            :menu-props="() => ({ role: 'menu', 'aria-label': '交易排序' })"
+            :node-props="(option) => ({ role: 'menuitemradio', 'aria-checked': option.key === phoneSortValue ? 'true' : 'false' })"
+            :render-icon="(option) => option.key === phoneSortValue ? h(NIcon, { 'aria-hidden': 'true' }, () => h(Check)) : null"
+            @select="changePhoneSort"
+          >
+            <NButton
+              class="ledger-phone-sort"
+              attr-type="button"
+              size="small"
+              aria-label="交易排序"
+              aria-haspopup="menu"
+              :aria-expanded="phoneSortOpen"
+            >
+              <template #icon><NIcon :size="18" aria-hidden="true"><ArrowsSort /></NIcon></template>
+            </NButton>
+          </NDropdown>
         </div>
-        <div class="ledger-history-summary" aria-label="交易汇总">
+        <div v-if="page" class="ledger-history-summary" aria-label="交易汇总">
           <span>收入 <strong class="is-income"><LedgerAnimatedMoney :minor="resultSummary.incomeMinor" :currency="store.settings.value?.baseCurrency ?? 'CNY'" :hide-fraction="compactTableScroll" animate-on-mount /></strong></span>
           <i aria-hidden="true" />
           <span>支出 <strong class="is-expense"><LedgerAnimatedMoney :minor="resultSummary.expenseMinor" :currency="store.settings.value?.baseCurrency ?? 'CNY'" :hide-fraction="compactTableScroll" animate-on-mount /></strong></span>
@@ -888,6 +943,35 @@ const visibleTransactionColumns = computed(() => {
           <i /><i /><i /><i /><i /><i /><i />
         </span>
       </div>
+      <ul v-else-if="phoneLayout && transactions.length" class="ledger-phone-transactions" data-testid="ledger-compact-transaction-list" aria-label="交易记录">
+        <li v-for="transaction in visibleTransactions" :key="transaction.id">
+          <button
+            type="button"
+            class="ledger-transaction-row ledger-phone-transaction"
+            :class="{ 'is-statistics-excluded': transaction.excludedFromStatistics }"
+            :data-testid="`ledger-transaction-row-${transaction.id}`"
+            aria-haspopup="dialog"
+            @click="inspect(transaction)"
+          >
+            <strong class="ledger-phone-transaction-title">{{ phoneTransactionTitle(transaction) }}</strong>
+            <strong class="ledger-transaction-amount" :class="`is-${presentationKind(transaction)}`">
+              <LedgerAnimatedMoney :minor="signedAmountMinor(transaction)" :currency="store.settings.value?.baseCurrency ?? 'CNY'" :signed="transaction.type !== 'transfer'" :animate-on-mount="false" :animate-on-change="false" />
+            </strong>
+            <span class="ledger-phone-transaction-meta">
+              <template v-if="transaction.type === 'income' || transaction.type === 'expense'">
+                <span class="ledger-phone-transaction-category">{{ transactionCategory(transaction) }}</span>
+                <span class="ledger-phone-transaction-account"><span aria-hidden="true">· </span>{{ transactionAccount(transaction) }}</span>
+              </template>
+              <template v-else-if="transaction.type === 'transfer'">
+                <span class="ledger-phone-transaction-category">{{ typeLabel(transaction.type, transaction.transferKind) }}</span>
+                <span class="ledger-phone-transaction-account"><span aria-hidden="true">· </span>{{ accountName(transaction.fromAccountId) }}</span>
+              </template>
+              <template v-else>{{ typeLabel(transaction.type) }}</template>
+            </span>
+            <time class="ledger-phone-transaction-time" :datetime="new Date(transaction.occurredAt).toISOString()">{{ phoneTransactionTime(transaction) }}</time>
+          </button>
+        </li>
+      </ul>
       <NDataTable
         v-else-if="transactions.length"
         class="ledger-transaction-table"
@@ -899,7 +983,7 @@ const visibleTransactionColumns = computed(() => {
         @update:sorter="changeTableSort"
         :row-key="(transaction) => transaction.id"
         :row-props="transactionRowProps"
-        :loading="loading || paginationLoading"
+        :loading="loading"
         :flex-height="desktopTableFlexHeight"
         :max-height="desktopTableFlexHeight ? undefined : 268"
         :scroll-x="tabletTable ? undefined : (compactTableScroll ? 760 : 1190)"
@@ -908,7 +992,7 @@ const visibleTransactionColumns = computed(() => {
         :bottom-bordered="false"
         :single-line="false"
       />
-      <NEmpty v-else class="ledger-transactions-empty" data-testid="ledger-transactions-empty" size="medium" :description="hasFilters ? '没有符合当前筛选条件的交易' : '暂无交易记录'">
+      <NEmpty v-else-if="page && !filterError" class="ledger-transactions-empty" data-testid="ledger-transactions-empty" size="medium" :description="hasFilters ? '没有符合当前筛选条件的交易' : '暂无交易记录'">
         <template #icon>
           <span class="ledger-empty-icon" aria-hidden="true">
             <NIcon :size="24"><component :is="hasFilters ? Search : Wallet" /></NIcon>
@@ -936,14 +1020,13 @@ const visibleTransactionColumns = computed(() => {
             :page-size="tablePageSize"
             :item-count="transactionTotal"
             :page-sizes="pageSizeOptions"
-            :disabled="paginationLoading"
+            :disabled="loading"
             :page-slot="paginationPageSlot"
             show-size-picker
             size="medium"
             @update:page="changeTablePage"
             @update:page-size="changePageSize"
           />
-          <span v-if="paginationLoading" class="ledger-pagination-loading">正在加载…</span>
         </div>
       </div>
     </NCard>
@@ -1092,7 +1175,6 @@ const visibleTransactionColumns = computed(() => {
 .ledger-no-active-account-notice p { margin: 4px 0 0; color: var(--text-muted); font-size: .75rem; }
 .ledger-notice-actions { display: flex; flex-wrap: wrap; gap: 8px; }
 .ledger-transaction-pagination { display: flex; align-items: center; justify-content: center; gap: 12px; margin-top: 18px; }
-.ledger-pagination-loading { color: var(--text-muted); font-size: .75rem; }
 .ledger-transaction-context-menu { position: fixed; z-index: 3000; display: grid; min-width: 132px; gap: 2px; padding: 5px; border: 1px solid color-mix(in srgb, var(--border) 82%, transparent); border-radius: 9px; background: var(--bg); box-shadow: 0 12px 30px color-mix(in srgb, #0f172a 20%, transparent); }
 .ledger-transaction-context-menu-item { justify-content: flex-start; width: 100%; padding: 7px 9px; border-radius: 6px; color: var(--text); font: inherit; font-size: .78rem; text-align: left; }
 .ledger-transaction-context-menu-item:hover:not(:disabled),
@@ -1647,21 +1729,50 @@ const visibleTransactionColumns = computed(() => {
   .ledger-transaction-table :deep(.ledger-transaction-amount) { white-space: nowrap; }
 }
 @media (max-width: 600px) {
-  .ledger-transaction-table th:nth-child(3),
-  .ledger-transaction-table td:nth-child(3),
-  .ledger-transaction-table th:nth-child(5),
-  .ledger-transaction-table td:nth-child(5) { display: none; }
-  .ledger-transaction-table th:nth-child(4),
-  .ledger-transaction-table td:nth-child(4) { display: table-cell; }
-  .ledger-transaction-table th:first-child,
-  .ledger-transaction-table td:first-child { width: 30%; }
-  .ledger-transaction-table th:nth-child(2),
-  .ledger-transaction-table td:nth-child(2) { width: 15%; }
-  .ledger-transaction-table th:nth-child(4),
-  .ledger-transaction-table td:nth-child(4) { width: 25%; }
-  .ledger-transaction-table th:nth-child(6),
-  .ledger-transaction-table td:nth-child(6) { width: 16%; }
-  .ledger-transaction-table th:nth-child(7),
-  .ledger-transaction-table td:nth-child(7) { width: 14%; }
+  :global(.ledger-phone-account-menu .ledger-account-select-balance) { min-width: 0; }
+  .ledger-filters { padding: 4px 8px; }
+  .ledger-filter-select-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px; }
+  .ledger-filter-select-card { padding-inline: 0; }
+  .ledger-filter-icon { display: none; }
+  .ledger-history-tools .ledger-search-row { gap: 8px; }
+  .ledger-phone-sort { flex: none; width: 36px; height: 32px; padding: 0; }
+  .ledger-phone-transactions { min-width: 0; margin: 0; padding: 0; list-style: none; }
+  .ledger-phone-transactions li + li { border-top: 1px solid var(--ledger-divider); }
+  .ledger-phone-transaction {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    align-items: baseline;
+    gap: 3px 10px;
+    box-sizing: border-box;
+    width: 100%;
+    padding: 10px 16px;
+    border: 0;
+    background: transparent;
+    color: var(--text-h);
+    font: inherit;
+    text-align: left;
+    cursor: pointer;
+  }
+  .ledger-phone-transaction:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+  .ledger-phone-transaction.is-statistics-excluded { opacity: .58; }
+  .ledger-phone-transaction-title,
+  .ledger-phone-transaction-category,
+  .ledger-phone-transaction-account { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .ledger-phone-transaction-title { font-size: .85rem; }
+  .ledger-phone-transaction-meta,
+  .ledger-phone-transaction-time { color: var(--text-muted); font-size: .73rem; }
+  .ledger-phone-transaction-meta { display: flex; align-items: baseline; gap: 4px; min-width: 0; }
+  .ledger-phone-transaction-category {
+    padding: 1px 5px;
+    border-radius: 4px;
+    background: color-mix(in srgb, var(--text-muted) 12%, transparent);
+    font-size: .66rem;
+    font-weight: 650;
+  }
+  .ledger-phone-transaction-account { flex: 1 1 0; min-width: 0; }
+  .ledger-phone-transaction-time,
+  .ledger-phone-transaction .ledger-transaction-amount { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+  .ledger-pagination-controls :deep(.n-pagination) { flex-wrap: wrap; }
+  .ledger-table-skeleton { min-width: 0; }
 }
 </style>

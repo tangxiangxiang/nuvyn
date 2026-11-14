@@ -12,8 +12,6 @@ import type { ComposeOption, ECharts } from 'echarts/core'
 import { useRoute, useRouter } from 'vue-router'
 import { useConfirm } from '../composables/useConfirm'
 import { usePagePullRefresh } from '../composables/usePagePullRefresh'
-import { useToast } from '../composables/useToast'
-import { useI18n } from '../composables/useI18n'
 import PagePullRefreshIndicator from '../components/PagePullRefreshIndicator.vue'
 import { useTheme } from '../composables/useTheme'
 import LedgerAnimatedMoney from '../components/ledger/LedgerAnimatedMoney.vue'
@@ -46,8 +44,6 @@ type LedgerBalanceChartOption = ComposeOption<
 const route = useRoute()
 const router = useRouter()
 const store = useLedgerStore()
-const toast = useToast()
-const { t } = useI18n()
 const { theme } = useTheme()
 const { confirm } = useConfirm()
 
@@ -150,19 +146,10 @@ const pullAvailable = computed(() => (
   && !editing.value && !deleting.value && !detailOpen.value
   && !store.recoveryGateVisible.value
 ))
-async function refreshAccountDetail(): Promise<void> {
-  try {
-    await store.refreshData()
-    await load()
-    if (actionError.value || store.workspaceError.value) toast.error(t('workspace.refresh_failed'))
-  } catch {
-    toast.error(t('workspace.refresh_failed'))
-  }
-}
 const {
   root: pullRoot, distance: pullDistance, refreshing: pullRefreshing,
   armed: pullArmed, offset: pullOffset, indicatorTop: pullIndicatorTop,
-} = usePagePullRefresh(pullAvailable, refreshAccountDetail)
+} = usePagePullRefresh(pullAvailable)
 // The template ref is consumed by Vue's runtime and has no script-side reads.
 void pullRoot
 

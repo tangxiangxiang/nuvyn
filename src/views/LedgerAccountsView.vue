@@ -4,8 +4,6 @@ import { NButton, NCard, NEmpty, NList, NListItem, NModal, NNumberAnimation, NRe
 import LedgerFirstAccountForm from '../components/ledger/LedgerFirstAccountForm.vue'
 import PagePullRefreshIndicator from '../components/PagePullRefreshIndicator.vue'
 import { usePagePullRefresh } from '../composables/usePagePullRefresh'
-import { useToast } from '../composables/useToast'
-import { useI18n } from '../composables/useI18n'
 import LedgerAnimatedMoney from '../components/ledger/LedgerAnimatedMoney.vue'
 import LedgerPendingCreateGate from '../components/ledger/LedgerPendingCreateGate.vue'
 import LedgerAccountIcon from '../components/ledger/LedgerAccountIcon.vue'
@@ -14,8 +12,6 @@ import { ledgerWorkspaceReadErrorMessage } from '../features/ledger/ledgerErrors
 import { useLedgerStore } from '../features/ledger/ledgerStore'
 
 const store = useLedgerStore()
-const toast = useToast()
-const { t } = useI18n()
 const createOpen = ref(false)
 const activeAccountTypeFilter = ref<'all' | 'asset' | 'liability'>('all')
 const archivedAccountTypeFilter = ref<'all' | 'asset' | 'liability'>('all')
@@ -59,18 +55,10 @@ const pullAvailable = computed(() => (
   store.workspaceState.value === 'READY'
   && !loading.value && !createOpen.value && !store.recoveryGateVisible.value
 ))
-async function refreshAccounts(): Promise<void> {
-  try {
-    await store.refreshData()
-    if (store.workspaceError.value) toast.error(t('workspace.refresh_failed'))
-  } catch {
-    toast.error(t('workspace.refresh_failed'))
-  }
-}
 const {
   root: pullRoot, distance: pullDistance, refreshing: pullRefreshing,
   armed: pullArmed, offset: pullOffset, indicatorTop: pullIndicatorTop,
-} = usePagePullRefresh(pullAvailable, refreshAccounts)
+} = usePagePullRefresh(pullAvailable)
 // The template ref is consumed by Vue's runtime and has no script-side reads.
 void pullRoot
 

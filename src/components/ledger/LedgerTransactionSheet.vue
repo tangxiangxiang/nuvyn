@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, nextTick, ref, watch } from 'vue'
+import { useMediaQuery } from '@vueuse/core'
 import {
   NButton,
   NCard,
@@ -38,6 +39,7 @@ const { user } = useAuth()
 const toast = useToast()
 const { confirm } = useConfirm()
 const transactionFields = ref<{ focusAmount: () => void } | null>(null)
+const phoneLayout = useMediaQuery('(max-width: 600px)')
 
 type EntryType = 'expense' | 'income' | 'transfer'
 const entryTypeOptions: ReadonlyArray<readonly [EntryType, string]> = [
@@ -107,7 +109,7 @@ function defaultOccurredAt(): string {
 }
 
 function defaultAccountId(): string {
-  const recent = readRecentTransactionAccount()
+  const recent = readRecentTransactionAccount(user.value)
   const accounts = activeAccounts.value
   if (accounts.some((account) => account.id === recent)) return recent
   return accounts.length === 1 ? accounts[0]!.id : ''
@@ -144,13 +146,12 @@ function resetForm(): void {
   })
 }
 
-watch(() => props.open, async (open) => {
+watch(() => props.open, (open) => {
   if (open) {
     resetForm()
     // NModal owns trapping and restoration. The shared field component
     // supplies the sheet's initial amount focus after its content is mounted.
-    await nextTick()
-    transactionFields.value?.focusAmount()
+    focusInitialInput()
   }
 }, { immediate: true })
 
@@ -198,6 +199,10 @@ watch(activeAccounts, (accounts) => {
   if (toAccountId.value && !accounts.some((account) => account.id === toAccountId.value)) toAccountId.value = ''
 })
 
+watch(user, (owner, previous) => {
+  if (props.open && (owner?.id !== previous?.id || owner?.username !== previous?.username)) resetForm()
+})
+
 function onTypeTabKeydown(event: KeyboardEvent, selectedType: EntryType): void {
   const current = event.currentTarget as HTMLElement | null
   if (event.key === 'Enter' || event.key === ' ') {
@@ -241,7 +246,9 @@ function handleVisibilityChange(value: boolean): void {
 }
 
 function focusInitialInput(): void {
-  void nextTick(() => transactionFields.value?.focusAmount())
+  void nextTick(() => {
+    if (props.open && !phoneLayout.value) transactionFields.value?.focusAmount()
+  })
 }
 
 function allowAmountInput(value: string): boolean {

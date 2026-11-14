@@ -226,31 +226,6 @@ async function loadFolders(): Promise<void> {
   }
 }
 
-async function refreshBoardGallery(): Promise<void> {
-  loading.value = true
-  folderLoading.value = true
-  loadError.value = ''
-  folderLoadError.value = ''
-  try {
-    const results = await Promise.allSettled([
-      boardMetadataSource.refresh(),
-      boardFolderSource.refresh(),
-    ])
-    if (results[0].status === 'rejected') {
-      loadError.value = messageFor(results[0].reason, t('board.load_failed'))
-    }
-    if (results[1].status === 'rejected') {
-      folderLoadError.value = messageFor(results[1].reason, t('board.load_failed'))
-    }
-    if (results.some((result) => result.status === 'rejected')) {
-      toast.error(t('workspace.refresh_failed'))
-    }
-  } finally {
-    loading.value = false
-    folderLoading.value = false
-  }
-}
-
 const pullAvailable = computed(() => (
   !loading.value && !folderLoading.value && mutationKeys.value.length === 0
   && !renameOpen.value && !folderModalOpen.value && !moveOpen.value
@@ -258,7 +233,7 @@ const pullAvailable = computed(() => (
 const {
   root: pullRoot, distance: pullDistance, refreshing: pullRefreshing,
   armed: pullArmed, offset: pullOffset, indicatorTop: pullIndicatorTop,
-} = usePagePullRefresh(pullAvailable, refreshBoardGallery)
+} = usePagePullRefresh(pullAvailable)
 // The template ref is consumed by Vue's runtime and has no script-side reads.
 void pullRoot
 
