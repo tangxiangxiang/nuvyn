@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, inject, shallowRef, watch, computed, defineAsyncComponent, onBeforeUnmount, onMounted, nextTick } from 'vue'
+import { ref, inject, shallowRef, watch, watchEffect, computed, defineAsyncComponent, onBeforeUnmount, onMounted, nextTick } from 'vue'
 import { useEventListener, useMediaQuery, useStorage } from '@vueuse/core'
 import { onBeforeRouteLeave, onBeforeRouteUpdate, useRoute, useRouter } from 'vue-router'
 import { useShortcutDisplay } from '../composables/useShortcutDisplay'
@@ -2295,10 +2295,27 @@ function openDiaryPlan(date: DiaryDate, trigger: HTMLElement | null = null, choo
   diaryPlanDate.value = date
 }
 
-function openDiaryPlanHome(event: MouseEvent) {
+function openDiaryPlanHome(trigger: HTMLElement) {
   const today = localCivilToday()
-  if (today) openDiaryPlan(today, event.currentTarget as HTMLElement, true)
+  if (today) openDiaryPlan(today, trigger, true)
 }
+
+watchEffect(() => {
+  if (!appShell?.diaryPlanEntry) return
+  if (!isDiaryCalendarVisible.value || !diaryAccess.isUnlocked.value) {
+    appShell.diaryPlanEntry.value = null
+    return
+  }
+  const { year, month } = diaryPlanMonth.value
+  const monthPrefix = `${String(year).padStart(4, '0')}-${String(month).padStart(2, '0')}-`
+  appShell.diaryPlanEntry.value = {
+    open: openDiaryPlanHome,
+    hasPlans: diaryPlanDays.value.some((day) => day.total > 0 && day.date.startsWith(monthPrefix)),
+  }
+})
+onBeforeUnmount(() => {
+  if (appShell?.diaryPlanEntry?.value?.open === openDiaryPlanHome) appShell.diaryPlanEntry.value = null
+})
 
 async function closeDiaryPlan() {
   const date = diaryPlanDate.value
@@ -2309,7 +2326,7 @@ async function closeDiaryPlan() {
   if (!date || !diaryAccess.isUnlocked.value || !isDiaryCalendarVisible.value) return
   if (trigger?.isConnected) trigger.focus()
   else if (!diaryCalendarSurfaceRef.value?.focusDate(date)) {
-    vaultRef.value?.querySelector<HTMLButtonElement>('[data-testid="diary-calendar-plan-home"]')?.focus()
+    document.querySelector<HTMLButtonElement>('.nav-actions [data-testid="diary-calendar-plan-home"]')?.focus()
   }
 }
 
@@ -3860,7 +3877,6 @@ watch(isReadMode, async (reading) => {
             @mood-change="updateDiaryCalendarMood"
             @month-change="onDiaryCalendarMonthChange"
             @plan-selected="openDiaryPlan"
-            @plan-home="openDiaryPlanHome"
           />
         </template>
       </DiaryWorkspace>

@@ -45,7 +45,6 @@ const emit = defineEmits<{
   'month-change': [month: DiaryCalendarMonth]
   'mood-change': [date: DiaryDate, mood: DiaryMoodId | null]
   'plan-selected': [date: DiaryDate, trigger: HTMLButtonElement]
-  'plan-home': [trigger: MouseEvent]
 }>()
 
 const lastMonthKey = ref<string | null>(null)
@@ -484,13 +483,6 @@ defineExpose({ focusDate, closeMoodPicker, clearSelection })
     :aria-busy="props.loading || undefined"
   >
     <div class="diary-calendar-host">
-      <button
-        v-if="props.planDays"
-        type="button"
-        class="diary-calendar-plan-home"
-        data-testid="diary-calendar-plan-home"
-        @click="emit('plan-home', $event)"
-      >{{ t('diary.plan.short') }}</button>
       <NCalendar
         :key="calendarKey"
         :default-value="calendarDefaultValue"
@@ -979,21 +971,6 @@ defineExpose({ focusDate, closeMoodPicker, clearSelection })
   background: transparent;
   cursor: pointer;
   pointer-events: auto;
-}
-
-.diary-calendar-plan-home {
-  position: absolute;
-  z-index: 3;
-  top: 14px;
-  inset-inline-end: 12px;
-  padding: 4px 6px;
-  border: 0;
-  border-radius: 5px;
-  background: transparent;
-  color: var(--accent);
-  font: inherit;
-  font-size: 0.8rem;
-  cursor: pointer;
 }
 
 .diary-calendar-plan::before {

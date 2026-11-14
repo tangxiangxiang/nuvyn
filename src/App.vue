@@ -19,7 +19,7 @@ import { useZenMode } from './composables/vault/useZenMode'
 import { createZenModeChord } from './views/zenModeChord'
 import { useDiaryAccessSession } from './composables/diary/useDiaryAccessSession'
 import { DiaryAccessContextKey } from './composables/diary/diaryAccessContext'
-import { AppShellContextKey } from './composables/appShellContext'
+import { AppShellContextKey, type AppShellContext } from './composables/appShellContext'
 import DiaryAccessDialog from './components/diary/DiaryAccessDialog.vue'
 import type { ScopeKey } from '../shared/scopeProtocol'
 import { boardMetadataSource } from './features/board/boardMetadataSource'
@@ -51,6 +51,7 @@ const settingsRequestTick = ref(0)
 const noteTabletImageCommand = ref<(() => void) | null>(null)
 const ledgerSettingsOpen = ref(false)
 const diaryCalendarVisible = ref(false)
+const diaryPlanEntry: NonNullable<AppShellContext['diaryPlanEntry']> = ref(null)
 const diaryBackCommand = ref<(() => void | Promise<void>) | null>(null)
 const diaryAnalysisExportCommand = ref<(() => Promise<void>) | null>(null)
 const ledgerAnalysisExportCommand = ref<(() => Promise<void>) | null>(null)
@@ -89,6 +90,7 @@ provide(AppShellContextKey, {
   settingsRequestTick,
   noteTabletImageCommand,
   diaryCalendarVisible,
+  diaryPlanEntry,
   diaryBackCommand,
   diaryAnalysisExportCommand,
   ledgerAnalysisExportCommand,

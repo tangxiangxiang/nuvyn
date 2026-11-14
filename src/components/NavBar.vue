@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, inject, nextTick, onBeforeUnmount, onMounted, ref, watch, type ComponentPublicInstance } from 'vue'
-import { NButton, NDropdown, NIcon } from 'naive-ui'
+import { NButton, NDropdown, NIcon, NTooltip } from 'naive-ui'
 import {
   Box,
   Calendar,
@@ -9,6 +9,7 @@ import {
   Photo,
   LayoutSidebarLeftExpand,
   LayoutSidebarRightExpand,
+  ListCheck,
   Lock,
   Moon,
   Notes,
@@ -148,6 +149,10 @@ watch(activeScope, () => {
 }, { flush: 'sync' })
 const diaryAccess = inject(DiaryAccessContextKey, null)
 const appShell = inject(AppShellContextKey, null)
+
+function openDiaryPlan(event: MouseEvent): void {
+  if (event.currentTarget instanceof HTMLElement) appShell?.diaryPlanEntry?.value?.open(event.currentTarget)
+}
 const noteSpeechOptions = computed(() => [
   { label: t('note.speech_read_all'), key: 'read-all' },
   ...(appShell?.noteSpeechReadSelectionCommand?.value
@@ -1025,6 +1030,24 @@ onBeforeUnmount(() => {
       </div>
       <div class="nav-spacer" />
       <div class="nav-actions">
+        <NTooltip v-if="isDiaryCalendarVisible && props.diaryUnlocked && appShell?.diaryPlanEntry?.value" placement="bottom-end">
+          <template #trigger>
+            <NButton
+              class="nav-diary-plan"
+              :class="{ 'has-plans': appShell.diaryPlanEntry.value.hasPlans }"
+              attr-type="button"
+              size="small"
+              quaternary
+              :bordered="false"
+              :aria-label="t('diary.plan.open_home')"
+              data-testid="diary-calendar-plan-home"
+              @click="openDiaryPlan"
+            >
+              <NIcon aria-hidden="true"><ListCheck /></NIcon>
+            </NButton>
+          </template>
+          <span data-testid="diary-calendar-plan-tooltip">{{ t('diary.plan.short') }}</span>
+        </NTooltip>
         <NDropdown
           v-if="isVault && appShell?.noteSpeechReadAllCommand?.value"
           trigger="click"

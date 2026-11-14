@@ -93,6 +93,7 @@ const STRINGS: Strings = {
   'diary.future_missing': { zh: '未来日期尚未创建。到达该日期后才能新建日记。', en: 'Future diary dates are not created until that date arrives.' },
   'diary.plan.heading': { zh: '当日计划', en: 'Day plan' },
   'diary.plan.short': { zh: '计划', en: 'Plans' },
+  'diary.plan.open_home': { zh: '打开计划', en: 'Open plans' },
   'diary.plan.open': { zh: '查看 {date} 的计划', en: 'View plan for {date}' },
   'diary.plan.choose_date': { zh: '选择计划日期', en: 'Choose a plan date' },
   'diary.plan.close': { zh: '关闭计划', en: 'Close plan' },

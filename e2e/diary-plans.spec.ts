@@ -73,6 +73,7 @@ test('creates a future plan, safely retries a lost response and persists through
     await sheet(page).getByRole('button', { name: 'Close plan' }).click()
     await expect(dateButton).toBeFocused()
     await expect(marker(page, tomorrow)).toBeVisible()
+    await expect(page.getByTestId('diary-calendar-plan-home')).toHaveClass(/has-plans/)
     expect(createDiaryRequests).toEqual([])
     expect((await request.get(`/api/posts/diary/${tomorrow}`)).status()).toBe(404)
     const items = (await (await request.get(`${base}?date=${tomorrow}`)).json()).items
@@ -126,6 +127,7 @@ test('keeps today and past Diary entries separate from plans and discards stale 
     await calendarDay(calendar, past).click()
     await expect(page.locator(`[role="tab"][data-tab-id="diary/${past}"]`)).toHaveAttribute('aria-selected', 'true')
     await expect(page.locator('.reading-pane')).toBeVisible()
+    await expect(page.getByTestId('diary-calendar-plan-home')).toHaveCount(0)
     await goBackFromDiaryDocument(page)
     await expect(calendar).toBeVisible()
     await page.getByTestId('diary-calendar-plan-home').click()
@@ -166,14 +168,49 @@ test('keeps today and past Diary entries separate from plans and discards stale 
   }
 })
 
-test('keeps the plan form accessible on desktop, tablet, phone and short landscape', async ({ page }) => {
+test('keeps the Plan icon and form accessible across viewports and themes', async ({ page }) => {
   await openCalendar(page)
+  const entry = page.locator('.nav-actions').getByRole('button', { name: 'Open plans', exact: true })
+  const tooltip = page.getByTestId('diary-calendar-plan-tooltip')
+  const toggle = page.locator('.theme-toggle')
+  await expect(page.getByTestId('diary-calendar').getByTestId('diary-calendar-plan-home')).toHaveCount(0)
   for (const viewport of [
-    { width: 390, height: 844 }, { width: 768, height: 1024 },
+    { width: 320, height: 640 }, { width: 390, height: 844 }, { width: 768, height: 1024 },
     { width: 1280, height: 800 }, { width: 599, height: 320 },
   ]) {
     await page.setViewportSize(viewport)
-    await page.getByTestId('diary-calendar-plan-home').click()
+    await expect(entry).toHaveText('')
+    await expect(entry.locator('svg')).toBeVisible()
+    const iconBounds = (await entry.boundingBox())!
+    const toggleBounds = (await toggle.boundingBox())!
+    expect(iconBounds.width).toBeCloseTo(toggleBounds.width)
+    expect(iconBounds.height).toBeCloseTo(toggleBounds.height)
+    expect(iconBounds.x + iconBounds.width).toBeLessThan(viewport.width)
+    expect(iconBounds.y + iconBounds.height / 2).toBeCloseTo(toggleBounds.y + toggleBounds.height / 2, 0)
+    if (viewport.width === 1280) {
+      const root = page.locator('html')
+      if (await root.getAttribute('data-theme') !== 'dark') await toggle.click()
+      await expect(root).toHaveAttribute('data-theme', 'dark')
+      await expect(tooltip).toBeHidden()
+      await entry.hover()
+      await expect(tooltip).toHaveText('Plans')
+      await expect(tooltip).toBeVisible()
+      await page.mouse.move(0, 0)
+      await expect(tooltip).toBeHidden()
+      await page.getByTestId('diary-calendar-next').click()
+      await page.getByTestId('diary-calendar-previous').click()
+      await entry.focus()
+      await page.keyboard.press('Shift+Tab')
+      await page.keyboard.press('Tab')
+      await expect(entry).toBeFocused()
+      await page.keyboard.press('Enter')
+      await expect(sheet(page)).toBeVisible()
+      await page.keyboard.press('Escape')
+      await expect(entry).toBeFocused()
+      await page.keyboard.press('Space')
+    } else {
+      await entry.click()
+    }
     const panel = sheet(page)
     await expect(panel).toBeVisible()
     await newItem(page, 'Responsive plan')

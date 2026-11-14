@@ -24,6 +24,10 @@ export interface AppShellContext {
    * displayed.
    */
   readonly diaryCalendarVisible: Ref<boolean>
+  readonly diaryPlanEntry?: Ref<{
+    open: (trigger: HTMLElement) => void
+    hasPlans: boolean
+  } | null>
   /** Vault-owned semantic action used by the global workspace navigation. */
   readonly diaryBackCommand?: Ref<(() => void | Promise<void>) | null>
   /** Hidden chrome gesture; data/filter/session ownership stays in VaultView. */

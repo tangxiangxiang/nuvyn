@@ -29,7 +29,6 @@ const emit = defineEmits<{
   'month-change': [month: DiaryCalendarMonth]
   'mood-change': [date: DiaryDate, mood: DiaryMoodId | null]
   'plan-selected': [date: DiaryDate, trigger: HTMLButtonElement]
-  'plan-home': [trigger: MouseEvent]
 }>()
 
 const { t } = useI18n()
@@ -75,7 +74,6 @@ defineExpose({ focusDate, closeMoodPicker, clearSelection })
       @month-change="emit('month-change', $event)"
       @mood-change="onMoodChange"
       @plan-selected="(date, trigger) => emit('plan-selected', date, trigger)"
-      @plan-home="emit('plan-home', $event)"
     />
   </section>
 </template>
