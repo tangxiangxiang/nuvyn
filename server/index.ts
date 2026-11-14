@@ -6,10 +6,8 @@ import attachmentRoutes from './attachments/routes.js'
 import boardRoutes from './board/routes.js'
 import boardFolderRoutes from './board/folderRoutes.js'
 import boardMaterialRoutes from './board/materialRoutes.js'
-import diaryRoutes from './routes/diary.js'
-import diaryPlanRoutes from './routes/diaryPlans.js'
+import diaryLifeRoutes from './routes/diaryLife.js'
 import diaryAccessRoutes from './routes/diaryAccess.js'
-import diaryMigrationRoutes from './routes/diaryMigration.js'
 import diaryMoodIconRoutes from './routes/diaryMoodIcons.js'
 import historyRoutes from './history/routes.js'
 import { authBoundary } from './auth/middleware.js'
@@ -40,10 +38,8 @@ app.route('/api/auth', authRoutes)
 app.route('/', vaultIdentityRoutes)
 app.route('/', metadataRoutes)
 app.route('/', folderRoutes)
-app.route('/', diaryRoutes)
-app.route('/api/diary/plans', diaryPlanRoutes)
+app.route('/api/diary/life', diaryLifeRoutes)
 app.route('/', diaryAccessRoutes)
-app.route('/', diaryMigrationRoutes)
 app.route('/api/diary/mood-icons', diaryMoodIconRoutes)
 app.route('/', postRoutes)
 app.route('/', tagRoutes)

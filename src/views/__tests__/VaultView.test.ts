@@ -1,54 +1,15 @@
 import { readFileSync as readSourceFile } from 'node:fs'
 import { fileURLToPath } from 'node:url'
-import { describe, expect, it, vi } from 'vitest'
+import { describe, expect, it } from 'vitest'
 import { applyMetadataToPostSummary } from '../metadataPostSummary'
-import { handleDiaryHomeKeydown } from '../diaryHomeKeyboard'
 
 // Source wiring assertions should have identical meaning in LF/CRLF checkouts.
 function readFileSync(path: string, encoding: 'utf8'): string {
   return readSourceFile(path, encoding).replace(/\r\n/g, '\n')
 }
 
-function keyboardEvent(
-  key: string,
-  options: { ctrlKey?: boolean; metaKey?: boolean } = {},
-): KeyboardEvent {
-  let prevented = false
-  return {
-    key,
-    ctrlKey: options.ctrlKey ?? false,
-    metaKey: options.metaKey ?? false,
-    get defaultPrevented() {
-      return prevented
-    },
-    preventDefault() {
-      prevented = true
-    },
-  } as unknown as KeyboardEvent
-}
 
 describe('VaultView editor tab wiring', () => {
-  it('owns the hidden Diary export command, final tree projection and session fence', () => {
-    const source = readFileSync(fileURLToPath(new URL('../VaultView.vue', import.meta.url)), 'utf8')
-    const handler = source.match(/async function exportDiaryAnalysis[\s\S]*?\n}/)?.[0]
-    expect(handler).toBeDefined()
-    expect(source).toContain('managedDiaryPathsInProjection(projectFileTree({')
-    expect(source).toContain('query: parseTagQuery(filesFilter.value)')
-    expect(source).toContain('exactPathFilter: diaryExactPathFilter.value')
-    expect(source).toContain('appShell.diaryAnalysisExportCommand.value = exportDiaryAnalysis')
-    expect(source).toContain('appShell.diaryAnalysisExportCommand.value = null')
-    expect(handler).toContain('!diaryAccess.isUnlocked.value')
-    expect(handler).toContain('captureDiarySessionGeneration()')
-    expect(handler).toContain('isDiarySessionGenerationCurrent(sessionGeneration)')
-    expect(handler).toContain("activeScope.value !== 'diary'")
-    expect(handler).toContain("watch(activeScope, () => { scopeCurrent = false }, { flush: 'sync' })")
-    expect(handler).toContain('stopScopeWatch()')
-    expect(handler).toContain('const paths = [...filteredDiaryAnalysisPaths.value]')
-    expect(handler!.indexOf('const paths =')).toBeLessThan(handler!.indexOf('await loadDiaryAnalysisExport'))
-    expect(handler).toContain('tab && !tab.loading && !tab.loadError ? tab.raw : undefined')
-    expect(handler).toContain('if (data && isCurrent()) downloadDiaryAnalysisExport(data, isCurrent)')
-    expect(handler).not.toMatch(/doSaveNow|requestAccess|selectScope|router\.|localStorage|sessionStorage|toast\.|console\.error\([^)]*,/)
-  })
 
   it('settles PDF images before preparing the export snapshot', () => {
     const source = readFileSync(fileURLToPath(new URL('../VaultView.vue', import.meta.url)), 'utf8')
@@ -151,7 +112,7 @@ describe('VaultView editor tab wiring', () => {
     const selectionHandler = source.match(/function selectTag\(tag: string\): void \{[\s\S]*?\n\}/)?.[0]
     const browsingWatcher = source.match(/watch\(tagBrowsingIndex, \(index\) => \{[\s\S]*?\n\}\)/)?.[0]
 
-    expect(source).toContain("import {\n  buildTagIndex,\n  parseTagQuery,\n  resolveTagBrowseSelection,\n  toggleTagBrowseSelection,\n} from '../lib/tags'")
+    expect(source).toContain("import {\n  buildTagIndex,\n  resolveTagBrowseSelection,\n  toggleTagBrowseSelection,\n} from '../lib/tags'")
     expect(source).toContain('const tagBrowsingIndex = computed(() => buildTagIndex(posts.value))')
     expect(selectionHandler).toContain('toggleTagBrowseSelection(selectedTag.value, tag)')
     expect(selectionHandler).toContain('tagSelectionEpoch.value += 1')
@@ -200,7 +161,7 @@ describe('VaultView editor tab wiring', () => {
   it('keeps the editor and tabs mounted while the History sidebar is active', () => {
     const source = readFileSync(fileURLToPath(new URL('../VaultView.vue', import.meta.url)), 'utf8')
 
-    expect(source).toContain('const historyPanelVisible = computed(() => (')
+    expect(source).toContain('const historyPanelVisible = computed(() => workspaceLeftSidebarVisible.value && activePanel.value === ')
     expect(source).toContain('v-else-if="historyPanelVisible"')
     expect(source).toContain('@open-revision="openHistoryComparison"')
     expect(source).not.toContain('import DiffView')
@@ -341,7 +302,7 @@ describe('VaultView editor tab wiring', () => {
     const source = readFileSync(fileURLToPath(new URL('../VaultView.vue', import.meta.url)), 'utf8')
     const shortcutHandler = source.match(/function onVaultKeydown[\s\S]*?\n}/)?.[0]
 
-    expect(source).toContain('v-show="!isDiaryPresentationPrimary && !activeHistoryComparison && !activeWorkingTreeDiff && !activeDraftRecovery"')
+    expect(source).toContain('v-show="!activeHistoryComparison && !activeWorkingTreeDiff && !activeDraftRecovery"')
     expect(source).toContain('<HistoryComparisonPane')
     expect(source).toContain(':comparison="activeHistoryComparison"')
     expect(source).toContain('const historyComparisons = useHistoryComparisons({')
@@ -351,46 +312,6 @@ describe('VaultView editor tab wiring', () => {
     expect(shortcutHandler?.match(/onEditorKeydown\(event\)/g)).toHaveLength(1)
     expect(shortcutHandler).toContain('if (!readOnlyTab)')
     expect(source).not.toContain('snapshots.value.push(activeTab')
-  })
-
-  it('routes Diary G+B and navbar re-selection through the same active workspace close command', () => {
-    const source = readFileSync(fileURLToPath(new URL('../VaultView.vue', import.meta.url)), 'utf8')
-    const diaryShortcut = source.match(/const diaryBackChord = createDiaryShortcutChord\([\s\S]*?\n\}\)/)?.[0]
-    const diaryBackCommand = source.match(/function backToDiaryHome\([\s\S]*?\n\}/)?.[0]
-    const diaryBackEligibility = source.match(/const canBackToDiaryHome = computed\(\(\) => \([\s\S]*?\n\)\)/)?.[0]
-    const ordinaryDiaryDocument = source.match(/const isOrdinaryManagedDiaryDocumentActive = computed\(\(\) => \([\s\S]*?\n\)\)/)?.[0]
-    const specialWorkspaceSurface = source.match(/const specialWorkspaceSurfaceActive = computed\(\(\) => Boolean\([\s\S]*?\n\)\)/)?.[0]
-
-    expect(diaryShortcut).toBeDefined()
-    expect(ordinaryDiaryDocument).toBeDefined()
-    expect(specialWorkspaceSurface).toBeDefined()
-    expect(diaryShortcut).toContain('goBack: backToDiaryHome')
-    expect(diaryShortcut).toContain('isDiaryDocument: () => canBackToDiaryHome.value')
-    expect(diaryBackEligibility).toContain('isOrdinaryManagedDiaryDocumentActive.value')
-    expect(ordinaryDiaryDocument).toContain('isDiaryScope.value')
-    expect(ordinaryDiaryDocument).toContain("classifyDiaryPath(activePath.value ?? '') === 'managed'")
-    expect(ordinaryDiaryDocument).toContain('activeWorkspaceTabId.value === activePath.value')
-    expect(ordinaryDiaryDocument).toContain('activeTab.value?.path === activePath.value')
-    expect(ordinaryDiaryDocument).toContain('!specialWorkspaceSurfaceActive.value')
-    expect(specialWorkspaceSurface).toContain('activeHistoryComparison.value')
-    expect(specialWorkspaceSurface).toContain('activeWorkingTreeDiff.value')
-    expect(specialWorkspaceSurface).toContain('activeDraftRecovery.value')
-    expect(diaryBackEligibility).not.toContain('isDiaryDocumentMode')
-    expect(source).toContain('registeredDiaryBackCommand = () => { void backToDiaryHome() }')
-    expect(diaryBackCommand).toContain('if (!canBackToDiaryHome.value) return')
-    expect(diaryBackCommand).toContain('await closeWorkspaceTab(activeId)')
-    const scopeTransition = source.match(/async function changeVaultScope\([\s\S]*?\n\}/)?.[0]
-    expect(scopeTransition).toBeDefined()
-    expect(scopeTransition).toContain('await doSaveNow(outgoingPath)')
-    expect(scopeTransition).toContain('resolveScopeDocumentPath(scope)')
-    expect(scopeTransition).toContain('selectScope(scope)')
-    expect(scopeTransition).toContain('selectEditorTab(targetPath)')
-    expect(scopeTransition).not.toContain('closeWorkspaceTab(')
-    expect(source).toContain(".filter((tab) => scopeForWorkspacePath(tab.documentPath ?? tab.id) === activeScope.value)")
-    expect(source).toContain('const noteActivePath = ref<string | null>(null)')
-    expect(source).toContain('const diaryActivePath = ref<string | null>(null)')
-    expect(source).toContain('@close="closeWorkspaceTab"')
-    expect(source).not.toContain('window.history.back()')
   })
 
   it('revalidates recovery identity after View Current opens the document', () => {
@@ -570,64 +491,6 @@ describe('VaultView editor tab wiring', () => {
     expect(shortcut).toContain('void selectWorkspaceTab(nextTab.id)')
   })
 
-  it('gates hidden document shortcuts while Diary Home is primary', () => {
-    const source = readFileSync(fileURLToPath(new URL('../VaultView.vue', import.meta.url)), 'utf8')
-    const shortcut = source.match(/function onVaultKeydown[\s\S]*?\n}/)?.[0]
-
-    expect(shortcut).toBeDefined()
-    expect(shortcut).toContain('if (isDiaryPresentationPrimary.value)')
-    expect(shortcut).toContain('handleDiaryHomeKeydown(event, {')
-    expect(shortcut).toContain('activeWorkspaceTabId: activeWorkspaceTabId.value')
-    expect(shortcut).toContain('workspaceTabCount: workspaceTabs.value.length')
-    expect(source).toContain('hidden tabs only own shortcuts when a corresponding workspace target')
-  })
-
-  it('claims Diary Home W/Tab only when a hidden workspace target exists', () => {
-    const onEditorKeydown = vi.fn()
-    const state = { activeWorkspaceTabId: 'diary/2026-08-24', workspaceTabCount: 2 }
-
-    const closeEvent = keyboardEvent('w', { ctrlKey: true })
-    handleDiaryHomeKeydown(closeEvent, state, onEditorKeydown)
-    expect(closeEvent.defaultPrevented).toBe(true)
-
-    const cycleEvent = keyboardEvent('Tab', { ctrlKey: true })
-    handleDiaryHomeKeydown(cycleEvent, state, onEditorKeydown)
-    expect(cycleEvent.defaultPrevented).toBe(true)
-    expect(state).toEqual({ activeWorkspaceTabId: 'diary/2026-08-24', workspaceTabCount: 2 })
-    expect(onEditorKeydown).not.toHaveBeenCalled()
-  })
-
-  it('does not claim browser W/Tab when Diary Home has no workspace target', () => {
-    const onEditorKeydown = vi.fn()
-    const state = { activeWorkspaceTabId: null, workspaceTabCount: 0 }
-
-    const closeEvent = keyboardEvent('w', { ctrlKey: true })
-    handleDiaryHomeKeydown(closeEvent, state, onEditorKeydown)
-    expect(closeEvent.defaultPrevented).toBe(false)
-
-    const cycleEvent = keyboardEvent('Tab', { ctrlKey: true })
-    handleDiaryHomeKeydown(cycleEvent, state, onEditorKeydown)
-    expect(cycleEvent.defaultPrevented).toBe(false)
-    expect(state).toEqual({ activeWorkspaceTabId: null, workspaceTabCount: 0 })
-    expect(onEditorKeydown).not.toHaveBeenCalled()
-  })
-
-  it('keeps Diary Home S/E suppression and B forwarding unchanged', () => {
-    const onEditorKeydown = vi.fn()
-    const state = { activeWorkspaceTabId: null, workspaceTabCount: 0 }
-
-    for (const key of ['s', 'e']) {
-      const event = keyboardEvent(key, { metaKey: true })
-      handleDiaryHomeKeydown(event, state, onEditorKeydown)
-      expect(event.defaultPrevented).toBe(true)
-    }
-
-    const filesEvent = keyboardEvent('b', { metaKey: true })
-    handleDiaryHomeKeydown(filesEvent, state, onEditorKeydown)
-    expect(filesEvent.defaultPrevented).toBe(false)
-    expect(onEditorKeydown).toHaveBeenCalledOnce()
-  })
-
   it('warns when a family move settles without persisting the latest edit', () => {
     const source = readFileSync(fileURLToPath(new URL('../VaultView.vue', import.meta.url)), 'utf8')
     const handler = source.match(
@@ -683,363 +546,5 @@ describe('VaultView AI live context capture wiring', () => {
     // Diff after-sides are re-read from the live editor buffer at the
     // capture instant.
     expect(source).toContain('liveDocument: (path) => liveEditorForPath(tabs.value, path)')
-  })
-})
-
-describe('VaultView D3.2 Diary surface wiring', () => {
-  it('shows Calendar-first only for the diary scope without replacing FileTree', () => {
-    const source = readFileSync(fileURLToPath(new URL('../VaultView.vue', import.meta.url)), 'utf8')
-    const branch = source.match(
-      /v-if="isDiaryCalendarMounted"[\s\S]*?<DiaryCalendarSurface[\s\S]*?\/>/,
-    )?.[0]
-
-    expect(source).toContain("import DiaryCalendarSurface from '../components/diary/DiaryCalendarSurface.vue'")
-    expect(source).toContain("const isDiaryScope = computed(() => activeScope.value === 'diary')")
-    expect(source).toContain('const isDiaryCalendarMounted = computed(() => isDiaryScope.value)')
-    expect(source).toContain('const diaryWorkspacePresentation = useDiaryWorkspacePresentation({')
-    expect(source).toContain('const isDiaryPresentationPrimary = computed(() => isDiaryCalendarVisible.value)')
-    expect(source).toContain('isDocument: isDiaryDocumentMode')
-    expect(source).toContain(':eligible="diaryPresentationEligible"')
-    expect(source).toContain(':visible="isDiaryCalendarVisible"')
-    expect(branch).toBeDefined()
-    expect(source).toContain('<DiaryWorkspace')
-    expect(branch).toContain(':mode="presentationMode"')
-    expect(branch).toContain('<template #home>')
-    expect(branch).toContain(':tree="tree"')
-    expect(branch).toContain(':loading="treeLoading"')
-    expect(branch).toContain(':error="treeError"')
-    expect(source).toContain('<FileTree')
-    expect(source).toContain(':tree="tree"')
-    expect(source).toContain('const workspaceActivityBarVisible = computed(() => (')
-    expect(source).toContain('v-if="workspaceActivityBarVisible"')
-    expect(source).toContain('const filesPanelVisible = computed(() => (')
-    expect(source).toContain('v-if="filesPanelVisible"')
-    expect(source).toContain('v-else-if="tagPanelVisible"')
-    expect(source).toContain('v-else-if="historyPanelVisible"')
-    expect(source).toContain('v-else-if="recoveryPanelVisible"')
-    expect(source).toContain('activityBarVisible: activityBarLayoutVisible')
-    expect(source).toContain('forceSidePanelOpen: forceSidePanelLayoutOpen')
-    expect(source).toContain('forceSidePanelLayoutOpen.value = visible && diary')
-    const presentationWatch = source.match(
-      /watch\(\[workspaceSidebarVisible, isDiaryScope\][\s\S]*?\n\}, \{ immediate: true, flush: 'sync' \}\)/,
-    )?.[0]
-    expect(presentationWatch).toBeDefined()
-    expect(presentationWatch).not.toContain('activePanel.value =')
-  })
-
-  it('limits Note image insertion to the active editable Note surface', () => {
-    const source = readFileSync(fileURLToPath(new URL('../VaultView.vue', import.meta.url)), 'utf8')
-    const gate = source.match(/const canInsertNoteImage = computed\(\(\) => Boolean\([\s\S]*?\n\)\)/u)?.[0]
-
-    expect(gate).toBeDefined()
-    expect(gate).toContain("route.meta.workspaceKind === 'vault'")
-    expect(gate).toContain("activeScope.value === 'note'")
-    expect(gate).toContain('activeTab.value?.path === activePath.value')
-    expect(gate).toContain('!isReadMode.value')
-    expect(gate).toContain('!specialWorkspaceSurfaceActive.value')
-    expect(source).toContain(':allow-image-insertion="canInsertNoteImage"')
-  })
-
-  it('routes D3.2 date intent to the D4 lifecycle owner', () => {
-    const source = readFileSync(fileURLToPath(new URL('../VaultView.vue', import.meta.url)), 'utf8')
-    const branch = source.match(
-      /v-if="isDiaryCalendarMounted"[\s\S]*?<DiaryCalendarSurface[\s\S]*?\/>/,
-    )?.[0] ?? ''
-
-    expect(branch).toContain('@date-selected="onDiaryDateSelected"')
-    expect(source).toContain('const { ensureDiaryDate, openDiaryDate } = useDiaryDateCommand({')
-    expect(source).toContain('diaryWorkspacePresentation.recordDateCommandResult(result)')
-    expect(source).toContain('diaryWorkspacePresentation.requestDocument(result.date, result.path)')
-    expect(source).toContain("viewModeApi?.set('read')")
-    expect(source).toContain("result.status !== 'opened' && result.status !== 'created'")
-    expect(source).toContain('const intent = diaryWorkspacePresentation.beginDateIntent()')
-    expect(source).toContain('diaryWorkspacePresentation.isDateIntentCurrent(intent)')
-    expect(source).toContain('!isDiaryScope.value')
-    expect(source).toContain('!diaryPresentationEligible.value')
-    expect(source).toContain("createDiaryDate,")
-    expect(source).not.toContain("createPost({ path: 'diary")
-    expect(source).not.toContain("documentLifecycle.createFile({ path: 'diary")
-  })
-
-  it('hands successful Diary dates to the native Vault document surfaces and keeps D6.4 deferred', () => {
-    const source = readFileSync(fileURLToPath(new URL('../VaultView.vue', import.meta.url)), 'utf8')
-
-    expect(source).not.toContain('DiaryReaderDialog')
-    expect(source).not.toContain('<template #reader>')
-    expect(source).not.toContain('requestReader(')
-    expect(source).toContain('diaryWorkspacePresentation.requestDocument(result.date, result.path)')
-    expect(source).toContain("viewModeApi?.set('read')")
-    expect(source).toContain(':exact-path-filter="diaryExactPathFilter"')
-    expect(source).not.toContain('@clear-exact-path-filter="closeDiaryPresentation"')
-    const presentationCall = source.match(
-      /const diaryWorkspacePresentation = useDiaryWorkspacePresentation\([\s\S]*?\n\}\)/,
-    )?.[0]
-    expect(presentationCall).toBeDefined()
-    expect(presentationCall).toContain('activePath,')
-    expect(source).toContain('if (activePath.value !== result.path)')
-    expect(source).toContain('diaryFilterSeed.value = date')
-    expect(source).toContain('filesFilter.value = date')
-    expect(source).toContain('const isDiaryCalendarMounted = computed(() => isDiaryScope.value)')
-    expect(source).toContain('v-if="isReadMode && !isDiaryPresentationPrimary && !activeHistoryComparison')
-    expect(source).toContain('<ReadingPane')
-    expect(source).toContain('<EditorPane')
-    expect(source).not.toContain('watch(activePath')
-    expect(source).not.toContain('router.back()')
-    expect(source).not.toContain('closeTab()')
-  })
-
-  it('persists FileTree query ownership so a user-cleared query is not re-seeded', () => {
-    const source = readFileSync(fileURLToPath(new URL('../VaultView.vue', import.meta.url)), 'utf8')
-    const ownership = readFileSync(fileURLToPath(new URL('../../composables/diary/diaryFilterScopeExit.ts', import.meta.url)), 'utf8')
-
-    expect(ownership).toContain("export type DiaryFilterOwnership = 'none' | 'calendar' | 'user'")
-    expect(source).toContain('BROWSER_STORAGE_KEYS.diaryFilterOwnership')
-    expect(source).toContain("diaryFilterOwnership.value = 'user'")
-    expect(source).toContain("diaryFilterOwnership.value === 'user'")
-    expect(source).toContain("diaryFilterOwnership.value === 'calendar'")
-    expect(source).toContain('@update:filter="onFilesFilterEdited"')
-  })
-
-  it('distinguishes fresh access bootstrap from a reconciled lock boundary', () => {
-    const source = readFileSync(fileURLToPath(new URL('../VaultView.vue', import.meta.url)), 'utf8')
-    const cleanup = readFileSync(fileURLToPath(new URL('../../composables/diary/diaryFilterScopeExit.ts', import.meta.url)), 'utf8')
-
-    expect(source).toContain('watchDiaryFilterScopeExit({')
-    expect(source).toContain('statusResolved: diaryAccess.statusResolved')
-    expect(cleanup).toContain('[isDiaryScope, statusResolved]')
-    expect(cleanup).toContain('if (inDiaryScope || !accessResolved) return')
-    expect(cleanup).toContain("diaryFilterOwnership.value === 'calendar'")
-    expect(cleanup).toContain("diaryFilterOwnership.value = 'none'")
-  })
-
-  it('keeps the Calendar mounted while presentation state controls visibility', () => {
-    const source = readFileSync(fileURLToPath(new URL('../VaultView.vue', import.meta.url)), 'utf8')
-    const editorSurface = source.match(
-      /<div\s+v-if="!isReadMode"[\s\S]*?class="content"/,
-    )?.[0]
-
-    expect(source).toContain('v-if="isDiaryCalendarMounted"')
-    expect(source).toContain('const isDiaryCalendarMounted = computed(() => isDiaryScope.value)')
-    expect(source).toContain('isHome: isDiaryCalendarMode')
-    expect(source).toContain("'is-diary-home': isDiaryCalendarVisible")
-    expect(editorSurface).toBeDefined()
-    expect(editorSurface).toContain('v-show="!isDiaryPresentationPrimary && !activeHistoryComparison && !activeWorkingTreeDiff && !activeDraftRecovery"')
-    expect(source).toContain('v-show="!isDiaryPresentationPrimary"')
-    expect(source).not.toContain('v-else-if="!isReadMode"')
-    expect(source).not.toContain('diary-reader-mode')
-  })
-
-  it('promotes Diary Home to a presentation-only primary surface', () => {
-    const source = readFileSync(fileURLToPath(new URL('../VaultView.vue', import.meta.url)), 'utf8')
-    const styles = readFileSync(fileURLToPath(new URL('../../style.css', import.meta.url)), 'utf8')
-
-    expect(source).toContain("'diary-calendar-mode': isDiaryCalendarVisible")
-    expect(source).toContain('v-if="isDiaryCalendarMounted"')
-    expect(source).toContain('v-show="!isDiaryPresentationPrimary"')
-    expect(source).toContain('const routeSidebarVisible = computed(() => route.meta.sidebar !== false)')
-    expect(source).toContain(`const workspaceSidebarVisible = computed(() => (
-  routeSidebarVisible.value
-  && !isDiaryCalendarVisible.value
-  && !zenModeActive.value
-))`)
-    expect(source).toContain('const workspaceLeftSidebarVisible = computed(() => workspaceSidebarVisible.value && leftSidebarVisible.value)')
-    expect(source).toContain('useVaultLayout({')
-    expect(source).toContain('statusBarVisible: statusBarLayoutVisible')
-    expect(source).toContain('watch([workspaceSidebarVisible, isDiaryScope]')
-    expect(source).toContain('activityBarLayoutVisible.value = visible && !diary')
-    expect(source).toContain('forceSidePanelLayoutOpen.value = visible && diary')
-    expect(source).toContain('v-if="workspaceSidebarVisible && workspaceRightPanelAvailable"')
-    expect(styles).not.toContain('.vault.diary-calendar-mode > :is(.file-tree, .tag-panel, .history-panel, .recovery-center)')
-    expect(styles).not.toContain('.vault.diary-calendar-mode > .right-rail-slot')
-    expect(styles).not.toContain('.vault.diary-calendar-mode > .status-bar-row')
-    expect(styles).not.toContain('.vault.diary-reader-mode')
-  })
-
-  it('mirrors the existing side-panel state for mobile native Diary documents', () => {
-    const source = readFileSync(fileURLToPath(new URL('../VaultView.vue', import.meta.url)), 'utf8')
-    const styles = readFileSync(fileURLToPath(new URL('../../style.css', import.meta.url)), 'utf8')
-
-    // Mobile navigation reuses the shared left-panel toggle over a full-width document.
-    expect(source).toContain("'side-panel-open': sidePanelOpen")
-    expect(styles).toContain('.vault.diary-native-document-mode > .file-tree')
-    expect(source).toContain('watch([isOrdinaryManagedDiaryDocumentActive, isMobileDiaryViewport]')
-    expect(source).toContain("'diary-native-document-mode': isOrdinaryManagedDiaryDocumentActive")
-    expect(source).toContain('closeMobileDiaryNavigation()')
-    expect(source).toContain('rightRailVisible,')
-    expect(source).toContain('tabletDrawer,')
-    expect(styles).toContain('grid-template-columns: minmax(0, 1fr) !important')
-    expect(styles).not.toMatch(/\.vault\.diary-native-document-mode[^}]*grid-template-columns:\s*40px/)
-  })
-})
-
-describe('Diary recovery presentation', () => {
-  it('temporarily replaces Diary FileTree and provides an explicit return path', () => {
-    const source = readFileSync(fileURLToPath(new URL('../VaultView.vue', import.meta.url)), 'utf8')
-    const recoveryCenter = readFileSync(fileURLToPath(new URL('../../components/vault/DraftRecoveryCenter.vue', import.meta.url)), 'utf8')
-    const translations = readFileSync(fileURLToPath(new URL('../../composables/useI18n.ts', import.meta.url)), 'utf8')
-    const handler = source.match(/function openRecoveryManagement\(\): void \{[\s\S]*?\n}/)?.[0]
-    const filesVisibility = source.match(/const filesPanelVisible = computed\(\(\) => \([\s\S]*?\n\)\)/)?.[0]
-    const recoveryVisibility = source.match(/const recoveryPanelVisible = computed\(\(\) => \([\s\S]*?\n\)\)/)?.[0]
-
-    expect(source).toContain('const diaryRecoveryCenterVisible = ref(false)')
-    expect(filesVisibility).toContain('!diaryRecoveryCenterVisible.value')
-    expect(filesVisibility).toContain("activePanel.value === 'files'")
-    expect(recoveryVisibility).toContain('diaryRecoveryCenterVisible.value')
-    expect(recoveryVisibility).toContain("activePanel.value === 'recovery'")
-    expect(source).toContain(':show-back="isDiaryScope"')
-    expect(source).toContain('@back="diaryRecoveryCenterVisible = false"')
-    expect(recoveryCenter).toContain("t('draft_recovery.center.back_to_files')")
-    expect(translations).toContain("'draft_recovery.center.back_to_files':")
-    expect(handler).toContain('if (isDiaryScope.value)')
-    expect(handler).toContain('diaryRecoveryCenterVisible.value = true')
-    expect(handler).toContain("selectPanel('recovery')")
-    expect(source).toMatch(/watch\(\[isDiaryScope, isDiaryCalendarVisible\][\s\S]*?if \(!diary \|\| calendarHome\) diaryRecoveryCenterVisible\.value = false/)
-  })
-})
-
-describe('D7.3 Native Diary mood context removal', () => {
-  it('keeps Native Diary free of the removed Mood context action', () => {
-    const source = readFileSync(fileURLToPath(new URL('../VaultView.vue', import.meta.url)), 'utf8')
-    const tabs = readFileSync(fileURLToPath(new URL('../../components/vault/EditorTabs.vue', import.meta.url)), 'utf8')
-
-    expect(source).toContain("import { useDiaryMoodCommand } from '../composables/diary/useDiaryMoodCommand'")
-    expect(source).not.toContain('<DiaryMoodContextAction')
-    expect(source).not.toContain('resolveNativeDiaryMoodContext')
-    expect(source).not.toContain('activeNativeDiaryContext')
-    expect(source).not.toContain('nativeMoodExcludedBySurface')
-    expect(source).not.toContain('diaryMoodMutationDisabled')
-    expect(source).not.toContain('updateNativeDiaryMood')
-    expect(source).not.toContain('clearNativeDiaryMood')
-    expect(source).not.toContain('diaryMoodContextRef')
-    expect(source).not.toContain(':context-actions-visible="canInsertNoteImage"')
-    expect(source).not.toContain('<template #context-actions>')
-    expect(source).toContain(':allow-image-insertion="canInsertNoteImage"')
-    expect(source).toMatch(/const canInsertNoteImage = computed\(\(\) => Boolean\([\s\S]*?activeScope\.value === 'note'/)
-
-    expect(tabs).not.toContain('DiaryMood')
-    expect(tabs).not.toContain('classifyDiaryPath')
-    expect(tabs).toContain('<slot name="context-actions" />')
-  })
-})
-
-describe('D7.3 Calendar mood integration wiring', () => {
-  it('uses the bulk PostSummary projection and keeps Calendar mutation ownership in VaultView', () => {
-    const source = readFileSync(fileURLToPath(new URL('../VaultView.vue', import.meta.url)), 'utf8')
-      .replace(/\r\n/g, '\n')
-    const calendarBranch = source.match(
-      /<DiaryCalendarSurface[\s\S]*?\/>/,
-    )?.[0]
-
-    expect(calendarBranch).toBeDefined()
-    expect(calendarBranch).toContain(':tree="tree"')
-    expect(calendarBranch).toContain(':posts="posts"')
-    expect(calendarBranch).toContain(':mood-busy="diaryMoodBusy"')
-    expect(calendarBranch).toContain('@mood-change="updateDiaryCalendarMood"')
-    expect(source).toContain('diaryDateFromPath,')
-    expect(source).toContain('classifyDiaryPath,')
-    expect(source).toContain('diaryLogicalPathForDate,')
-    expect(source).toContain('async function updateDiaryCalendarMood(date: DiaryDate, mood: MoodId | null)')
-    expect(source).toContain('const path = diaryLogicalPathForDate(date)')
-    expect(source).toContain('const dateResult = await ensureDiaryDate(date)')
-    expect(source).toContain('const openResult = await openDiaryDate(date)')
-    expect(source).toContain('pendingMoodFirstPresentationDate')
-    expect(source).toContain('dateReadyForPresentation')
-    expect(source).toContain('diaryMoodCommand.setMood(date, mood, expectedUpdatedAt)')
-    expect(source).toContain('diaryCalendarSurfaceRef.value?.closeMoodPicker(!shouldPresentAfterMutation)')
-    expect(source).toContain('await presentDiaryDateResult(openResult, presentationIntent)')
-    expect(source).toContain('watch(isDiaryCalendarVisible, (visible, wasVisible) => {')
-    expect(source).toContain('diaryCalendarSurfaceRef.value?.closeMoodPicker(false)')
-    expect(source).toContain('async function onDiaryDateSelected(date: DiaryDate): Promise<void> {\n  diaryCalendarSurfaceRef.value?.closeMoodPicker(false)')
-    expect(source).not.toContain('updateDocumentMetadata(')
-  })
-
-  it('keeps Calendar components free of API, router, and document lifecycle ownership', () => {
-    const calendar = readFileSync(
-      fileURLToPath(new URL('../../components/diary/DiaryCalendar.vue', import.meta.url)),
-      'utf8',
-    )
-    const surface = readFileSync(
-      fileURLToPath(new URL('../../components/diary/DiaryCalendarSurface.vue', import.meta.url)),
-      'utf8',
-    )
-
-    for (const source of [calendar, surface]) {
-      expect(source).not.toMatch(/authFetch|fetch\(|useRouter|router\.|openPost|updateDocumentMetadata|\/api\//)
-    }
-    expect(calendar).toContain("'mood-change'")
-    expect(calendar).toContain('<DiaryMoodPicker')
-    expect(calendar).toContain('emit(\'mood-change\', activeMoodDate.value, mood)')
-    expect(calendar).toContain('diary-calendar-day-content')
-  })
-})
-
-describe('Diary Single Document Policy', () => {
-  it('owns managed Diary replacement in the shared Editor Tab lifecycle', () => {
-    const tabs = readFileSync(fileURLToPath(new URL('../../composables/vault/useEditorTabs.ts', import.meta.url)), 'utf8')
-    const view = readFileSync(fileURLToPath(new URL('../VaultView.vue', import.meta.url)), 'utf8')
-    const openManaged = tabs.match(/async function openManagedDiaryPost[\s\S]*?\n  }/)?.[0]
-
-    expect(view).toContain('singleManagedDiaryDocument: true')
-    expect(openManaged).toBeDefined()
-    expect(openManaged).toContain("classifyDiaryPath(tab.path) === 'managed'")
-    expect(tabs).toContain('await doSaveNow(path)')
-    expect(tabs).toContain('let navigationIntentGeneration = 0')
-    expect(openManaged).toContain('requestStillOwnsCapturedTabs')
-    expect(openManaged).toContain('loadPostDetached(path)')
-    expect(openManaged).toContain('replaceTabsWithLoadedPost(oldDiaryPaths, path, detachedPost)')
-    expect(tabs).toContain('requiresCloseConfirmation(tab!)')
-    expect(openManaged).not.toContain('activate: false')
-    expect(openManaged).not.toContain('closeManyConfirmedWithDrafts(previousDiaryPaths)')
-    expect(openManaged).not.toContain("path.startsWith('diary/')")
-  })
-
-  it('routes Diary FileTree selection through the date command without replacing the query', () => {
-    const source = readFileSync(fileURLToPath(new URL('../VaultView.vue', import.meta.url)), 'utf8')
-    const handler = source.match(/async function openFileTreeDocument[\s\S]*?\n}/)?.[0]
-
-    expect(handler).toBeDefined()
-    expect(handler).toContain("classifyDiaryPath(path) === 'managed'")
-    expect(handler).toContain('activePath.value === path')
-    expect(handler).toContain('activeWorkspaceTabId.value === path')
-    expect(handler).toContain('activeDocument?.path === path')
-    expect(handler).toContain('!specialWorkspaceSurfaceActive.value')
-    expect(handler).toContain('diaryDateFromPath(path)')
-    expect(handler).toContain('diaryWorkspacePresentation.reset()')
-    expect(handler).toContain('openDiaryDate(date)')
-    expect(handler).toContain('presentDiaryDateResult(result, intent, { focusVault: false })')
-    expect(handler!.indexOf('diaryWorkspacePresentation.reset()'))
-      .toBeLessThan(handler!.indexOf('beginDateIntent()'))
-    expect(handler).not.toContain('filesFilter.value =')
-    expect(source).toContain('@select="openFileTreeDocument"')
-  })
-
-  it('hides only the ordinary Diary document tab strip and collapses its grid row', () => {
-    const source = readFileSync(fileURLToPath(new URL('../VaultView.vue', import.meta.url)), 'utf8')
-    const styles = readFileSync(fileURLToPath(new URL('../../style.css', import.meta.url)), 'utf8')
-    const stripPolicy = source.match(/const workspaceTabStripVisible = computed\(\(\) => \{[\s\S]*?\n\}\)/)?.[0]
-
-    expect(stripPolicy).toBeDefined()
-    expect(source).toContain('isDiaryDocumentMode.value || isManagedDiaryDocumentActive.value')
-    expect(source).toContain('activeHistoryComparison.value')
-    expect(source).toContain('activeWorkingTreeDiff.value')
-    expect(source).toContain('activeDraftRecovery.value')
-    expect(stripPolicy).toContain('!specialWorkspaceSurfaceActive.value')
-    expect(source).toContain('v-if="workspaceTabs.length > 0 && !noteTabletLayout"')
-    expect(source).toContain('v-show="workspaceTabStripVisible"')
-    expect(source).toContain('if (noteTabletLayout.value) return false')
-    expect(source).toContain("'is-no-tab-strip': !workspaceTabStripVisible")
-    expect(styles).toContain('.editor-area.is-no-tab-strip {\n  grid-template-rows: minmax(0, 1fr);')
-  })
-
-  it('leaves native Cmd/Ctrl+Tab alone in an ordinary Diary document', () => {
-    const source = readFileSync(fileURLToPath(new URL('../VaultView.vue', import.meta.url)), 'utf8')
-    const handler = source.match(/function onVaultKeydown\(event: KeyboardEvent\): void \{[\s\S]*?\n}/)?.[0]
-    const nativeTabGuard = "ordinaryDiaryDocument && meta && event.key === 'Tab'"
-    const workspaceCycling = "if (meta && event.key === 'Tab' && workspaceTabs.value.length > 0)"
-
-    expect(handler).toBeDefined()
-    expect(handler).toContain(nativeTabGuard)
-    expect(handler).toContain(workspaceCycling)
-    expect(handler!.indexOf(nativeTabGuard)).toBeLessThan(handler!.indexOf(workspaceCycling))
   })
 })

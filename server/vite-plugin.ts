@@ -10,12 +10,12 @@ import { ensureInitialFolders } from './seed.ts'
 import { getDb } from './db.ts'
 import { loadAuthConfig } from './auth/config.ts'
 import { initializeAuthRuntime } from './auth/runtime.ts'
-import { getDiaryMigrationService } from './diaryMigration/service.ts'
 import { readCanonicalEnv } from './env.ts'
 import { migrateVaultMetadata } from './metadataMigration.ts'
 import { initializeTagIdentityAndHealth } from './tagIdentityMigration.ts'
 import { initializeTagUndoFoundationHealth } from './tagUndoHealth.ts'
 import { recoverInterruptedOperations } from './crashRecovery.ts'
+import { cleanupLegacyDiary } from './diaryLegacyCleanup.ts'
 import { reconcileHistoryMetadata } from './history/metadataRevisions.ts'
 import { AttachmentTrash } from './attachments/trash.ts'
 import { withVaultMutation } from './vaultMutation.ts'
@@ -50,14 +50,12 @@ export function serverPlugin(): Plugin {
             console.log(`[nuvyn] crash recovery: ${action.action} ${action.file}${action.detail ? ` (${action.detail})` : ''}`)
           }
         }
-        const diaryMigrationRecovery = await getDiaryMigrationService(getDb(), CONTENT_DIR).recover()
-        if (diaryMigrationRecovery.actions.length > 0) {
-          console.log(`[nuvyn] Diary migration recovery: ${JSON.stringify(diaryMigrationRecovery)}`)
-        }
+
         // Keep development startup aligned with production: unresolved
         // generic History metadata journals fail closed before any request
         // can observe an unproven cross-store state.
         await reconcileHistoryMetadata(getDb(), CONTENT_DIR)
+        await cleanupLegacyDiary(getDb(), CONTENT_DIR)
         const report = await migrateVaultMetadata(getDb(), CONTENT_DIR)
         console.log(`[nuvyn] metadata migration: ${JSON.stringify(report)}`)
         const tagIdentityHealth = await initializeTagIdentityAndHealth(getDb(), CONTENT_DIR, report)

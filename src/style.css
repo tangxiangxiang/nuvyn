@@ -1823,30 +1823,6 @@ main.container.auth-page-shell {
   }
 }
 
-/* Mobile Diary reuses the existing FileTree and its toggle as temporary
-   navigation. The document retains the full grid surface underneath. */
-@media (max-width: 600px) {
-  .vault.diary-native-document-mode {
-    position: relative;
-    grid-template-columns: minmax(0, 1fr) !important;
-  }
-
-  .vault.diary-native-document-mode > .file-tree,
-  .vault.diary-native-document-mode > .recovery-center,
-  .vault.diary-native-document-mode > .workspace-left-navigation > .file-tree,
-  .vault.diary-native-document-mode > .workspace-left-navigation > .recovery-center {
-    position: absolute;
-    inset: 0 auto 24px 0;
-    width: min(280px, 85vw);
-    z-index: 5;
-    box-shadow: 8px 0 24px #0003;
-  }
-
-  .vault.diary-native-document-mode > .splitter:not(.splitter-toc) {
-    display: none;
-  }
-}
-
 /* Activity Bar */
 .activity-bar {
   background: var(--vs-bg-3);
@@ -4937,15 +4913,6 @@ body:has(.ledger-detail-sheet-card) .n-modal-mask {
   grid-template-rows: minmax(0, 1fr);
 }
 
-/* Diary Home can be primary while backing document tabs remain mounted for
-   the existing lifecycle. Collapse the hidden tab row without treating the
-   workspace as document-empty or mutating its tabs. */
-.editor-area.is-diary-home {
-  grid-template-rows: minmax(0, 1fr);
-}
-
-/* A native Diary document uses the date tree as navigation. Hide the tab
-   strip without leaving its fixed 36px grid track above the document. */
 .editor-area.is-no-tab-strip {
   grid-template-rows: minmax(0, 1fr);
 }

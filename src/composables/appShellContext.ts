@@ -16,22 +16,6 @@ export interface AppShellContext {
   readonly noteSpeechReadSelectionCommand?: Ref<(() => void) | null>
   /** Capability owned by the active Note tablet editor. */
   readonly noteTabletImageCommand?: Ref<(() => void) | null>
-  /**
-   * The Vault-owned Calendar Home is rendered below the global navbar, so the
-   * shell exposes its resolved visibility for chrome that lives above the
-   * router view. This keeps navbar controls aligned with the actual surface,
-   * even when a retained document URL is still active while Calendar Home is
-   * displayed.
-   */
-  readonly diaryCalendarVisible: Ref<boolean>
-  readonly diaryPlanEntry?: Ref<{
-    open: (trigger: HTMLElement) => void
-    hasPlans: boolean
-  } | null>
-  /** Vault-owned semantic action used by the global workspace navigation. */
-  readonly diaryBackCommand?: Ref<(() => void | Promise<void>) | null>
-  /** Hidden chrome gesture; data/filter/session ownership stays in VaultView. */
-  readonly diaryAnalysisExportCommand?: Ref<(() => Promise<void>) | null>
   /** Ledger module lifecycle owns availability; the export feature owns data. */
   readonly ledgerAnalysisExportCommand?: Ref<(() => Promise<void>) | null>
   /** Switch Note/Diary presentation while preserving each scope's document context. */

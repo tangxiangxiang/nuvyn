@@ -1,0 +1,37 @@
+import { describe, expect, it } from 'vitest'
+import { civilDate, dayDistance, nextOccurrence, occursOn, parseDay, parseEvent, type EventFields } from '../diaryLife'
+
+const event: EventFields = { title: '生日', description: '', emoji: '🎂', type: 'anniversary', startDate: '2024-02-29', endDate: '2024-02-29', startTime: null, endTime: null, allDay: true, recurrence: 'yearly', showCountdown: true, isPrimary: false }
+describe('Diary natural days', () => {
+  it('rejects invalid dates and empty records are handled by the write boundary', () => {
+    for (const value of ['2025-02-29', '2026-04-31', '2026-1-01', '0000-01-01', '2026-11-15T00:00:00Z']) expect(civilDate(value)).toBe(false)
+    expect(civilDate('2024-02-29')).toBe(true)
+    expect(parseDay({ moodId: null, description: '  记录  ' })).toEqual({ moodId: null, description: '记录' })
+    expect(parseDay({ moodId: 'not-a-mood', description: '' })).toBeNull()
+  })
+  it('constrains Feb 29 to Feb 28 and finds the next year after occurrence', () => {
+    expect(nextOccurrence(event, '2025-02-01')).toBe('2025-02-28')
+    expect(nextOccurrence(event, '2025-03-01')).toBe('2026-02-28')
+    expect(nextOccurrence(event, '2028-01-01')).toBe('2028-02-29')
+    expect(occursOn(event, '2025-02-28')).toBe(true)
+    expect(occursOn(event, '2023-02-28')).toBe(false)
+  })
+  it('uses civil days across DST and year boundaries', () => {
+    expect(dayDistance('2026-03-07', '2026-03-09')).toBe(2)
+    expect(dayDistance('2026-10-31', '2026-11-02')).toBe(2)
+    expect(dayDistance('2026-12-31', '2027-01-01')).toBe(1)
+    const trip = { ...event, startDate: '2024-12-30', endDate: '2025-01-02' }
+    expect(occursOn(trip, '2027-01-01')).toBe(true)
+    expect(occursOn(trip, '2027-01-03')).toBe(false)
+  })
+  it('does not count expired one-time events', () => {
+    expect(nextOccurrence({ ...event, recurrence: 'none' }, '2025-01-01')).toBeNull()
+  })
+  it('validates times, ranges, and required title', () => {
+    expect(parseEvent({ ...event, title: ' ' })).toBeNull()
+    expect(parseEvent({ ...event, endDate: '2024-02-28' })).toBeNull()
+    expect(parseEvent({ ...event, allDay: false, startTime: '25:00' })).toBeNull()
+    expect(parseEvent({ ...event, allDay: false, startTime: '13:00', endTime: '12:00' })).toBeNull()
+    expect(parseEvent({ ...event, allDay: false, endDate: '2024-03-01', startTime: '13:00', endTime: '12:00' })).not.toBeNull()
+  })
+})

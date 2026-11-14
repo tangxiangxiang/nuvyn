@@ -1,336 +1,47 @@
-# Diary Architecture
-
-> This is the current runtime authority for Diary. If this document, a
-> historical design record, and the code disagree, the current code and this
-> document take precedence over historical planning.
-
-**Runtime baseline:** `3096661e24861f3893546eeeb277c91342805654`  
-**Last audited:** 2026-09-14  
-**Maintenance state:** Diary V1 is closed; maintenance mode is active.
-
-## 1. Product identity
-
-Diary is one of Nuvyn's first-level Personal OS Workspaces. Its specialization
-is:
-
-```text
-Diary → What I experience
-```
-
-It is a date-based navigation workspace, not a second editor or an independent
-diary app. Calendar navigation finds a day; Vault owns the document that
-represents that day.
-
-The stable identity is a validated local civil date:
-
-```text
-DiaryDate       YYYY-MM-DD
-Logical path    diary/YYYY-MM-DD
-Physical path   diary/YYYY-MM-DD.md
-```
-
-`DiaryDate` is a strict Gregorian date string. It is not a timestamp and is
-never interpreted by converting UTC midnight. The server owns the canonical
-date/path command and the exact path is also the identity used by document
-metadata and the Vault lifecycle.
-
-New managed Diary bodies are written using the current Diary body envelope.
-The live metadata row remains in SQLite; a legacy plaintext body is a
-migration state, not the current write format.
-
-## 2. Workspace and ownership model
-
-Diary is an existing `diary` scope inside the `/vault` route. It does not add a
-second route, tab system, editor, or document identity layer.
-
-| Concern | Current owner |
-| --- | --- |
-| Diary scope and access gate | `App.vue`, `useDiaryAccessSession`, and the Diary access context |
-| Calendar Home shell | `DiaryWorkspace.vue` and `DiaryCalendarSurface.vue` |
-| Date projection and Calendar adapter | `diaryCalendarProjection.ts` and `diaryCalendarAdapter.ts` |
-| Calendar presentation | `DiaryCalendar.vue` with Naive UI `NCalendar` |
-| Date open/create intent | `useDiaryDateCommand.ts`, orchestrated by `VaultView.vue` |
-| Document tabs and active document | `useEditorTabs`, `useTabWorkspace`, and `VaultView.vue` |
-| Read/edit/save/history/recovery lifecycle | the existing Vault components and composables, subject to Diary privacy gates |
-| Diary body privacy | `server/diaryAccess/` and the guarded Diary routes |
-| Legacy encrypted migration | `DiaryMigrationService` and the Settings migration workflow |
-
-The ownership rule is:
-
-> Calendar does navigation. Vault does documents.
-
-## 3. Calendar Home and native document presentation
-
-The normal presentation path is:
-
-```text
-Diary scope
-  -> Calendar Home
-  -> explicit date intent
-  -> useDiaryDateCommand.openDiaryDate()
-  -> existing Vault openPost()/tab lifecycle
-  -> native READ or EDIT surface
-  -> existing tab close authority
-  -> Calendar Home
-```
-
-`useDiaryWorkspacePresentation` owns only the Calendar Home/native-document
-visibility handoff. The Calendar subtree remains mounted for the Diary scope
-and is hidden while a native Diary document is visible. This preserves the
-Naive UI Calendar's internal state across the handoff without making the
-Calendar a document owner.
-
-Opening a date records the successful date command explicitly. Observing an
-active path or selecting a generic Vault tab cannot synthesize a Calendar
-date intent or retarget Diary presentation.
-
-When the final managed Diary document is closed, the presentation returns to
-Calendar Home. The current month and projected metadata remain available; the
-Calendar's interaction selection is cleared on the Home transition.
-
-## 4. Calendar runtime
-
-The current provider is Naive UI `NCalendar` version `2.45.3`. The runtime has
-no `v-calendar` package or production import. The Nuvyn integration is kept at
-the presentation boundary:
-
-- `diaryCalendarAdapter.ts` converts provider fields to and from validated
-  local-civil Diary dates and months.
-- `diaryCalendarProjection.ts` projects Vault tree and metadata into the
-  Calendar's day model.
-- `DiaryCalendar.vue` owns Nuvyn date buttons, month display, weekday labels,
-  mood controls, Today/Selected presentation, and Nuvyn-owned ARIA/data
-  attributes.
-- Naive UI owns the Calendar panel and its month navigation primitives;
-  Nuvyn annotates the rendered previous/next controls with stable labels and
-  test attributes.
-
-Month navigation uses the provider's panel-change boundary and preserves the
-current `DiaryCalendarMonth`. The weekday row is Nuvyn-owned and follows the
-active locale (`zh-CN` begins Monday; `en-US` begins Sunday). Adjacent-month
-cells retain valid date identity and can navigate to that month through the
-same date adapter.
-
-Existing dates can be opened. A missing local-today or past date enters the
-Calendar Mood-first flow before the canonical date command creates it. A
-missing future date uses the same command, starts with an editable plan
-template, and leaves Mood unset. The server uses the supplied IANA timezone
-to select the template and derives the one canonical path from the date.
-Existing files open through that same exact-path command.
-
-### Unified Markdown plan migration
-
-The unlocked Calendar reads migration status. It requests write batches only
-after the user confirms they have backed up SQLite and the encrypted vault.
-Schema 42 records stable failure codes by owner and date for review and retry.
-Schema 41 adds
-an owner/date checkpoint with source IDs and versions, the target document
-ID, hashes of the exact file generations before and after migration, and a
-completion timestamp. Schema 40 and its original encrypted rows stay intact.
-Legacy Plan CRUD returns HTTP 410.
-
-Under the structure and document locks, migration authenticates every legacy
-item for a date, preserves the existing body as a prefix, and appends a
-Markdown task section. Only the encrypted envelope reaches the durable file
-writer. SQLite records the checkpoint before the atomic create or replacement
-and confirms completion after verifying the bytes. A retry with the matching
-target verifies and confirms without appending again. A retry with the
-matching base can safely resume. Any other document generation or source
-version needs review. Source rows retain the original titles, including
-line breaks flattened in the display text, and the original timestamps.
-If a date still has a plaintext primary, complete the existing Diary
-encryption migration before retrying its Plan migration.
-
-Task counts are parsed from the current document on demand in an unlocked
-body operation. Only counts reach the Calendar, with no persistent summary
-cache. Reader tasks are read-only and edits use the regular document CAS.
-
-For rollback, back up the encrypted vault and its matching SQLite database
-together. Restoring a pre-upgrade pair reverts the migration. Export or
-preserve newer Markdown edits before restoring a snapshot. A code-only
-downgrade would expose the original stale Plan rows and is not a data
-rollback. Keep those rows and checkpoints for manual reconciliation.
-
-The Calendar date button is the business interaction owner. It exposes
-`data-diary-day-content`, `data-date`, `aria-current` for local Today, and
-`aria-pressed` for the current Calendar selection. Naive UI class names are
-used only for layout compatibility, not for Diary business semantics.
-
-## 5. Selection semantics
-
-Selected is a live Calendar Home interaction state, not a historical record of
-the last opened Diary. It is held by `DiaryCalendar`'s
-`selectedCalendarValue` and is set only by an explicit Calendar date
-interaction.
-
-The lifecycle is:
-
-```text
-Calendar Home        selected = null
-  -> click/keyboard date
-Diary document       selected date may remain in mounted Calendar state
-  -> close / return Home
-Calendar Home        clearSelection(); selected = null
-```
-
-The return transition intentionally keeps the Calendar mounted, so it does
-not reset unrelated state. It preserves the current month, mood projection,
-and Today styling while clearing the stale selected marker and its
-`aria-pressed="true"` semantics.
-
-## 6. Mood architecture
-
-Mood is a Diary metadata field, not part of the Markdown body. The current
-metadata owner is the `documents.mood` field exposed through the existing
-document metadata API. Explicit Mood writes require the current metadata
-version and are applied through the shared compare-and-set mutation path.
-
-The framework-independent registry in `shared/diaryMood.ts` owns stable Mood
-IDs, labels, accessibility names, order, and canonical assets. User-managed
-icon preferences can add configured custom IDs without changing the persisted
-meaning of existing IDs.
-
-`DiaryMoodPicker.vue` owns the picker surface. `DiaryCalendar.vue` presents one
-mood action per day and keeps that action separate from date navigation.
-`useDiaryMoodCommand.ts` performs the authoritative CAS update; it does not
-create a file or open a document on its own. Missing today/past dates are
-created by the existing date command before their Mood update completes.
-
-Mood remains visible after closing and reopening a Diary, survives refresh,
-and is projected back into Calendar without copying body content. Unknown but
-well-formed stored IDs remain representable and use the safe unknown-Mood
-presentation.
-
-## 7. Native document lifecycle
-
-Diary documents are ordinary Vault workspace documents after the date command
-has resolved their canonical path. The active tab authority is the live
-workspace state in `VaultView.vue`, derived from the existing editor,
-comparison, and recovery tab owners; it is never inferred from the last DOM
-node or the last clicked date.
-
-The close path is shared by the tab close button and keyboard commands:
-
-```text
-closeWorkspaceTab(id)
-  -> closeWorkspaceTabState()
-  -> useEditorTabs.closeTab()
-  -> existing mutation barrier and dirty/save policy
-  -> remove the document tab
-  -> existing workspace fallback selection
-```
-
-If the active document is dirty, the existing confirmation/save/discard policy
-decides whether the close proceeds. Cancel leaves the tab and its selection
-unchanged. A successful close uses the existing workspace fallback policy,
-which prefers the remaining tab at the closing position and then the adjacent
-tab, with companion diff handling kept by the generic workspace owner. If no
-tab remains, `VaultView` focuses the Vault root and Diary presentation returns
-to Calendar Home when the Diary scope is active.
-
-Diary does not duplicate Monaco, ReadingPane, save, History, Recovery, draft,
-or tab lifecycle code. Privacy restrictions may intentionally make a generic
-surface unavailable for a managed encrypted Diary; that is a guarded policy
-boundary, not a second Diary implementation.
-
-## 8. Diary `G → B` shortcut
-
-`G → B` is a Diary-scoped two-key chord named Diary Back. It follows the
-global `go`/`back` meaning; the Board editor's separate route-scoped `G → B`
-handler remains unchanged. The Diary chord is registered once by `VaultView.vue`
-through `createDiaryShortcutChord()` and is processed by the existing Vault
-keydown authority.
-
-Current contract:
-
-- timeout: `1000ms`;
-- keys are matched case-insensitively using `event.key`;
-- `metaKey`, `ctrlKey`, and `altKey` cancel/exclude the chord;
-- input, textarea, select, contenteditable, textbox, Monaco, and other text
-  entry contexts are ignored;
-- blocking dialogs/popovers own the keyboard and prevent background close;
-- scope changes, active-tab/presentation changes, blur, visibility changes,
-  timeout, and unmount reset pending state;
-- Calendar Home is a no-op because it has no active managed Diary document;
-- a completed chord calls the same `closeWorkspaceTab(activeId)` path used by
-  the tab close button, returning the user to the Diary list or Calendar Home
-  according to the existing workspace fallback policy.
-
-Other global-navigation chords are not implemented and are not part of the
-current shortcut contract.
-
-## 9. Privacy, encryption, and migration
-
-Diary access is a separate secondary-password boundary, distinct from the
-Nuvyn owner login. `App.vue` requests access before entering Diary, and the
-server `DiaryAccessService` owns the session-bound capability. The service
-derives a Diary-only key-encryption key with the bounded existing scrypt
-parameters, unwraps a random Diary data-encryption key, and keeps live key
-material in the server-side capability boundary. The raw key is not exposed to
-routes or persisted as a body value.
-
-The current body format is a versioned AES-256-GCM envelope with vault,
-document, and logical-path identity binding. New Diary writes emit that
-envelope. Body reads and writes run through `withDiaryBodyOperation()` and
-are fenced by the access-session epoch; explicit lock, logout, session expiry,
-and capability replacement invalidate new work and drain active operations
-before releasing the capability.
-
-Managed Diary body routes require the active capability. Structural Calendar
-metadata can remain available without decrypting body content, while generic
-operations that would scan, rewrite, version, recover, or expose an encrypted
-body are rejected or kept fail-closed unless they have an adapter-aware owner.
-
-Legacy migration is owned by `DiaryMigrationService`, not by the Calendar or
-the editor. The Settings workflow explicitly scans, records an immutable
-inventory, prepares or verifies encrypted candidates, handles platform
-capability differences, and reports residuals or attention states. On
-platforms requiring user finalization, Nuvyn gives the user the replacement
-steps and verifies the result; it does not silently delete a legacy plaintext
-primary. The migration ledger records structural/provenance state and does
-not become a plaintext body store.
-
-## 10. Boundaries
-
-Diary-specific authority is limited to:
-
-- canonical date identity and date-command rules;
-- Calendar month/navigation presentation;
-- Mood metadata and icon presentation;
-- Diary access/privacy and migration contracts;
-- Calendar Home/native-document presentation state;
-- Diary-scoped `G → B` shortcut policy.
-
-Diary must not copy or become the owner of the Vault editor, generic document
-tabs, save/dirty protocol, History, Recovery, draft store, filesystem safety,
-authentication, or generic document lifecycle. Note and Ledger remain outside
-Diary's scope.
-
-## 11. Invariants and test coverage
-
-The current test matrix protects these stable contracts:
-
-| Invariant | Coverage category |
-| --- | --- |
-| Strict date/path identity and local-civil behavior | shared protocol and Calendar adapter tests |
-| Calendar surface, month navigation, weekday/header, Today/Selected, and ARIA | Calendar component tests and Calendar surface/release E2E |
-| Mood registry, picker, CAS, conflict, lifecycle, and responsive behavior | Mood component/composable tests and Mood E2E |
-| Native READ/EDIT and ordinary Vault lifecycle reuse | Diary reader/editor/lifecycle E2E |
-| Selection cleanup, retained month, scope and route handoff | lifecycle regression and responsive E2E |
-| Access sessions, encrypted body fail-closed behavior, and teardown | Diary access/body unit and integration tests |
-| Legacy migration ownership, recovery, consent, and platform states | migration service/route tests and CI integration lanes |
-| `G → B`, text-entry/overlay guards, timeout, and browser integration | `diaryShortcutChord` unit tests and the real Diary browser E2E |
-| Release regressions and cross-platform compatibility | Diary release suite and the full CI matrix |
-
-The latest baseline CI run passed all required jobs. The final closure audit
-found no open P0, P1, or P2 issue.
-
-## 12. Historical lineage
-
-The D0–D8 planning, implementation, review, and evidence files under
-`docs/design/` remain useful for traceability, but they are historical
-lineage. In particular, old VCalendar claims, early Reader Dialog decisions,
-and statements that Mood or encryption were not implemented must not be used
-to infer current behavior. The maintained user-facing authority is
-[`Diary User Guide`](../user-guide/diary.md); the maintained technical
-authority is this document.
+# Diary architecture
+
+Diary is an independent workspace at `/diary`. SQLite is the source of truth for daily mood records and life events. The workspace reuses the existing Diary password, capability, theme and custom mood icon settings. Legacy Diary URLs redirect to the calendar.
+
+## UI
+
+`DiaryView.vue` owns the displayed month, view preference, day and event dialogs and countdowns. `DiaryLifeCalendar.vue` wraps Naive UI Calendar and displays a single marker per cell. `DiaryEventForm.vue` handles event creation and editing, and `DiaryMoodPicker.vue` provides shared mood choices. Switching views keeps the calendar mounted, including its month and date selection. Only the view preference is stored in browser storage, scoped to the signed-in owner.
+
+Diary mode batches the month's mood markers and fetches the selected date's text on demand. Events mode reads events in pages, displays a primary event first, then sorts by start time, creation time and ID. A date shows one emoji and a count of any additional events. Preset event emojis use the same Fluent Emoji collection as moods. Custom event emojis use the device's emoji font. The dialog is centered on larger screens and appears at the bottom on phones.
+
+## SQLite and privacy
+
+Migration `0043_diary_life.sql` creates the following tables and removes the obsolete Plan and Diary content migration tables.
+
+| Table | Key | Storage |
+| --- | --- | --- |
+| `diary_days` | owner, date | Encrypted mood ID and description |
+| `diary_events` | owner, event UUID | Indexed start and end dates and recurrence, plus encrypted event fields |
+| `diary_deleted_records` | owner, kind, ID or date | Latest deletion version to reject a stale write |
+
+Owner, dates, event UUIDs, recurrence, version and creation/update timestamps are visible in an offline database inspection. Titles, descriptions, mood IDs, event emojis, categories, times, all-day, primary and countdown flags are encrypted. There is no public listing of Diary metadata. Each request checks authentication, owner scope and a valid Diary capability.
+
+The record key is derived from the existing Diary data key using a separate HMAC domain. AES-256-GCM uses a fresh nonce per write, and authenticates the vault, owner, record kind, identity and version. The API enforces optimistic version checks and disables caching. The browser discards active data and invalidates reads when the session locks.
+
+## API
+
+All endpoints are relative to `/api/diary/life`.
+
+| Method | Path | Purpose |
+| --- | --- | --- |
+| GET | `/days?start=&end=` | Batch mood markers |
+| GET | `/days/:date` | Read the day and its current version |
+| PUT, DELETE | `/days/:date` | Save or delete with `expectedVersion` |
+| GET | `/events?start=&end=&offset=` | Paged event range, with optional `date` filter |
+| GET | `/events/:id` | Read a single event |
+| PUT, DELETE | `/events/:id` | Save or delete with `expectedVersion` |
+| GET | `/countdowns?today=&offset=` | Paged events with countdown enabled |
+
+Dates are validated as ISO calendar dates. Times are optional local wall-clock values. UUIDs are generated by the client on event creation. Mutations return a conflict when the supplied version is stale and a locked response when Diary access is missing.
+
+## Recurrence and countdowns
+
+Dates and durations use calendar arithmetic with Temporal. Countdown days are calculated against the browser's local date, including across year boundaries and daylight-saving transitions. Annual February 29 events occur on February 28 in non-leap years. A multi-day annual event preserves its original duration. The countdown uses the next start date, and a past one-off event falls off the countdown list. The first three upcoming dates are shown by default.
+
+## Legacy retirement
+
+At startup the server only removes regular, single-link Markdown files with valid date names directly under the Diary directory and an exact document metadata match. The operation is idempotent and skips symlinks, nested directories, unrelated names and unmanaged files. Historic shared Git objects are retained to avoid rewriting Note history. Legacy guards on shared Vault services still protect any retained Diary snapshots.

@@ -46,6 +46,12 @@ const router = createRouter({
   routes: [
     ...devRoutes,
     ...compatibilitySpikeRoutes,
+    {
+      path: '/diary',
+      name: 'diary',
+      component: () => import('../views/DiaryView.vue'),
+      meta: { fullWidth: true, workspace: true, workspaceKind: 'diary', chromeStyle: 'workspace', requiresVaultIdentity: false, sidebar: false },
+    },
     { path: '/', redirect: '/vault', meta: { workspace: true } },
     {
       path: '/login',
@@ -217,6 +223,7 @@ function authRouteTarget(route: RouteLocationNormalized, name: 'login' | 'setup'
 
 router.beforeEach(async (to) => {
   if (to.meta.publicDevPreview) return true
+  if (to.path === '/vault/diary' || to.path.startsWith('/vault/diary/')) return { name: 'diary' }
 
   const state = await auth.ensureHydrated()
   // A failed status request remains recoverable through the App shell. Do not

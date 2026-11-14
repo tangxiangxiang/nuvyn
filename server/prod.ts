@@ -18,6 +18,7 @@ import { migrateVaultMetadata } from './metadataMigration.ts'
 import { initializeTagIdentityAndHealth } from './tagIdentityMigration.ts'
 import { initializeTagUndoFoundationHealth } from './tagUndoHealth.ts'
 import { recoverInterruptedOperations } from './crashRecovery.ts'
+import { cleanupLegacyDiary } from './diaryLegacyCleanup.ts'
 import { reconcileHistoryMetadata } from './history/metadataRevisions.ts'
 import {
   acquireVaultWriterOwnership,
@@ -26,7 +27,6 @@ import {
 import { resolveAuthOrigin, resolveServerHost } from './prodConfig.ts'
 import { loadAuthConfig } from './auth/config.ts'
 import { initializeAuthRuntime } from './auth/runtime.ts'
-import { getDiaryMigrationService } from './diaryMigration/service.ts'
 import { AttachmentTrash } from './attachments/trash.ts'
 import { withVaultMutation } from './vaultMutation.ts'
 
@@ -102,15 +102,13 @@ try {
       console.log(`[nuvyn] crash recovery: ${action.action} ${action.file}${action.detail ? ` (${action.detail})` : ''}`)
     }
   }
-  const diaryMigrationRecovery = await getDiaryMigrationService(getDb(), CONTENT_DIR).recover()
-  if (diaryMigrationRecovery.actions.length > 0) {
-    console.log(`[nuvyn] Diary migration recovery: ${JSON.stringify(diaryMigrationRecovery)}`)
-  }
+
   // Reconcile the generic History metadata journal after filesystem crash
   // recovery and before the server accepts requests. An unresolved
   // cross-store state fails startup closed instead of being guessed by a
   // later History request.
   await reconcileHistoryMetadata(getDb(), CONTENT_DIR)
+  await cleanupLegacyDiary(getDb(), CONTENT_DIR)
   // Only scan live vault metadata after crash recovery has restored every
   // formal path. Otherwise an interrupted takeover can be misclassified
   // as an orphan during this very startup.

@@ -1,11 +1,3 @@
-export interface DiaryShortcutChordOptions {
-  isDiaryDocument: () => boolean
-  isTextEntryContext: (event: KeyboardEvent) => boolean
-  isBlocked: (event: KeyboardEvent) => boolean
-  goBack: () => Promise<void> | void
-  timeoutMs?: number
-}
-
 function isTextEntryElement(element: Element | null): boolean {
   if (!element) return false
   return element.matches(
@@ -33,59 +25,4 @@ export function isDiaryShortcutBlocked(event: KeyboardEvent): boolean {
   ) || active?.closest(
     '[role="dialog"], [aria-modal="true"], .n-modal, .n-dialog, .n-popover',
   ))
-}
-
-export function createDiaryShortcutChord(options: DiaryShortcutChordOptions) {
-  const timeoutMs = options.timeoutMs ?? 1000
-  let pending = false
-  let timer: ReturnType<typeof setTimeout> | null = null
-  let closing = false
-
-  function reset(): void {
-    pending = false
-    if (timer !== null) {
-      clearTimeout(timer)
-      timer = null
-    }
-  }
-
-  function arm(): void {
-    reset()
-    pending = true
-    timer = setTimeout(reset, timeoutMs)
-  }
-
-  function onKeydown(event: KeyboardEvent): boolean {
-    if (!options.isDiaryDocument() || options.isTextEntryContext(event) || options.isBlocked(event)) {
-      reset()
-      return false
-    }
-
-    if (event.metaKey || event.ctrlKey || event.altKey) {
-      reset()
-      return false
-    }
-
-    const key = event.key.toLowerCase()
-    if (!pending) {
-      if (key === 'g') arm()
-      return false
-    }
-
-    reset()
-    if (key !== 'b' || closing) return false
-
-    event.preventDefault()
-    closing = true
-    void Promise.resolve(options.goBack()).finally(() => {
-      closing = false
-    })
-    return true
-  }
-
-  function dispose(): void {
-    reset()
-  }
-
-  return { onKeydown, reset, dispose }
 }

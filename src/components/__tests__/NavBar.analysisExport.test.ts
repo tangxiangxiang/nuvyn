@@ -9,7 +9,7 @@ import { useScopeFilter } from '../../composables/vault/useScopeFilter'
 import { useI18n } from '../../composables/useI18n'
 import { __resetVaultLayoutState } from '../../composables/vault/useVaultLayout'
 
-describe.each(['diary', 'ledger'] as const)('NavBar hidden %s analysis gesture', (scope) => {
+describe('NavBar hidden Ledger analysis gesture', () => {
   let wrapper: VueWrapper | undefined
   let finePointer = true
   let mobileWidth = false
@@ -50,30 +50,28 @@ describe.each(['diary', 'ledger'] as const)('NavBar hidden %s analysis gesture',
         { path: '/board', name: 'board', component: { template: '<div />' } },
       ],
     })
-    await router.push(scope === 'diary' ? '/vault' : '/ledger')
+    await router.push('/ledger')
     const otherCommand = vi.fn(async () => {})
-    const diaryBackCommand = vi.fn()
-    const calendarVisible = ref(scope === 'diary')
+
+    const calendarVisible = ref(false)
     const commandRef = ref<(() => Promise<void>) | null>(command)
     wrapper = mount(NavBar, {
       attachTo: document.body,
-      props: { workspaceKind: scope === 'diary' ? 'vault' : 'ledger', diaryUnlocked: unlocked },
+      props: { workspaceKind: 'ledger', diaryUnlocked: unlocked },
       global: {
         plugins: [router],
         provide: {
           [AppShellContextKey as symbol]: {
             settingsRequestTick: ref(0),
             diaryCalendarVisible: calendarVisible,
-            diaryBackCommand: ref(diaryBackCommand),
-            diaryAnalysisExportCommand: scope === 'diary' ? commandRef : ref(otherCommand),
-            ledgerAnalysisExportCommand: scope === 'ledger' ? commandRef : ref(otherCommand),
+            ledgerAnalysisExportCommand: commandRef,
           },
         },
       },
     })
-    const chip = wrapper.findAll('.scope-chip').find((item) => item.text().includes(scope))!
-    const otherChip = wrapper.findAll('.scope-chip').find((item) => item.text().includes(scope === 'diary' ? 'ledger' : 'diary'))!
-    return { command, otherCommand, chip, otherChip, diaryBackCommand, router, calendarVisible, commandRef }
+    const chip = wrapper.findAll('.scope-chip').find((item) => item.text().includes('ledger'))!
+    const otherChip = wrapper.findAll('.scope-chip').find((item) => item.text().includes('diary'))!
+    return { command, otherCommand, chip, otherChip, router, calendarVisible, commandRef }
   }
 
   function key(options: KeyboardEventInit = {}, target: EventTarget = window): KeyboardEvent {
@@ -83,7 +81,7 @@ describe.each(['diary', 'ledger'] as const)('NavBar hidden %s analysis gesture',
   }
 
   it.each([{ key: 'e' }, { key: 'E' }, { key: 'E', shiftKey: true }])('invokes only the active command after hover: %j', async (options) => {
-    const { command, otherCommand, chip, diaryBackCommand, router } = await setup()
+    const { command, otherCommand, chip, router } = await setup()
     const attributes = chip.attributes()
     const content = chip.html()
     const route = router.currentRoute.value.path
@@ -95,7 +93,6 @@ describe.each(['diary', 'ledger'] as const)('NavBar hidden %s analysis gesture',
     await flushPromises()
     expect(command).toHaveBeenCalledOnce()
     expect(otherCommand).not.toHaveBeenCalled()
-    expect(diaryBackCommand).not.toHaveBeenCalled()
     expect(router.currentRoute.value.path).toBe(route)
     expect(chip.attributes()).toEqual(attributes)
     expect(chip.html()).toBe(content)
@@ -129,27 +126,13 @@ describe.each(['diary', 'ledger'] as const)('NavBar hidden %s analysis gesture',
     expect(command).not.toHaveBeenCalled()
   })
 
-  it('leaves the existing click/Diary Back behavior intact', async () => {
-    const { command, chip, diaryBackCommand, router } = await setup()
+  it('leaves the existing click behavior intact', async () => {
+    const { command, chip, router } = await setup()
     const route = router.currentRoute.value.path
     await chip.trigger('mouseenter')
     await chip.trigger('click')
-    expect(diaryBackCommand).toHaveBeenCalledTimes(scope === 'diary' ? 1 : 0)
     expect(router.currentRoute.value.path).toBe(route)
     expect(command).not.toHaveBeenCalled()
-  })
-
-  it('requires Diary unlock only for Diary, including a lock during hover', async () => {
-    const { command, chip } = await setup(vi.fn(async () => {}), false)
-    await chip.trigger('mouseenter')
-    key()
-    await flushPromises()
-    expect(command).toHaveBeenCalledTimes(scope === 'diary' ? 0 : 1)
-    await wrapper!.setProps({ diaryUnlocked: true })
-    await wrapper!.setProps({ diaryUnlocked: false })
-    key()
-    await flushPromises()
-    expect(command).toHaveBeenCalledTimes(scope === 'diary' ? 0 : 2)
   })
 
   it('uses pointer capability rather than viewport width', async () => {
@@ -264,7 +247,7 @@ describe.each(['diary', 'ledger'] as const)('NavBar hidden %s analysis gesture',
     await chip.trigger('mouseenter')
     key()
     await flushPromises()
-    expect(log).toHaveBeenCalledExactlyOnceWith(`${scope === 'diary' ? 'Diary' : 'Ledger'} analysis export failed`)
+    expect(log).toHaveBeenCalledExactlyOnceWith('Ledger analysis export failed')
     key()
     await flushPromises()
     expect(command).toHaveBeenCalledTimes(2)

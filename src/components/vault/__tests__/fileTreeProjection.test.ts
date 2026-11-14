@@ -1,7 +1,9 @@
 import { describe, expect, it } from 'vitest'
 import type { PostSummary, TreeNode } from '../../../lib/api'
 import { parseTagQuery } from '../../../lib/tags'
-import { managedDiaryPathsInProjection } from '../../../features/diary/diaryAnalysisExport'
+function managedDiaryPathsInProjection(nodes: readonly TreeNode[]): string[] {
+  return nodes.flatMap(node => node.kind === 'folder' ? managedDiaryPathsInProjection(node.children) : /^diary\/\d{4}-\d{2}-\d{2}$/.test(node.path) ? [node.path] : [])
+}
 import { projectFileTree } from '../fileTreeProjection'
 
 const posts: PostSummary[] = [

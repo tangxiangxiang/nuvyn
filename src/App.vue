@@ -19,7 +19,7 @@ import { useZenMode } from './composables/vault/useZenMode'
 import { createZenModeChord } from './views/zenModeChord'
 import { useDiaryAccessSession } from './composables/diary/useDiaryAccessSession'
 import { DiaryAccessContextKey } from './composables/diary/diaryAccessContext'
-import { AppShellContextKey, type AppShellContext } from './composables/appShellContext'
+import { AppShellContextKey } from './composables/appShellContext'
 import DiaryAccessDialog from './components/diary/DiaryAccessDialog.vue'
 import type { ScopeKey } from '../shared/scopeProtocol'
 import { boardMetadataSource } from './features/board/boardMetadataSource'
@@ -47,13 +47,15 @@ const toast = useToast()
 const diaryAccess = useDiaryAccessSession()
 const { active: zenModeActive, enter: enterZenMode, exit: exitZenMode } = useZenMode()
 const { activeScope, selectScope, diaryScopeRestorePending, settleDiaryScopeRestore } = useScopeFilter()
+watch(activeScope, (scope) => {
+  if (scope === 'diary') {
+    if (route.path.startsWith('/vault')) void router.replace({ name: 'diary' })
+    selectScope('note')
+  }
+}, { flush: 'post' })
 const settingsRequestTick = ref(0)
 const noteTabletImageCommand = ref<(() => void) | null>(null)
 const ledgerSettingsOpen = ref(false)
-const diaryCalendarVisible = ref(false)
-const diaryPlanEntry: NonNullable<AppShellContext['diaryPlanEntry']> = ref(null)
-const diaryBackCommand = ref<(() => void | Promise<void>) | null>(null)
-const diaryAnalysisExportCommand = ref<(() => Promise<void>) | null>(null)
 const ledgerAnalysisExportCommand = ref<(() => Promise<void>) | null>(null)
 const vaultScopeChangeCommand = ref<((scope: 'note' | 'diary') => Promise<boolean>) | null>(null)
 const zenModeBrandEntry = ref<{ canEnter: () => boolean; enter: () => boolean } | null>(null)
@@ -89,10 +91,6 @@ function onOpenSearch(): void {
 provide(AppShellContextKey, {
   settingsRequestTick,
   noteTabletImageCommand,
-  diaryCalendarVisible,
-  diaryPlanEntry,
-  diaryBackCommand,
-  diaryAnalysisExportCommand,
   ledgerAnalysisExportCommand,
   vaultScopeChangeCommand,
   zenModeBrandEntry,
@@ -121,7 +119,7 @@ const isVaultRoute = computed(() => (
 ))
 const isLedgerRoute = computed(() => workspaceKind.value === 'ledger')
 const isBoardHomeRoute = computed(() => route.name === 'board' || route.name === 'board-folder')
-const usesWorkspacePullRefresh = computed(() => isLedgerRoute.value || isBoardHomeRoute.value)
+const usesWorkspacePullRefresh = computed(() => isLedgerRoute.value || isBoardHomeRoute.value || workspaceKind.value === 'diary')
 const ledgerZenEligible = computed(() => (
   isLedgerRoute.value
   && auth.state.value === 'authenticated'
@@ -296,10 +294,12 @@ async function requestScopeChange(scope: ScopeKey): Promise<void> {
   if (scope === activeScope.value) return
   if (scope === 'diary') {
     if (!(await requestDiaryAccess())) return
+    await router.push({ name: 'diary' })
+    return
   }
   const scopeTransition = vaultScopeChangeCommand.value
   if (
-    (scope === 'note' || scope === 'diary')
+    scope === 'note'
     && route.path.startsWith('/vault')
     && scopeTransition
   ) {

@@ -273,7 +273,7 @@ describe('SettingsModal', () => {
     for (const [category, pages] of [
       ['Diary', []],
       ['Ledger', ['交易分类', '账户图标']],
-      ['数据与维护', ['文档元数据', '存储与附件', '日记迁移']],
+      ['数据与维护', ['文档元数据', '存储与附件']],
       ['Note', ['编辑器', '标签']],
     ] as const) {
       findButton(category).click()
@@ -701,7 +701,7 @@ describe('SettingsModal', () => {
     expect(document.body.querySelectorAll('[role="dialog"]')).toHaveLength(1)
   })
 
-  it('keeps metadata actions and Diary migration reachable from Data & maintenance', async () => {
+  it('keeps metadata actions reachable from Data & maintenance', async () => {
     getFrontmatterCleanupPreview.mockResolvedValueOnce({
       candidates: [{ path: 'inbox/legacy', customFields: [] }],
       blocked: [],
@@ -721,9 +721,7 @@ describe('SettingsModal', () => {
     expect(confirm).toHaveBeenCalledTimes(1)
     expect(restoreDocumentFrontmatter).not.toHaveBeenCalled()
 
-    findButton('日记迁移').click()
-    await flushPromises()
-    expect(findButton('扫描旧日记状态').disabled).toBe(false)
+
   })
 
   it('preserves Naive number bounds and exact numeric/boolean editor preference types', async () => {

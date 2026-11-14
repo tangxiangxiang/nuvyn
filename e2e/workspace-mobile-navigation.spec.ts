@@ -1,5 +1,5 @@
 import { expect, test, type APIRequestContext, type Page } from './fixtures/auth'
-import { test as diaryTest } from './fixtures/diary'
+import { unlockDiary } from './helpers/diary-life'
 
 const RUN_ID = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
 const MOBILE_VIEWPORT = { width: 375, height: 812 }
@@ -222,7 +222,7 @@ test('mobile navigation switches between Note, Board and Ledger', async ({ page 
   await expect(page.getByTestId('ledger-page')).toBeVisible()
 })
 
-diaryTest('Diary Calendar matches Note navbar geometry across tablet breakpoints', async ({ page }) => {
+test('Diary Calendar matches Note navbar geometry across tablet breakpoints', async ({ page }) => {
   await page.setViewportSize(DESKTOP_VIEWPORT)
   await page.goto('/vault')
   const tabletWidths = [601, 768, 899, 900, 901, 1024, 1199]
@@ -235,7 +235,8 @@ diaryTest('Diary Calendar matches Note navbar geometry across tablet breakpoints
   await page.setViewportSize({ width: 768, height: 1024 })
   const diary = page.locator('.scope-chip').filter({ hasText: 'diary' })
   await diary.click()
-  await expect(page.getByTestId('diary-calendar-surface')).toBeVisible()
+  await unlockDiary(page)
+  await expect(page.getByTestId('diary-life')).toBeVisible()
   await expect(page.locator('.navbar .brand-wordmark')).toBeVisible()
   for (const name of ['note', 'diary', 'ledger']) {
     await expect(page.locator('.navbar .scope-chip-label').filter({ hasText: name })).toBeVisible()
@@ -253,9 +254,7 @@ diaryTest('Diary Calendar matches Note navbar geometry across tablet breakpoints
   }
 })
 
-diaryTest('Diary and Ledger entries remain usable from the mobile navigation', async ({ page }) => {
-  // Let the Diary fixture complete its supported unlock/bootstrap flow on
-  // desktop, where Note is still present, then exercise the mobile nav.
+test('Diary and Ledger entries remain usable from the mobile navigation', async ({ page }) => {
   await page.setViewportSize(DESKTOP_VIEWPORT)
   await page.goto('/vault')
   await page.setViewportSize(MOBILE_VIEWPORT)
@@ -263,8 +262,9 @@ diaryTest('Diary and Ledger entries remain usable from the mobile navigation', a
 
   const diary = page.locator('.scope-chip').filter({ hasText: 'diary' })
   await diary.click()
+  await unlockDiary(page)
   await expect(diary).toHaveAttribute('aria-pressed', 'true', { timeout: 15_000 })
-  await expect(page.getByTestId('diary-calendar-surface')).toBeVisible()
+  await expect(page.getByTestId('diary-life')).toBeVisible()
 
   await page.locator('.scope-chip').filter({ hasText: 'ledger' }).click()
   await expect(page).toHaveURL(/\/ledger(?:[/?#]|$)/)

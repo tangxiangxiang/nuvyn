@@ -104,3 +104,19 @@ license. They are separate from the configurable Mood catalog.
 | --- | --- |
 | `public/emoji/plan-clipboard.svg` | `assets/Clipboard/Color/clipboard_color.svg` |
 | `public/emoji/plan-completed.svg` | `assets/Check mark button/Color/check_mark_button_color.svg` |
+
+Diary Reborn event presets use unchanged SVGs from the same pinned revision
+and MIT license. Presets never determine an event's category. Other user-entered
+Emoji use the platform glyph renderer without loading remote resources.
+
+| Bundled asset | Upstream Color SVG |
+| --- | --- |
+| `event-birthday.svg` | `assets/Birthday cake/Color/birthday_cake_color.svg` |
+| `event-car.svg` | `assets/Automobile/Color/automobile_color.svg` |
+| `event-house.svg` | `assets/House/Color/house_color.svg` |
+| `event-ring.svg` | `assets/Ring/Color/ring_color.svg` |
+| `event-graduation.svg` | `assets/Graduation cap/Color/graduation_cap_color.svg` |
+| `event-travel.svg` | `assets/Airplane/Color/airplane_color.svg` |
+| `event-goal.svg` | `assets/Bullseye/Color/bullseye_color.svg` |
+| `event-work.svg` | `assets/Briefcase/Color/briefcase_color.svg` |
+| `event-health.svg` | `assets/Hospital/Color/hospital_color.svg` |

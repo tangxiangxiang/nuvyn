@@ -21,7 +21,6 @@ import SettingsAiSpeechSection from './SettingsAiSpeechSection.vue'
 import SettingsEditorSection from './SettingsEditorSection.vue'
 import SettingsMetadataSection from './SettingsMetadataSection.vue'
 import SettingsTagsSection from './SettingsTagsSection.vue'
-import SettingsDiaryMigrationSection from './SettingsDiaryMigrationSection.vue'
 import SettingsLedgerAccountIconsSection from './SettingsLedgerAccountIconsSection.vue'
 import SettingsLedgerCategoriesSection from './SettingsLedgerCategoriesSection.vue'
 import SettingsDiaryMoodIconsSection from './SettingsDiaryMoodIconsSection.vue'
@@ -73,7 +72,6 @@ const CATEGORIES = {
   maintenance: { label: 'settings.category_maintenance', icon: Settings, sections: [
     { id: 'metadata', label: 'settings.metadata' },
     { id: 'storage-attachments', label: 'settings.storage_attachments' },
-    { id: 'diary-migration', label: 'settings.diary_migration_nav' },
   ] },
 } as const
 
@@ -343,7 +341,6 @@ onBeforeUnmount(() => {
                 @restore="restoreOriginalFrontmatter"
                 @remove="removeFrontmatter"
               />
-              <SettingsDiaryMigrationSection v-else-if="active === 'diary-migration'" />
               <SettingsLedgerAccountIconsSection v-else-if="active === 'ledger-account-icons'" />
               <SettingsLedgerCategoriesSection v-else-if="active === 'ledger-categories'" />
               <SettingsDiaryMoodIconsSection v-else-if="active === 'diary-mood-icons'" />

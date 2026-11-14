@@ -28,6 +28,7 @@ export const NUVYN_BROWSER_STORAGE_KEYS = {
   fileTreeCompact: 'nuvyn.file-tree.compact',
   fileTreeFilter: 'nuvyn.file-tree.filter',
   diaryFilterSeed: 'nuvyn.diary.filter-seed',
+  diaryLifeView: 'nuvyn.diary.view',
   diaryFilterOwnership: 'nuvyn.diary.filter-ownership',
 } as const
 

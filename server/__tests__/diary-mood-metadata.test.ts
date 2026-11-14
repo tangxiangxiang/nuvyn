@@ -319,26 +319,6 @@ describe('Diary Mood live metadata', () => {
     }
   })
 
-  it('keeps the existing Diary create authority and returns an unset Mood', async () => {
-    const response = await call('POST', '/api/diary/dates', {
-      date: '2026-08-24',
-      timeZone: 'Asia/Shanghai',
-    })
-
-    expect(response.status).toBe(201)
-    expect(await response.json()).toMatchObject({
-      date: '2026-08-24',
-      path: 'diary/2026-08-24',
-      created: true,
-      post: {
-        path: 'diary/2026-08-24',
-        mood: null,
-        metadataUpdatedAt: expect.any(Number),
-      },
-    })
-    expect(getDocumentMetadata(db, 'diary/2026-08-24')?.mood).toBeNull()
-  })
-
   it('allows Mood mutation for an already-existing future Diary document', async () => {
     const logicalPath = 'diary/2099-12-31'
     await write(logicalPath, '# Future Diary\n')

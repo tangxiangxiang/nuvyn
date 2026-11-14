@@ -5,7 +5,9 @@ import { defineComponent, ref } from 'vue'
 import FileTree from '../FileTree.vue'
 import { projectFileTree } from '../fileTreeProjection'
 import { parseTagQuery } from '../../../lib/tags'
-import { managedDiaryPathsInProjection } from '../../../features/diary/diaryAnalysisExport'
+function managedDiaryPathsInProjection(nodes: readonly TreeNode[]): string[] {
+  return nodes.flatMap(node => node.kind === 'folder' ? managedDiaryPathsInProjection(node.children) : /^diary\/\d{4}-\d{2}-\d{2}$/.test(node.path) ? [node.path] : [])
+}
 import { classifyDiaryPath } from '../../../../shared/diaryProtocol'
 import type { PostSummary, TreeNode } from '../../../lib/api'
 import { installDialogMocks } from '../../../__test-helpers__/dialogs'

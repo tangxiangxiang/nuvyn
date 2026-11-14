@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, inject, nextTick, onBeforeUnmount, onMounted, ref, watch, type ComponentPublicInstance } from 'vue'
-import { NButton, NDropdown, NIcon, NTooltip } from 'naive-ui'
+import { NButton, NDropdown, NIcon } from 'naive-ui'
 import {
   Box,
   Calendar,
@@ -9,7 +9,6 @@ import {
   Photo,
   LayoutSidebarLeftExpand,
   LayoutSidebarRightExpand,
-  ListCheck,
   Lock,
   Moon,
   Notes,
@@ -150,9 +149,6 @@ watch(activeScope, () => {
 const diaryAccess = inject(DiaryAccessContextKey, null)
 const appShell = inject(AppShellContextKey, null)
 
-function openDiaryPlan(event: MouseEvent): void {
-  if (event.currentTarget instanceof HTMLElement) appShell?.diaryPlanEntry?.value?.open(event.currentTarget)
-}
 const noteSpeechOptions = computed(() => [
   { label: t('note.speech_read_all'), key: 'read-all' },
   ...(appShell?.noteSpeechReadSelectionCommand?.value
@@ -165,7 +161,7 @@ function onNoteSpeechMenuSelect(key: string): void {
   else if (key === 'read-all') appShell?.noteSpeechReadAllCommand?.value?.()
 }
 
-let analysisExportHoveredScope: 'diary' | 'ledger' | null = null
+let analysisExportHoveredScope: 'ledger' | null = null
 let analysisExportRunning = false
 let analysisExportDisposed = false
 
@@ -180,20 +176,20 @@ function leaveAnalysisScopeChip(): void {
 }
 
 function enterScopeChip(scope: ScopeKey): void {
-  if ((scope !== 'diary' && scope !== 'ledger') || analysisExportDisposed || !supportsAnalysisHover()) return
+  if (scope !== 'ledger' || analysisExportDisposed || !supportsAnalysisHover()) return
   if (analysisExportHoveredScope === scope) return
   leaveAnalysisScopeChip()
   analysisExportHoveredScope = scope
   window.addEventListener('keydown', onAnalysisExportKeydown)
 }
 
-async function runAnalysisExport(scope: 'diary' | 'ledger', command: () => Promise<void>): Promise<void> {
+async function runAnalysisExport(command: () => Promise<void>): Promise<void> {
   analysisExportRunning = true
   try {
     await command()
   } catch {
     // Never log an exception which might carry decrypted document context.
-    console.error(`${scope === 'diary' ? 'Diary' : 'Ledger'} analysis export failed`)
+    console.error('Ledger analysis export failed')
   } finally {
     analysisExportRunning = false
   }
@@ -207,12 +203,9 @@ function onAnalysisExportKeydown(event: KeyboardEvent): void {
     || event.ctrlKey || event.metaKey || event.altKey || isNuvynShortcutBlocked(event)
     || isDiaryTextEntryContext(event) || isDiaryShortcutBlocked(event)
     || event.composedPath().some((target) => target instanceof HTMLElement && target.isContentEditable)) return
-  if (scope === 'diary' && (!isVault.value || isLedger.value || !props.diaryUnlocked)) return
-  if (scope === 'ledger' && !isLedger.value) return
-  const command = scope === 'diary'
-    ? appShell?.diaryAnalysisExportCommand?.value
-    : appShell?.ledgerAnalysisExportCommand?.value
-  if (command) void runAnalysisExport(scope, command)
+  if (!isLedger.value) return
+  const command = appShell?.ledgerAnalysisExportCommand?.value
+  if (command) void runAnalysisExport(command)
 }
 
 watch(showScopeChips, (visible) => {
@@ -244,30 +237,15 @@ function activeVaultDocumentScope(): ScopeKey | null {
 }
 
 function isScopeActive(scope: ScopeKey): boolean {
+  if (route?.name === 'diary') return scope === 'diary'
   if (isBoard.value) return false
   if (isLedger.value) return scope === 'ledger'
   if (scope === 'ledger' && isVaultLedgerDocument()) return true
-  // When Calendar Home is the visible surface, the selected Vault scope owns
-  // navigation state. A retained document URL must not mask a scope change.
-  if (appShell?.diaryCalendarVisible.value === true) return activeScope.value === scope
   if (navigationSelectedScope.value) return navigationSelectedScope.value === scope
   const documentScope = activeVaultDocumentScope()
   if (documentScope) return scope === documentScope
   return activeScope.value === scope
 }
-
-/* Calendar Home is the Diary scope at the Vault root. A Diary document has a
-   nested /vault/<path> route and keeps the normal reading/editing controls.
-   VaultView publishes the resolved visibility so a retained document URL
-   cannot make Calendar Home controls appear; the route fallback keeps this
-   component correct in isolated mounts without the App shell. */
-const isDiaryCalendarVisible = computed(() => (
-  isVault.value
-  && (
-    appShell?.diaryCalendarVisible.value === true
-    || (activeScope.value === 'diary' && route?.name === 'vault')
-  )
-))
 
 /* The Vault home can have a highlighted file-tree row without an active
    document. Reading/editing is meaningful only after a document route has
@@ -278,6 +256,15 @@ const isVaultDocumentVisible = computed(() => (
 ))
 
 function onScopeClick(scope: ScopeKey): void {
+  if (scope === 'diary' && diaryAccess) {
+    void diaryAccess.requestAccess().then(granted => { if (granted) void router.push({ name: 'diary' }) })
+    return
+  }
+  if (route?.name === 'diary' && scope === 'note') {
+    selectScope('note')
+    void router.push({ name: 'vault' })
+    return
+  }
   if (scope === 'ledger') {
     // Keep direct legacy Ledger documents usable in the Vault while the
     // top-level Ledger chip opens the canonical Ledger workspace elsewhere.
@@ -293,48 +280,9 @@ function onScopeClick(scope: ScopeKey): void {
     return
   }
   if (isLedger.value) {
-    if (scope === 'diary' && diaryAccess) {
-      void diaryAccess.requestScopeChange(scope).then(() => {
-        if (activeScope.value === scope) {
-          navigationSelectedScope.value = scope
-          void router.push({ name: 'vault' })
-        }
-      })
-      return
-    }
     selectScope(scope)
     navigationSelectedScope.value = scope
     void router.push({ name: 'vault' })
-    return
-  }
-  if (
-    scope === 'diary'
-    && isVault.value
-    && props.diaryUnlocked
-    && activeScope.value === 'diary'
-  ) {
-    // The Vault owns whether this is an ordinary Diary document eligible for
-    // Back. Calendar Home and special surfaces intentionally turn this into
-    // a no-op; the navbar never duplicates document-close policy.
-    navigationSelectedScope.value = scope
-    appShell?.diaryBackCommand?.value?.()
-    return
-  }
-  if (scope === 'note' && isVault.value && activeScope.value === 'diary') {
-    const changeScope = appShell?.vaultScopeChangeCommand?.value
-    if (!changeScope) return
-    void changeScope('note').then((completed) => {
-      if (completed && activeScope.value === 'note') {
-        navigationSelectedScope.value = 'note'
-      }
-    }).catch(() => {})
-    return
-  }
-  if (scope === 'diary' && diaryAccess) {
-    void diaryAccess.requestScopeChange(scope).then(() => {
-      if (activeScope.value === scope) navigationSelectedScope.value = scope
-      if (isBoard.value && activeScope.value === scope) void router.push({ name: 'vault' })
-    })
     return
   }
   selectScope(scope)
@@ -961,7 +909,7 @@ onBeforeUnmount(() => {
 
 <template>
   <header
-    :class="['navbar', { 'is-vault': isVault, 'is-workspace': isWorkspace, 'ledger-nav-mode': isLedger, 'board-nav-mode': isBoard, 'diary-calendar-mode': isVault && activeScope === 'diary', 'is-zen-transitioning': props.zenModeTransitioning, 'note-tablet-nav': isVault && noteTablet }]"
+    :class="['navbar', { 'is-vault': isVault, 'is-workspace': isWorkspace, 'ledger-nav-mode': isLedger, 'board-nav-mode': isBoard, 'is-zen-transitioning': props.zenModeTransitioning, 'note-tablet-nav': isVault && noteTablet }]"
     :inert="props.logoutBusy || undefined"
     :aria-busy="props.logoutBusy || undefined"
   >
@@ -1030,24 +978,6 @@ onBeforeUnmount(() => {
       </div>
       <div class="nav-spacer" />
       <div class="nav-actions">
-        <NTooltip v-if="isDiaryCalendarVisible && props.diaryUnlocked && appShell?.diaryPlanEntry?.value" placement="bottom-end">
-          <template #trigger>
-            <NButton
-              class="nav-diary-plan"
-              :class="{ 'has-plans': appShell.diaryPlanEntry.value.hasPlans }"
-              attr-type="button"
-              size="small"
-              quaternary
-              :bordered="false"
-              :aria-label="t('diary.plan.open_home')"
-              data-testid="diary-calendar-plan-home"
-              @click="openDiaryPlan"
-            >
-              <NIcon aria-hidden="true"><ListCheck /></NIcon>
-            </NButton>
-          </template>
-          <span data-testid="diary-calendar-plan-tooltip">{{ t('diary.plan.short') }}</span>
-        </NTooltip>
         <NDropdown
           v-if="isVault && appShell?.noteSpeechReadAllCommand?.value"
           trigger="click"
@@ -1109,7 +1039,7 @@ onBeforeUnmount(() => {
           <NIcon aria-hidden="true"><Photo /></NIcon>
         </NButton>
         <NButton
-          v-if="isVault && !isLedger && viewModeApi && isVaultDocumentVisible && !isDiaryCalendarVisible"
+          v-if="isVault && !isLedger && viewModeApi && isVaultDocumentVisible"
           class="view-toggle"
           :class="{ 'is-read': isReadMode }"
           attr-type="button"
@@ -1127,7 +1057,7 @@ onBeforeUnmount(() => {
           </NIcon>
         </NButton>
         <NButton
-          v-if="isVault && !isLedger && !isDiaryCalendarVisible"
+          v-if="isVault && !isLedger"
           class="left-panel-toggle"
           attr-type="button"
           size="small"
@@ -1142,7 +1072,7 @@ onBeforeUnmount(() => {
           <NIcon class="left-panel-toggle-icon" aria-hidden="true"><LayoutSidebarLeftExpand /></NIcon>
         </NButton>
         <NButton
-          v-if="isVault && !isLedger && !isDiaryCalendarVisible && workspaceRightPanelAvailable"
+          v-if="isVault && !isLedger && workspaceRightPanelAvailable"
           class="right-rail-toggle"
           attr-type="button"
           size="small"
