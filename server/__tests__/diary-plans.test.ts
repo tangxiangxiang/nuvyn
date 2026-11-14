@@ -8,7 +8,7 @@ import app from '../index'
 import { applyMigrations } from '../db'
 import { CONTENT_DIR, setContentDir } from '../paths'
 import { __resetLinkIndexForTesting } from '../linkIndex'
-import { __setAtomicWriteCrashHooksForTesting, __setAtomicWriteTestHooksForTesting } from '../atomicTextWrite'
+import { __setAtomicWriteCrashHooksForTesting, __setAtomicWriteTestHooksForTesting, sha256Hex } from '../atomicTextWrite'
 import {
   closeAuthTestContext, createAuthenticatedTestContext, jsonRequest,
   unlockDiaryAccessForTesting, withAuthCookie, withDiaryCapability, type AuthenticatedTestContext,
@@ -23,9 +23,14 @@ let auth: AuthenticatedTestContext
 let capability: string
 let vault: string
 
-function request(method: string, url: string, body?: unknown, unlocked = true) {
-  const req = jsonRequest(url, { method, body, origin: auth.runtime.config.publicOrigin })
-  return app.fetch(unlocked ? withDiaryCapability(auth, req, capability) : withAuthCookie(auth, req))
+function request(method: string, url: string, body?: unknown, unlocked = true, signal?: AbortSignal) {
+  const req = jsonRequest(url, {
+    method,
+    body: body ?? (url === `${base}/migrate` ? { backupConfirmed: true } : undefined),
+    origin: auth.runtime.config.publicOrigin,
+  })
+  const authenticated = unlocked ? withDiaryCapability(auth, req, capability) : withAuthCookie(auth, req)
+  return app.fetch(signal ? new Request(authenticated, { signal }) : authenticated)
 }
 
 async function seed(day: string, title: string, completedAt: number | null = null) {
@@ -82,7 +87,7 @@ describe('Diary Plan Markdown migration', () => {
       const original = upgrade.prepare('SELECT * FROM diary_plan_items').all()
       applyMigrations(upgrade)
       applyMigrations(upgrade)
-      expect(upgrade.prepare('SELECT version FROM schema_version').get()).toEqual({ version: 41 })
+      expect(upgrade.prepare('SELECT version FROM schema_version').get()).toEqual({ version: 42 })
       expect(upgrade.prepare('SELECT * FROM diary_plan_items').all()).toEqual(original)
       expect(upgrade.prepare('SELECT * FROM diary_plan_markdown_migration').all()).toEqual([])
     } finally {
@@ -97,6 +102,17 @@ describe('Diary Plan Markdown migration', () => {
     for (const [method, url] of [['POST', base], ['PATCH', `${base}/old`], ['DELETE', `${base}/old`]]) {
       expect((await request(method!, url!)).status).toBe(410)
     }
+  })
+
+  it('reads status without changing the vault and requires explicit confirmation', async () => {
+    await seed(date, 'Private task')
+    expect((await request('GET', `${base}/migration-status`, undefined, false)).status).toBe(423)
+    expect(await (await request('GET', `${base}/migration-status`)).json()).toEqual({
+      hasLegacyPlans: true, completed: 0, pending: 1, failures: [], hasConflicts: false,
+    })
+    expect((await request('POST', `${base}/migrate`, {})).status).toBe(400)
+    expect(checkpoint(date)).toBeUndefined()
+    expect(await fs.readdir(vault)).toEqual([])
   })
 
   it('merges encrypted items by date, preserves Diary bytes and deduplicates concurrent migration', async () => {
@@ -119,12 +135,17 @@ describe('Diary Plan Markdown migration', () => {
     })
     expect(db.prepare('SELECT * FROM diary_plan_items ORDER BY id').all()).toEqual(source)
     const physical = await fs.readFile(path.join(vault, 'diary', `${date}.md`), 'utf8')
+    expect(checkpoint(date)).toMatchObject({ target_hash: sha256Hex(physical) })
     expect(physical).not.toMatch(/Confidential duplicate|Free-form content/)
     expect(JSON.stringify(checkpoint(date))).not.toContain('Confidential duplicate')
     expect(auth.logs.join(' ')).not.toContain('Confidential duplicate')
     expect(await (await request('GET', `${base}/calendar?month=2032-02`)).json()).toMatchObject({
       days: [{ date, total: 2, completed: 1 }, { date: otherDate, total: 1, completed: 0 }],
     })
+    const later = `${custom}\nUser edit after migration\n`
+    expect((await request('PUT', `/api/posts/diary/${date}`, { raw: later, baseRaw: await raw(date) })).status).toBe(200)
+    expect(await (await request('POST', `${base}/migrate`)).json()).toMatchObject({ migrated: 0 })
+    expect(await raw(date)).toBe(later)
   })
 
   it('isolates corrupt dates and resumes after the file lands before SQLite confirmation', async () => {
@@ -141,6 +162,9 @@ describe('Diary Plan Markdown migration', () => {
       { date, code: 'diary-plan-payload-invalid' },
       { date: otherDate, code: 'diary-plan-migration-unavailable' },
     ])
+    expect(await (await request('GET', `${base}/migration-status`)).json()).toMatchObject({
+      completed: 0, pending: 2, failures: first.failures, hasConflicts: true,
+    })
     expect(checkpoint(date)).toBeUndefined()
     expect(checkpoint(otherDate)).toMatchObject({ completed_at: null })
     const written = await raw(otherDate)
@@ -150,6 +174,9 @@ describe('Diary Plan Markdown migration', () => {
     db.prepare('UPDATE diary_plan_items SET encrypted_fields = ? WHERE id = ?').run(original, damaged)
     expect(await (await request('POST', `${base}/migrate`)).json()).toEqual({ migrated: 1, failures: [], next: null })
     expect(await raw(date)).toContain('Damaged task')
+    expect(await (await request('GET', `${base}/migration-status`)).json()).toMatchObject({
+      completed: 2, pending: 0, failures: [], hasConflicts: false,
+    })
   })
 
   it('fails closed when a prepared checkpoint no longer matches the document or the source version', async () => {
@@ -208,6 +235,50 @@ describe('Diary Plan Markdown migration', () => {
     })
     expect(await raw(date)).toBe(edited)
     expect(checkpoint(date)).toMatchObject({ completed_at: null })
+  })
+
+  it.each(['lock', 'abort'] as const)('leaves the prepared base intact on %s before publication', async (action) => {
+    await request('POST', '/api/diary/dates', { date, timeZone: 'UTC' })
+    await seed(date, 'Resumable task')
+    const file = path.join(vault, 'diary', `${date}.md`)
+    const original = await fs.readFile(file, 'utf8')
+    const controller = new AbortController()
+    let lock: Promise<unknown> | undefined
+    __setAtomicWriteCrashHooksForTesting({
+      afterJournalWrite() {
+        if (action === 'lock') lock = auth.runtime.diaryAccess.lock(auth.session.id)
+        else controller.abort()
+      },
+    })
+    const response = await request('POST', `${base}/migrate`, undefined, true, controller.signal)
+    await lock
+    expect(response.status).toBe(action === 'lock' ? 423 : 200)
+    expect(await fs.readFile(file, 'utf8')).toBe(original)
+    expect(checkpoint(date)).toMatchObject({ completed_at: null, base_hash: sha256Hex(original) })
+    __setAtomicWriteCrashHooksForTesting(null)
+    if (action === 'lock') {
+      capability = (await auth.runtime.diaryAccess.unlock(auth.session.id, 'diary-access-test-password')).capability
+    }
+    expect(await (await request('POST', `${base}/migrate`)).json()).toMatchObject({ migrated: 1 })
+    expect((await raw(date)).match(/Resumable task/g)).toHaveLength(1)
+  })
+
+  it('recovers from a SQLite confirmation failure without publishing a second generation', async () => {
+    await seed(date, 'Already published')
+    db.exec(`
+      CREATE TRIGGER reject_confirmation BEFORE UPDATE OF completed_at ON diary_plan_markdown_migration
+      BEGIN SELECT RAISE(ABORT, 'Injected SQLite confirmation failure'); END
+    `)
+    expect(await (await request('POST', `${base}/migrate`)).json()).toMatchObject({
+      failures: [{ date, code: 'diary-plan-migration-unavailable' }],
+    })
+    const file = path.join(vault, 'diary', `${date}.md`)
+    const published = await fs.readFile(file, 'utf8')
+    expect(checkpoint(date)).toMatchObject({ completed_at: null, target_hash: sha256Hex(published) })
+    db.exec('DROP TRIGGER reject_confirmation')
+    expect(await (await request('POST', `${base}/migrate`)).json()).toMatchObject({ migrated: 1 })
+    expect(await fs.readFile(file, 'utf8')).toBe(published)
+    expect((await raw(date)).match(/Already published/g)).toHaveLength(1)
   })
 
   it('leaves a legacy plaintext primary untouched for the existing encryption workflow', async () => {

@@ -108,6 +108,7 @@ import {
 import DiaryWorkspace from '../components/diary/DiaryWorkspace.vue'
 import DiaryCalendarSurface from '../components/diary/DiaryCalendarSurface.vue'
 import DiaryPlanDateDialog from '../components/diary/DiaryPlanDateDialog.vue'
+import DiaryPlanMigrationPrompt from '../components/diary/DiaryPlanMigrationPrompt.vue'
 import { projectDiaryDaysFromTree } from '../components/diary/diaryCalendarProjection'
 import { adjacentDiaryDate, diaryTitleSwipeDirection } from '../components/diary/diaryTitleSwipe'
 import TagPanel from '../components/vault/TagPanel.vue'
@@ -2290,33 +2291,61 @@ function openDiaryPlanHome(trigger: HTMLElement) {
   diaryPlanDate.value = today
 }
 
-const settledPlanMigrationEpoch = ref<number | null>(null)
-watch([isDiaryCalendarVisible, diaryAccess.isUnlocked, diaryAccess.epoch], ([visible, unlocked, epoch], _previous, onCleanup) => {
-  if (!visible || !unlocked) return
-  if (epoch !== null && settledPlanMigrationEpoch.value === epoch) return
-  const request = new AbortController()
-  onCleanup(() => request.abort())
-  void (async () => {
+const diaryMigrationStatus = shallowRef<Awaited<ReturnType<typeof diaryPlanApi.migrationStatus>> | null>(null)
+const diaryMigrationBusy = ref(false)
+const diaryMigrationError = ref(false)
+let diaryMigrationScope: AbortController | undefined
+
+async function loadDiaryMigrationStatus() {
+  const signal = diaryMigrationScope?.signal
+  if (!signal || signal.aborted) return
+  try {
+    const status = await diaryPlanApi.migrationStatus(signal)
+    if (!signal.aborted) {
+      diaryMigrationStatus.value = status
+      diaryMigrationError.value = false
+    }
+  } catch {
+    if (!signal.aborted) diaryMigrationError.value = true
+  }
+}
+
+async function runDiaryMigration() {
+  const signal = diaryMigrationScope?.signal
+  if (!signal || signal.aborted || diaryMigrationBusy.value || !diaryMigrationStatus.value?.pending) return
+  diaryMigrationBusy.value = true
+  diaryMigrationError.value = false
+  let failed = false
+  try {
     let cursor: number | null = 0
-    let changed = false
-    let failed = false
-    while (cursor !== null && !request.signal.aborted) {
-      const batch = await diaryPlanApi.migrate(cursor, request.signal)
-      changed ||= batch.migrated > 0
-      failed ||= batch.failures.length > 0
-      cursor = batch.next
+    while (cursor !== null && !signal.aborted) {
+      cursor = (await diaryPlanApi.migrate(cursor, signal)).next
     }
-    if (request.signal.aborted) return
-    if (changed) {
-      await refresh()
-      if (!request.signal.aborted) diaryPlanCalendar.refresh()
+  } catch {
+    failed = true
+  } finally {
+    if (!signal.aborted) {
+      await loadDiaryMigrationStatus()
+      if (!signal.aborted) {
+        diaryMigrationError.value ||= failed && Boolean(diaryMigrationStatus.value?.pending)
+        diaryMigrationBusy.value = false
+        diaryPlanCalendar.refresh()
+        void refresh().catch(() => toast.info(t('metadata.sync_failed')))
+      }
     }
-    if (failed && !request.signal.aborted) toast.error(t('diary.plan.migration_failed'))
-    if (!failed && !request.signal.aborted) settledPlanMigrationEpoch.value = epoch
-  })().catch(() => {
-    if (!request.signal.aborted) toast.error(t('diary.plan.migration_failed'))
-  })
-}, { immediate: true })
+  }
+}
+
+watch([isDiaryCalendarVisible, diaryAccess.isUnlocked, diaryAccess.epoch], ([visible, unlocked], _previous, onCleanup) => {
+  diaryMigrationStatus.value = null
+  diaryMigrationError.value = false
+  diaryMigrationBusy.value = false
+  if (!visible || !unlocked) return
+  const scope = new AbortController()
+  diaryMigrationScope = scope
+  onCleanup(() => scope.abort())
+  void loadDiaryMigrationStatus()
+}, { immediate: true, flush: 'sync' })
 
 watch(() => fileChanges.events.value.at(-1), (event) => {
   if (event && diaryDateFromPath(event.path)) diaryPlanCalendar.refresh()
@@ -3886,6 +3915,14 @@ watch(isReadMode, async (reading) => {
         class="content diary-calendar-content"
       >
         <template #home>
+          <DiaryPlanMigrationPrompt
+            v-if="diaryAccess.isUnlocked.value && isDiaryCalendarVisible"
+            :status="diaryMigrationStatus"
+            :busy="diaryMigrationBusy"
+            :error="diaryMigrationError"
+            @migrate="runDiaryMigration"
+            @reload="loadDiaryMigrationStatus"
+          />
           <DiaryCalendarSurface
             ref="diaryCalendarSurfaceRef"
             :tree="tree"

@@ -14,7 +14,7 @@ import { withDocumentWriteLock, withVaultStructureLock } from './documentWriteLo
 import { getIndex as getLinkIndex } from './linkIndex.js'
 import { CONTENT_DIR, filePathFor, readSafeRelativeFile, resolveSafeRelativePath } from './paths.js'
 import { appendDiaryPlanItems } from './diaryPlanMarkdown.js'
-import { compareDiaryPlanItems } from '../shared/diaryPlan.js'
+import { compareDiaryPlanItems, type DiaryPlanMigrationStatus } from '../shared/diaryPlan.js'
 import { diaryLogicalPathForDate, parseDiaryDate } from '../shared/diaryProtocol.js'
 import type { Database } from 'better-sqlite3'
 
@@ -36,6 +36,27 @@ type SourceRow = {
 
 const idPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/
 const validTimestamp = (value: number) => Number.isSafeInteger(value) && value >= 0
+
+export function diaryPlanMigrationStatus(db: Database, ownerId: number): DiaryPlanMigrationStatus {
+  const counts = db.prepare(`
+    SELECT COUNT(DISTINCT p.date) AS total,
+      COUNT(DISTINCT CASE WHEN m.completed_at IS NOT NULL THEN p.date END) AS completed
+    FROM diary_plan_items p
+    LEFT JOIN diary_plan_markdown_migration m ON m.owner_user_id = p.owner_user_id AND m.date = p.date
+    WHERE p.owner_user_id = ? AND p.encrypted_fields IS NOT NULL
+  `).get(ownerId) as { total: number; completed: number }
+  const rows = db.prepare(`
+    SELECT date, code FROM diary_plan_migration_failures
+    WHERE owner_user_id = ? ORDER BY date
+  `).all(ownerId) as Array<{ date: string; code: string }>
+  return {
+    hasLegacyPlans: counts.total > 0,
+    pending: counts.total - counts.completed,
+    completed: counts.completed,
+    failures: rows.map(({ date, code }) => ({ date: parseDiaryDate(date), code })),
+    hasConflicts: rows.some(({ code }) => code !== 'diary-plan-migration-unavailable'),
+  }
+}
 
 class MigrationConflict extends Error {}
 class LegacyDiaryNeedsEncryption extends Error {}
@@ -63,6 +84,7 @@ async function statIfPresent(absolute: string) {
 
 export async function migrateDiaryPlans(
   db: Database, ownerId: number, operation: DiaryBodyOperation, offset: number, signal: AbortSignal,
+  canContinue: () => boolean,
 ) {
   const dates = db.prepare(`
     SELECT DISTINCT p.date FROM diary_plan_items p
@@ -73,27 +95,47 @@ export async function migrateDiaryPlans(
   const batch = dates.slice(0, 12)
   let migrated = 0
   for (const { date } of batch) {
-    if (signal.aborted) break
+    if (signal.aborted || !canContinue()) break
     operation.assertCurrent()
     try {
-      if (await migrateDay(db, ownerId, operation, date)) migrated++
+      if (await migrateDay(db, ownerId, operation, date, signal, canContinue)) migrated++
     } catch (error) {
       operation.assertCurrent()
-      failures.push({ date: parseDiaryDate(date) ?? '', code: migrationErrorCode(error) })
+      if (signal.aborted || !canContinue()) break
+      const code = migrationErrorCode(error)
+      db.prepare(`
+        INSERT INTO diary_plan_migration_failures (owner_user_id, date, code)
+        SELECT ?, ?, ? WHERE NOT EXISTS (
+          SELECT 1 FROM diary_plan_markdown_migration
+          WHERE owner_user_id = ? AND date = ? AND completed_at IS NOT NULL
+        )
+        ON CONFLICT (owner_user_id, date) DO UPDATE SET code = excluded.code
+      `).run(ownerId, date, code, ownerId, date)
+      failures.push({ date: parseDiaryDate(date) ?? '', code })
     }
   }
   const next = dates[batch.length]
   return { migrated, failures, next: next ? offset + batch.length : null }
 }
 
-async function migrateDay(db: Database, ownerId: number, operation: DiaryBodyOperation, value: string) {
+async function migrateDay(
+  db: Database, ownerId: number, operation: DiaryBodyOperation, value: string,
+  signal: AbortSignal, canContinue: () => boolean,
+) {
+  const assertActive = () => {
+    operation.assertCurrent()
+    signal.throwIfAborted()
+    // Existing body leases drain on lock. A migration can stop earlier
+    // and leave its checkpoint for the next explicitly confirmed run.
+    if (!canContinue()) throw new Error('Diary migration access ended')
+  }
   const date = parseDiaryDate(value)
   if (!date) throw new DiaryPlanCryptoError()
   const logicalPath = diaryLogicalPathForDate(date)
   const absolute = filePathFor(logicalPath)
   const root = path.dirname(absolute)
   return withVaultStructureLock(() => withDocumentWriteLock(logicalPath, async () => {
-    operation.assertCurrent()
+    assertActive()
     const checkpoint = db.prepare('SELECT * FROM diary_plan_markdown_migration WHERE owner_user_id = ? AND date = ?')
       .get(ownerId, date) as (Checkpoint & { completed_at: number | null }) | undefined
     if (checkpoint && checkpoint.completed_at !== null) return false
@@ -150,16 +192,18 @@ async function migrateDay(db: Database, ownerId: number, operation: DiaryBodyOpe
     // The regular atomic replacement stages the old generation. Route a
     // plaintext legacy primary through the existing Diary encryption flow first.
     if (current && !current.encrypted) throw new LegacyDiaryNeedsEncryption()
-    const base = current?.bytes.toString('utf8') ?? null
-    const baseHash = base === null ? null : sha256Hex(base)
+    // Checkpoints and atomic CAS describe the physical encrypted generation.
+    const baseEnvelope = current?.bytes.toString('utf8') ?? null
+    const baseHash = baseEnvelope === null ? null : sha256Hex(baseEnvelope)
 
     const finish = async () => {
       db.transaction(() => {
-        operation.assertCurrent()
+        assertActive()
         assertStableSource()
         touchDocumentMetadata(db, logicalPath)
         db.prepare('UPDATE diary_plan_markdown_migration SET completed_at = ? WHERE owner_user_id = ? AND date = ?')
           .run(Date.now(), ownerId, date)
+        db.prepare('DELETE FROM diary_plan_migration_failures WHERE owner_user_id = ? AND date = ?').run(ownerId, date)
       }).immediate()
       try {
         (await getLinkIndex()).registerPath(logicalPath)
@@ -183,7 +227,7 @@ async function migrateDay(db: Database, ownerId: number, operation: DiaryBodyOpe
       // Preserve the document identity and exact encrypted generation proof
       // across a crash, before publishing any new file bytes.
       db.transaction(() => {
-        operation.assertCurrent()
+        assertActive()
         assertStableSource()
         if (!metadata) {
           const now = Date.now()
@@ -196,9 +240,10 @@ async function migrateDay(db: Database, ownerId: number, operation: DiaryBodyOpe
           ON CONFLICT (owner_user_id, date) DO UPDATE SET target_hash = excluded.target_hash
         `).run(ownerId, date, documentId, sourceVersions, baseHash, sha256Hex(encrypted))
       }).immediate()
-      operation.assertCurrent()
-      // The create-only implementation ignores the expected-content argument.
-      await prepared.commit(base ?? '')
+      await prepared.commit(baseEnvelope ?? '', () => {
+        assertActive()
+        assertStableSource()
+      })
       const written = await readBody()
       if (!Buffer.isBuffer(written) || !written.equals(Buffer.from(encrypted, 'utf8'))) throw new MigrationConflict()
       return await finish()

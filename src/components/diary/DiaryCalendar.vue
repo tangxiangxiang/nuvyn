@@ -75,7 +75,12 @@ function planForDay(day: NaiveCalendarDay) {
 }
 
 function showPlanEmoji(day: NaiveCalendarDay) {
-  return Boolean(planForDay(day) && !diaryDayForCalendarDay(day)?.mood)
+  return Boolean(planForDay(day)?.total && !diaryDayForCalendarDay(day)?.mood)
+}
+
+function planEmojiSource(day: NaiveCalendarDay) {
+  const plan = planForDay(day)
+  return plan?.completed === plan?.total ? '/emoji/plan-completed.svg' : '/emoji/plan-clipboard.svg'
 }
 
 function planLabel(day: NaiveCalendarDay) {
@@ -522,7 +527,7 @@ defineExpose({ focusDate, closeMoodPicker, clearSelection, openDateFromAction })
                 </span>
               </button>
               <NButton
-                v-if="!showPlanEmoji({ year, month, date }) && (diaryDayForCalendarDay({ year, month, date })?.hasDiary || moodDefinitionForDay({ year, month, date }) || hasUnknownMoodForDay({ year, month, date }))"
+                v-if="showPlanEmoji({ year, month, date }) || diaryDayForCalendarDay({ year, month, date })?.hasDiary || moodDefinitionForDay({ year, month, date }) || hasUnknownMoodForDay({ year, month, date })"
                 attr-type="button"
                 size="small"
                 quaternary
@@ -530,7 +535,7 @@ defineExpose({ focusDate, closeMoodPicker, clearSelection, openDateFromAction })
                 class="diary-calendar-mood"
                 :class="{
                   'diary-calendar-mood-unknown': hasUnknownMoodForDay({ year, month, date }),
-                  'diary-calendar-mood-empty': !moodDefinitionForDay({ year, month, date }) && !hasUnknownMoodForDay({ year, month, date }),
+                  'diary-calendar-mood-empty': !showPlanEmoji({ year, month, date }) && !moodDefinitionForDay({ year, month, date }) && !hasUnknownMoodForDay({ year, month, date }),
                 }"
                 data-testid="diary-calendar-mood"
                 :data-date="diaryDateFromCalendarFields({ year, month, date }) ?? undefined"
@@ -548,15 +553,15 @@ defineExpose({ focusDate, closeMoodPicker, clearSelection, openDateFromAction })
                   aria-hidden="true"
                 >
                 <span v-else-if="hasUnknownMoodForDay({ year, month, date })" aria-hidden="true">?</span>
+                <img
+                  v-else-if="showPlanEmoji({ year, month, date })"
+                  data-testid="diary-calendar-plan"
+                  :src="planEmojiSource({ year, month, date })"
+                  alt=""
+                  aria-hidden="true"
+                >
                 <span v-else class="diary-calendar-mood-empty-mark" aria-hidden="true">?</span>
               </NButton>
-              <span
-                v-else-if="showPlanEmoji({ year, month, date })"
-                class="diary-calendar-mood diary-calendar-plan-emoji"
-                data-testid="diary-calendar-plan"
-                :data-date="diaryDateForCalendarDay({ year, month, date })"
-                aria-hidden="true"
-              >{{ planForDay({ year, month, date })?.completed === planForDay({ year, month, date })?.total ? '✅' : '📋' }}</span>
             </div>
           </template>
         </template>
@@ -973,11 +978,6 @@ defineExpose({ focusDate, closeMoodPicker, clearSelection, openDateFromAction })
   object-fit: contain;
 }
 
-.diary-calendar-mood.diary-calendar-plan-emoji {
-  font-size: 21px;
-  pointer-events: none;
-}
-
 .diary-calendar-mood-empty-mark {
   font-size: 1rem;
   font-weight: 500;
@@ -1062,10 +1062,6 @@ defineExpose({ focusDate, closeMoodPicker, clearSelection, openDateFromAction })
   .diary-calendar-mood img {
     width: 18px;
     height: 18px;
-  }
-
-  .diary-calendar-mood.diary-calendar-plan-emoji {
-    font-size: 18px;
   }
 
   .diary-calendar-error {

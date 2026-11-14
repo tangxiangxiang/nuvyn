@@ -25,6 +25,8 @@ Section headings are optional.
 Each date has one marker. Mood takes priority when set. A clipboard means
 there are open tasks, and a check mark means every task is complete. The
 date's accessible name includes task progress even when it displays Mood.
+Select the marker to open the Mood picker. Select the date number to open the
+document.
 
 Diary dates use the `YYYY-MM-DD` identity shown by the Calendar. Changing the
 month does not change the identity of an existing entry.
@@ -86,6 +88,11 @@ intentionally unavailable unless they have an adapter-aware privacy path.
 This does not change the normal Diary read/edit experience.
 
 ## Protected Diary access
+
+If the calendar offers **Migrate legacy plans**, first back up the SQLite data
+and encrypted vault from the same point in time. Open the prompt, review the
+pending dates, and confirm your backup to start. The prompt lists any failed
+dates and their reasons. Resolve conflicts before retrying.
 
 Diary has a separate access password in addition to the Nuvyn owner login.
 The first visit asks you to set it up; later visits ask you to unlock Diary.

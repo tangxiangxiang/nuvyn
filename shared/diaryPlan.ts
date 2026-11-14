@@ -20,6 +20,14 @@ export interface DiaryPlanDaySummary {
   completed: number
 }
 
+export interface DiaryPlanMigrationStatus {
+  hasLegacyPlans: boolean
+  pending: number
+  completed: number
+  failures: Array<{ date: DiaryDate | null; code: string }>
+  hasConflicts: boolean
+}
+
 export function parseDiaryPlanFields(input: unknown): DiaryPlanFields | null {
   if (!input || typeof input !== 'object' || Array.isArray(input)) return null
   const value = input as Record<string, unknown>

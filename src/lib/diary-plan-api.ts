@@ -1,4 +1,4 @@
-import type { DiaryPlanDaySummary } from '../../shared/diaryPlan'
+import type { DiaryPlanDaySummary, DiaryPlanMigrationStatus } from '../../shared/diaryPlan'
 import { diaryAuthFetch } from './auth-session'
 
 const base = '/api/diary/plans'
@@ -13,9 +13,17 @@ export const diaryPlanApi = {
   async month(month: string, signal?: AbortSignal) {
     return (await request<{ days: DiaryPlanDaySummary[] }>(`/calendar?month=${month}`, { signal })).days
   },
+  migrationStatus(signal: AbortSignal) {
+    return request<DiaryPlanMigrationStatus>('/migration-status', { signal })
+  },
   migrate(offset: number, signal: AbortSignal) {
     return request<{ migrated: number; failures: Array<{ date: string; code: string }>; next: number | null }>(
-      `/migrate?offset=${offset}`, { method: 'POST', signal },
+      `/migrate?offset=${offset}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ backupConfirmed: true }),
+        signal,
+      },
     )
   },
 }

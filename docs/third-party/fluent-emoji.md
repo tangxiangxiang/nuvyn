@@ -96,3 +96,11 @@ The user-created SVG icon feature and all stored Diary metadata remain intact.
 Upstream files are copied unchanged, not hotlinked. No CDN or network request
 is required at runtime. If replacing these assets in future, retain the
 appropriate third-party license notice in distributed builds.
+
+The Diary Plan markers use two Color SVGs from the same pinned revision and MIT
+license. They are separate from the configurable Mood catalog.
+
+| Nuvyn bundled asset | Microsoft Fluent Emoji upstream Color SVG |
+| --- | --- |
+| `public/emoji/plan-clipboard.svg` | `assets/Clipboard/Color/clipboard_color.svg` |
+| `public/emoji/plan-completed.svg` | `assets/Check mark button/Color/check_mark_button_color.svg` |

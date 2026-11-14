@@ -50,6 +50,13 @@ ciphertext, or change other AI settings.
 
 Stop Nuvyn before copying `data/` and the vault. This closes SQLite cleanly and prevents a document mutation from spanning the two backup copies.
 
+Before upgrading to a release with unified Diary plans, make a matched backup
+of the SQLite data directory and the complete encrypted vault while the service
+is stopped. Check that both copies are present before confirming the backup in
+the Diary migration prompt. The prompt records your confirmation only. A code
+rollback does not undo migrated Markdown. To roll back data, preserve later edits
+separately and restore both stores from the same pre-upgrade snapshot.
+
 If zero-downtime backups are required, use a filesystem snapshot that covers
 both stores at the same point in time and a SQLite-aware backup process. A
 plain live copy of only `nuvyn.db` can miss Ledger or other data still in the

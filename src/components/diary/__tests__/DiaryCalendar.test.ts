@@ -435,7 +435,7 @@ describe('DiaryCalendar presentation adapter', () => {
     const wrapper = mountCalendar([
       { ...day('2026-08-24'), mood: 'happy' },
       day('2026-08-25'),
-      day('2026-08-26'),
+      { ...day('2026-08-26'), metadataUpdatedAt: 1 },
     ], {
       planDays: [
         { date: date('2026-08-24'), total: 2, completed: 1 },
@@ -448,8 +448,11 @@ describe('DiaryCalendar presentation adapter', () => {
     expect(dayCell(wrapper, '2026-08-24').find('[data-testid="diary-calendar-plan"]').exists()).toBe(false)
     expect(wrapper.get('[data-diary-day-content][data-date="2026-08-24"]').attributes('aria-label'))
       .toContain('1 of 2 plan items completed')
-    expect(dayCell(wrapper, '2026-08-25').get('[data-testid="diary-calendar-plan"]').text()).toBe('✅')
-    expect(dayCell(wrapper, '2026-08-26').get('[data-testid="diary-calendar-plan"]').text()).toBe('📋')
+    expect(dayCell(wrapper, '2026-08-25').get('[data-testid="diary-calendar-plan"]').attributes('src')).toBe('/emoji/plan-completed.svg')
+    const planButton = dayCell(wrapper, '2026-08-26').get('button[data-testid="diary-calendar-mood"]')
+    expect(planButton.get('[data-testid="diary-calendar-plan"]').attributes('src')).toBe('/emoji/plan-clipboard.svg')
+    await planButton.trigger('click')
+    expect(planButton.attributes('aria-expanded')).toBe('true')
     wrapper.unmount()
   })
 

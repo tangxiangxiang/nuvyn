@@ -256,7 +256,7 @@ function sameOwnedArtifact(a: OwnedArtifact, b: OwnedArtifact): boolean {
 export interface PreparedAtomicTextWrite {
   readonly temporaryPath: string
   readonly ownership: OwnedTemporaryFile
-  commit(): Promise<void>
+  commit(expectedRaw?: string, beforePublish?: () => void): Promise<void>
   rollback(): Promise<void>
   /**
    * Roll back the exact generation created by this create transaction. The
@@ -464,7 +464,7 @@ export interface PreparedAtomicTextReplace {
    * Any external generation wins. The caller's bytes are never written
    * over a generation the caller did not prove it still owned.
    */
-  commit(expectedRaw: string): Promise<void>
+  commit(expectedRaw: string, beforePublish?: () => void): Promise<void>
   rollback(): Promise<void>
 }
 
@@ -483,7 +483,7 @@ export async function prepareAtomicTextCreate(
   return {
     temporaryPath: prepared.temporaryPath,
     ownership: prepared.ownership,
-    async commit() {
+    async commit(_expectedRaw, beforePublish) {
       if (settled) return
       try {
         await verifyOwnedTemporaryPath(
@@ -495,6 +495,7 @@ export async function prepareAtomicTextCreate(
         )
         // link(2) is the create-only counterpart to rename: it atomically
         // fails with EEXIST and never replaces a newer generation.
+        beforePublish?.()
         await fs.link(prepared.temporaryPath, targetPath)
         // A successful create-only link proves that the target is this
         // transaction's generation. Retain that identity independently of
@@ -796,7 +797,7 @@ export async function prepareAtomicTextWrite(
   return {
     temporaryPath,
     ownership: ownedTemporary,
-    async commit(expectedRaw: string) {
+    async commit(expectedRaw: string, beforePublish?: () => void) {
       if (settled) return
       await verifyOwnedTemporaryPath(
         temporaryPath,
@@ -984,6 +985,7 @@ export async function prepareAtomicTextWrite(
       //    expectedRaw, which the caller already holds, so both of our
       //    files are removed and the conflict reports the winner.
       try {
+        beforePublish?.()
         await fs.link(temporaryPath, targetPath)
       } catch (error) {
         if ((error as NodeJS.ErrnoException).code === 'EEXIST') {

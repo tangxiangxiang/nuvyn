@@ -1,9 +1,9 @@
 import { Hono, type Context } from 'hono'
 import { diaryLogicalPathForDate, parseDiaryDate } from '../../shared/diaryProtocol.js'
 import type { DiaryPlanDaySummary } from '../../shared/diaryPlan.js'
-import { withDiaryBodyOperation } from '../diaryAccess/guard.js'
-import type { DiaryBodyOperation } from '../diaryAccess/service.js'
-import { migrateDiaryPlans } from '../diaryPlanMigration.js'
+import { hasDiaryBodyAccess, withDiaryBodyOperation } from '../diaryAccess/guard.js'
+import { readDiaryAccessCapability, type DiaryBodyOperation } from '../diaryAccess/service.js'
+import { diaryPlanMigrationStatus, migrateDiaryPlans } from '../diaryPlanMigration.js'
 import { summarizeDiaryTasks } from '../diaryPlanMarkdown.js'
 import { getDocumentMetadata } from '../documentMetadata.js'
 import { withDocumentWriteLock } from '../documentWriteLock.js'
@@ -11,7 +11,7 @@ import { CONTENT_DIR, readSafeRelativeFile } from '../paths.js'
 import { DIARY_BODY_MAX_ENVELOPE_BYTES } from '../diaryAccess/body.js'
 import { metadataDb } from './shared.js'
 
-type OwnerEnv = { Variables: { authUser: { id: number } } }
+type OwnerEnv = { Variables: { authUser: { id: number }; authSessionId: number } }
 type PlanContext = Context<OwnerEnv>
 const routes = new Hono<OwnerEnv>()
 
@@ -33,14 +33,26 @@ async function guarded(c: PlanContext, run: (ownerId: number, operation: DiaryBo
   return response ?? c.json({ code: 'diary-locked' }, 423)
 }
 
+routes.get('/migration-status', (c) => guarded(c, async (ownerId, operation) => {
+  operation.assertCurrent()
+  return c.json(diaryPlanMigrationStatus(metadataDb(), ownerId))
+}))
+
 routes.post('/migrate', (c) => guarded(c, async (ownerId, operation) => {
+  const confirmation = await c.req.json<{ backupConfirmed?: unknown }>().catch(() => null)
+  if (confirmation?.backupConfirmed !== true) {
+    return c.json({ code: 'diary-plan-backup-confirmation-required' }, 400)
+  }
+  operation.assertCurrent()
   const cursor = c.req.query('offset') ?? '0'
   const offset = Number(cursor)
   if (!Number.isSafeInteger(offset) || offset < 0 || String(offset) !== cursor) {
     return c.json({ code: 'invalid-diary-plan-cursor' }, 400)
   }
-  const result = await migrateDiaryPlans(metadataDb(), ownerId, operation, offset, c.req.raw.signal)
-  operation.assertCurrent()
+  const capability = readDiaryAccessCapability(c.req.raw.headers)
+  const canContinue = () => hasDiaryBodyAccess(c.get('authSessionId'), capability)
+  const result = await migrateDiaryPlans(metadataDb(), ownerId, operation, offset, c.req.raw.signal, canContinue)
+  if (!canContinue()) return c.json({ code: 'diary-locked' }, 423)
   return c.json(result)
 }))
 

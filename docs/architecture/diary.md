@@ -120,7 +120,10 @@ Existing files open through that same exact-path command.
 
 ### Unified Markdown plan migration
 
-The unlocked Calendar requests migration in bounded batches. Schema 41 adds
+The unlocked Calendar reads migration status. It requests write batches only
+after the user confirms they have backed up SQLite and the encrypted vault.
+Schema 42 records stable failure codes by owner and date for review and retry.
+Schema 41 adds
 an owner/date checkpoint with source IDs and versions, the target document
 ID, hashes of the exact file generations before and after migration, and a
 completion timestamp. Schema 40 and its original encrypted rows stay intact.

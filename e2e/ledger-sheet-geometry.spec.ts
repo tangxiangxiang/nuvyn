@@ -17,6 +17,7 @@ type LedgerCategory = {
 
 type LedgerTransaction = {
   id: string
+  payee: string
   type: 'income' | 'expense' | 'transfer' | 'adjustment'
   categoryId: string
 }
@@ -26,7 +27,7 @@ type Viewport = {
   height: number
 }
 
-async function ensureLedgerFixture(request: APIRequestContext): Promise<LedgerTransaction> {
+async function ensureLedgerFixture(request: APIRequestContext, newerTransactions = 0): Promise<LedgerTransaction> {
   const fixtureId = crypto.randomUUID()
   const openingDate = '2026-01-01'
 
@@ -88,7 +89,7 @@ async function ensureLedgerFixture(request: APIRequestContext): Promise<LedgerTr
       accountId: account.id,
       categoryId: category.id,
       occurredAt: instantFromLocalDateTime(`${openingDate}T12:00`, settings.timezone),
-      payee: 'Closure geometry fixture',
+      payee: `Closure geometry fixture ${fixtureId}`,
       note: '',
     },
     headers: { 'Idempotency-Key': `closure-transaction-${fixtureId}` },
@@ -97,6 +98,21 @@ async function ensureLedgerFixture(request: APIRequestContext): Promise<LedgerTr
     throw new Error(
       `Failed to create geometry fixture transaction: ${createTransaction.status()} ${await createTransaction.text()}`,
     )
+  }
+  for (let index = 0; index < newerTransactions; index++) {
+    const newer = await request.post('/api/ledger/transactions', {
+      data: {
+        type: 'expense',
+        amountMinor: 123,
+        accountId: account.id,
+        categoryId: category.id,
+        occurredAt: instantFromLocalDateTime(`${openingDate}T12:01`, settings.timezone) + index,
+        payee: `Newer geometry fixture ${fixtureId}`,
+        note: '',
+      },
+      headers: { 'Idempotency-Key': `closure-newer-transaction-${fixtureId}-${index}` },
+    })
+    expect(newer.status()).toBe(201)
   }
   return await createTransaction.json() as LedgerTransaction
 }
@@ -213,6 +229,7 @@ test('Ledger detail sheet keeps centered desktop geometry and one labelled dialo
   const transaction = await ensureLedgerFixture(request)
 
   await page.goto('/ledger/transactions')
+  await page.getByRole('textbox', { name: '搜索交易' }).fill(transaction.payee)
   const row = page.getByTestId(`ledger-transaction-row-${transaction.id}`)
   await expect(row).toBeVisible()
   await row.click()
@@ -233,10 +250,13 @@ test('Ledger detail sheet keeps centered desktop geometry and one labelled dialo
 test('Ledger detail sheet keeps full-width bottom-anchored mobile geometry', async ({ page, request }) => {
   const viewport = { width: 390, height: 844 }
   await page.setViewportSize(viewport)
-  const transaction = await ensureLedgerFixture(request)
+  const transaction = await ensureLedgerFixture(request, 10)
 
   await page.goto('/ledger/transactions')
   const row = page.getByTestId(`ledger-transaction-row-${transaction.id}`)
+  await expect(page.getByTestId('ledger-compact-transaction-list').getByTestId(/^ledger-transaction-row-/)).toHaveCount(10)
+  await expect(row).toHaveCount(0)
+  await page.getByRole('textbox', { name: '搜索交易' }).fill(transaction.payee)
   await expect(row).toBeVisible()
   await row.click()
 
