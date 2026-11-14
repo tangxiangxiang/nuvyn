@@ -14,7 +14,17 @@ Calendar Home is the Diary starting point and navigation center.
 - Click a date to open its Diary. Existing dates open directly.
 - A missing today or past date asks for a Mood first. Choosing a Mood creates
   the date and then opens the new Diary; cancelling leaves the date untouched.
-- A missing future date is not created until that date arrives.
+- A missing future date opens in Edit with a simple plan template. Use the
+  Plans icon in the top navigation to jump to a date.
+
+Plans and journal entries share the same Markdown document for that date.
+Use `- [ ]` for an open task and `- [x]` for a completed task. Edit the
+checkbox syntax in Edit mode. Reader shows the checkboxes as read-only.
+Section headings are optional.
+
+Each date has one marker. Mood takes priority when set. A clipboard means
+there are open tasks, and a check mark means every task is complete. The
+date's accessible name includes task progress even when it displays Mood.
 
 Diary dates use the `YYYY-MM-DD` identity shown by the Calendar. Changing the
 month does not change the identity of an existing entry.

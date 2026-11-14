@@ -75,6 +75,7 @@ import { watchDiaryFilterScopeExit, type DiaryFilterOwnership } from '../composa
 import { useDiaryMoodCommand } from '../composables/diary/useDiaryMoodCommand'
 import { useDiaryMoodIconPreferences } from '../composables/diary/useDiaryMoodIconPreferences'
 import { useDiaryPlanCalendar } from '../composables/diary/useDiaryPlanCalendar'
+import { diaryPlanApi } from '../lib/diary-plan-api'
 import { useDiaryWorkspacePresentation } from '../composables/diary/useDiaryWorkspacePresentation'
 import {
   captureDiarySessionGeneration,
@@ -106,7 +107,7 @@ import {
 } from '../features/diary/diaryAnalysisExport'
 import DiaryWorkspace from '../components/diary/DiaryWorkspace.vue'
 import DiaryCalendarSurface from '../components/diary/DiaryCalendarSurface.vue'
-import DiaryDayPlanSheet from '../components/diary/DiaryDayPlanSheet.vue'
+import DiaryPlanDateDialog from '../components/diary/DiaryPlanDateDialog.vue'
 import { projectDiaryDaysFromTree } from '../components/diary/diaryCalendarProjection'
 import { adjacentDiaryDate, diaryTitleSwipeDirection } from '../components/diary/diaryTitleSwipe'
 import TagPanel from '../components/vault/TagPanel.vue'
@@ -389,11 +390,7 @@ const emptyActions = computed(() => [
 const vaultRef = shallowRef<HTMLElement | null>(null)
 const editorTabsRef = ref<InstanceType<typeof EditorTabs> | null>(null)
 const fileTreeRef = ref<InstanceType<typeof FileTree> | null>(null)
-const diaryCalendarSurfaceRef = ref<{
-  focusDate: (date: DiaryDate) => boolean
-  closeMoodPicker: (restoreFocus?: boolean) => void
-  clearSelection: () => void
-} | null>(null)
+const diaryCalendarSurfaceRef = ref<InstanceType<typeof DiaryCalendarSurface> | null>(null)
 const comparisonPaneRef = ref<InstanceType<typeof HistoryComparisonPane> | null>(null)
 const workingTreeDiffPaneRef = ref<InstanceType<typeof WorkingTreeDiffPane> | null>(null)
 const recoveryPaneRef = ref<InstanceType<typeof DraftRecoveryPane> | null>(null)
@@ -1576,8 +1573,6 @@ const { ensureDiaryDate, openDiaryDate } = useDiaryDateCommand({
   refresh,
   fileChanges,
   mutationLock: historyMutationLock,
-  getToday: localCivilToday,
-  onFuture: () => toast.info(t('diary.future_missing')),
   onBusy: () => toast.info(t('diary.open_busy')),
   onError: (error) => toast.error(t('diary.open_failed', {
     error: error.message || t('common.unknown_error'),
@@ -2283,22 +2278,49 @@ const diaryPlanMonth = ref(diaryCalendarMonthFromLocalDate())
 const diaryPlanCalendar = useDiaryPlanCalendar(diaryPlanMonth, isDiaryCalendarVisible, diaryAccess.isUnlocked, diaryAccess.epoch)
 const diaryPlanDays = diaryPlanCalendar.days
 const diaryPlanDate = ref<DiaryDate | null>(null)
-const diaryPlanChooseDate = ref(false)
-let diaryPlanTrigger: HTMLElement | null = null
+let diaryPlanTrigger: HTMLButtonElement | null = null
 
-function openDiaryPlan(date: DiaryDate, trigger: HTMLElement | null = null, chooseDate = false) {
+function openDiaryPlanHome(trigger: HTMLElement) {
   if (!isDiaryCalendarVisible.value || !diaryAccess.isUnlocked.value) return
+  const today = localCivilToday()
+  if (!today || !(trigger instanceof HTMLButtonElement)) return
   diaryWorkspacePresentation.beginDateIntent()
   diaryCalendarSurfaceRef.value?.closeMoodPicker(false)
   diaryPlanTrigger = trigger
-  diaryPlanChooseDate.value = chooseDate
-  diaryPlanDate.value = date
+  diaryPlanDate.value = today
 }
 
-function openDiaryPlanHome(trigger: HTMLElement) {
-  const today = localCivilToday()
-  if (today) openDiaryPlan(today, trigger, true)
-}
+const settledPlanMigrationEpoch = ref<number | null>(null)
+watch([isDiaryCalendarVisible, diaryAccess.isUnlocked, diaryAccess.epoch], ([visible, unlocked, epoch], _previous, onCleanup) => {
+  if (!visible || !unlocked) return
+  if (epoch !== null && settledPlanMigrationEpoch.value === epoch) return
+  const request = new AbortController()
+  onCleanup(() => request.abort())
+  void (async () => {
+    let cursor: number | null = 0
+    let changed = false
+    let failed = false
+    while (cursor !== null && !request.signal.aborted) {
+      const batch = await diaryPlanApi.migrate(cursor, request.signal)
+      changed ||= batch.migrated > 0
+      failed ||= batch.failures.length > 0
+      cursor = batch.next
+    }
+    if (request.signal.aborted) return
+    if (changed) {
+      await refresh()
+      if (!request.signal.aborted) diaryPlanCalendar.refresh()
+    }
+    if (failed && !request.signal.aborted) toast.error(t('diary.plan.migration_failed'))
+    if (!failed && !request.signal.aborted) settledPlanMigrationEpoch.value = epoch
+  })().catch(() => {
+    if (!request.signal.aborted) toast.error(t('diary.plan.migration_failed'))
+  })
+}, { immediate: true })
+
+watch(() => fileChanges.events.value.at(-1), (event) => {
+  if (event && diaryDateFromPath(event.path)) diaryPlanCalendar.refresh()
+})
 
 watchEffect(() => {
   if (!appShell?.diaryPlanEntry) return
@@ -2318,15 +2340,18 @@ onBeforeUnmount(() => {
 })
 
 async function closeDiaryPlan() {
-  const date = diaryPlanDate.value
   const trigger = diaryPlanTrigger
   diaryPlanDate.value = null
   diaryPlanTrigger = null
   await nextTick()
-  if (!date || !diaryAccess.isUnlocked.value || !isDiaryCalendarVisible.value) return
-  if (trigger?.isConnected) trigger.focus()
-  else if (!diaryCalendarSurfaceRef.value?.focusDate(date)) {
-    document.querySelector<HTMLButtonElement>('.nav-actions [data-testid="diary-calendar-plan-home"]')?.focus()
+  if (isDiaryCalendarVisible.value && diaryAccess.isUnlocked.value && trigger?.isConnected) trigger.focus()
+}
+
+async function selectDiaryPlanDate(date: DiaryDate) {
+  const trigger = diaryPlanTrigger
+  await closeDiaryPlan()
+  if (trigger && isDiaryCalendarVisible.value && diaryAccess.isUnlocked.value) {
+    diaryCalendarSurfaceRef.value?.openDateFromAction(date, trigger)
   }
 }
 
@@ -2474,6 +2499,7 @@ async function refreshTabletVault(): Promise<void> {
     // editor buffers remain untouched, so pending edits and Diary sessions
     // retain their existing save and access boundaries.
     await refresh()
+    if (isDiaryCalendarVisible.value) diaryPlanCalendar.refresh()
   } catch {
     toast.error(t('vault.refresh_failed'))
   } finally {
@@ -3234,16 +3260,10 @@ async function onDiaryDateSelected(date: DiaryDate): Promise<void> {
   clearPendingMoodFirstPresentation()
   const intent = diaryWorkspacePresentation.beginDateIntent()
   const generation = captureDiarySessionGeneration()
-  const result: DiaryDateCommandResult = await openDiaryDate(date, { notifyFuture: false })
-  if (result.status === 'future') {
-    if (diaryWorkspacePresentation.isDateIntentCurrent(intent) && isDiarySessionGenerationCurrent(generation)) {
-      openDiaryPlan(date)
-    }
-    return
-  }
+  const result = await openDiaryDate(date)
+  if (!diaryWorkspacePresentation.isDateIntentCurrent(intent) || !isDiarySessionGenerationCurrent(generation)) return
   // A Calendar date click becomes a committed FileTree seed only after the
-  // canonical date command opens or creates the Diary. Rejected dates (most
-  // importantly missing future dates) must leave the user's ordinary query
+  // canonical date command opens or creates the Diary. Rejected dates leave the user's ordinary query
   // untouched. FileTree clicks never reach this handler and therefore cannot
   // rewrite the query.
   if (result.status === 'opened' || result.status === 'created') {
@@ -3251,13 +3271,14 @@ async function onDiaryDateSelected(date: DiaryDate): Promise<void> {
     diaryFilterOwnership.value = 'calendar'
     filesFilter.value = date
   }
-  await presentDiaryDateResult(result, intent)
+  const today = localCivilToday()
+  await presentDiaryDateResult(result, intent, { edit: result.status === 'created' && !!today && date > today })
 }
 
 async function presentDiaryDateResult(
   result: DiaryDateCommandResult,
   intent: number,
-  options: { focusVault?: boolean } = {},
+  options: { focusVault?: boolean; edit?: boolean } = {},
 ): Promise<void> {
   if (
     !diaryWorkspacePresentation.isDateIntentCurrent(intent)
@@ -3271,7 +3292,7 @@ async function presentDiaryDateResult(
     return
   }
   diaryWorkspacePresentation.requestDocument(result.date, result.path)
-  viewModeApi?.set('read')
+  viewModeApi?.set(options.edit ? 'edit' : 'read')
   await nextTick()
   if (options.focusVault !== false && diaryWorkspacePresentation.isDateIntentCurrent(intent)) {
     vaultRef.value?.focus()
@@ -3876,17 +3897,14 @@ watch(isReadMode, async (reading) => {
             @date-selected="onDiaryDateSelected"
             @mood-change="updateDiaryCalendarMood"
             @month-change="onDiaryCalendarMonthChange"
-            @plan-selected="openDiaryPlan"
           />
         </template>
       </DiaryWorkspace>
-      <DiaryDayPlanSheet
+      <DiaryPlanDateDialog
         v-if="diaryPlanDate && diaryAccess.isUnlocked.value && isDiaryCalendarVisible"
         :date="diaryPlanDate"
-        :choose-date="diaryPlanChooseDate"
         @close="closeDiaryPlan"
-        @date-change="diaryPlanDate = $event"
-        @changed="diaryPlanCalendar.updateDay"
+        @select="selectDiaryPlanDate"
       />
 
       <!-- Edit mode: single Monaco editor surface. -->

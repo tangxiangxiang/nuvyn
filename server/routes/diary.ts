@@ -154,7 +154,7 @@ function isExistenceConflict(error: unknown): boolean {
 }
 
 // Resolve one Diary date. The request identity is deliberately only `date`;
-// the server derives the exact logical/physical path and owns future checks.
+// the server derives the exact logical/physical path and initial template.
 diaryRoutes.post('/api/diary/dates', async (c) => {
   const body = await c.req.json().catch(() => null) as {
     date?: unknown
@@ -189,9 +189,6 @@ diaryRoutes.post('/api/diary/dates', async (c) => {
     // Compare canonical YYYY-MM-DD strings only. No UTC-midnight Date or
     // ISO-string slicing is involved in the local today/future decision.
     const today = localDiaryDateForTimeZone(new Date(), timeZone)
-    if (date > today) {
-      return bad(c, 'future Diary dates cannot be created', 422, 'future-diary-date')
-    }
 
     try {
       await ensureDiaryRoot(absolutePath)
@@ -200,7 +197,7 @@ diaryRoutes.post('/api/diary/dates', async (c) => {
       throw error
     }
 
-    const raw = `# ${date}\n`
+    const raw = date > today ? `# ${date}\n\n## 计划\n\n- [ ] \n` : `# ${date}\n`
     const databaseSnapshot = snapshotDocumentMetadataMutation(metadataDb(), [logicalPath])
     const documentId = randomUUID()
     // A new physical generation must not inherit a stale row from a prior

@@ -366,7 +366,7 @@ test('mobile native Diary documents fill the viewport when the side panel is clo
   expect(state.consoleErrors).toEqual([])
 })
 
-test('existing today/past enter native READ and missing future dates open plans', async ({ page, request }) => {
+test('existing today/past enter native READ and missing future dates open the native editor', async ({ page, request }) => {
   const today = localCivilDate()
   const past = shiftCivilDate(today, -1)
   const existingFuture = shiftCivilDate(today, 1)
@@ -398,9 +398,9 @@ test('existing today/past enter native READ and missing future dates open plans'
     await expect(page.locator(`[role="tab"][data-tab-id="${diaryPath(existingFuture)}"]`)).toHaveCount(0)
 
     await clickDiaryDate(page, missingFuture)
-    await expect(page.getByTestId('diary-day-plan-sheet')).toBeVisible()
-    await expect(page.getByTestId('diary-calendar')).toBeVisible()
-    await expect(page.locator(`[role="tab"][data-tab-id="${diaryPath(missingFuture)}"]`)).toHaveCount(0)
+    await expect(page.getByRole('textbox', { name: 'Editor content' })).toBeVisible()
+    await expect(page.getByTestId('diary-calendar')).toBeHidden()
+    await expect(page).toHaveURL(new RegExp(`/vault/diary/${missingFuture}(?:[?#]|$)`))
   } finally {
     for (const date of [...createdDates, existingFuture, missingFuture]) await deleteDiaryDate(request, date)
   }

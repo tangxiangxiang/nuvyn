@@ -28,7 +28,6 @@ const emit = defineEmits<{
   'date-selected': [date: DiaryDate]
   'month-change': [month: DiaryCalendarMonth]
   'mood-change': [date: DiaryDate, mood: DiaryMoodId | null]
-  'plan-selected': [date: DiaryDate, trigger: HTMLButtonElement]
 }>()
 
 const { t } = useI18n()
@@ -51,7 +50,11 @@ function onMoodChange(date: DiaryDate, mood: DiaryMoodId | null): void {
   emit('mood-change', date, mood)
 }
 
-defineExpose({ focusDate, closeMoodPicker, clearSelection })
+function openDateFromAction(date: DiaryDate, trigger: HTMLButtonElement) {
+  calendarRef.value?.openDateFromAction(date, trigger)
+}
+
+defineExpose({ focusDate, closeMoodPicker, clearSelection, openDateFromAction })
 </script>
 
 <template>
@@ -73,7 +76,6 @@ defineExpose({ focusDate, closeMoodPicker, clearSelection })
       @date-selected="emit('date-selected', $event)"
       @month-change="emit('month-change', $event)"
       @mood-change="onMoodChange"
-      @plan-selected="(date, trigger) => emit('plan-selected', date, trigger)"
     />
   </section>
 </template>

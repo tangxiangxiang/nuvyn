@@ -132,17 +132,20 @@ describe('POST /api/diary/dates', () => {
     expect(await fs.readFile(diaryPath)).toEqual(encryptedBefore)
   })
 
-  it('creates a missing past date and rejects a missing future without a file', async () => {
+  it('creates a past Diary and an encrypted future plan template without a Mood', async () => {
     const past = '2000-02-29'
     const future = '2999-12-31'
     const pastResponse = await call('POST', '/api/diary/dates', { date: past, timeZone: TIME_ZONE })
     const futureResponse = await call('POST', '/api/diary/dates', { date: future, timeZone: TIME_ZONE })
 
     expect(pastResponse.status).toBe(201)
-    expect(futureResponse.status).toBe(422)
-    expect(await futureResponse.json()).toMatchObject({ code: 'future-diary-date' })
+    expect(futureResponse.status).toBe(201)
+    expect(await futureResponse.json()).toMatchObject({ created: true, post: { mood: null } })
     await expect(fs.stat(path.join(vault, 'diary', `${past}.md`))).resolves.toBeTruthy()
-    await expect(fs.stat(path.join(vault, 'diary', `${future}.md`))).rejects.toThrow()
+    expect(await fs.readFile(path.join(vault, 'diary', `${future}.md`), 'utf8')).toContain(DIARY_BODY_ENVELOPE_MAGIC)
+    expect(await (await call('GET', `/api/posts/diary/${future}`)).json()).toMatchObject({
+      raw: `# ${future}\n\n## 计划\n\n- [ ] \n`,
+    })
   })
 
   it('returns an existing future Diary without creating a second identity', async () => {
@@ -167,8 +170,7 @@ describe('POST /api/diary/dates', () => {
     expect(pathIdentity.status).toBe(400)
   })
 
-  it('linearizes concurrent requests to one exact physical file with no suffix', async () => {
-    const date = '2000-03-01'
+  it.each(['2000-03-01', '2999-03-01'])('linearizes concurrent requests for %s to one physical file', async (date) => {
     const responses = await Promise.all(
       Array.from({ length: 8 }, () => call('POST', '/api/diary/dates', { date, timeZone: TIME_ZONE })),
     )

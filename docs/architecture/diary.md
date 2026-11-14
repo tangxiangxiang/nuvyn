@@ -113,8 +113,40 @@ same date adapter.
 
 Existing dates can be opened. A missing local-today or past date enters the
 Calendar Mood-first flow before the canonical date command creates it. A
-missing future date is not created. Existing future files remain ordinary
-existing documents and are resolved through the same exact-path command.
+missing future date uses the same command, starts with an editable plan
+template, and leaves Mood unset. The server uses the supplied IANA timezone
+to select the template and derives the one canonical path from the date.
+Existing files open through that same exact-path command.
+
+### Unified Markdown plan migration
+
+The unlocked Calendar requests migration in bounded batches. Schema 41 adds
+an owner/date checkpoint with source IDs and versions, the target document
+ID, hashes of the exact file generations before and after migration, and a
+completion timestamp. Schema 40 and its original encrypted rows stay intact.
+Legacy Plan CRUD returns HTTP 410.
+
+Under the structure and document locks, migration authenticates every legacy
+item for a date, preserves the existing body as a prefix, and appends a
+Markdown task section. Only the encrypted envelope reaches the durable file
+writer. SQLite records the checkpoint before the atomic create or replacement
+and confirms completion after verifying the bytes. A retry with the matching
+target verifies and confirms without appending again. A retry with the
+matching base can safely resume. Any other document generation or source
+version needs review. Source rows retain the original titles, including
+line breaks flattened in the display text, and the original timestamps.
+If a date still has a plaintext primary, complete the existing Diary
+encryption migration before retrying its Plan migration.
+
+Task counts are parsed from the current document on demand in an unlocked
+body operation. Only counts reach the Calendar, with no persistent summary
+cache. Reader tasks are read-only and edits use the regular document CAS.
+
+For rollback, back up the encrypted vault and its matching SQLite database
+together. Restoring a pre-upgrade pair reverts the migration. Export or
+preserve newer Markdown edits before restoring a snapshot. A code-only
+downgrade would expose the original stale Plan rows and is not a data
+rollback. Keep those rows and checkpoints for manual reconciliation.
 
 The Calendar date button is the business interaction owner. It exposes
 `data-diary-day-content`, `data-date`, `aria-current` for local Today, and

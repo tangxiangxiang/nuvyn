@@ -342,7 +342,7 @@ test('Calendar Mood picker closes when month navigation changes the Calendar con
   }
 })
 
-test('Calendar opens plans for a missing future date without creating a Diary', async ({ page, request }) => {
+test('Calendar creates one future Diary and opens its native editor', async ({ page, request }) => {
   const today = localCivilDate()
   const future = nextCivilDate(today)
   const futurePath = diaryPath(future)
@@ -361,8 +361,6 @@ test('Calendar opens plans for a missing future date without creating a Diary', 
 
     const surface = page.getByTestId('diary-calendar-surface')
     await expect(surface).toBeVisible()
-    const routeBefore = new URL(page.url()).pathname
-    const tabsBefore = await page.locator('.tabs').count()
     await moveCalendarToMonth(page, future)
     const dateButton = calendarDay(surface, future)
     await expect(dateButton).toBeVisible()
@@ -373,14 +371,13 @@ test('Calendar opens plans for a missing future date without creating a Diary', 
     })
     await dateButton.click()
     expect((await probeResponse).status()).toBe(404)
-    await expect(page.getByTestId('diary-day-plan-sheet')).toBeVisible()
-    await page.keyboard.press('Escape')
-    await expect(dateButton).toBeFocused()
-    await expect.poll(() => createMethods).toEqual([])
-
-    expect(new URL(page.url()).pathname).toBe(routeBefore)
-    expect(await page.locator('.tabs').count()).toBe(tabsBefore)
-    expect((await request.get(`/api/posts/${futurePath}`)).status()).toBe(404)
+    await expect(page.getByRole('textbox', { name: 'Editor content' })).toBeVisible()
+    await expect(page.getByTestId('diary-day-plan-sheet')).toHaveCount(0)
+    await expect.poll(() => createMethods).toEqual(['POST'])
+    expect(new URL(page.url()).pathname).toBe(`/vault/${futurePath}`)
+    expect(await (await request.get(`/api/posts/${futurePath}`)).json()).toMatchObject({
+      metadata: { mood: null },
+    })
   } finally {
     await deleteDiaryDate(request, future)
   }
@@ -396,7 +393,7 @@ test('Calendar opens plans for a missing future date without creating a Diary', 
   }])
 })
 
-test('missing future Diary does not overwrite the user FileTree filter', async ({ page, request }) => {
+test('failed future Diary creation does not overwrite the user FileTree filter', async ({ page, request }) => {
   await expectDiaryTestTimeZone(page)
   const today = localCivilDate()
   const future = nextCivilDate(today)
@@ -410,6 +407,8 @@ test('missing future Diary does not overwrite the user FileTree filter', async (
       mutationRequests.push(`${requestEvent.method()} ${url.pathname}`)
     }
   })
+
+  await page.route('**/api/diary/dates', (route) => route.fulfill({ status: 503, json: { error: 'Test create failure' } }))
 
   try {
     await deleteDiaryDate(request, future)
@@ -434,7 +433,7 @@ test('missing future Diary does not overwrite the user FileTree filter', async (
     await dateButton.click()
     expect((await probeResponse).status()).toBe(404)
 
-    await expect.poll(() => mutationRequests).toEqual([])
+    await expect.poll(() => mutationRequests).toEqual(['POST /api/diary/dates'])
     // Calendar Home intentionally occupies the full workspace without the
     // explorer sidebar. The user-owned filter still remains persisted for
     // when the explorer is restored after leaving Calendar.
@@ -450,7 +449,7 @@ test('missing future Diary does not overwrite the user FileTree filter', async (
   }
 
   expect(diagnostics.pageErrors).toEqual([])
-  expect(diagnostics.consoleErrors).toEqual([
+  expect(diagnostics.consoleErrors.filter((message) => !message.includes('503'))).toEqual([
     'Failed to load resource: the server responded with a status of 404 (Not Found)',
   ])
 })

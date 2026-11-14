@@ -44,7 +44,6 @@ const emit = defineEmits<{
   'date-selected': [date: DiaryDate]
   'month-change': [month: DiaryCalendarMonth]
   'mood-change': [date: DiaryDate, mood: DiaryMoodId | null]
-  'plan-selected': [date: DiaryDate, trigger: HTMLButtonElement]
 }>()
 
 const lastMonthKey = ref<string | null>(null)
@@ -75,11 +74,13 @@ function planForDay(day: NaiveCalendarDay) {
   return date ? plansByDate.value.get(date) : undefined
 }
 
-function openPlan(day: NaiveCalendarDay, event: MouseEvent) {
-  const date = diaryDateForCalendarDay(day)
-  if (!date || !(event.currentTarget instanceof HTMLButtonElement)) return
-  closeMoodPicker(false)
-  emit('plan-selected', date, event.currentTarget)
+function showPlanEmoji(day: NaiveCalendarDay) {
+  return Boolean(planForDay(day) && !diaryDayForCalendarDay(day)?.mood)
+}
+
+function planLabel(day: NaiveCalendarDay) {
+  const plan = planForDay(day)
+  return plan ? t('diary.plan.progress', { completed: String(plan.completed), total: String(plan.total) }) : ''
 }
 const activeMoodDay = computed(() => (
   activeMoodDate.value ? daysByDate.value.get(activeMoodDate.value) ?? null : null
@@ -345,8 +346,9 @@ function needsMoodFirst(date: DiaryDate): boolean {
     && Boolean(todayDate.value && date <= todayDate.value)
 }
 
-function isMissingFutureDate(date: DiaryDate): boolean {
-  return Boolean(todayDate.value && date > todayDate.value && daysByDate.value.get(date)?.hasDiary !== true)
+function openDateFromAction(date: DiaryDate, trigger: HTMLButtonElement) {
+  if (needsMoodFirst(date)) openMoodPickerForDate(date, trigger)
+  else selectDate(date)
 }
 
 function onDayClick(day: NaiveCalendarDay, event: MouseEvent): void {
@@ -355,18 +357,10 @@ function onDayClick(day: NaiveCalendarDay, event: MouseEvent): void {
 
   // A missing today/past Diary requires a Mood choice before the existing
   // date command may create it. Opening and dismissing this picker is purely
-  // presentational and therefore cannot create a document. Missing future
-  // dates continue through the existing command so its guard remains the
-  // single authority for resolving an existing Diary before opening Plan.
+  // presentational and therefore cannot create a document.
   if (needsMoodFirst(date)) {
     const trigger = event.currentTarget
     if (trigger instanceof HTMLButtonElement) openMoodPickerForDate(date, trigger)
-    return
-  }
-
-  if (isMissingFutureDate(date)) {
-    closeMoodPicker(false)
-    emit('date-selected', date)
     return
   }
 
@@ -393,12 +387,6 @@ function onCalendarValueUpdate(value: number, time: NaiveCalendarDay): void {
     return
   }
 
-  if (isMissingFutureDate(date)) {
-    closeMoodPicker(false)
-    emit('date-selected', date)
-    return
-  }
-
   selectDate(date)
 }
 
@@ -408,6 +396,8 @@ function dayAriaLabel(day: NaiveCalendarDay): string {
   const labels: string[] = []
   if (data?.hasDiary) labels.push(t('diary.calendar.has_diary'))
   if (data?.hasDiary) labels.push(`${t('mood.label')}: ${moodLabelForDay(day)}`)
+  const plan = planLabel(day)
+  if (plan) labels.push(plan)
   return labels.length ? `${base}, ${labels.join(', ')}` : base
 }
 
@@ -466,7 +456,7 @@ onBeforeUnmount(() => {
   if (moodPickerPositionFrame !== null) window.cancelAnimationFrame(moodPickerPositionFrame)
 })
 
-defineExpose({ focusDate, closeMoodPicker, clearSelection })
+defineExpose({ focusDate, closeMoodPicker, clearSelection, openDateFromAction })
 
 </script>
 
@@ -532,7 +522,7 @@ defineExpose({ focusDate, closeMoodPicker, clearSelection })
                 </span>
               </button>
               <NButton
-                v-if="diaryDayForCalendarDay({ year, month, date })?.hasDiary || moodDefinitionForDay({ year, month, date }) || hasUnknownMoodForDay({ year, month, date })"
+                v-if="!showPlanEmoji({ year, month, date }) && (diaryDayForCalendarDay({ year, month, date })?.hasDiary || moodDefinitionForDay({ year, month, date }) || hasUnknownMoodForDay({ year, month, date }))"
                 attr-type="button"
                 size="small"
                 quaternary
@@ -560,17 +550,13 @@ defineExpose({ focusDate, closeMoodPicker, clearSelection })
                 <span v-else-if="hasUnknownMoodForDay({ year, month, date })" aria-hidden="true">?</span>
                 <span v-else class="diary-calendar-mood-empty-mark" aria-hidden="true">?</span>
               </NButton>
-              <button
-                v-if="planForDay({ year, month, date })"
-                type="button"
-                class="diary-calendar-plan"
-                :class="{ 'is-completed': planForDay({ year, month, date })?.completed === planForDay({ year, month, date })?.total }"
+              <span
+                v-else-if="showPlanEmoji({ year, month, date })"
+                class="diary-calendar-mood diary-calendar-plan-emoji"
                 data-testid="diary-calendar-plan"
                 :data-date="diaryDateForCalendarDay({ year, month, date })"
-                :aria-label="t('diary.plan.open', { date: diaryDateForCalendarDay({ year, month, date }) ?? '' })"
-                @click.stop="openPlan({ year, month, date }, $event)"
-                @keydown.stop
-              />
+                aria-hidden="true"
+              >{{ planForDay({ year, month, date })?.completed === planForDay({ year, month, date })?.total ? '✅' : '📋' }}</span>
             </div>
           </template>
         </template>
@@ -790,6 +776,7 @@ defineExpose({ focusDate, closeMoodPicker, clearSelection })
 }
 
 .diary-calendar-host :deep(.n-calendar-cell) {
+  position: relative;
   min-width: 0;
   min-height: 44px;
   padding: 4px;
@@ -956,40 +943,6 @@ defineExpose({ focusDate, closeMoodPicker, clearSelection })
   display: inline-block;
 }
 
-.diary-calendar-plan {
-  position: absolute;
-  top: calc(var(--diary-calendar-date-top) + 44px);
-  right: 0;
-  z-index: 2;
-  display: grid;
-  place-items: center;
-  width: 14px;
-  height: 24px;
-  padding: 0;
-  border: 0;
-  border-radius: 5px;
-  background: transparent;
-  cursor: pointer;
-  pointer-events: auto;
-}
-
-.diary-calendar-plan::before {
-  width: 6px;
-  height: 6px;
-  border-radius: 50%;
-  background: var(--accent);
-  content: '';
-}
-
-.diary-calendar-plan.is-completed::before {
-  background: var(--vs-text-3, var(--text-muted));
-}
-
-.diary-calendar-plan:focus-visible {
-  outline: 2px solid var(--accent);
-  outline-offset: -2px;
-}
-
 .diary-calendar-mood {
   position: absolute;
   top: calc(var(--diary-calendar-date-top) + 65px);
@@ -1020,9 +973,20 @@ defineExpose({ focusDate, closeMoodPicker, clearSelection })
   object-fit: contain;
 }
 
+.diary-calendar-mood.diary-calendar-plan-emoji {
+  font-size: 21px;
+  pointer-events: none;
+}
+
 .diary-calendar-mood-empty-mark {
   font-size: 1rem;
   font-weight: 500;
+  opacity: 0;
+}
+
+.diary-calendar-mood-empty:hover .diary-calendar-mood-empty-mark,
+.diary-calendar-mood-empty:focus-visible .diary-calendar-mood-empty-mark {
+  opacity: 1;
 }
 
 .diary-calendar-mood:hover:not(:disabled),
@@ -1098,6 +1062,10 @@ defineExpose({ focusDate, closeMoodPicker, clearSelection })
   .diary-calendar-mood img {
     width: 18px;
     height: 18px;
+  }
+
+  .diary-calendar-mood.diary-calendar-plan-emoji {
+    font-size: 18px;
   }
 
   .diary-calendar-error {

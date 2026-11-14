@@ -418,7 +418,7 @@ describe('DiaryCalendar presentation adapter', () => {
     wrapper.unmount()
   })
 
-  it('keeps a missing future date on the existing date-command guard path', async () => {
+  it('sends a missing future date to the document command without asking for Mood', async () => {
     vi.useFakeTimers()
     vi.setSystemTime(new Date(2026, 7, 27, 12, 0, 0))
     const wrapper = mountCalendar([])
@@ -428,6 +428,28 @@ describe('DiaryCalendar presentation adapter', () => {
     await flushPromises()
     expect(document.body.querySelector('[data-testid="diary-mood-picker"]')).toBeNull()
     expect(wrapper.emitted('date-selected')).toEqual([['2026-08-28']])
+    wrapper.unmount()
+  })
+
+  it('uses a single marker and announces plan progress even on days with Mood', async () => {
+    const wrapper = mountCalendar([
+      { ...day('2026-08-24'), mood: 'happy' },
+      day('2026-08-25'),
+      day('2026-08-26'),
+    ], {
+      planDays: [
+        { date: date('2026-08-24'), total: 2, completed: 1 },
+        { date: date('2026-08-25'), total: 1, completed: 1 },
+        { date: date('2026-08-26'), total: 2, completed: 0 },
+      ],
+    })
+    await flushPromises()
+    expect(dayCell(wrapper, '2026-08-24').find('[data-testid="diary-calendar-mood"] img').exists()).toBe(true)
+    expect(dayCell(wrapper, '2026-08-24').find('[data-testid="diary-calendar-plan"]').exists()).toBe(false)
+    expect(wrapper.get('[data-diary-day-content][data-date="2026-08-24"]').attributes('aria-label'))
+      .toContain('1 of 2 plan items completed')
+    expect(dayCell(wrapper, '2026-08-25').get('[data-testid="diary-calendar-plan"]').text()).toBe('✅')
+    expect(dayCell(wrapper, '2026-08-26').get('[data-testid="diary-calendar-plan"]').text()).toBe('📋')
     wrapper.unmount()
   })
 

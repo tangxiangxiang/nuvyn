@@ -254,7 +254,7 @@ describe('useDiaryWorkspacePresentation', () => {
     requestDocument(state, '2026-08-24')
 
     state.presentation.recordDateCommandResult({
-      status: 'future',
+      status: 'error',
       date: date('2026-08-25'),
       path: 'diary/2026-08-25',
     })

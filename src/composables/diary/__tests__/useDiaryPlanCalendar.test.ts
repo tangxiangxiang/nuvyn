@@ -5,13 +5,14 @@ import type { DiaryPlanDaySummary } from '../../../../shared/diaryPlan'
 import { useDiaryPlanCalendar } from '../useDiaryPlanCalendar'
 
 describe('Diary Plan calendar summaries', () => {
-  it('discards out-of-order months, reuses the cache and clears pending work on lock', async () => {
+  it('discards out-of-order months, reloads on calendar return and clears pending work on lock', async () => {
     const queries: Array<{ month: string; done: (days: DiaryPlanDaySummary[]) => void }> = []
     const load = vi.fn((month: string) => new Promise<DiaryPlanDaySummary[]>((done) => queries.push({ month, done })))
     const scope = effectScope()
     const active = ref({ year: 2032, month: 1 })
     const unlocked = ref(true)
-    const plans = scope.run(() => useDiaryPlanCalendar(active, ref(true), unlocked, ref(1), load))!
+    const visible = ref(true)
+    const plans = scope.run(() => useDiaryPlanCalendar(active, visible, unlocked, ref(1), load))!
     const day = { date: parseDiaryDate('2032-03-01')!, total: 2, completed: 1 }
     try {
       active.value = { year: 2032, month: 2 }
@@ -22,12 +23,14 @@ describe('Diary Plan calendar summaries', () => {
       queries[0]!.done([])
       await Promise.resolve()
       expect(plans.days.value).toEqual([day])
-      active.value = { year: 2032, month: 4 }
-      active.value = { year: 2032, month: 3 }
+      visible.value = false
+      expect(plans.days.value).toEqual([])
+      visible.value = true
       expect(load).toHaveBeenCalledTimes(4)
-      expect(plans.days.value).toEqual([day])
-      plans.updateDay(day.date, { ...day, completed: 2 })
+      queries[3]!.done([{ ...day, completed: 2 }])
+      await Promise.resolve()
       expect(plans.days.value).toEqual([{ ...day, completed: 2 }])
+      plans.refresh()
       unlocked.value = false
       queries[4]!.done([day])
       await Promise.resolve()

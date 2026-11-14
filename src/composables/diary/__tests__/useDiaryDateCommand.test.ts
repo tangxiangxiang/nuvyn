@@ -36,7 +36,6 @@ function harness(options: {
   createDiaryDate?: DiaryDateCommandOptions['createDiaryDate']
   openPost?: DiaryDateCommandOptions['openPost']
   refresh?: () => Promise<void>
-  getToday?: () => DiaryDate | null
   mutationLock?: DiaryDateCommandOptions['mutationLock']
 } = {}) {
   const existing = new Set(options.existing ?? [])
@@ -56,7 +55,6 @@ function harness(options: {
     ?? (async (_path: string, _options?: { refresh?: boolean }) => {}))
   const refresh = options.refresh ?? vi.fn(async () => {})
   const publish = vi.fn()
-  const onFuture = vi.fn()
   const onBusy = vi.fn()
   const onError = vi.fn()
   const onRefreshError = vi.fn()
@@ -67,9 +65,7 @@ function harness(options: {
     refresh,
     fileChanges: { publish } as Pick<VaultFileChanges, 'publish'>,
     mutationLock: options.mutationLock,
-    getToday: options.getToday ?? (() => date('2026-08-24')),
     getTimeZone: () => 'Asia/Shanghai',
-    onFuture,
     onBusy,
     onError,
     onRefreshError,
@@ -82,7 +78,6 @@ function harness(options: {
     openPost,
     refresh,
     publish,
-    onFuture,
     onBusy,
     onError,
     onRefreshError,
@@ -219,21 +214,20 @@ describe('useDiaryDateCommand', () => {
     },
   )
 
-  it('does not create or navigate to a missing future date', async () => {
+  it('creates and opens a missing future date through the normal command', async () => {
     const state = harness()
 
     const result = await state.openDiaryDate('2026-08-25')
 
     expect(result).toEqual({
-      status: 'future',
+      status: 'created',
       date: date('2026-08-25'),
       path: 'diary/2026-08-25',
     })
-    expect(state.createDiaryDate).not.toHaveBeenCalled()
-    expect(state.openPost).not.toHaveBeenCalled()
-    expect(state.refresh).not.toHaveBeenCalled()
-    expect(state.publish).not.toHaveBeenCalled()
-    expect(state.onFuture).toHaveBeenCalledWith(date('2026-08-25'))
+    expect(state.createDiaryDate).toHaveBeenCalledTimes(1)
+    expect(state.openPost).toHaveBeenCalledWith('diary/2026-08-25', { refresh: false })
+    expect(state.refresh).toHaveBeenCalledTimes(1)
+    expect(state.publish).toHaveBeenCalledTimes(1)
   })
 
   it.each(['2026-02-31', '2026-13-01', 'not-a-date', 'diary/2026-08-24', '2026-8-24'])(
