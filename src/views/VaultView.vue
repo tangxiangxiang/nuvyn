@@ -74,6 +74,7 @@ import { useDiaryDateCommand, type DiaryDateCommandResult } from '../composables
 import { watchDiaryFilterScopeExit, type DiaryFilterOwnership } from '../composables/diary/diaryFilterScopeExit'
 import { useDiaryMoodCommand } from '../composables/diary/useDiaryMoodCommand'
 import { useDiaryMoodIconPreferences } from '../composables/diary/useDiaryMoodIconPreferences'
+import { useDiaryPlanCalendar } from '../composables/diary/useDiaryPlanCalendar'
 import { useDiaryWorkspacePresentation } from '../composables/diary/useDiaryWorkspacePresentation'
 import {
   captureDiarySessionGeneration,
@@ -84,7 +85,7 @@ import {
 import { DiaryAccessContextKey } from '../composables/diary/diaryAccessContext'
 import { AppShellContextKey } from '../composables/appShellContext'
 import { useTabletEditorViewport } from '../composables/vault/useTabletEditorViewport'
-import { localCivilToday } from '../components/diary/diaryCalendarAdapter'
+import { diaryCalendarMonthFromLocalDate, localCivilToday, type DiaryCalendarMonth } from '../components/diary/diaryCalendarAdapter'
 import {
   classifyDiaryPath,
   diaryDateFromPath,
@@ -105,6 +106,7 @@ import {
 } from '../features/diary/diaryAnalysisExport'
 import DiaryWorkspace from '../components/diary/DiaryWorkspace.vue'
 import DiaryCalendarSurface from '../components/diary/DiaryCalendarSurface.vue'
+import DiaryDayPlanSheet from '../components/diary/DiaryDayPlanSheet.vue'
 import { projectDiaryDaysFromTree } from '../components/diary/diaryCalendarProjection'
 import { adjacentDiaryDate, diaryTitleSwipeDirection } from '../components/diary/diaryTitleSwipe'
 import TagPanel from '../components/vault/TagPanel.vue'
@@ -2277,6 +2279,52 @@ const isDiaryCalendarVisible = computed(() => (
   && !isManagedDiaryDocumentActive.value
   && !isManagedDiaryDocumentRoute.value
 ))
+const diaryPlanMonth = ref(diaryCalendarMonthFromLocalDate())
+const diaryPlanCalendar = useDiaryPlanCalendar(diaryPlanMonth, isDiaryCalendarVisible, diaryAccess.isUnlocked, diaryAccess.epoch)
+const diaryPlanDays = diaryPlanCalendar.days
+const diaryPlanDate = ref<DiaryDate | null>(null)
+const diaryPlanChooseDate = ref(false)
+let diaryPlanTrigger: HTMLElement | null = null
+
+function openDiaryPlan(date: DiaryDate, trigger: HTMLElement | null = null, chooseDate = false) {
+  if (!isDiaryCalendarVisible.value || !diaryAccess.isUnlocked.value) return
+  diaryWorkspacePresentation.beginDateIntent()
+  diaryCalendarSurfaceRef.value?.closeMoodPicker(false)
+  diaryPlanTrigger = trigger
+  diaryPlanChooseDate.value = chooseDate
+  diaryPlanDate.value = date
+}
+
+function openDiaryPlanHome(event: MouseEvent) {
+  const today = localCivilToday()
+  if (today) openDiaryPlan(today, event.currentTarget as HTMLElement, true)
+}
+
+async function closeDiaryPlan() {
+  const date = diaryPlanDate.value
+  const trigger = diaryPlanTrigger
+  diaryPlanDate.value = null
+  diaryPlanTrigger = null
+  await nextTick()
+  if (!date || !diaryAccess.isUnlocked.value || !isDiaryCalendarVisible.value) return
+  if (trigger?.isConnected) trigger.focus()
+  else if (!diaryCalendarSurfaceRef.value?.focusDate(date)) {
+    vaultRef.value?.querySelector<HTMLButtonElement>('[data-testid="diary-calendar-plan-home"]')?.focus()
+  }
+}
+
+function onDiaryCalendarMonthChange(month: DiaryCalendarMonth) {
+  if (diaryPlanMonth.value.year === month.year && diaryPlanMonth.value.month === month.month) return
+  diaryPlanMonth.value = month
+  diaryWorkspacePresentation.beginDateIntent()
+}
+
+watch(isDiaryCalendarVisible, (visible) => {
+  if (!visible) {
+    diaryPlanDate.value = null
+    diaryPlanTrigger = null
+  }
+})
 const workspaceTabStripVisible = computed(() => {
   if (zenModeActive.value) return false
   if (workspaceTabs.value.length === 0 || isDiaryPresentationPrimary.value) return false
@@ -3168,7 +3216,14 @@ async function onDiaryDateSelected(date: DiaryDate): Promise<void> {
   // previous repair context, including when it targets the same date.
   clearPendingMoodFirstPresentation()
   const intent = diaryWorkspacePresentation.beginDateIntent()
-  const result: DiaryDateCommandResult = await openDiaryDate(date)
+  const generation = captureDiarySessionGeneration()
+  const result: DiaryDateCommandResult = await openDiaryDate(date, { notifyFuture: false })
+  if (result.status === 'future') {
+    if (diaryWorkspacePresentation.isDateIntentCurrent(intent) && isDiarySessionGenerationCurrent(generation)) {
+      openDiaryPlan(date)
+    }
+    return
+  }
   // A Calendar date click becomes a committed FileTree seed only after the
   // canonical date command opens or creates the Diary. Rejected dates (most
   // importantly missing future dates) must leave the user's ordinary query
@@ -3561,6 +3616,9 @@ async function exportPdfDocument(path: string): Promise<boolean> {
 // surface subscribes to its synchronous generation fence so a lock/logout
 // clears decrypted holders before late network/render work can publish again.
 const stopDiaryTeardown = subscribeDiaryTeardown(() => {
+  diaryPlanDate.value = null
+  diaryPlanTrigger = null
+  diaryPlanCalendar.clear()
   documentExport.cancel()
   clearManagedDiaryWorkspace()
   draftPersistence.clearSensitiveState()
@@ -3797,11 +3855,23 @@ watch(isReadMode, async (reading) => {
             :loading="treeLoading"
             :error="treeError"
             :mood-busy="diaryMoodBusy"
+            :plan-days="diaryAccess.isUnlocked.value ? diaryPlanDays : undefined"
             @date-selected="onDiaryDateSelected"
             @mood-change="updateDiaryCalendarMood"
+            @month-change="onDiaryCalendarMonthChange"
+            @plan-selected="openDiaryPlan"
+            @plan-home="openDiaryPlanHome"
           />
         </template>
       </DiaryWorkspace>
+      <DiaryDayPlanSheet
+        v-if="diaryPlanDate && diaryAccess.isUnlocked.value && isDiaryCalendarVisible"
+        :date="diaryPlanDate"
+        :choose-date="diaryPlanChooseDate"
+        @close="closeDiaryPlan"
+        @date-change="diaryPlanDate = $event"
+        @changed="diaryPlanCalendar.updateDay"
+      />
 
       <!-- Edit mode: single Monaco editor surface. -->
       <div

@@ -342,7 +342,7 @@ test('Calendar Mood picker closes when month navigation changes the Calendar con
   }
 })
 
-test('Calendar click on a missing future Diary is a browser-visible no-op', async ({ page, request }) => {
+test('Calendar opens plans for a missing future date without creating a Diary', async ({ page, request }) => {
   const today = localCivilDate()
   const future = nextCivilDate(today)
   const futurePath = diaryPath(future)
@@ -373,6 +373,9 @@ test('Calendar click on a missing future Diary is a browser-visible no-op', asyn
     })
     await dateButton.click()
     expect((await probeResponse).status()).toBe(404)
+    await expect(page.getByTestId('diary-day-plan-sheet')).toBeVisible()
+    await page.keyboard.press('Escape')
+    await expect(dateButton).toBeFocused()
     await expect.poll(() => createMethods).toEqual([])
 
     expect(new URL(page.url()).pathname).toBe(routeBefore)

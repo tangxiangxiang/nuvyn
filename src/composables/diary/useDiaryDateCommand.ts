@@ -96,7 +96,7 @@ export function useDiaryDateCommand(options: DiaryDateCommandOptions) {
     return null
   }
 
-  async function run(date: DiaryDate, openDocument: boolean): Promise<DiaryDateEnsureResult> {
+  async function run(date: DiaryDate, openDocument: boolean, notifyFuture = true): Promise<DiaryDateEnsureResult> {
     const path = diaryLogicalPathForDate(date)
     let release = options.mutationLock?.acquire(toMutationPaths([path])) ?? null
     if (options.mutationLock && !release) {
@@ -138,7 +138,7 @@ export function useDiaryDateCommand(options: DiaryDateCommandOptions) {
       const today = options.getToday?.() ?? localCivilToday()
       if (!today) return fail(new Error('local Diary date is unavailable'), date, path)
       if (date > today) {
-        options.onFuture?.(date)
+        if (notifyFuture) options.onFuture?.(date)
         return { status: 'future', date, path }
       }
 
@@ -241,7 +241,7 @@ export function useDiaryDateCommand(options: DiaryDateCommandOptions) {
     return promise
   }
 
-  function openDiaryDate(value: unknown): Promise<DiaryDateCommandResult> {
+  function openDiaryDate(value: unknown, { notifyFuture = true } = {}): Promise<DiaryDateCommandResult> {
     const date = parseDiaryDate(value)
     if (!date) return Promise.resolve(invalidResult())
 
@@ -249,7 +249,7 @@ export function useDiaryDateCommand(options: DiaryDateCommandOptions) {
     if (existing) return existing
 
     const path = diaryLogicalPathForDate(date)
-    const promise = run(date, true)
+    const promise = run(date, true, notifyFuture)
       .then(toCommandResult)
       .catch((error) => fail(error, date, path) as DiaryDateCommandResult)
     inFlight.set(date, promise)

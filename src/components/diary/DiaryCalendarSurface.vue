@@ -3,6 +3,7 @@ import { computed, ref } from 'vue'
 import type { PostSummary, TreeNode } from '../../lib/api'
 import type { DiaryDate } from '../../../shared/diaryProtocol'
 import type { DiaryMoodId } from '../../../shared/diaryMood'
+import type { DiaryPlanDaySummary } from '../../../shared/diaryPlan'
 import { useI18n } from '../../composables/useI18n'
 import DiaryCalendar from './DiaryCalendar.vue'
 import { projectDiaryDaysFromTree } from './diaryCalendarProjection'
@@ -15,6 +16,7 @@ const props = withDefaults(defineProps<{
   error?: string | null
   initialMonth?: DiaryCalendarMonth
   moodBusy?: boolean
+  planDays?: readonly DiaryPlanDaySummary[]
 }>(), {
   posts: () => [],
   loading: false,
@@ -26,6 +28,8 @@ const emit = defineEmits<{
   'date-selected': [date: DiaryDate]
   'month-change': [month: DiaryCalendarMonth]
   'mood-change': [date: DiaryDate, mood: DiaryMoodId | null]
+  'plan-selected': [date: DiaryDate, trigger: HTMLButtonElement]
+  'plan-home': [trigger: MouseEvent]
 }>()
 
 const { t } = useI18n()
@@ -66,9 +70,12 @@ defineExpose({ focusDate, closeMoodPicker, clearSelection })
       :error="props.error"
       :initial-month="props.initialMonth"
       :mood-busy="props.moodBusy"
+      :plan-days="props.planDays"
       @date-selected="emit('date-selected', $event)"
       @month-change="emit('month-change', $event)"
       @mood-change="onMoodChange"
+      @plan-selected="(date, trigger) => emit('plan-selected', date, trigger)"
+      @plan-home="emit('plan-home', $event)"
     />
   </section>
 </template>

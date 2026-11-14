@@ -6,6 +6,7 @@ import { useI18n } from '../../composables/useI18n'
 import { useTheme } from '../../composables/useTheme'
 import { useDiaryMoodIconPreferences } from '../../composables/diary/useDiaryMoodIconPreferences'
 import type { DiaryDate } from '../../../shared/diaryProtocol'
+import type { DiaryPlanDaySummary } from '../../../shared/diaryPlan'
 import DiaryMoodPicker from './DiaryMoodPicker.vue'
 import {
   diaryCalendarMonthFromFields,
@@ -32,6 +33,7 @@ const props = withDefaults(defineProps<{
   error?: string | null
   initialMonth?: DiaryCalendarMonth
   moodBusy?: boolean
+  planDays?: readonly DiaryPlanDaySummary[]
 }>(), {
   loading: false,
   error: null,
@@ -42,6 +44,8 @@ const emit = defineEmits<{
   'date-selected': [date: DiaryDate]
   'month-change': [month: DiaryCalendarMonth]
   'mood-change': [date: DiaryDate, mood: DiaryMoodId | null]
+  'plan-selected': [date: DiaryDate, trigger: HTMLButtonElement]
+  'plan-home': [trigger: MouseEvent]
 }>()
 
 const lastMonthKey = ref<string | null>(null)
@@ -65,6 +69,19 @@ const normalizedDays = computed(() => normalizeDiaryDays(props.days))
 const daysByDate = computed(() => new Map(
   normalizedDays.value.map((day) => [day.date, day] as const),
 ))
+const plansByDate = computed(() => new Map(props.planDays?.map((day) => [day.date, day])))
+
+function planForDay(day: NaiveCalendarDay) {
+  const date = diaryDateForCalendarDay(day)
+  return date ? plansByDate.value.get(date) : undefined
+}
+
+function openPlan(day: NaiveCalendarDay, event: MouseEvent) {
+  const date = diaryDateForCalendarDay(day)
+  if (!date || !(event.currentTarget instanceof HTMLButtonElement)) return
+  closeMoodPicker(false)
+  emit('plan-selected', date, event.currentTarget)
+}
 const activeMoodDay = computed(() => (
   activeMoodDate.value ? daysByDate.value.get(activeMoodDate.value) ?? null : null
 ))
@@ -329,6 +346,10 @@ function needsMoodFirst(date: DiaryDate): boolean {
     && Boolean(todayDate.value && date <= todayDate.value)
 }
 
+function isMissingFutureDate(date: DiaryDate): boolean {
+  return Boolean(todayDate.value && date > todayDate.value && daysByDate.value.get(date)?.hasDiary !== true)
+}
+
 function onDayClick(day: NaiveCalendarDay, event: MouseEvent): void {
   const date = diaryDateForCalendarDay(day)
   if (!date) return
@@ -337,10 +358,16 @@ function onDayClick(day: NaiveCalendarDay, event: MouseEvent): void {
   // date command may create it. Opening and dismissing this picker is purely
   // presentational and therefore cannot create a document. Missing future
   // dates continue through the existing command so its guard remains the
-  // single authority for the browser-visible no-op.
+  // single authority for resolving an existing Diary before opening Plan.
   if (needsMoodFirst(date)) {
     const trigger = event.currentTarget
     if (trigger instanceof HTMLButtonElement) openMoodPickerForDate(date, trigger)
+    return
+  }
+
+  if (isMissingFutureDate(date)) {
+    closeMoodPicker(false)
+    emit('date-selected', date)
     return
   }
 
@@ -364,6 +391,12 @@ function onCalendarValueUpdate(value: number, time: NaiveCalendarDay): void {
   if (needsMoodFirst(date)) {
     const trigger = dateButtonForDate(date)
     if (trigger) openMoodPickerForDate(date, trigger)
+    return
+  }
+
+  if (isMissingFutureDate(date)) {
+    closeMoodPicker(false)
+    emit('date-selected', date)
     return
   }
 
@@ -451,6 +484,13 @@ defineExpose({ focusDate, closeMoodPicker, clearSelection })
     :aria-busy="props.loading || undefined"
   >
     <div class="diary-calendar-host">
+      <button
+        v-if="props.planDays"
+        type="button"
+        class="diary-calendar-plan-home"
+        data-testid="diary-calendar-plan-home"
+        @click="emit('plan-home', $event)"
+      >{{ t('diary.plan.short') }}</button>
       <NCalendar
         :key="calendarKey"
         :default-value="calendarDefaultValue"
@@ -528,6 +568,17 @@ defineExpose({ focusDate, closeMoodPicker, clearSelection })
                 <span v-else-if="hasUnknownMoodForDay({ year, month, date })" aria-hidden="true">?</span>
                 <span v-else class="diary-calendar-mood-empty-mark" aria-hidden="true">?</span>
               </NButton>
+              <button
+                v-if="planForDay({ year, month, date })"
+                type="button"
+                class="diary-calendar-plan"
+                :class="{ 'is-completed': planForDay({ year, month, date })?.completed === planForDay({ year, month, date })?.total }"
+                data-testid="diary-calendar-plan"
+                :data-date="diaryDateForCalendarDay({ year, month, date })"
+                :aria-label="t('diary.plan.open', { date: diaryDateForCalendarDay({ year, month, date }) ?? '' })"
+                @click.stop="openPlan({ year, month, date }, $event)"
+                @keydown.stop
+              />
             </div>
           </template>
         </template>
@@ -911,6 +962,55 @@ defineExpose({ focusDate, closeMoodPicker, clearSelection })
   position: relative;
   z-index: 1;
   display: inline-block;
+}
+
+.diary-calendar-plan {
+  position: absolute;
+  top: calc(var(--diary-calendar-date-top) + 44px);
+  right: 0;
+  z-index: 2;
+  display: grid;
+  place-items: center;
+  width: 14px;
+  height: 24px;
+  padding: 0;
+  border: 0;
+  border-radius: 5px;
+  background: transparent;
+  cursor: pointer;
+  pointer-events: auto;
+}
+
+.diary-calendar-plan-home {
+  position: absolute;
+  z-index: 3;
+  top: 14px;
+  inset-inline-end: 12px;
+  padding: 4px 6px;
+  border: 0;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--accent);
+  font: inherit;
+  font-size: 0.8rem;
+  cursor: pointer;
+}
+
+.diary-calendar-plan::before {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--accent);
+  content: '';
+}
+
+.diary-calendar-plan.is-completed::before {
+  background: var(--vs-text-3, var(--text-muted));
+}
+
+.diary-calendar-plan:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
 }
 
 .diary-calendar-mood {

@@ -366,7 +366,7 @@ test('mobile native Diary documents fill the viewport when the side panel is clo
   expect(state.consoleErrors).toEqual([])
 })
 
-test('existing today/past enter native READ while unsupported future files and missing future stay Home', async ({ page, request }) => {
+test('existing today/past enter native READ and missing future dates open plans', async ({ page, request }) => {
   const today = localCivilDate()
   const past = shiftCivilDate(today, -1)
   const existingFuture = shiftCivilDate(today, 1)
@@ -398,6 +398,7 @@ test('existing today/past enter native READ while unsupported future files and m
     await expect(page.locator(`[role="tab"][data-tab-id="${diaryPath(existingFuture)}"]`)).toHaveCount(0)
 
     await clickDiaryDate(page, missingFuture)
+    await expect(page.getByTestId('diary-day-plan-sheet')).toBeVisible()
     await expect(page.getByTestId('diary-calendar')).toBeVisible()
     await expect(page.locator(`[role="tab"][data-tab-id="${diaryPath(missingFuture)}"]`)).toHaveCount(0)
   } finally {
