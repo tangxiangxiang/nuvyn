@@ -125,12 +125,17 @@ describe('DiaryCalendarSurface', () => {
     expect(empty.find('.n-calendar').exists()).toBe(true)
     expect(empty.find('[data-testid="diary-calendar-surface-empty"]').exists()).toBe(false)
 
-    const loading = mountSurface(treeWith(), { loading: true, error: 'Tree unavailable' })
+    const loading = mountSurface(treeWith(), { loading: true })
     await flushPromises()
-    expect(loading.get('[data-testid="diary-calendar-surface"]').attributes('aria-busy')).toBe('true')
-    expect(loading.get('[data-testid="diary-calendar-loading"]').attributes('role')).toBe('status')
-    expect(loading.get('[data-testid="diary-calendar-error"]').attributes('role')).toBe('alert')
+    const surface = loading.get('[data-testid="diary-calendar-surface"]')
+    expect(surface.attributes('aria-busy')).toBe('true')
+    expect(loading.find('[role="status"]').exists()).toBe(false)
     expect(loading.find('.n-calendar').exists()).toBe(true)
+
+    await loading.setProps({ loading: false, error: 'Tree unavailable' })
+
+    expect(surface.attributes('aria-busy')).toBeUndefined()
+    expect(loading.get('[role="alert"]').text()).toBe('Tree unavailable')
   })
 
   it('re-emits date and month intents without owning navigation side effects', async () => {

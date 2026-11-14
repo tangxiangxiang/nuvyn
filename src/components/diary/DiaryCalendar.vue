@@ -533,10 +533,7 @@ defineExpose({ focusDate, closeMoodPicker, clearSelection })
         </template>
       </NCalendar>
 
-      <div v-if="props.loading" class="diary-calendar-status" data-testid="diary-calendar-loading" role="status" aria-live="polite">
-        {{ t('diary.calendar.loading') }}
-      </div>
-      <div v-if="props.error" class="diary-calendar-status diary-calendar-error" data-testid="diary-calendar-error" role="alert">
+      <div v-if="props.error" class="diary-calendar-error" data-testid="diary-calendar-error" role="alert">
         {{ props.error }}
       </div>
     </div>
@@ -586,18 +583,14 @@ defineExpose({ focusDate, closeMoodPicker, clearSelection })
   min-height: 0;
 }
 
-.diary-calendar-status {
+.diary-calendar-error {
   position: absolute;
   top: 84px;
   left: 16px;
   z-index: 2;
-  color: var(--text-muted);
+  color: var(--vs-danger, #d73a49);
   font-size: 0.875rem;
   pointer-events: none;
-}
-
-.diary-calendar-error {
-  color: var(--vs-danger, #d73a49);
 }
 
 /* Naive UI owns the calendar structure; these overrides keep the Diary
@@ -1030,7 +1023,7 @@ defineExpose({ focusDate, closeMoodPicker, clearSelection })
     height: 18px;
   }
 
-  .diary-calendar-status {
+  .diary-calendar-error {
     left: 8px;
   }
 }

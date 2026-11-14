@@ -87,13 +87,14 @@ onMounted(() => {
         @submit.prevent="submit"
       >
         <h2 id="diary-access-title">{{ t(mode === 'setup' ? 'diary_access.setup_title' : 'diary_access.unlock_title') }}</h2>
-        <p class="diary-access-description">{{ t(mode === 'setup' ? 'diary_access.setup_description' : 'diary_access.unlock_description') }}</p>
-        <label for="diary-access-password">{{ t('diary_access.password') }}</label>
+        <p v-if="mode === 'setup'" class="diary-access-description">{{ t('diary_access.setup_description') }}</p>
+        <label for="diary-access-password">{{ t(mode === 'setup' ? 'diary_access.password' : 'auth.password') }}</label>
         <NInput
           ref="passwordRef"
           v-model:value="password"
           type="password"
           size="medium"
+          :placeholder="mode === 'unlock' ? '' : undefined"
           :minlength="12"
           :maxlength="256"
           class="diary-access-control"
@@ -125,12 +126,9 @@ onMounted(() => {
             :disabled="busy"
           />
         </template>
-        <div class="diary-remember-option">
-          <NCheckbox v-model:checked="rememberDevice" :disabled="busy" data-testid="diary-remember-device">
-            {{ t('diary_access.remember_device') }}
-          </NCheckbox>
-          <p>{{ t('diary_access.remember_device_hint') }}</p>
-        </div>
+        <NCheckbox v-model:checked="rememberDevice" class="diary-remember-option" :disabled="busy" data-testid="diary-remember-device">
+          {{ t('diary_access.remember_device') }}
+        </NCheckbox>
         <p v-if="error" class="diary-access-error" role="alert">{{ error }}</p>
         <div class="diary-access-actions">
           <NButton
@@ -166,8 +164,7 @@ onMounted(() => {
 .diary-access-control { width: 100%; }
 .diary-access-control :deep(.n-input) { width: 100%; min-height: 40px; border-color: var(--border); border-radius: 5px; background: var(--bg-soft); }
 .diary-access-control :deep(.n-input__input-el) { color: var(--text-h); }
-.diary-remember-option { display: grid; gap: 4px; margin-top: 4px; }
-.diary-remember-option p { margin: 0 0 2px 24px; color: var(--text-muted); font-size: 0.78rem; line-height: 1.45; }
+.diary-remember-option { justify-self: start; margin-top: 4px; }
 .diary-access-error { margin: 2px 0 0; color: #b91c1c; }
 .diary-access-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 8px; }
 @media (max-width: 600px) { .diary-access-backdrop { align-items: end; padding: 0; } .diary-access-dialog { width: 100%; border-radius: 8px 8px 0 0; } }

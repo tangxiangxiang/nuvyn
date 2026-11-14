@@ -67,8 +67,11 @@ describe('DiaryAccessDialog', () => {
       attachTo: document.body,
     })
     expect(document.getElementById('diary-access-confirm')).toBeNull()
-    expect((document.getElementById('diary-access-password') as HTMLInputElement).autocomplete)
-      .toBe('new-password')
+    const password = document.getElementById('diary-access-password') as HTMLInputElement
+    expect(password.autocomplete).toBe('new-password')
+    expect(password.labels?.[0]?.textContent).toBe('密码')
+    expect(password.placeholder).toBe('')
+    expect(document.querySelector('.diary-access-description')).toBeNull()
     expect(document.querySelector('.diary-access-actions button[type="submit"]')).toBeTruthy()
     const form = document.querySelector('form.diary-access-dialog') as HTMLFormElement
     form.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))
