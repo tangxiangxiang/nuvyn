@@ -11,8 +11,9 @@ import { useAuth } from '../composables/useAuth'
 import { useConfirm } from '../composables/useConfirm'
 import { createDiaryEventId, diaryLifeApi } from '../lib/diary-life-api'
 import { diaryAttachmentsApi } from '../lib/diary-attachments-api'
+import { DiaryAttachmentPreviewUrls } from '../lib/diaryAttachmentPreviewUrls'
 import { addDays, compareEvents, dayDistance, localToday, nextOccurrence, occursOn, parseDay, parseEvent, type DiaryDay, type DiaryDaySummary, type DiaryEvent, type DayFields, type EventFields } from '../../shared/diaryLife'
-import { MAX_DIARY_ATTACHMENT_BYTES, MAX_DIARY_DAY_ATTACHMENTS, type DiaryAttachment } from '../../shared/diaryAttachments'
+import { DIARY_ATTACHMENT_STAGE_HEARTBEAT_INTERVAL_MS, MAX_DIARY_ATTACHMENT_BYTES, MAX_DIARY_DAY_ATTACHMENTS, type DiaryAttachment } from '../../shared/diaryAttachments'
 import { NUVYN_BROWSER_STORAGE_KEYS, ownerScopedStorageKey, readStorageKey, writeStorageKey } from '../technicalNamespace'
 import DiaryLifeCalendar from '../components/diary/DiaryLifeCalendar.vue'
 import DiaryDayDialog from '../components/diary/DiaryDayDialog.vue'
@@ -45,7 +46,7 @@ const upcoming = ref<DiaryEvent[]>([])
 const selected = ref<string | null>(null)
 const day = ref<DiaryDay | null>(null)
 const dayAttachments = ref<DiaryAttachment[]>([])
-const draftAttachments = ref<Array<DiaryAttachment & { pending?: boolean }>>([])
+const draftAttachments = ref<Array<DiaryAttachment & { pending?: boolean; localPreviewUrl?: string }>>([])
 const dayVersion = ref(0)
 const draft = ref<DayFields>({ moodId: null, entries: [] })
 const dayMode = ref<'read' | 'edit'>('read')
@@ -69,9 +70,50 @@ const eventListLoaded = ref(false)
 const eventListLoading = ref(false)
 const eventListLoadingMore = ref(false)
 const eventListError = ref('')
+
+function stopAttachmentSession() {
+  if (attachmentLeaseTimer) clearInterval(attachmentLeaseTimer)
+  attachmentLeaseTimer = undefined
+  attachmentLeaseRequest?.abort()
+  attachmentLeaseRequest = null
+  attachmentSessionId.value = null
+}
+
+async function renewAttachmentSession() {
+  const sessionId = attachmentSessionId.value
+  const date = selected.value
+  if (!sessionId || !date || dayMode.value !== 'edit' || !access.isUnlocked.value || attachmentLeaseRequest) return
+  const controller = new AbortController()
+  attachmentLeaseRequest = controller
+  const generation = captureDiarySessionGeneration()
+  try {
+    await diaryAttachmentsApi.heartbeat(date, sessionId, controller.signal)
+  } catch {
+    // A failed heartbeat lets the server lease expire. The next heartbeat or
+    // upload retries; no attachment bytes or metadata are exposed here.
+  } finally {
+    if (attachmentLeaseRequest === controller) attachmentLeaseRequest = null
+    if (!isDiarySessionGenerationCurrent(generation) || attachmentSessionId.value !== sessionId) controller.abort()
+  }
+}
+
+function startAttachmentSession() {
+  stopAttachmentSession()
+  attachmentSessionId.value = crypto.randomUUID().toLowerCase()
+  void renewAttachmentSession()
+  attachmentLeaseTimer = setInterval(() => { void renewAttachmentSession() }, DIARY_ATTACHMENT_STAGE_HEARTBEAT_INTERVAL_MS)
+}
+
+function onDiaryVisibilityChange() {
+  if (document.visibilityState === 'visible') void renewAttachmentSession()
+}
 let request: AbortController | null = null
 let detailRequest: AbortController | null = null
 let attachmentUploadRequest: AbortController | null = null
+let attachmentLeaseRequest: AbortController | null = null
+let attachmentLeaseTimer: ReturnType<typeof setInterval> | undefined
+const attachmentSessionId = ref<string | null>(null)
+const attachmentPreviewUrls = new DiaryAttachmentPreviewUrls()
 let eventListRequest: AbortController | null = null
 let timer: ReturnType<typeof setInterval> | undefined
 const dirty = computed(() => {
@@ -130,6 +172,8 @@ function resetForm() {
   detailRequest?.abort()
   attachmentUploadRequest?.abort()
   attachmentUploadRequest = null
+  stopAttachmentSession()
+  attachmentPreviewUrls.clear()
   selected.value = null
   eventDraft.value = null
   editing.value = null
@@ -260,7 +304,10 @@ async function close() {
     resetForm()
   }
 }
-function editDay() { dayMode.value = 'edit' }
+function editDay() {
+  dayMode.value = 'edit'
+  if (selected.value) startAttachmentSession()
+}
 async function cancelDayEdit() {
   if (busy.value || attachmentBusy.value) return
   if (dirty.value && !await confirm('放弃未保存的修改？')) return
@@ -282,12 +329,18 @@ async function discardPendingAttachments() {
   for (const item of pending) {
     try { await diaryAttachmentsApi.discard(item.id) } catch {
       attachmentError.value = '部分未保存附件将在过期后自动清理。'
+    } finally {
+      attachmentPreviewUrls.release(item.id)
     }
   }
+  stopAttachmentSession()
   draftAttachments.value = dayAttachments.value.map(item => ({ ...item }))
 }
 async function addDayAttachments(files: File[]) {
   if (!selected.value || dayMode.value !== 'edit' || attachmentBusy.value) return
+  if (!attachmentSessionId.value) startAttachmentSession()
+  const sessionId = attachmentSessionId.value
+  if (!sessionId) return
   const generation = captureDiarySessionGeneration()
   const date = selected.value
   const failures: string[] = []
@@ -306,15 +359,25 @@ async function addDayAttachments(files: File[]) {
         failures.push(`${file.name}：单个附件不能超过 20 MiB。`)
         continue
       }
+      let localPreviewUrl: string | null = null
+      try { localPreviewUrl = attachmentPreviewUrls.create(file) } catch { /* The protected preview remains available after saving. */ }
       try {
-        const attachment = await diaryAttachmentsApi.stage(date, file, controller.signal)
+        const attachment = await diaryAttachmentsApi.stage(date, sessionId, file, controller.signal)
         if (controller.signal.aborted || !isDiarySessionGenerationCurrent(generation) || selected.value !== date) {
           void diaryAttachmentsApi.discard(attachment.id).catch(() => {})
           return
         }
-        draftAttachments.value = [...draftAttachments.value, { ...attachment, pending: true }]
+        if (localPreviewUrl) attachmentPreviewUrls.associate(attachment.id, localPreviewUrl)
+        draftAttachments.value = [...draftAttachments.value, {
+          ...attachment,
+          pending: true,
+          ...(localPreviewUrl ? { localPreviewUrl } : {}),
+        }]
+        localPreviewUrl = null
       } catch (error) {
         if (!controller.signal.aborted) failures.push(`${file.name}：${(error as Error).message}`)
+      } finally {
+        attachmentPreviewUrls.releaseUnassigned(localPreviewUrl)
       }
     }
   } finally {
@@ -335,6 +398,7 @@ async function removeDayAttachment(id: string) {
     attachmentBusy.value = true
     try {
       await diaryAttachmentsApi.discard(id)
+      attachmentPreviewUrls.release(id)
       draftAttachments.value = draftAttachments.value.filter(item => item.id !== id)
     } catch (error) { attachmentError.value = (error as Error).message }
     finally { attachmentBusy.value = false }
@@ -360,6 +424,7 @@ async function open(date: string) {
     dayVersion.value = result.version
     draft.value = { moodId: result.day?.moodId ?? null, entries: [...(result.day?.entries ?? [])] }
     dayMode.value = result.day ? 'read' : 'edit'
+    if (!result.day) startAttachmentSession()
     initial.value = JSON.stringify({ fields: draft.value, attachments: draftAttachments.value.map(item => item.id) })
   } catch { if (!scope.signal.aborted) { dayReadFailed.value = true; formError.value = '读取失败，请关闭后重试。' } }
   finally { if (!scope.signal.aborted) loadingDay.value = false }
@@ -407,11 +472,13 @@ async function save() {
           day.value = result.day
           dayVersion.value = result.version
           dayAttachments.value = result.attachments
+          attachmentPreviewUrls.clear()
           draftAttachments.value = result.attachments.map(item => ({ ...item }))
         }
         draft.value = { moodId: fields.moodId, entries: [...fields.entries] }
       }
       initial.value = JSON.stringify({ fields: draft.value, attachments: draftAttachments.value.map(item => item.id) })
+      stopAttachmentSession()
       dayMode.value = 'read'
       await load()
       return
@@ -450,12 +517,17 @@ async function remove() {
 async function openCountdown(event: DiaryEvent, date: string) {
   if (await open(date)) edit(event)
 }
-onBeforeRouteLeave(canLeave)
+onBeforeRouteLeave(async () => {
+  if (!await canLeave()) return false
+  await discardPendingAttachments()
+  return true
+})
 function beforeUnload(event: BeforeUnloadEvent) { if (dirty.value) { event.preventDefault(); event.returnValue = '' } }
 onMounted(() => {
   void preferences.load().catch(() => {})
   if (!access.isUnlocked.value) void accessContext?.requestAccess()
   window.addEventListener('beforeunload', beforeUnload)
+  document.addEventListener('visibilitychange', onDiaryVisibilityChange)
   timer = setInterval(() => { if (today.value !== localToday()) { today.value = localToday(); void load() } }, 30000)
 })
 onBeforeUnmount(() => {
@@ -463,6 +535,7 @@ onBeforeUnmount(() => {
   clearPrivateData()
   clearInterval(timer)
   window.removeEventListener('beforeunload', beforeUnload)
+  document.removeEventListener('visibilitychange', onDiaryVisibilityChange)
   clearShellCommands()
   if (appShell?.diaryViewMode) appShell.diaryViewMode.value = 'diary'
 })

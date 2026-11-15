@@ -4,7 +4,7 @@ import { civilDate } from '../../shared/diaryLife.js'
 import { MAX_DIARY_ATTACHMENT_BYTES } from '../../shared/diaryAttachments.js'
 import { withDiaryBodyOperation } from '../diaryAccess/guard.js'
 import type { DiaryBodyOperation } from '../diaryAccess/service.js'
-import { DiaryAttachmentError, discardStagedDiaryAttachment, readDiaryAttachment, stageDiaryAttachment } from '../diaryAttachments/service.js'
+import { DiaryAttachmentError, discardStagedDiaryAttachment, readDiaryAttachment, renewDiaryAttachmentStageSession, stageDiaryAttachment } from '../diaryAttachments/service.js'
 import { DiaryAttachmentStorage } from '../diaryAttachments/storage.js'
 import { validateDiaryAttachmentInput } from '../diaryAttachments/validation.js'
 import { metadataDb } from './shared.js'
@@ -40,9 +40,10 @@ routes.post('/stage', c => guarded(c, async (owner, operation) => {
   let form: FormData
   try { form = await c.req.formData() } catch { return c.json({ code: 'diary-attachment-invalid' }, 400) }
   const date = form.get('date')
+  const sessionId = form.get('sessionId')
   const file = form.get('file')
   const requestKey = c.req.header('Idempotency-Key') ?? ''
-  if (typeof date !== 'string' || !civilDate(date) || !(file instanceof File)) return c.json({ code: 'diary-attachment-invalid' }, 400)
+  if (typeof date !== 'string' || !civilDate(date) || typeof sessionId !== 'string' || !(file instanceof File)) return c.json({ code: 'diary-attachment-invalid' }, 400)
   if (file.size < 1) return c.json({ code: 'diary-attachment-invalid' }, 400)
   if (file.size > MAX_DIARY_ATTACHMENT_BYTES) return c.json({ code: 'diary-attachment-too-large' }, 413)
   const bytes = Buffer.from(await file.arrayBuffer())
@@ -54,11 +55,24 @@ routes.post('/stage', c => guarded(c, async (owner, operation) => {
     })
     if (!validated) return c.json({ code: 'diary-attachment-unsupported' }, 415)
     const metadata = await stageDiaryAttachment({
-      db: metadataDb(), owner, date, name: validated.name, mimeType: validated.mimeType,
+      db: metadataDb(), owner, date, sessionId, name: validated.name, mimeType: validated.mimeType,
       bytes, requestKey, operation, storage: attachmentStorage(),
     })
     return c.json({ attachment: metadata }, 201)
   } finally { bytes.fill(0) }
+}))
+
+routes.post('/sessions/:sessionId/heartbeat', c => guarded(c, async (owner, operation) => {
+  let body: unknown
+  try { body = await c.req.json() } catch { return c.json({ code: 'diary-attachment-invalid' }, 400) }
+  if (!body || typeof body !== 'object' || typeof (body as { date?: unknown }).date !== 'string' || !civilDate((body as { date: string }).date)) {
+    return c.json({ code: 'diary-attachment-invalid' }, 400)
+  }
+  await renewDiaryAttachmentStageSession({
+    db: metadataDb(), owner, date: (body as { date: string }).date,
+    sessionId: c.req.param('sessionId'), operation, storage: attachmentStorage(),
+  })
+  return c.body(null, 204)
 }))
 
 routes.get('/:id/content', c => guarded(c, async (owner, operation) => {

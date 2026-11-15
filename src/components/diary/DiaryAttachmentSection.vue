@@ -6,7 +6,7 @@ import { subscribeDiaryTeardown } from '../../composables/diary/useDiaryAccessSe
 import { diaryAttachmentsApi } from '../../lib/diary-attachments-api'
 import type { DiaryAttachment } from '../../../shared/diaryAttachments'
 
-type DraftAttachment = DiaryAttachment & { pending?: boolean }
+type DraftAttachment = DiaryAttachment & { pending?: boolean; localPreviewUrl?: string }
 const props = defineProps<{
   date: string
   attachments: DraftAttachment[]
@@ -55,7 +55,7 @@ function clearAll() {
 }
 
 async function loadImage(attachment: DraftAttachment) {
-  if (!active || urls.has(attachment.id)) return
+  if (!active || attachment.pending || attachment.mimeType === 'application/pdf' || urls.has(attachment.id)) return
   const pending = loads.get(attachment.id)
   if (pending) return pending
   const controller = new AbortController()
@@ -128,8 +128,8 @@ function refreshObservedTiles() {
 }
 
 const stopTeardown = subscribeDiaryTeardown(clearAll)
-watch(() => props.attachments.map(item => item.id).join(':'), async key => {
-  const retained = new Set(key ? key.split(':') : [])
+watch(() => JSON.stringify(props.attachments.map(item => [item.id, Boolean(item.pending), item.localPreviewUrl ?? null])), async () => {
+  const retained = new Set(props.attachments.map(item => item.id))
   for (const id of [...urls.keys()]) if (!retained.has(id)) revoke(id)
   for (const [id, controller] of [...controllers]) {
     if (!retained.has(id)) { controller.abort(); controllers.delete(id) }
@@ -141,7 +141,12 @@ watch(() => props.attachments.map(item => item.id).join(':'), async key => {
     refCallbacks.delete(id)
   }
   await nextTick()
-  if (active) refreshObservedTiles()
+  if (!active) return
+  refreshObservedTiles()
+  for (const id of visibleIds) {
+    const attachment = props.attachments.find(item => item.id === id)
+    if (attachment && !attachment.pending) void loadImage(attachment)
+  }
 }, { flush: 'post' })
 
 onMounted(() => {
@@ -170,6 +175,11 @@ function selectFiles(event: Event) {
 }
 
 async function openImage(attachment: DraftAttachment) {
+  if (attachment.localPreviewUrl) {
+    preview.value = { id: attachment.id, url: attachment.localPreviewUrl, name: attachment.name }
+    return
+  }
+  if (attachment.pending) return
   if (!urls.has(attachment.id)) await loadImage(attachment)
   const url = urls.get(attachment.id)
   if (url && active) preview.value = { id: attachment.id, url, name: attachment.name }
@@ -220,12 +230,12 @@ function formatSize(bytes: number): string {
     <div v-if="props.attachments.length" class="diary-attachment-grid">
       <article v-for="attachment in props.attachments" :key="attachment.id" class="diary-attachment-item" :data-testid="`diary-attachment-${attachment.id}`">
         <button v-if="attachment.mimeType !== 'application/pdf'" :ref="tileRef(attachment.id)" type="button" class="diary-attachment-image" :data-attachment-id="attachment.id" :aria-label="`预览 ${attachment.name}`" @click="openImage(attachment)">
-          <img v-if="urls.get(attachment.id)" :src="urls.get(attachment.id)" :alt="attachment.name" loading="lazy">
+          <img v-if="attachment.localPreviewUrl || urls.get(attachment.id)" :src="attachment.localPreviewUrl || urls.get(attachment.id)" :alt="attachment.name" loading="lazy">
           <span v-else-if="loading.has(attachment.id)" class="diary-attachment-placeholder"><NSpin size="small" /></span>
           <span v-else-if="failed.has(attachment.id)" class="diary-attachment-placeholder is-error">加载失败</span>
           <span v-else class="diary-attachment-placeholder"><Paperclip :size="22" /></span>
         </button>
-        <button v-else type="button" class="diary-attachment-pdf" :disabled="props.disabled || loading.has(attachment.id)" :aria-label="`下载 ${attachment.name}`" @click="downloadPdf(attachment)">
+        <button v-else type="button" class="diary-attachment-pdf" :disabled="props.disabled || attachment.pending || loading.has(attachment.id)" :aria-label="`下载 ${attachment.name}`" @click="downloadPdf(attachment)">
           <NSpin v-if="loading.has(attachment.id)" size="small" />
           <Download v-else :size="22" />
         </button>

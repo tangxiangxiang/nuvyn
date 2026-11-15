@@ -41,7 +41,7 @@ routes.get('/days/:date', c => guarded(c, async store => {
   const db = metadataDb()
   const storage = new DiaryAttachmentStorage()
   await ensureDiaryAttachmentStorage(db, storage)
-  await cleanupDiaryAttachmentStorage(db, storage)
+  await cleanupDiaryAttachmentStorage(db, storage, c.get('authUser')?.id)
   return c.json({ day: store.getDay(date), version: store.dayVersion(date), attachments: store.dayAttachments(date) })
 }))
 routes.put('/days/:date', c => guarded(c, async store => {
@@ -56,7 +56,7 @@ routes.put('/days/:date', c => guarded(c, async store => {
   // The SQLite transaction has already committed. Physical deletion is
   // represented by durable tombstones and will be retried on later requests
   // or startup recovery, so cleanup failure must not report a false save error.
-  await cleanupDiaryAttachmentStorage(metadataDb(), new DiaryAttachmentStorage()).catch(() => {})
+  await cleanupDiaryAttachmentStorage(metadataDb(), new DiaryAttachmentStorage(), c.get('authUser')?.id).catch(() => {})
   return c.json({ day, version: day.version, attachments: store.dayAttachments(date) })
 }))
 routes.get('/events', c => guarded(c, store => {
@@ -100,7 +100,7 @@ for (const kind of ['days', 'events'] as const) {
     const id = c.req.param('id')
     if (!version(body?.expectedVersion) || body.expectedVersion < 1 || !(kind === 'days' ? civilDate(id) : idValid(id))) return c.json({ code: 'invalid-diary-delete' }, 400)
     store.remove(kind === 'days' ? 'day' : 'event', id, body.expectedVersion)
-    if (kind === 'days') await cleanupDiaryAttachmentStorage(metadataDb(), new DiaryAttachmentStorage()).catch(() => {})
+    if (kind === 'days') await cleanupDiaryAttachmentStorage(metadataDb(), new DiaryAttachmentStorage(), c.get('authUser')?.id).catch(() => {})
     return c.json({ ok: true })
   }))
 }

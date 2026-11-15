@@ -10,7 +10,9 @@ test('Diary attachments upload privately, remain linked to the day, preview, and
   await unlockDiary(page)
 
   const cell = page.locator('.diary-life-calendar [data-date$="-27"]')
+  const leaseHeartbeat = page.waitForResponse(response => response.url().includes('/api/diary/attachments/sessions/') && response.url().endsWith('/heartbeat') && response.status() === 204)
   await cell.click()
+  await leaseHeartbeat
   await page.getByTestId('diary-add-attachment').click()
   await page.getByTestId('diary-attachment-input').setInputFiles([
     { name: 'private-memory.png', mimeType: 'image/png', buffer: png },
@@ -21,7 +23,10 @@ test('Diary attachments upload privately, remain linked to the day, preview, and
   await expect(attachments.getByText('private-memory.png')).toBeVisible()
   await expect(attachments.getByText('private-memory.pdf')).toBeVisible()
   await expect(attachments.getByText('待保存')).toHaveCount(2)
+  await expect(attachments.getByRole('img', { name: 'private-memory.png' })).toHaveAttribute('src', /^blob:/)
+  const protectedImageRead = page.waitForResponse(response => response.url().includes(`/api/diary/attachments/`) && response.url().endsWith('/content') && response.status() === 200)
   await page.getByTestId('diary-save-entry').click()
+  await protectedImageRead
   await expect(page.getByTestId('diary-edit-entry')).toBeVisible()
   await expect(attachments.getByText('private-memory.png')).toBeVisible()
   await expect(cell.locator('.life-entry-marker')).toBeVisible()

@@ -55,10 +55,10 @@ export function diaryLifeStore(db: Database, owner: number, operation: DiaryBody
           if (!attachment || attachment.day_date !== date || !['attached', 'staged'].includes(attachment.status)) throw new DiaryAttachmentError('conflict', 409)
         }
         for (const id of currentIds) {
-          if (!wanted.has(id)) db.prepare("UPDATE diary_day_attachments SET status = 'deleting', expires_at = NULL WHERE owner_user_id = ? AND id = ? AND status = 'attached'").run(owner, id)
+          if (!wanted.has(id)) db.prepare("UPDATE diary_day_attachments SET status = 'deleting', expires_at = NULL, stage_session_id = NULL WHERE owner_user_id = ? AND id = ? AND status = 'attached'").run(owner, id)
         }
         attachmentIds.forEach((id, index) => {
-          db.prepare(`UPDATE diary_day_attachments SET status = 'attached', display_order = ?, expires_at = NULL
+          db.prepare(`UPDATE diary_day_attachments SET status = 'attached', display_order = ?, expires_at = NULL, stage_session_id = NULL
             WHERE owner_user_id = ? AND id = ? AND day_date = ? AND status IN ('staged', 'attached')`)
             .run(index, owner, id, date)
         })
@@ -107,7 +107,7 @@ export function diaryLifeStore(db: Database, owner: number, operation: DiaryBody
       const column = kind === 'day' ? 'date' : 'id'
       db.transaction(() => {
         if (kind === 'day') {
-          db.prepare(`UPDATE diary_day_attachments SET status = 'deleting', expires_at = NULL
+          db.prepare(`UPDATE diary_day_attachments SET status = 'deleting', expires_at = NULL, stage_session_id = NULL
             WHERE owner_user_id = ? AND day_date = ? AND status IN ('staged', 'attached')`).run(owner, id)
         }
         const result = db.prepare(`DELETE FROM ${table} WHERE owner_user_id = ? AND ${column} = ? AND version = ?`).run(owner, id, version)

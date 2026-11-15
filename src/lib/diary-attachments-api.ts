@@ -23,10 +23,11 @@ async function assertResponse(response: Response): Promise<void> {
 }
 
 export const diaryAttachmentsApi = {
-  async stage(date: string, file: File, signal?: AbortSignal): Promise<DiaryAttachment> {
+  async stage(date: string, sessionId: string, file: File, signal?: AbortSignal): Promise<DiaryAttachment> {
     if (file.size < 1 || file.size > MAX_DIARY_ATTACHMENT_BYTES) throw new Error('单个附件不能超过 20 MiB。')
     const form = new FormData()
     form.append('date', date)
+    form.append('sessionId', sessionId)
     form.append('file', file, file.name)
     const response = await diaryAuthFetch('/api/diary/attachments/stage', {
       method: 'POST', signal, cache: 'no-store', headers: { 'Idempotency-Key': createRequestKey() }, body: form,
@@ -35,6 +36,13 @@ export const diaryAttachmentsApi = {
     const result = await response.json() as { attachment?: DiaryAttachment }
     if (!result.attachment || result.attachment.date !== date || result.attachment.size !== file.size) throw new Error('附件响应无效，请重试。')
     return result.attachment
+  },
+
+  async heartbeat(date: string, sessionId: string, signal?: AbortSignal): Promise<void> {
+    const response = await diaryAuthFetch(`/api/diary/attachments/sessions/${encodeURIComponent(sessionId)}/heartbeat`, {
+      method: 'POST', signal, cache: 'no-store', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ date }),
+    })
+    await assertResponse(response)
   },
 
   async discard(id: string, signal?: AbortSignal): Promise<void> {
