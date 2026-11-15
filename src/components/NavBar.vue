@@ -4,13 +4,16 @@ import { NButton, NDropdown, NIcon } from 'naive-ui'
 import {
   Box,
   Calendar,
+  CalendarEvent,
   Edit,
   Eye,
   Photo,
   LayoutSidebarLeftExpand,
   LayoutSidebarRightExpand,
   Lock,
+  List as ListIcon,
   Moon,
+  MoodSmile,
   Notes,
   Search,
   Sun,
@@ -87,6 +90,7 @@ const effectiveWorkspaceKind = computed<WorkspaceKind>(() => {
 })
 const isWorkspace = computed(() => effectiveWorkspaceKind.value !== null)
 const isVault = computed(() => effectiveWorkspaceKind.value === 'vault')
+const isDiary = computed(() => effectiveWorkspaceKind.value === 'diary')
 /* Ledger shares this navbar with Vault, but its body does not own Vault's
    editor/read-mode or right-rail controls. Keep the route fallback for
    legacy isolated mounts that still pass only `isVault`. */
@@ -978,6 +982,38 @@ onBeforeUnmount(() => {
       </div>
       <div class="nav-spacer" />
       <div class="nav-actions">
+        <NButton
+          v-if="isDiary && props.diaryUnlocked && appShell?.diaryViewToggleCommand?.value"
+          class="diary-view-toggle"
+          attr-type="button"
+          size="small"
+          quaternary
+          :bordered="false"
+          :aria-label="appShell.diaryViewMode?.value === 'diary' ? '切换到人生事件' : '切换到情绪日记'"
+          :title="appShell.diaryViewMode?.value === 'diary' ? '切换到人生事件' : '切换到情绪日记'"
+          data-testid="diary-view-toggle"
+          @click="appShell?.diaryViewToggleCommand?.value?.()"
+        >
+          <NIcon aria-hidden="true">
+            <CalendarEvent v-if="appShell.diaryViewMode?.value === 'diary'" />
+            <MoodSmile v-else />
+          </NIcon>
+        </NButton>
+        <NButton
+          v-if="isDiary && props.diaryUnlocked && appShell?.diaryEventListCommand?.value"
+          class="diary-event-list-toggle"
+          attr-type="button"
+          size="small"
+          quaternary
+          :bordered="false"
+          aria-label="人生事件"
+          title="人生事件"
+          aria-haspopup="dialog"
+          data-testid="diary-event-list-toggle"
+          @click="appShell?.diaryEventListCommand?.value?.()"
+        >
+          <NIcon aria-hidden="true"><ListIcon /></NIcon>
+        </NButton>
         <NDropdown
           v-if="isVault && appShell?.noteSpeechReadAllCommand?.value"
           trigger="click"

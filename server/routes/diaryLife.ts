@@ -54,6 +54,11 @@ routes.get('/events', c => guarded(c, store => {
   })
   return c.json(result)
 }))
+routes.get('/events/list', c => guarded(c, store => {
+  const { offset = '0' } = c.req.query()
+  if (!/^\d{1,7}$/.test(offset)) return c.json({ code: 'invalid-diary-event-list-query' }, 400)
+  return c.json(store.allEvents(Number(offset)))
+}))
 routes.get('/events/:id', c => guarded(c, store => {
   const event = store.getEvent(c.req.param('id'))
   return event ? c.json({ event }) : c.json({ code: 'diary-not-found' }, 404)

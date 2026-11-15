@@ -62,6 +62,13 @@ for (const viewport of [{ width: 390, height: 844 }, { width: 768, height: 1024 
       }
       await page.getByRole('button', { name: '保存', exact: true }).click()
       await expect(page.getByRole('textbox', { name: '事件标题', exact: true })).toBeHidden()
+      await page.getByTestId('diary-event-list-toggle').click()
+      const eventList = page.locator('.diary-event-list-dialog')
+      await expect(eventList).toBeVisible()
+      await expect(eventList.getByRole('button', { name: new RegExp(`人生事件 ${viewport.width}`) })).toBeVisible()
+      await eventList.getByRole('button', { name: new RegExp(`人生事件 ${viewport.width}`) }).click()
+      await expect(page.getByRole('textbox', { name: '事件标题', exact: true })).toHaveValue(`人生事件 ${viewport.width}`)
+      await page.getByRole('button', { name: '取消', exact: true }).click()
       await cell.click()
       await expect(page.getByRole('button', { name: `人生事件 ${viewport.width}`, exact: true })).toBeVisible()
       await page.reload()

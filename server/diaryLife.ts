@@ -52,6 +52,12 @@ export function diaryLifeStore(db: Database, owner: number, operation: DiaryBody
         .all(owner, end, start, offset) as Row[]
       return { items: rows.slice(0, 200).map(event), next: rows.length > 200 ? offset + 200 : null }
     },
+    allEvents(offset = 0) {
+      const rows = db.prepare(`SELECT * FROM diary_events WHERE owner_user_id = ?
+        ORDER BY start_date DESC, id DESC LIMIT 201 OFFSET ?`)
+        .all(owner, offset) as Row[]
+      return { items: rows.slice(0, 200).map(event), next: rows.length > 200 ? offset + 200 : null }
+    },
     putEvent(id: string, fields: EventFields, expected: number) {
       operation.assertCurrent()
       const now = Date.now()

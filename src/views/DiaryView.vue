@@ -1,10 +1,10 @@
 <script setup lang="ts">
-import { computed, inject, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { computed, inject, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { onBeforeRouteLeave } from 'vue-router'
-import { NButton, NIcon, NInput, NModal, NTooltip } from 'naive-ui'
-import { CalendarEvent, MoodSmile } from '@vicons/tabler'
+import { NButton, NInput, NModal } from 'naive-ui'
 import { Temporal } from '@js-temporal/polyfill'
 import { DiaryAccessContextKey } from '../composables/diary/diaryAccessContext'
+import { AppShellContextKey } from '../composables/appShellContext'
 import { captureDiarySessionGeneration, isDiarySessionGenerationCurrent, subscribeDiaryTeardown, useDiaryAccessSession } from '../composables/diary/useDiaryAccessSession'
 import { useDiaryMoodIconPreferences } from '../composables/diary/useDiaryMoodIconPreferences'
 import { useAuth } from '../composables/useAuth'
@@ -15,10 +15,12 @@ import { NUVYN_BROWSER_STORAGE_KEYS, ownerScopedStorageKey, readStorageKey, writ
 import DiaryLifeCalendar from '../components/diary/DiaryLifeCalendar.vue'
 import DiaryMoodPicker from '../components/diary/DiaryMoodPicker.vue'
 import DiaryEventForm from '../components/diary/DiaryEventForm.vue'
+import DiaryEventListDialog from '../components/diary/DiaryEventListDialog.vue'
 import { eventEmojiSource } from '../features/diary/eventEmoji'
 
 const access = useDiaryAccessSession()
 const accessContext = inject(DiaryAccessContextKey, null)
+const appShell = inject(AppShellContextKey, null)
 const preferences = useDiaryMoodIconPreferences()
 const auth = useAuth()
 const { confirmCancellable } = useConfirm()
@@ -54,13 +56,25 @@ const error = ref('')
 const formError = ref('')
 const allCountdowns = ref(false)
 const today = ref(localToday())
+const eventListVisible = ref(false)
+const eventListItems = ref<DiaryEvent[]>([])
+const eventListNext = ref<number | null>(0)
+const eventListLoaded = ref(false)
+const eventListLoading = ref(false)
+const eventListLoadingMore = ref(false)
+const eventListError = ref('')
 let request: AbortController | null = null
 let detailRequest: AbortController | null = null
+let eventListRequest: AbortController | null = null
 let timer: ReturnType<typeof setInterval> | undefined
-const dirty = computed(() => selected.value !== null && !loadingDay.value && !dayReadFailed.value && JSON.stringify(mode.value === 'diary' ? draft.value : eventDraft.value) !== initial.value)
+const dirty = computed(() => selected.value !== null && !loadingDay.value && !dayReadFailed.value
+  && JSON.stringify(eventDraft.value ? eventDraft.value : draft.value) !== initial.value)
 const storageKey = computed(() => auth.user.value ? ownerScopedStorageKey(NUVYN_BROWSER_STORAGE_KEYS.diaryLifeView, auth.user.value) : null)
-watch(storageKey, key => { mode.value = key && readStorageKey(key) === 'events' ? 'events' : 'diary' }, { immediate: true })
+watch(storageKey, key => {
+  mode.value = key && readStorageKey(key) === 'events' ? 'events' : 'diary'
+}, { immediate: true })
 watch(mode, value => { if (storageKey.value) writeStorageKey(storageKey.value, value) })
+watch(mode, value => { if (appShell?.diaryViewMode) appShell.diaryViewMode.value = value }, { immediate: true })
 
 const range = computed(() => ({ start: addDays(month.value, -7), end: Temporal.PlainDate.from(month.value).add({ months: 1, days: 7 }).toString() }))
 const selectedEvents = computed(() => events.value.filter(e => selected.value && occursOn(e, selected.value)).sort(compareEvents))
@@ -115,6 +129,8 @@ function resetForm() {
 
 function clearPrivateData() {
   request?.abort()
+  eventListRequest?.abort()
+  clearShellCommands()
   cancelConfirmation?.()
   resetForm()
   days.value = []
@@ -122,6 +138,80 @@ function clearPrivateData() {
   upcoming.value = []
   error.value = ''
   allCountdowns.value = false
+  eventListVisible.value = false
+  eventListItems.value = []
+  eventListNext.value = 0
+  eventListLoaded.value = false
+  eventListLoading.value = false
+  eventListLoadingMore.value = false
+  eventListError.value = ''
+}
+
+async function loadEventList(reset = false) {
+  if (!access.isUnlocked.value || eventListLoading.value || eventListLoadingMore.value) return
+  const offset = reset ? 0 : eventListNext.value
+  if (offset === null) return
+  eventListRequest?.abort()
+  const scope = new AbortController()
+  eventListRequest = scope
+  if (reset) eventListLoading.value = true
+  else eventListLoadingMore.value = true
+  eventListError.value = ''
+  try {
+    const result = await diaryLifeApi.eventListPage(offset, scope.signal)
+    if (scope.signal.aborted || eventListRequest !== scope) return
+    eventListItems.value = reset ? result.items : [...eventListItems.value, ...result.items]
+    eventListNext.value = result.next
+    eventListLoaded.value = true
+  } catch {
+    if (!scope.signal.aborted && eventListRequest === scope) eventListError.value = '加载失败，请重试。'
+  } finally {
+    if (eventListRequest === scope) {
+      eventListRequest = null
+      eventListLoading.value = false
+      eventListLoadingMore.value = false
+    }
+  }
+}
+
+async function openEventList() {
+  if (!(await canLeave()) || !access.isUnlocked.value) return
+  resetForm()
+  eventListVisible.value = true
+  if (!eventListLoaded.value) void loadEventList(true)
+}
+
+function invalidateEventList() {
+  eventListRequest?.abort()
+  eventListRequest = null
+  eventListLoading.value = false
+  eventListLoadingMore.value = false
+  eventListItems.value = []
+  eventListNext.value = 0
+  eventListLoaded.value = false
+  eventListError.value = ''
+  if (eventListVisible.value) void loadEventList(true)
+}
+
+function registerShellCommands() {
+  if (appShell?.diaryViewToggleCommand) appShell.diaryViewToggleCommand.value = diaryViewToggleCommand
+  if (appShell?.diaryEventListCommand) appShell.diaryEventListCommand.value = diaryEventListCommand
+}
+
+function clearShellCommands() {
+  if (appShell?.diaryViewToggleCommand?.value === diaryViewToggleCommand) appShell.diaryViewToggleCommand.value = null
+  if (appShell?.diaryEventListCommand?.value === diaryEventListCommand) appShell.diaryEventListCommand.value = null
+}
+
+const diaryViewToggleCommand = () => { void toggle() }
+const diaryEventListCommand = () => { void openEventList() }
+
+async function selectEventFromList(event: DiaryEvent) {
+  eventListVisible.value = false
+  resetForm()
+  selected.value = event.startDate
+  await nextTick()
+  edit(event)
 }
 
 const stopTeardown = subscribeDiaryTeardown(clearPrivateData)
@@ -129,6 +219,18 @@ watch([month, access.isUnlocked, access.epoch], () => {
   if (access.isUnlocked.value) void load()
   else clearPrivateData()
 }, { immediate: true })
+watch(access.isUnlocked, unlocked => {
+  if (unlocked) registerShellCommands()
+  else clearShellCommands()
+}, { immediate: true })
+watch(eventListVisible, visible => {
+  if (!visible) {
+    eventListRequest?.abort()
+    eventListRequest = null
+    eventListLoading.value = false
+    eventListLoadingMore.value = false
+  }
+})
 async function canLeave() {
   return !busy.value && (!dirty.value || await confirm('放弃未保存的修改？'))
 }
@@ -170,7 +272,7 @@ async function save() {
   const date = selected.value
   busy.value = true; formError.value = ''
   try {
-    if (mode.value === 'diary') {
+    if (!eventDraft.value) {
       if (!draft.value.moodId && !draft.value.description.trim()) {
         if (day.value) {
           const version = day.value.version
@@ -186,12 +288,13 @@ async function save() {
     if (!isDiarySessionGenerationCurrent(generation) || !access.isUnlocked.value) return
     resetForm()
     await load()
+    invalidateEventList()
   } catch (e) { if (isDiarySessionGenerationCurrent(generation)) formError.value = (e as Error).message }
   finally { busy.value = false }
 }
 async function remove() {
   const date = selected.value
-  const entry = mode.value === 'diary' ? day.value : editing.value
+  const entry = eventDraft.value ? editing.value : day.value
   if (busy.value || !date || !entry) return
   const generation = captureDiarySessionGeneration()
   busy.value = true
@@ -202,6 +305,7 @@ async function remove() {
     if (!isDiarySessionGenerationCurrent(generation) || !access.isUnlocked.value) return
     resetForm()
     await load()
+    invalidateEventList()
   } catch (error) {
     if (isDiarySessionGenerationCurrent(generation)) formError.value = (error as Error).message
   } finally {
@@ -224,6 +328,8 @@ onBeforeUnmount(() => {
   clearPrivateData()
   clearInterval(timer)
   window.removeEventListener('beforeunload', beforeUnload)
+  clearShellCommands()
+  if (appShell?.diaryViewMode) appShell.diaryViewMode.value = 'diary'
 })
 </script>
 
@@ -231,7 +337,6 @@ onBeforeUnmount(() => {
   <main class="diary-life" data-testid="diary-life">
     <template v-if="access.isUnlocked.value">
       <div class="diary-life-calendar-stage">
-        <div class="diary-life-toolbar"><NTooltip><template #trigger><NButton quaternary circle :aria-label="mode === 'diary' ? '切换到人生事件' : '切换到情绪日记'" @click="toggle"><NIcon><CalendarEvent v-if="mode === 'diary'" /><MoodSmile v-else /></NIcon></NButton></template>{{ mode === 'diary' ? '人生事件' : '情绪日记' }}</NTooltip></div>
         <div v-if="error" class="diary-life-error" role="alert">{{ error }} <NButton text @click="load">重试</NButton></div>
         <DiaryLifeCalendar :markers="markers" :today="today" @select="open" @month="month = $event" />
       </div>
@@ -242,17 +347,28 @@ onBeforeUnmount(() => {
       <NModal :show="selected !== null" preset="card" :title="selected ?? ''" class="diary-life-dialog" :mask-closable="!busy" :close-on-esc="!busy" :closable="!busy" @update:show="!$event && close()">
         <p v-if="formError" role="alert">{{ formError }}</p>
         <p v-else-if="loadingDay" role="status">正在读取…</p>
-        <template v-if="mode === 'diary' && !loadingDay && !dayReadFailed">
+        <template v-if="mode === 'diary' && !eventDraft && !loadingDay && !dayReadFailed">
           <NButton quaternary aria-label="选择心情" @click="picker = !picker"><img v-if="draft.moodId && preferences.sourceFor(draft.moodId)" class="mood-preview" :src="preferences.sourceFor(draft.moodId)" alt="心情"><span v-else>选择心情</span></NButton>
           <DiaryMoodPicker v-if="picker" class="life-mood-picker" :current-mood="draft.moodId" @select="draft.moodId = $event; picker = false" @clear="draft.moodId = null; picker = false" @close="picker = false" />
           <NInput v-model:value="draft.description" type="textarea" :input-props="{ 'aria-label': '记录' }" placeholder="记录今天的感受…" :maxlength="4000" :rows="5" />
         </template>
-        <template v-else-if="mode === 'events'">
+        <template v-else-if="mode === 'events' || eventDraft">
           <DiaryEventForm v-if="eventDraft" v-model="eventDraft" />
           <div v-else class="day-events"><button v-for="event in selectedEvents" :key="event.id" type="button" @click="edit(event)"><strong><img v-if="eventEmojiSource(event.emoji)" :src="eventEmojiSource(event.emoji)" class="event-emoji" alt=""><template v-else>{{ event.emoji }}</template> {{ event.title }}</strong><span v-if="event.description">{{ event.description }}</span></button><p v-if="!selectedEvents.length">还没有事件</p><NButton @click="edit()">新增事件</NButton></div>
         </template>
-        <template #footer><div class="life-actions"><NButton v-if="(mode === 'diary' && day) || editing" text type="error" :disabled="busy" @click="remove">删除</NButton><span /><NButton :disabled="busy" @click="close">取消</NButton><NButton v-if="mode === 'diary' || eventDraft" type="primary" :loading="busy" :disabled="loadingDay || dayReadFailed" @click="save">保存</NButton></div></template>
+        <template #footer><div class="life-actions"><NButton v-if="(!eventDraft && mode === 'diary' && day) || editing" text type="error" :disabled="busy" @click="remove">删除</NButton><span /><NButton :disabled="busy" @click="close">取消</NButton><NButton v-if="mode === 'diary' || eventDraft" type="primary" :loading="busy" :disabled="loadingDay || dayReadFailed" @click="save">保存</NButton></div></template>
       </NModal>
+      <DiaryEventListDialog
+        v-model:show="eventListVisible"
+        :items="eventListItems"
+        :loading="eventListLoading"
+        :loading-more="eventListLoadingMore"
+        :has-more="eventListNext !== null"
+        :error="eventListError"
+        @retry="loadEventList(true)"
+        @load-more="loadEventList()"
+        @select="selectEventFromList"
+      />
     </template>
     <NButton v-else class="unlock-diary" @click="accessContext?.requestAccess()">解锁日记</NButton>
   </main>
@@ -276,8 +392,7 @@ onBeforeUnmount(() => {
   flex-direction: column;
   min-height: 100%;
 }
-.diary-life-toolbar { position: absolute; top: 4px; right: 0; z-index: 1; }
-.diary-life-error { margin-top: 44px; padding: 8px 0; }
+.diary-life-error { margin-top: 8px; padding: 8px 0; }
 .countdowns { display: flex; gap: 16px; flex-wrap: wrap; padding: 12px 0; }
 .countdowns button, .day-events > button { text-align: left; background: transparent; color: inherit; border: 0; font: inherit; cursor: pointer; display: flex; flex-direction: column; gap: 6px; padding: 8px; }
 .countdowns small, .day-events span { opacity: .65; }

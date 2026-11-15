@@ -23,6 +23,7 @@ describe('Diary database API', () => {
     const response = await request('GET', '/days/2026-11-15', undefined, false)
     expect(response.status).toBe(423)
     expect(response.headers.get('cache-control')).toBe('no-store')
+    expect((await request('GET', '/events/list', undefined, false)).status).toBe(423)
   })
   it('repairs a version 43 database missing Diary deletion receipts', async () => {
     db.exec('DROP TABLE diary_deleted_records; UPDATE schema_version SET version = 43')
@@ -78,6 +79,10 @@ describe('Diary database API', () => {
     const unrelatedMonth = await request('GET', '/events?start=2025-11-01&end=2025-11-30')
     expect((await unrelatedMonth.json()).items).toHaveLength(0)
     await request('PUT', `/events/${randomUUID()}`, { ...event, recurrence: 'none' })
+    const latest = randomUUID()
+    expect((await request('PUT', `/events/${latest}`, { ...event, startDate: '2026-12-01', endDate: '2026-12-01', recurrence: 'none', showCountdown: false })).status).toBe(200)
+    const list = await request('GET', '/events/list?offset=0')
+    expect((await list.json()).items[0].id).toBe(latest)
     const countdowns = await request('GET', '/countdowns?today=2025-02-01')
     expect((await countdowns.json()).items.map((item: { id: string }) => item.id).sort()).toEqual([first, second].sort())
     expect((await request('PUT', `/events/${first}`, { ...event, title: '更新', expectedVersion: 1 })).status).toBe(200)
