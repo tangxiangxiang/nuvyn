@@ -1,7 +1,16 @@
 import { Temporal } from '@js-temporal/polyfill'
 import { isMoodId, isDiaryCustomMoodId } from './diaryMood.js'
+import { MAX_DIARY_DAY_ATTACHMENTS } from './diaryAttachments.js'
 
-export interface DayFields { moodId: string | null; entries: string[] }
+export interface DiaryImageGroup { entryId: string | null; attachmentIds: string[] }
+export interface DayFields {
+  moodId: string | null
+  entries: string[]
+  /** Stable identities are added when a legacy day enters edit mode. */
+  entryIds?: string[]
+  /** Omitted groups are legacy/unassigned images and are rendered at the end. */
+  imageGroups?: DiaryImageGroup[]
+}
 export interface DiaryDaySummary { date: string; moodId: string | null; hasEntries: boolean; hasAttachments: boolean; version: number }
 export interface EventFields {
   title: string
@@ -31,6 +40,8 @@ export function addDays(date: string, days: number): string { return Temporal.Pl
 export const MAX_DAY_ENTRIES = 100
 export const MAX_DAY_ENTRY_CHARACTERS = 4000
 export const MAX_DAY_TOTAL_CHARACTERS = 4000
+export const MAX_DIARY_IMAGE_GROUP_SIZE = 9
+const DIARY_UUID = /^[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/
 export function parseDay(value: unknown): DayFields | null {
   if (!value || typeof value !== 'object') return null
   const v = value as Record<string, unknown>
@@ -48,7 +59,53 @@ export function parseDay(value: unknown): DayFields | null {
   if (entries.length > MAX_DAY_ENTRIES || entries.some(entry => typeof entry !== 'string' || entry.length > MAX_DAY_ENTRY_CHARACTERS)) return null
   const textEntries = entries as string[]
   if (textEntries.reduce((total, entry) => total + entry.length, 0) > MAX_DAY_TOTAL_CHARACTERS) return null
-  return { moodId: v.moodId as string | null, entries: textEntries.filter(entry => entry.trim().length > 0) }
+
+  let suppliedEntryIds: string[] | undefined
+  if (v.entryIds !== undefined) {
+    if (!Array.isArray(v.entryIds) || v.entryIds.length !== textEntries.length
+      || v.entryIds.some(id => typeof id !== 'string' || !DIARY_UUID.test(id))
+      || new Set(v.entryIds).size !== v.entryIds.length) return null
+    suppliedEntryIds = v.entryIds as string[]
+  }
+
+  let imageGroups: DiaryImageGroup[] | undefined
+  if (v.imageGroups !== undefined) {
+    if (!Array.isArray(v.imageGroups) || v.imageGroups.length > 20) return null
+    const knownEntries = new Set(suppliedEntryIds ?? [])
+    const usedAttachments = new Set<string>()
+    const groups: DiaryImageGroup[] = []
+    for (const rawGroup of v.imageGroups) {
+      if (!rawGroup || typeof rawGroup !== 'object' || Array.isArray(rawGroup)) return null
+      const group = rawGroup as Record<string, unknown>
+      if (group.entryId !== null && (!suppliedEntryIds || typeof group.entryId !== 'string' || !knownEntries.has(group.entryId))) return null
+      if (!Array.isArray(group.attachmentIds) || group.attachmentIds.length < 1
+        || group.attachmentIds.length > MAX_DIARY_IMAGE_GROUP_SIZE
+        || group.attachmentIds.some(id => typeof id !== 'string' || !DIARY_UUID.test(id))
+        || new Set(group.attachmentIds).size !== group.attachmentIds.length) return null
+      const attachmentIds = group.attachmentIds as string[]
+      if (attachmentIds.some(id => usedAttachments.has(id))) return null
+      attachmentIds.forEach(id => usedAttachments.add(id))
+      if (usedAttachments.size > MAX_DIARY_DAY_ATTACHMENTS) return null
+      groups.push({ entryId: group.entryId as string | null, attachmentIds: [...attachmentIds] })
+    }
+    imageGroups = groups
+  }
+
+  const retainedIndexes = textEntries.flatMap((entry, index) => entry.trim().length > 0 ? [index] : [])
+  const retainedEntries = retainedIndexes.map(index => textEntries[index]!)
+  const retainedEntryIds = suppliedEntryIds?.filter((_, index) => retainedIndexes.includes(index))
+  const retainedIdSet = new Set(retainedEntryIds ?? [])
+  const normalizedGroups = imageGroups?.map(group => ({
+    ...group,
+    // If a text row is cleared, keep its photos and move them to the end.
+    entryId: group.entryId !== null && !retainedIdSet.has(group.entryId) ? null : group.entryId,
+  }))
+  return {
+    moodId: v.moodId as string | null,
+    entries: retainedEntries,
+    ...(retainedEntryIds ? { entryIds: retainedEntryIds } : {}),
+    ...(normalizedGroups ? { imageGroups: normalizedGroups } : {}),
+  }
 }
 export function parseEvent(value: unknown): EventFields | null {
   if (!value || typeof value !== 'object') return null

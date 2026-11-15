@@ -114,4 +114,34 @@ describe('DiaryAttachmentSection staged image previews', () => {
     expect(wrapper.get(`[data-testid="diary-attachment-${pdf.id}"] .diary-attachment-meta`).text()).toBe('memory.pdf')
     wrapper.unmount()
   })
+
+  it('exposes a simple per-image move control in edit mode without showing photo metadata', async () => {
+    const entryId = '08a5c822-0d61-4e6c-a62c-1931a4da0771'
+    const targetId = '08a5c822-0d61-4e6c-a62c-1931a4da0772'
+    const wrapper = mount(DiaryAttachmentSection, {
+      props: {
+        date: staged.date,
+        attachments: [staged],
+        mode: 'edit',
+        embedded: true,
+        targetEntryId: entryId,
+        placementOptions: [{ id: entryId, label: '早餐' }, { id: targetId, label: '学习' }],
+      },
+      global: {
+        stubs: {
+          NButton: { template: '<button><slot /></button>' },
+          NModal: { template: '<div><slot /></div>' },
+          NSpin: { template: '<span />' },
+        },
+      },
+    })
+    const card = wrapper.get(`[data-testid="diary-attachment-${staged.id}"]`)
+    const move = card.get('select')
+    expect(move.attributes('aria-label')).toBe('移动 memory.png 到其他日记条目')
+    expect(card.find('.diary-attachment-meta').exists()).toBe(false)
+    expect(wrapper.find('h3').exists()).toBe(false)
+    await move.setValue(targetId)
+    expect(wrapper.emitted('move')).toEqual([[staged.id, targetId]])
+    wrapper.unmount()
+  })
 })

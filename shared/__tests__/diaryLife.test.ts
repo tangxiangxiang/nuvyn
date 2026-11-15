@@ -19,6 +19,27 @@ describe('Diary natural days', () => {
     expect(parseDay({ moodId: null, entries: ['a'.repeat(4001)] })).toBeNull()
     expect(parseDay({ moodId: null, entries: ['a'.repeat(2500), 'b'.repeat(1501)] })).toBeNull()
   })
+  it('keeps legacy days positionless and validates stable entry-to-image groups', () => {
+    const entryIds = [
+      '08a5c822-0d61-4e6c-a62c-1931a4da0771',
+      '08a5c822-0d61-4e6c-a62c-1931a4da0772',
+    ]
+    const ids = Array.from({ length: 10 }, (_, index) => `18a5c822-0d61-4e6c-a62c-1931a4da0${String(index).padStart(3, '0')}`)
+    expect(parseDay({ moodId: null, entries: ['旧日记'] })).toEqual({ moodId: null, entries: ['旧日记'] })
+    expect(parseDay({ moodId: null, entries: [], imageGroups: [{ entryId: null, attachmentIds: [ids[0]] }] })?.imageGroups)
+      .toEqual([{ entryId: null, attachmentIds: [ids[0]] }])
+    expect(parseDay({ moodId: null, entries: ['旧日记'], imageGroups: [{ entryId: '08a5c822-0d61-4e6c-a62c-1931a4da0771', attachmentIds: [ids[0]] }] })).toBeNull()
+    expect(parseDay({ moodId: null, entries: ['早餐'], entryIds: [entryIds[0]], imageGroups: [{ entryId: entryIds[0], attachmentIds: [ids[0]] }] }))
+      .toEqual({ moodId: null, entries: ['早餐'], entryIds: [entryIds[0]], imageGroups: [{ entryId: entryIds[0], attachmentIds: [ids[0]] }] })
+    expect(parseDay({ moodId: null, entries: ['早餐'], entryIds: [entryIds[0]], imageGroups: [{ entryId: entryIds[0], attachmentIds: ids.slice(0, 9) }] })?.imageGroups?.[0]?.attachmentIds).toHaveLength(9)
+    expect(parseDay({ moodId: null, entries: ['早餐', '学习'], entryIds, imageGroups: [
+      { entryId: entryIds[0], attachmentIds: [ids[0]] },
+      { entryId: entryIds[1], attachmentIds: [ids[1]] },
+    ] })?.imageGroups).toHaveLength(2)
+    expect(parseDay({ moodId: null, entries: ['早餐'], entryIds: [entryIds[0]], imageGroups: [{ entryId: entryIds[0], attachmentIds: [ids[0], ids[0]] }] })).toBeNull()
+    expect(parseDay({ moodId: null, entries: ['早餐'], entryIds: [entryIds[0]], imageGroups: [{ entryId: entryIds[1], attachmentIds: [ids[0]] }] })).toBeNull()
+    expect(parseDay({ moodId: null, entries: ['早餐', ''], entryIds, imageGroups: [{ entryId: entryIds[1], attachmentIds: [ids[0]] }] })?.imageGroups?.[0]?.entryId).toBeNull()
+  })
   it('constrains Feb 29 to Feb 28 and finds the next year after occurrence', () => {
     expect(nextOccurrence(event, '2025-02-01')).toBe('2025-02-28')
     expect(nextOccurrence(event, '2025-03-01')).toBe('2026-02-28')

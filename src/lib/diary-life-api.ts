@@ -2,7 +2,7 @@ import { diaryAuthFetch } from './auth-session'
 import type { DiaryDay, DiaryDaySummary, DiaryEvent, DayFields, EventFields } from '../../shared/diaryLife'
 import type { DiaryAttachment } from '../../shared/diaryAttachments'
 
-export function createDiaryEventId(): string {
+function createDiaryId(): string {
   if (typeof crypto.randomUUID === 'function') return crypto.randomUUID()
   // Web Crypto still provides random bytes on HTTP origins where randomUUID is absent.
   const bytes = crypto.getRandomValues(new Uint8Array(16))
@@ -11,6 +11,8 @@ export function createDiaryEventId(): string {
   const hex = Array.from(bytes, byte => byte.toString(16).padStart(2, '0')).join('')
   return [hex.slice(0, 8), hex.slice(8, 12), hex.slice(12, 16), hex.slice(16, 20), hex.slice(20)].join('-')
 }
+export function createDiaryEventId(): string { return createDiaryId() }
+export function createDiaryEntryId(): string { return createDiaryId() }
 
 async function request<T>(path: string, method = 'GET', body?: unknown, signal?: AbortSignal): Promise<T> {
   const response = await diaryAuthFetch(`/api/diary/life${path}`, {

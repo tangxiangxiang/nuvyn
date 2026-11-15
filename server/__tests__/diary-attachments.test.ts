@@ -169,6 +169,52 @@ describe('Diary private attachments', () => {
     }), capability))).json()).toMatchObject({ day: null, attachments: [] })
   })
 
+  it('saves encrypted image groups with stable entries and never treats PDFs as gallery images', async () => {
+    const imageResponse = await upload('breakfast.png', PNG)
+    const pdfResponse = await upload('recipe.pdf', PDF, 'application/pdf')
+    const imageId = (await imageResponse.json() as { attachment: { id: string } }).attachment.id
+    const pdfId = (await pdfResponse.json() as { attachment: { id: string } }).attachment.id
+    const entryId = randomUUID().toLowerCase()
+    const attachments = [imageId, pdfId]
+    const saved = await saveDay(DATE, {
+      moodId: null,
+      entries: ['早上吃了南瓜饼'],
+      entryIds: [entryId],
+      imageGroups: [{ entryId, attachmentIds: [imageId] }],
+      expectedVersion: 0,
+      attachments,
+    })
+    expect(saved.status).toBe(200)
+    expect((await saved.json() as { day: { entryIds: string[]; imageGroups: Array<{ entryId: string | null; attachmentIds: string[] }> } }).day)
+      .toMatchObject({ entryIds: [entryId], imageGroups: [{ entryId, attachmentIds: [imageId] }] })
+
+    expect((await saveDay(DATE, {
+      moodId: null, entries: ['早上吃了南瓜饼'], entryIds: [entryId],
+      imageGroups: [{ entryId, attachmentIds: [pdfId] }], expectedVersion: 1, attachments,
+    })).status).toBe(400)
+    expect((await saveDay('2026-11-16', {
+      moodId: null, entries: ['另一条日记'], entryIds: [entryId],
+      imageGroups: [{ entryId, attachmentIds: [imageId] }], expectedVersion: 0, attachments: [imageId],
+    })).status).toBe(409)
+    expect((await saveDay(DATE, {
+      moodId: null, entries: ['早上吃了南瓜饼'], entryIds: [entryId],
+      imageGroups: [{ entryId, attachmentIds: [imageId] }, { entryId: null, attachmentIds: [imageId] }],
+      expectedVersion: 1, attachments,
+    })).status).toBe(400)
+
+    const deletedEntry = await saveDay(DATE, {
+      moodId: null, entries: [], entryIds: [],
+      imageGroups: [{ entryId: null, attachmentIds: [imageId] }], expectedVersion: 1, attachments,
+    })
+    expect(deletedEntry.status).toBe(200)
+    expect((await deletedEntry.json() as { day: { imageGroups: Array<{ entryId: string | null; attachmentIds: string[] }> }; attachments: Array<{ id: string }> }))
+      .toMatchObject({ day: { imageGroups: [{ entryId: null, attachmentIds: [imageId] }] }, attachments: [{ id: imageId }, { id: pdfId }] })
+    expect((await saveDay(DATE, {
+      moodId: null, entries: [], entryIds: [], imageGroups: [{ entryId: null, attachmentIds: [imageId] }],
+      expectedVersion: 1, attachments,
+    })).status).toBe(409)
+  })
+
   it('makes upload retries idempotent and prevents an unowned ID from deleting a file', async () => {
     const requestKey = randomUUID()
     const first = await upload('private-memory.png', PNG, 'image/png', requestKey)

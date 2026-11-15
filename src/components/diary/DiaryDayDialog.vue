@@ -31,13 +31,44 @@ const emit = defineEmits<{
   save: []
   remove: []
   'update:draft': [draft: DayFields]
-  'add-attachments': [files: File[]]
+  'update:content': [content: { entries: string[]; entryIds: string[] }]
+  'add-attachments': [files: File[], entryId: string | null]
   'remove-attachment': [id: string]
+  'move-attachment': [id: string, entryId: string | null]
 }>()
 const preferences = useDiaryMoodIconPreferences()
 const picker = ref(false)
 const moodSource = computed(() => props.draft.moodId ? preferences.sourceFor(props.draft.moodId) : undefined)
 const moodLabel = computed(() => props.draft.moodId ? preferences.labelFor(props.draft.moodId) : '')
+const placementOptions = computed(() => props.draft.entries.flatMap((entry, index) => {
+  const id = props.draft.entryIds?.[index]
+  if (!id) return []
+  const label = entry.trim().replace(/\s+/g, ' ').slice(0, 42) || `第 ${index + 1} 条日记`
+  return [{ id, label }]
+}))
+const pdfAttachments = computed(() => props.attachments.filter(item => item.mimeType === 'application/pdf'))
+const endImageGroups = computed(() => {
+  const mapped = new Set((props.draft.imageGroups ?? []).flatMap(group => group.attachmentIds))
+  const groups = (props.draft.imageGroups ?? [])
+    .filter(group => group.entryId === null)
+    .map(group => group.attachmentIds
+      .map(id => props.attachments.find(item => item.id === id))
+      .filter((item): item is typeof props.attachments[number] => Boolean(item && item.mimeType !== 'application/pdf')))
+    .filter(group => group.length)
+  const legacy = props.attachments.filter(item => item.mimeType !== 'application/pdf' && !mapped.has(item.id))
+  for (let offset = 0; offset < legacy.length; offset += 9) groups.push(legacy.slice(offset, offset + 9))
+  return groups
+})
+
+function imageGroupsForEntry(entryId: string | null) {
+  if (!entryId) return []
+  return (props.draft.imageGroups ?? [])
+    .filter(group => group.entryId === entryId)
+    .map(group => group.attachmentIds
+      .map(id => props.attachments.find(item => item.id === id))
+      .filter((item): item is typeof props.attachments[number] => Boolean(item && item.mimeType !== 'application/pdf')))
+    .filter(group => group.length)
+}
 
 function updateMood(moodId: string | null) {
   emit('update:draft', { ...props.draft, moodId })
@@ -91,18 +122,109 @@ function updateMood(moodId: string | null) {
             <DiaryMoodPicker v-if="picker" class="life-mood-picker" :current-mood="props.draft.moodId" @select="updateMood($event)" @clear="updateMood(null)" @close="picker = false" />
           </div>
 
-          <DiaryBulletReader v-if="props.mode === 'read'" :entries="props.draft.entries" />
-          <DiaryBulletEditor v-else :entries="props.draft.entries" @update:entries="emit('update:draft', { ...props.draft, entries: $event })" />
+          <div class="diary-day-stream" data-testid="diary-attachments">
+          <DiaryBulletReader v-if="props.mode === 'read' && props.draft.entries.length" :entries="props.draft.entries" :entry-ids="props.draft.entryIds">
+            <template #after-entry="{ entryId }">
+              <DiaryAttachmentSection
+                v-for="(group, groupIndex) in imageGroupsForEntry(entryId)"
+                :key="`${entryId}-${groupIndex}`"
+                :date="props.date"
+                :attachments="group"
+                :mode="props.mode"
+                embedded
+                :show-add="false"
+                :target-entry-id="entryId"
+              />
+            </template>
+          </DiaryBulletReader>
+          <DiaryBulletReader v-else-if="props.mode === 'read' && !props.attachments.length" :entries="[]" />
+          <DiaryBulletEditor v-else-if="props.mode === 'edit'" :entries="props.draft.entries" :entry-ids="props.draft.entryIds" @update:content="emit('update:content', $event)">
+            <template #after-entry="{ entryId }">
+              <template v-if="entryId">
+                <DiaryAttachmentSection
+                  v-for="(group, groupIndex) in imageGroupsForEntry(entryId)"
+                  :key="`${entryId}-${groupIndex}`"
+                  :date="props.date"
+                  :attachments="group"
+                  mode="edit"
+                  embedded
+                  :show-add="groupIndex === 0"
+                  add-label="图片"
+                  image-only
+                  :target-entry-id="entryId"
+                  :placement-options="placementOptions"
+                  :disabled="props.busy || props.loading || props.readFailed"
+                  :uploading="props.attachmentBusy"
+                  @add="(files, target) => emit('add-attachments', files, target)"
+                  @remove="emit('remove-attachment', $event)"
+                  @move="(id, target) => emit('move-attachment', id, target)"
+                />
+                <DiaryAttachmentSection
+                  v-if="imageGroupsForEntry(entryId).length === 0"
+                  :date="props.date"
+                  :attachments="[]"
+                  mode="edit"
+                  embedded
+                  add-label="图片"
+                  image-only
+                  :target-entry-id="entryId"
+                  :placement-options="placementOptions"
+                  :disabled="props.busy || props.loading || props.readFailed"
+                  :uploading="props.attachmentBusy"
+                  @add="(files, target) => emit('add-attachments', files, target)"
+                />
+              </template>
+            </template>
+          </DiaryBulletEditor>
           <DiaryAttachmentSection
+            v-for="(group, groupIndex) in endImageGroups"
+            :key="`end-images-${groupIndex}`"
             :date="props.date"
-            :attachments="props.attachments"
+            :attachments="group"
             :mode="props.mode"
+            embedded
+            :show-add="groupIndex === 0 && !pdfAttachments.length"
+            add-label="添加附件"
+            :target-entry-id="null"
+            :placement-options="placementOptions"
+            :disabled="props.busy || props.loading || props.readFailed"
+            :uploading="props.attachmentBusy"
+            :error="groupIndex === 0 ? props.attachmentError : undefined"
+            @add="(files, target) => emit('add-attachments', files, target)"
+            @remove="emit('remove-attachment', $event)"
+            @move="(id, target) => emit('move-attachment', id, target)"
+          />
+          <DiaryAttachmentSection
+            v-if="pdfAttachments.length"
+            :date="props.date"
+            :attachments="pdfAttachments"
+            :mode="props.mode"
+            embedded
+            :show-add="endImageGroups.length === 0"
+            add-label="添加附件"
+            :target-entry-id="null"
+            :placement-options="placementOptions"
+            :disabled="props.busy || props.loading || props.readFailed"
+            :uploading="props.attachmentBusy"
+            :error="!endImageGroups.length ? props.attachmentError : undefined"
+            @add="(files, target) => emit('add-attachments', files, target)"
+            @remove="emit('remove-attachment', $event)"
+          />
+          <DiaryAttachmentSection
+            v-if="props.mode === 'edit' && !endImageGroups.length && !pdfAttachments.length"
+            :date="props.date"
+            :attachments="[]"
+            mode="edit"
+            embedded
+            add-label="添加附件"
+            :target-entry-id="null"
+            :placement-options="placementOptions"
             :disabled="props.busy || props.loading || props.readFailed"
             :uploading="props.attachmentBusy"
             :error="props.attachmentError"
-            @add="emit('add-attachments', $event)"
-            @remove="emit('remove-attachment', $event)"
+            @add="(files, target) => emit('add-attachments', files, target)"
           />
+          </div>
         </div>
       </template>
 
@@ -125,6 +247,7 @@ function updateMood(moodId: string | null) {
 .diary-day-close { min-width: 40px; height: 40px; padding: 0; }
 .diary-day-message { margin: 4px 0; line-height: 1.6; }
 .diary-day-body { display: flex; min-width: 0; flex-direction: column; gap: 16px; padding-block: 4px 8px; }
+.diary-day-stream { display: flex; min-width: 0; flex-direction: column; gap: 12px; }
 .diary-day-mood { display: flex; min-height: 40px; align-items: center; font-size: 28px; line-height: 1; }
 .diary-day-mood img { display: block; width: 32px; height: 32px; object-fit: contain; }
 .diary-day-mood-editor { min-width: 0; }

@@ -9,10 +9,10 @@ import { captureDiarySessionGeneration, isDiarySessionGenerationCurrent, subscri
 import { useDiaryMoodIconPreferences } from '../composables/diary/useDiaryMoodIconPreferences'
 import { useAuth } from '../composables/useAuth'
 import { useConfirm } from '../composables/useConfirm'
-import { createDiaryEventId, diaryLifeApi } from '../lib/diary-life-api'
+import { createDiaryEntryId, createDiaryEventId, diaryLifeApi } from '../lib/diary-life-api'
 import { diaryAttachmentsApi } from '../lib/diary-attachments-api'
 import { DiaryAttachmentPreviewUrls } from '../lib/diaryAttachmentPreviewUrls'
-import { addDays, compareEvents, dayDistance, localToday, nextOccurrence, occursOn, parseDay, parseEvent, type DiaryDay, type DiaryDaySummary, type DiaryEvent, type DayFields, type EventFields } from '../../shared/diaryLife'
+import { addDays, compareEvents, dayDistance, localToday, MAX_DIARY_IMAGE_GROUP_SIZE, nextOccurrence, occursOn, parseDay, parseEvent, type DiaryDay, type DiaryDaySummary, type DiaryEvent, type DayFields, type DiaryImageGroup, type EventFields } from '../../shared/diaryLife'
 import { DIARY_ATTACHMENT_STAGE_HEARTBEAT_INTERVAL_MS, MAX_DIARY_ATTACHMENT_BYTES, MAX_DIARY_DAY_ATTACHMENTS, type DiaryAttachment } from '../../shared/diaryAttachments'
 import { NUVYN_BROWSER_STORAGE_KEYS, ownerScopedStorageKey, readStorageKey, writeStorageKey } from '../technicalNamespace'
 import DiaryLifeCalendar from '../components/diary/DiaryLifeCalendar.vue'
@@ -77,6 +77,34 @@ function stopAttachmentSession() {
   attachmentLeaseRequest?.abort()
   attachmentLeaseRequest = null
   attachmentSessionId.value = null
+}
+
+function copyDayFields(fields: Pick<DayFields, 'moodId' | 'entries' | 'entryIds' | 'imageGroups'>): DayFields {
+  return {
+    moodId: fields.moodId,
+    entries: [...fields.entries],
+    ...(fields.entryIds ? { entryIds: [...fields.entryIds] } : {}),
+    ...(fields.imageGroups ? { imageGroups: fields.imageGroups.map(group => ({ entryId: group.entryId, attachmentIds: [...group.attachmentIds] })) } : {}),
+  }
+}
+
+function assignImage(imageGroups: DiaryImageGroup[] | undefined, attachmentId: string, entryId: string | null): DiaryImageGroup[] {
+  const groups = (imageGroups ?? []).map(group => ({ ...group, attachmentIds: [...group.attachmentIds] }))
+  if (groups.some(group => group.entryId === entryId && group.attachmentIds.includes(attachmentId))) return groups
+  const remaining = groups
+    .map(group => ({ ...group, attachmentIds: group.attachmentIds.filter(id => id !== attachmentId) }))
+    .filter(group => group.attachmentIds.length)
+  const destination = [...remaining].reverse().find(group => group.entryId === entryId && group.attachmentIds.length < MAX_DIARY_IMAGE_GROUP_SIZE)
+  if (destination) destination.attachmentIds.push(attachmentId)
+  else remaining.push({ entryId, attachmentIds: [attachmentId] })
+  return remaining
+}
+
+function removeImageReference(imageGroups: DiaryImageGroup[] | undefined, attachmentId: string): DiaryImageGroup[] | undefined {
+  if (!imageGroups) return undefined
+  return imageGroups
+    .map(group => ({ ...group, attachmentIds: group.attachmentIds.filter(id => id !== attachmentId) }))
+    .filter(group => group.attachmentIds.length)
 }
 
 async function renewAttachmentSession() {
@@ -305,6 +333,10 @@ async function close() {
   }
 }
 function editDay() {
+  const fields = copyDayFields(draft.value)
+  fields.entryIds = fields.entries.map((_, index) => fields.entryIds?.[index] ?? createDiaryEntryId())
+  draft.value = fields
+  initial.value = JSON.stringify({ fields, attachments: draftAttachments.value.map(item => item.id) })
   dayMode.value = 'edit'
   if (selected.value) startAttachmentSession()
 }
@@ -317,13 +349,27 @@ async function cancelDayEdit() {
     return
   }
   await discardPendingAttachments()
-  draft.value = { moodId: day.value?.moodId ?? null, entries: [...(day.value?.entries ?? [])] }
+  draft.value = copyDayFields(day.value)
   draftAttachments.value = dayAttachments.value.map(item => ({ ...item }))
   initial.value = JSON.stringify({ fields: draft.value, attachments: draftAttachments.value.map(item => item.id) })
   dayMode.value = 'read'
   formError.value = ''
 }
 function updateDayDraft(next: DayFields) { draft.value = next }
+function updateDayContent(content: { entries: string[]; entryIds: string[] }) {
+  const retained = new Set(content.entryIds)
+  const imageGroups = draft.value.imageGroups?.map(group => ({
+    ...group,
+    attachmentIds: [...group.attachmentIds],
+    entryId: group.entryId !== null && !retained.has(group.entryId) ? null : group.entryId,
+  }))
+  draft.value = {
+    ...draft.value,
+    entries: [...content.entries],
+    entryIds: [...content.entryIds],
+    ...(imageGroups ? { imageGroups } : {}),
+  }
+}
 async function discardPendingAttachments() {
   const pending = draftAttachments.value.filter(item => item.pending)
   for (const item of pending) {
@@ -336,7 +382,7 @@ async function discardPendingAttachments() {
   stopAttachmentSession()
   draftAttachments.value = dayAttachments.value.map(item => ({ ...item }))
 }
-async function addDayAttachments(files: File[]) {
+async function addDayAttachments(files: File[], requestedEntryId: string | null = null) {
   if (!selected.value || dayMode.value !== 'edit' || attachmentBusy.value) return
   if (!attachmentSessionId.value) startAttachmentSession()
   const sessionId = attachmentSessionId.value
@@ -373,6 +419,10 @@ async function addDayAttachments(files: File[]) {
           pending: true,
           ...(localPreviewUrl ? { localPreviewUrl } : {}),
         }]
+        if (attachment.mimeType.startsWith('image/')) {
+          const entryId = requestedEntryId && draft.value.entryIds?.includes(requestedEntryId) ? requestedEntryId : null
+          draft.value = { ...draft.value, imageGroups: assignImage(draft.value.imageGroups, attachment.id, entryId) }
+        }
         localPreviewUrl = null
       } catch (error) {
         if (!controller.signal.aborted) failures.push(`${file.name}：${(error as Error).message}`)
@@ -400,11 +450,19 @@ async function removeDayAttachment(id: string) {
       await diaryAttachmentsApi.discard(id)
       attachmentPreviewUrls.release(id)
       draftAttachments.value = draftAttachments.value.filter(item => item.id !== id)
+      draft.value = { ...draft.value, imageGroups: removeImageReference(draft.value.imageGroups, id) }
     } catch (error) { attachmentError.value = (error as Error).message }
     finally { attachmentBusy.value = false }
     return
   }
   draftAttachments.value = draftAttachments.value.filter(item => item.id !== id)
+  draft.value = { ...draft.value, imageGroups: removeImageReference(draft.value.imageGroups, id) }
+}
+function moveDayImage(id: string, entryId: string | null) {
+  const attachment = draftAttachments.value.find(item => item.id === id)
+  if (!attachment || !attachment.mimeType.startsWith('image/') || busy.value || attachmentBusy.value) return
+  const validEntryId = entryId && draft.value.entryIds?.includes(entryId) ? entryId : null
+  draft.value = { ...draft.value, imageGroups: assignImage(draft.value.imageGroups, id, validEntryId) }
 }
 async function open(date: string) {
   if (!(await canLeave()) || !access.isUnlocked.value) return false
@@ -422,7 +480,7 @@ async function open(date: string) {
     dayAttachments.value = result.attachments
     draftAttachments.value = result.attachments.map(item => ({ ...item }))
     dayVersion.value = result.version
-    draft.value = { moodId: result.day?.moodId ?? null, entries: [...(result.day?.entries ?? [])] }
+    draft.value = result.day ? copyDayFields(result.day) : { moodId: null, entries: [] }
     dayMode.value = result.day ? 'read' : 'edit'
     if (!result.day) startAttachmentSession()
     initial.value = JSON.stringify({ fields: draft.value, attachments: draftAttachments.value.map(item => item.id) })
@@ -464,7 +522,7 @@ async function save() {
         draft.value = { moodId: null, entries: [] }
       } else {
         const unchanged = day.value
-          && JSON.stringify(fields) === JSON.stringify({ moodId: day.value.moodId, entries: day.value.entries })
+          && JSON.stringify(fields) === JSON.stringify(copyDayFields(day.value))
           && JSON.stringify(attachmentIds) === JSON.stringify(dayAttachments.value.map(item => item.id))
         if (!unchanged) {
           const result = await diaryLifeApi.saveDay(date, fields, dayVersion.value, attachmentIds)
@@ -475,7 +533,7 @@ async function save() {
           attachmentPreviewUrls.clear()
           draftAttachments.value = result.attachments.map(item => ({ ...item }))
         }
-        draft.value = { moodId: fields.moodId, entries: [...fields.entries] }
+        draft.value = copyDayFields(fields)
       }
       initial.value = JSON.stringify({ fields: draft.value, attachments: draftAttachments.value.map(item => item.id) })
       stopAttachmentSession()
@@ -572,8 +630,10 @@ onBeforeUnmount(() => {
         @save="save"
         @remove="remove"
         @update:draft="updateDayDraft"
+        @update:content="updateDayContent"
         @add-attachments="addDayAttachments"
         @remove-attachment="removeDayAttachment"
+        @move-attachment="moveDayImage"
       />
       <NModal v-if="selected !== null && (mode === 'events' || eventDraft)" :show="selected !== null && (mode === 'events' || eventDraft !== null)" preset="card" :title="selected ?? ''" class="diary-life-dialog" :mask-closable="!busy" :close-on-esc="!busy" :closable="!busy" @update:show="!$event && close()">
         <p v-if="formError" role="alert">{{ formError }}</p>

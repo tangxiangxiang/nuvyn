@@ -1,7 +1,7 @@
 import type { Database } from 'better-sqlite3'
 import type { DiaryBodyOperation } from './diaryAccess/service.js'
 import { parseDay, parseEvent, type DiaryDay, type DiaryEvent, type DayFields, type EventFields } from '../shared/diaryLife.js'
-import { MAX_DIARY_DAY_ATTACHMENTS } from '../shared/diaryAttachments.js'
+import { isDiaryAttachmentMimeType, MAX_DIARY_DAY_ATTACHMENTS } from '../shared/diaryAttachments.js'
 import { DiaryAttachmentError, listDiaryDayAttachments } from './diaryAttachments/service.js'
 
 export class DiaryConflict extends Error {}
@@ -49,10 +49,22 @@ export function diaryLifeStore(db: Database, owner: number, operation: DiaryBody
         const attachmentIds = requestedAttachmentIds ?? currentIds
         if (attachmentIds.length > MAX_DIARY_DAY_ATTACHMENTS || new Set(attachmentIds).size !== attachmentIds.length) throw new DiaryAttachmentError('invalid', 400)
         const wanted = new Set(attachmentIds)
+        const placedImageIds = new Set((fields.imageGroups ?? []).flatMap(group => group.attachmentIds))
+        if ([...placedImageIds].some(id => !wanted.has(id))) throw new DiaryAttachmentError('conflict', 409)
         for (const id of attachmentIds) {
-          const attachment = db.prepare(`SELECT day_date, status FROM diary_day_attachments
-            WHERE owner_user_id = ? AND id = ?`).get(owner, id) as { day_date: string; status: string } | undefined
+          const attachment = db.prepare(`SELECT day_date, status, encrypted_metadata FROM diary_day_attachments
+            WHERE owner_user_id = ? AND id = ?`).get(owner, id) as { day_date: string; status: string; encrypted_metadata: Buffer } | undefined
           if (!attachment || attachment.day_date !== date || !['attached', 'staged'].includes(attachment.status)) throw new DiaryAttachmentError('conflict', 409)
+          if (placedImageIds.has(id)) {
+            const metadata = operation.attachments!.decryptMetadata(attachment.encrypted_metadata, { owner, date, id })
+            const mimeType = metadata && typeof metadata === 'object' && !Array.isArray(metadata)
+              ? (metadata as Record<string, unknown>).mimeType
+              : null
+            if (!metadata || typeof metadata !== 'object' || Array.isArray(metadata)
+              || !isDiaryAttachmentMimeType(mimeType) || !mimeType.startsWith('image/')) {
+              throw new DiaryAttachmentError('invalid', 400)
+            }
+          }
         }
         for (const id of currentIds) {
           if (!wanted.has(id)) db.prepare("UPDATE diary_day_attachments SET status = 'deleting', expires_at = NULL, stage_session_id = NULL WHERE owner_user_id = ? AND id = ? AND status = 'attached'").run(owner, id)

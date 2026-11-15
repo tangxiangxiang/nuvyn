@@ -138,9 +138,9 @@ test('attachment tiles stay within the Diary sheet on desktop, tablet and narrow
     })
     expect(layout.scrollWidth).toBeLessThanOrEqual(layout.width)
     expect(layout.rootScrollWidth).toBeLessThanOrEqual(viewport.width)
-    expect(layout.columns).toBe(viewport.width <= 600 ? 2 : 3)
+    expect(layout.columns).toBe(1)
     expect(layout.firstCardWidth).toBeGreaterThan(0)
-    expect(layout.firstCardWidth).toBeLessThan(layout.width)
+    expect(layout.firstCardWidth).toBeLessThanOrEqual(176)
   }
 
   await page.getByTestId('diary-edit-entry').click()
@@ -191,4 +191,107 @@ test.describe('Diary attachment touch controls', () => {
     await remove.tap()
     await expect(card).toHaveCount(0)
   })
+})
+
+test('Diary entries keep photo groups attached through movement, refresh, cancellation and entry deletion', async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 })
+  await page.goto('/diary')
+  await unlockDiary(page)
+
+  const cell = page.locator('.diary-life-calendar [data-date$="-21"]')
+  await cell.click()
+  await page.getByTestId('diary-add-entry').click()
+  const first = page.getByRole('textbox', { name: '第 1 条日记', exact: true })
+  await first.fill('早餐')
+  await page.getByTestId('diary-add-entry').click()
+  const second = page.getByRole('textbox', { name: '第 2 条日记', exact: true })
+  await second.fill('学习')
+
+  const firstRow = page.locator('.diary-bullet-editor li').nth(0)
+  const secondRow = page.locator('.diary-bullet-editor li').nth(1)
+  const firstEntryId = await firstRow.getAttribute('data-entry-id')
+  const secondEntryId = await secondRow.getAttribute('data-entry-id')
+  expect(firstEntryId).toBeTruthy()
+  expect(secondEntryId).toBeTruthy()
+  const breakfastImages = Array.from({ length: 10 }, (_, index) => ({
+    name: `breakfast-${index + 1}.png`, mimeType: 'image/png', buffer: png,
+  }))
+  await firstRow.getByTestId('diary-attachment-input').setInputFiles(breakfastImages.slice(0, 9))
+  await expect(firstRow.locator('.diary-attachment-item')).toHaveCount(9)
+  await expect(firstRow.locator('.diary-attachment-grid')).toHaveCount(1)
+  await firstRow.getByTestId('diary-attachment-input').setInputFiles(breakfastImages.slice(9))
+  await expect(firstRow.locator('.diary-attachment-grid')).toHaveCount(2)
+  await expect(firstRow.locator('.diary-attachment-grid').nth(0).locator('.diary-attachment-item')).toHaveCount(9)
+  await expect(firstRow.locator('.diary-attachment-grid').nth(1).locator('.diary-attachment-item')).toHaveCount(1)
+
+  await secondRow.getByTestId('diary-attachment-input').setInputFiles({ name: 'study.png', mimeType: 'image/png', buffer: png })
+  await expect(secondRow.locator('.diary-attachment-item')).toHaveCount(1)
+  await firstRow.getByLabel('移动 breakfast-1.png 到其他日记条目').selectOption(secondEntryId!)
+  await expect(firstRow.locator('.diary-attachment-item')).toHaveCount(9)
+  await expect(secondRow.locator('.diary-attachment-item')).toHaveCount(2)
+  await page.getByTestId('diary-save-entry').click()
+
+  let reader = page.getByTestId('diary-bullet-reader')
+  let firstReadRow = reader.locator('li').nth(0)
+  let secondReadRow = reader.locator('li').nth(1)
+  await expect(firstReadRow.locator('.diary-attachment-item')).toHaveCount(9)
+  await expect(secondReadRow.locator('.diary-attachment-item')).toHaveCount(2)
+  for (const viewport of [
+    { width: 320, height: 568 },
+    { width: 390, height: 844 },
+    { width: 430, height: 844 },
+    { width: 768, height: 1024 },
+    { width: 1280, height: 800 },
+  ]) {
+    await page.setViewportSize(viewport)
+    const gallery = firstReadRow.locator('.diary-attachment-grid').first()
+    const layout = await gallery.evaluate(node => ({
+      width: node.clientWidth,
+      scrollWidth: node.scrollWidth,
+      columns: getComputedStyle(node).gridTemplateColumns.split(' ').length,
+      cardWidths: Array.from(node.querySelectorAll('.diary-attachment-item'), item => item.getBoundingClientRect().width),
+      rootScrollWidth: document.documentElement.scrollWidth,
+    }))
+    expect(layout.columns).toBe(3)
+    expect(layout.scrollWidth).toBeLessThanOrEqual(layout.width)
+    expect(layout.rootScrollWidth).toBeLessThanOrEqual(viewport.width)
+    expect(layout.cardWidths).toHaveLength(8)
+    expect(layout.cardWidths.every(width => width > 0 && width < layout.width)).toBe(true)
+  }
+  await page.getByRole('button', { name: '关闭日记' }).click()
+  await page.reload()
+  await unlockDiary(page)
+  await cell.click()
+  reader = page.getByTestId('diary-bullet-reader')
+  firstReadRow = reader.locator('li').nth(0)
+  secondReadRow = reader.locator('li').nth(1)
+  await expect(firstReadRow.locator('.diary-attachment-item')).toHaveCount(9)
+  await expect(secondReadRow.locator('.diary-attachment-item')).toHaveCount(2)
+
+  await page.getByTestId('diary-edit-entry').click()
+  const editableFirstRow = page.locator('.diary-bullet-editor li').nth(0)
+  const editableSecondId = await page.locator('.diary-bullet-editor li').nth(1).getAttribute('data-entry-id')
+  await editableFirstRow.getByLabel('移动 breakfast-2.png 到其他日记条目').selectOption(editableSecondId!)
+  await page.getByTestId('diary-cancel-edit').click()
+  const discard = page.getByRole('dialog', { name: '放弃未保存的修改？' })
+  await expect(discard).toBeVisible()
+  await discard.getByRole('button', { name: /^(Confirm|确认|确定)$/ }).click()
+  await expect(page.getByTestId('diary-bullet-reader').locator('li').nth(0).locator('.diary-attachment-item')).toHaveCount(9)
+  await expect(page.getByTestId('diary-bullet-reader').locator('li').nth(1).locator('.diary-attachment-item')).toHaveCount(2)
+
+  await page.getByTestId('diary-edit-entry').click()
+  await page.getByRole('button', { name: '删除第 1 条日记', exact: true }).click()
+  await page.getByTestId('diary-save-entry').click()
+  reader = page.getByTestId('diary-bullet-reader')
+  await expect(reader.locator('li')).toHaveCount(1)
+  await expect(reader.locator('li').nth(0).locator('.diary-attachment-item')).toHaveCount(2)
+  await expect(page.getByTestId('diary-attachments').locator('.diary-attachment-item')).toHaveCount(11)
+  await page.getByRole('button', { name: '关闭日记' }).click()
+  await page.reload()
+  await unlockDiary(page)
+  await cell.click()
+  reader = page.getByTestId('diary-bullet-reader')
+  await expect(reader.locator('li')).toHaveCount(1)
+  await expect(reader.locator('li').nth(0).locator('.diary-attachment-item')).toHaveCount(2)
+  await expect(page.getByTestId('diary-attachments').locator('.diary-attachment-item')).toHaveCount(11)
 })

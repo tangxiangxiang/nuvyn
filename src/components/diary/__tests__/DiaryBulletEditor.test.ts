@@ -111,4 +111,20 @@ describe('DiaryBulletEditor', () => {
     await wrapper.get('[aria-label="删除第 2 条日记"]').trigger('click')
     expect(wrapper.emitted('update:entries')?.at(-1)?.[0]).toEqual(['保留', ''])
   })
+
+  it('keeps stable entry identities when splitting and deleting rows', async () => {
+    const firstId = '08a5c822-0d61-4e6c-a62c-1931a4da0771'
+    const secondId = '08a5c822-0d61-4e6c-a62c-1931a4da0772'
+    const wrapper = mount(DiaryBulletEditor, { props: { entries: ['早餐后学习'], entryIds: [firstId] } })
+    const textarea = wrapper.get('textarea')
+    ;(textarea.element as HTMLTextAreaElement).setSelectionRange(2, 2)
+    await textarea.trigger('keydown', { key: 'Enter' })
+    expect(wrapper.emitted('update:content')?.at(-1)?.[0]).toEqual({ entries: ['早餐', '后学习'], entryIds: [firstId, expect.any(String)] })
+
+    const split = wrapper.emitted('update:content')?.at(-1)?.[0] as { entries: string[]; entryIds: string[] }
+    await wrapper.setProps(split)
+    await wrapper.get('[aria-label="删除第 1 条日记"]').trigger('click')
+    expect(wrapper.emitted('update:content')?.at(-1)?.[0]).toEqual({ entries: ['后学习'], entryIds: [split.entryIds[1]] })
+    expect(split.entryIds[1]).not.toBe(secondId)
+  })
 })

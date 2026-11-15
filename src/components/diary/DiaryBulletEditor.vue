@@ -2,12 +2,26 @@
 import { nextTick, onMounted, watch } from 'vue'
 import { NButton, NIcon } from 'naive-ui'
 import { Trash } from '@vicons/tabler'
+import { createDiaryEntryId } from '../../lib/diary-life-api'
 
-const props = defineProps<{ entries: string[] }>()
-const emit = defineEmits<{ 'update:entries': [entries: string[]] }>()
+const props = defineProps<{ entries: string[]; entryIds?: string[] }>()
+const emit = defineEmits<{
+  'update:entries': [entries: string[]]
+  'update:content': [content: { entries: string[]; entryIds: string[] }]
+}>()
 let composingTextarea: HTMLTextAreaElement | null = null
 const textareas: Array<HTMLTextAreaElement | null> = []
 const visibleEntries = () => props.entries.length ? props.entries : ['']
+const visibleEntryId = (index: number) => props.entryIds?.[index]
+
+function currentEntryIds() {
+  return props.entries.map((_, index) => props.entryIds?.[index] ?? createDiaryEntryId())
+}
+
+function updateContent(entries: string[], entryIds: string[]) {
+  emit('update:entries', entries)
+  emit('update:content', { entries, entryIds })
+}
 
 function setTextareaRef(element: unknown, index: number) {
   const textarea = element as HTMLTextAreaElement | null
@@ -21,9 +35,10 @@ function resize(textarea: HTMLTextAreaElement | null | undefined) {
 }
 
 function update(index: number, value: string) {
-  const next = [...props.entries]
+  const next = props.entries.length ? [...props.entries] : ['']
   next[index] = value
-  emit('update:entries', next)
+  const ids = props.entries.length ? currentEntryIds() : [createDiaryEntryId()]
+  updateContent(next, ids)
 }
 
 function focus(index: number, caret?: number) {
@@ -36,15 +51,17 @@ function focus(index: number, caret?: number) {
 }
 
 function addEntry() {
-  const next = [...props.entries, '']
-  emit('update:entries', next)
+  const next = props.entries.length ? [...props.entries, ''] : ['']
+  const ids = [...currentEntryIds(), createDiaryEntryId()]
+  updateContent(next, ids)
   focus(next.length - 1, 0)
 }
 
 function removeEntry(index: number) {
   if (!props.entries.length) return
   const next = props.entries.filter((_, entryIndex) => entryIndex !== index)
-  emit('update:entries', next)
+  const ids = currentEntryIds().filter((_, entryIndex) => entryIndex !== index)
+  updateContent(next, ids)
   if (next.length) focus(Math.max(0, index - 1))
 }
 
@@ -89,9 +106,12 @@ function onKeydown(index: number, event: KeyboardEvent) {
     const end = textarea.selectionEnd
     const before = textarea.value.slice(0, start)
     const after = textarea.value.slice(end)
-    const next = [...props.entries]
+    const next = props.entries.length ? [...props.entries] : ['']
+    const ids = props.entries.length ? currentEntryIds() : [createDiaryEntryId()]
+    const firstId = ids[index] ?? createDiaryEntryId()
     next.splice(index, 1, before, after)
-    emit('update:entries', next)
+    ids.splice(index, 1, firstId, createDiaryEntryId())
+    updateContent(next, ids)
     focus(index + 1, 0)
     return
   }
@@ -113,7 +133,7 @@ onMounted(() => { void nextTick(() => textareas.forEach(resize)) })
 <template>
   <div class="diary-bullet-editor" data-testid="diary-bullet-editor">
     <ul>
-      <li v-for="(entry, index) in visibleEntries()" :key="index">
+      <li v-for="(entry, index) in visibleEntries()" :key="visibleEntryId(index) ?? index" :data-entry-id="visibleEntryId(index)">
         <div class="diary-bullet-row">
           <textarea
             :ref="element => setTextareaRef(element, index)"
@@ -137,6 +157,7 @@ onMounted(() => { void nextTick(() => textareas.forEach(resize)) })
             @click="removeEntry(index)"
           ><NIcon aria-hidden="true" :size="16"><Trash /></NIcon></NButton>
         </div>
+        <slot name="after-entry" :entry-id="visibleEntryId(index) ?? null" :entry="entry" :index="index" />
       </li>
     </ul>
     <NButton attr-type="button" quaternary class="diary-bullet-add" data-testid="diary-add-entry" @click="addEntry">+ 添加一条</NButton>
