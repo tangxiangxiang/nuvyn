@@ -80,6 +80,19 @@ function mountDialog(mode: 'read' | 'edit', currentDay: DiaryDay | null) {
 }
 
 describe('DiaryDayDialog reading mode', () => {
+  it('shows a legacy future day and its attachments without edit actions', async () => {
+    const wrapper = mountMixed('read', day, [image, pdf])
+    await wrapper.setProps({ futureDate: true })
+    const dialog = document.body.querySelector('[data-testid="diary-day-dialog"]')!
+    expect(dialog.querySelector('[data-testid="diary-bullet-reader"]')?.textContent).toContain(day.entries[0])
+    expect(dialog.querySelector('[aria-label="预览 breakfast.png"]')).not.toBeNull()
+    expect(dialog.querySelector('[aria-label="下载 memory.pdf"]')).not.toBeNull()
+    expect(dialog.querySelector('[data-testid="diary-edit-entry"]')).toBeNull()
+    expect(dialog.querySelector('[data-testid="diary-day-actions-menu"]')).toBeNull()
+    expect(dialog.querySelector('.diary-bullet-number')).toBeNull()
+    wrapper.unmount()
+  })
+
   it('renders each placed image group immediately after its stable text entry', async () => {
     const entryIds = ['08a5c822-0d61-4e6c-a62c-1931a4da0771', '08a5c822-0d61-4e6c-a62c-1931a4da0772']
     const mappedDay: DiaryDay = {

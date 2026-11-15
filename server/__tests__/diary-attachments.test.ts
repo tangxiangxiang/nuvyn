@@ -3,6 +3,7 @@ import { promises as fs } from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import Database from 'better-sqlite3'
+import { Temporal } from '@js-temporal/polyfill'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import app from '../index.js'
 import { createSession } from '../auth/session.js'
@@ -38,9 +39,9 @@ function fetchAttachment(method: string, pathName: string, body?: BodyInit, unlo
   return app.fetch(unlocked ? withDiaryCapability(auth, request, capability) : withAuthCookie(auth, request))
 }
 
-function upload(name = 'private-memory.png', bytes: Uint8Array = PNG, mimeType = 'image/png', requestKey = randomUUID(), unlocked = true, sessionId = SESSION_A) {
+function upload(name = 'private-memory.png', bytes: Uint8Array = PNG, mimeType = 'image/png', requestKey = randomUUID(), unlocked = true, sessionId = SESSION_A, date = DATE) {
   const form = new FormData()
-  form.set('date', DATE)
+  form.set('date', date)
   form.set('sessionId', sessionId)
   form.set('file', new File([bytes], name, { type: mimeType }))
   return fetchAttachment('POST', `${attachment}/stage`, form, unlocked, { 'Idempotency-Key': requestKey })
@@ -69,6 +70,8 @@ function seedStagedRows(count: number, expiresAt: number, sessionId = SESSION_A)
 }
 
 beforeEach(async () => {
+  vi.useFakeTimers({ toFake: ['Date'] })
+  vi.setSystemTime(new Date('2026-11-16T12:00:00Z'))
   tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'nuvyn-diary-attachments-'))
   db = new Database(path.join(tempRoot, 'fixture.db'))
   auth = createAuthenticatedTestContext({ db })
@@ -76,6 +79,7 @@ beforeEach(async () => {
 })
 
 afterEach(async () => {
+  vi.useRealTimers()
   closeAuthTestContext(auth)
   db.close()
   __setDurableArtifactTestHooksForTesting(null)
@@ -83,6 +87,40 @@ afterEach(async () => {
 })
 
 describe('Diary private attachments', () => {
+  it('preserves legacy future days and attachments while blocking writes and allowing staged cleanup', async () => {
+    const zone = vi.spyOn(Temporal.Now, 'timeZoneId').mockReturnValue('UTC')
+    const date = '2026-11-16'
+    const uploadForDay = () => upload(undefined, PNG, 'image/png', randomUUID(), true, SESSION_A, date)
+    try {
+      const first = await uploadForDay()
+      expect(first.status).toBe(201)
+      const { attachment: { id } } = await first.json()
+      const fields = { moodId: null, entries: ['历史记录'], expectedVersion: 0, attachments: [id] }
+      expect((await saveDay(date, fields)).status).toBe(200)
+      const second = await uploadForDay()
+      expect(second.status).toBe(201)
+      const { attachment: { id: stagedId } } = await second.json()
+
+      vi.setSystemTime(new Date('2026-11-15T23:59:00Z'))
+      const denied = await uploadForDay()
+      expect(denied.status).toBe(403)
+      expect(await denied.json()).toEqual({ code: 'diary-future-date' })
+      const heartbeat = await fetchAttachment('POST', `${attachment}/sessions/${SESSION_A}/heartbeat`, JSON.stringify({ date }), true, { 'Content-Type': 'application/json' })
+      expect(heartbeat.status).toBe(403)
+      expect((await saveDay(date, { ...fields, expectedVersion: 1, attachments: [id, stagedId] })).status).toBe(403)
+      const dayPath = `${life}/days/${date}`
+      expect((await fetchAttachment('DELETE', dayPath, JSON.stringify({ expectedVersion: 1 }), true, { 'Content-Type': 'application/json' })).status).toBe(403)
+      expect(await (await fetchAttachment('GET', dayPath)).json()).toMatchObject({
+        day: { entries: fields.entries, version: 1 }, attachments: [{ id }],
+      })
+      const content = await fetchAttachment('GET', `${attachment}/${id}/content`)
+      expect(content.status).toBe(200)
+      expect(Buffer.from(await content.arrayBuffer())).toEqual(PNG)
+      expect((await fetchAttachment('DELETE', `${attachment}/${stagedId}`)).status).toBe(200)
+      expect(db.prepare('SELECT status FROM diary_day_attachments').all()).toEqual([{ status: 'attached' }])
+    } finally { zone.mockRestore() }
+  })
+
   it('requires an authenticated unlocked Diary capability and rejects untrusted file types', async () => {
     expect((await upload('private-memory.png', PNG, 'image/png', randomUUID(), false)).status).toBe(423)
     const stagedResponse = await upload()

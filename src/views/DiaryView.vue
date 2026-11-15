@@ -65,6 +65,8 @@ const error = ref('')
 const formError = ref('')
 const allCountdowns = ref(false)
 const today = ref(localToday())
+const serverToday = ref<string | null>(null)
+const canWriteDay = computed(() => selected.value !== null && serverToday.value !== null && selected.value <= serverToday.value)
 const eventListVisible = ref(false)
 const eventListItems = ref<DiaryEvent[]>([])
 const eventListNext = ref<number | null>(0)
@@ -112,7 +114,7 @@ function removeImageReference(imageGroups: DiaryImageGroup[] | undefined, attach
 async function renewAttachmentSession() {
   const sessionId = attachmentSessionId.value
   const date = selected.value
-  if (!sessionId || !date || dayMode.value !== 'edit' || !access.isUnlocked.value || attachmentLeaseRequest) return
+  if (!sessionId || !date || !canWriteDay.value || dayMode.value !== 'edit' || !access.isUnlocked.value || attachmentLeaseRequest) return
   const controller = new AbortController()
   attachmentLeaseRequest = controller
   const generation = captureDiarySessionGeneration()
@@ -128,6 +130,7 @@ async function renewAttachmentSession() {
 }
 
 function startAttachmentSession() {
+  if (!canWriteDay.value) return
   stopAttachmentSession()
   attachmentSessionId.value = createDiaryAttachmentClientId()
   void renewAttachmentSession()
@@ -135,7 +138,10 @@ function startAttachmentSession() {
 }
 
 function onDiaryVisibilityChange() {
-  if (document.visibilityState === 'visible') void renewAttachmentSession()
+  if (document.visibilityState === 'visible') {
+    void refreshDayPolicy()
+    void renewAttachmentSession()
+  }
 }
 let request: AbortController | null = null
 let detailRequest: AbortController | null = null
@@ -205,6 +211,7 @@ function resetForm() {
   stopAttachmentSession()
   attachmentPreviewUrls.clear()
   selected.value = null
+  serverToday.value = null
   eventDraft.value = null
   editing.value = null
   day.value = null
@@ -335,6 +342,7 @@ async function close() {
   }
 }
 function editDay() {
+  if (!canWriteDay.value || loadingDay.value || dayReadFailed.value) return
   const fields = copyDayFields(draft.value)
   fields.entryIds = fields.entries.map((_, index) => fields.entryIds?.[index] ?? createDiaryEntryId())
   draft.value = fields
@@ -385,7 +393,7 @@ async function discardPendingAttachments() {
   draftAttachments.value = dayAttachments.value.map(item => ({ ...item }))
 }
 async function addDayAttachments(files: File[], requestedEntryId: string | null = null) {
-  if (!selected.value || dayMode.value !== 'edit' || attachmentBusy.value) return
+  if (!selected.value || !canWriteDay.value || dayMode.value !== 'edit' || attachmentBusy.value) return
   if (!attachmentSessionId.value) startAttachmentSession()
   const sessionId = attachmentSessionId.value
   if (!sessionId) return
@@ -472,22 +480,36 @@ async function open(date: string) {
   detailRequest?.abort()
   const scope = new AbortController(); detailRequest = scope
   selected.value = date; eventDraft.value = null; editing.value = null; formError.value = ''; initial.value = 'null'
-  day.value = null; dayAttachments.value = []; draftAttachments.value = []; draft.value = { moodId: null, entries: [] }; dayMode.value = 'edit'; dayReadFailed.value = false
+  serverToday.value = null
+  day.value = null; dayAttachments.value = []; draftAttachments.value = []; draft.value = { moodId: null, entries: [] }; dayMode.value = 'read'; dayReadFailed.value = false
   if (mode.value !== 'diary') return true
   loadingDay.value = true
   try {
     const result = await diaryLifeApi.day(date, scope.signal)
     if (scope.signal.aborted) return
+    serverToday.value = result.today
     day.value = result.day
     dayAttachments.value = result.attachments
     draftAttachments.value = result.attachments.map(item => ({ ...item }))
     dayVersion.value = result.version
     draft.value = result.day ? copyDayFields(result.day) : { moodId: null, entries: [] }
-    dayMode.value = result.day ? 'read' : 'edit'
-    if (!result.day) startAttachmentSession()
+    if (!result.day && canWriteDay.value) {
+      dayMode.value = 'edit'
+      startAttachmentSession()
+    }
     initial.value = JSON.stringify({ fields: draft.value, attachments: draftAttachments.value.map(item => item.id) })
   } catch { if (!scope.signal.aborted) { dayReadFailed.value = true; formError.value = '读取失败，请关闭后重试。' } }
   finally { if (!scope.signal.aborted) loadingDay.value = false }
+}
+async function refreshDayPolicy() {
+  const signal = detailRequest?.signal
+  if (!signal || signal.aborted || !selected.value || !serverToday.value || loadingDay.value || !access.isUnlocked.value) return
+  try {
+    const result = await diaryLifeApi.dayPolicy(signal)
+    if (!signal.aborted) serverToday.value = result.today
+  } catch {
+    // Keep the last known boundary. The server checks every write independently.
+  }
 }
 async function toggle() {
   if (!(await canLeave())) return
@@ -503,6 +525,7 @@ function edit(event?: DiaryEvent) {
 }
 async function save() {
   if (busy.value || attachmentBusy.value || loadingDay.value || dayReadFailed.value || !selected.value) return
+  if (!eventDraft.value && !canWriteDay.value) return
   const generation = captureDiarySessionGeneration()
   const date = selected.value
   busy.value = true; formError.value = ''
@@ -558,7 +581,7 @@ async function save() {
 async function remove() {
   const date = selected.value
   const entry = eventDraft.value ? editing.value : day.value
-  if (busy.value || attachmentBusy.value || !date || !entry) return
+  if (busy.value || attachmentBusy.value || !date || !entry || (!eventDraft.value && !canWriteDay.value)) return
   const generation = captureDiarySessionGeneration()
   busy.value = true
   try {
@@ -589,7 +612,11 @@ onMounted(() => {
   if (!access.isUnlocked.value) void accessContext?.requestAccess()
   window.addEventListener('beforeunload', beforeUnload)
   document.addEventListener('visibilitychange', onDiaryVisibilityChange)
-  timer = setInterval(() => { if (today.value !== localToday()) { today.value = localToday(); void load() } }, 30000)
+  timer = setInterval(() => {
+    const currentDate = localToday()
+    if (today.value !== currentDate) { today.value = currentDate; void load() }
+    void refreshDayPolicy()
+  }, 30000)
 })
 onBeforeUnmount(() => {
   stopTeardown()
@@ -607,7 +634,7 @@ onBeforeUnmount(() => {
     <template v-if="access.isUnlocked.value">
       <div class="diary-life-calendar-stage">
         <div v-if="error" class="diary-life-error" role="alert">{{ error }} <NButton text @click="load">重试</NButton></div>
-        <DiaryLifeCalendar :markers="markers" :today="today" @select="open" @month="month = $event" />
+        <DiaryLifeCalendar :markers="markers" :today="today" :selected-date="selected" @select="open" @month="month = $event" />
       </div>
       <section v-if="mode === 'events' && countdowns.length" class="countdowns" aria-label="倒数日">
         <button v-for="item in (allCountdowns ? countdowns : countdowns.slice(0, 3))" :key="item.event.id" type="button" @click="openCountdown(item.event, item.date)"><span><img v-if="eventEmojiSource(item.event.emoji)" :src="eventEmojiSource(item.event.emoji)" class="event-emoji" alt=""><template v-else>{{ item.event.emoji }}</template> {{ item.event.title }}</span><small>{{ item.days === 0 ? '就是今天' : `还有 ${item.days} 天` }}</small></button>
@@ -620,7 +647,8 @@ onBeforeUnmount(() => {
         :day="day"
         :attachments="draftAttachments"
         :draft="draft"
-        :mode="dayMode"
+        :mode="canWriteDay ? dayMode : 'read'"
+        :future-date="serverToday !== null && !canWriteDay"
         :loading="loadingDay"
         :read-failed="dayReadFailed"
         :busy="busy"

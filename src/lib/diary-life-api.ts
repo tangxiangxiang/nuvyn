@@ -19,7 +19,12 @@ async function request<T>(path: string, method = 'GET', body?: unknown, signal?:
     method, signal, cache: 'no-store', headers: { 'Content-Type': 'application/json' },
     body: body === undefined ? undefined : JSON.stringify(body),
   })
-  if (!response.ok) throw new Error(response.status === 409 ? '记录已更新，请重新打开后再编辑。' : '操作失败，请重试。')
+  if (!response.ok) {
+    if (response.status === 403 && (await response.json().catch(() => null))?.code === 'diary-future-date') {
+      throw new Error('未来日期的日记只能查看。')
+    }
+    throw new Error(response.status === 409 ? '记录已更新，请重新打开后再编辑。' : '操作失败，请重试。')
+  }
   return response.json()
 }
 export const diaryLifeApi = {
@@ -34,7 +39,8 @@ export const diaryLifeApi = {
     return items
   },
   days: (start: string, end: string, signal?: AbortSignal) => request<{ days: DiaryDaySummary[] }>(`/days?start=${start}&end=${end}`, 'GET', undefined, signal),
-  day: (date: string, signal?: AbortSignal) => request<{ day: DiaryDay | null; version: number; attachments: DiaryAttachment[] }>(`/days/${date}`, 'GET', undefined, signal),
+  dayPolicy: (signal: AbortSignal) => request<{ today: string }>('/day-policy', 'GET', undefined, signal),
+  day: (date: string, signal?: AbortSignal) => request<{ day: DiaryDay | null; version: number; attachments: DiaryAttachment[]; today: string }>(`/days/${date}`, 'GET', undefined, signal),
   saveDay: (date: string, fields: DayFields, expectedVersion: number, attachments?: string[]) => request<{ day: DiaryDay; version: number; attachments: DiaryAttachment[] }>(`/days/${date}`, 'PUT', { ...fields, expectedVersion, ...(attachments === undefined ? {} : { attachments }) }),
   deleteDay: (date: string, expectedVersion: number) => request(`/days/${date}`, 'DELETE', { expectedVersion }),
   async events(start: string, end: string, signal?: AbortSignal): Promise<DiaryEvent[]> {

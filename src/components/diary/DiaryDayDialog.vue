@@ -18,6 +18,7 @@ const props = defineProps<{
   attachments: Array<DiaryAttachment & { pending?: boolean }>
   draft: DayFields
   mode: 'read' | 'edit'
+  futureDate?: boolean
   loading?: boolean
   readFailed?: boolean
   busy?: boolean
@@ -170,8 +171,8 @@ function selectAttachments(event: Event) {
               :disabled="editActionsDisabled"
               @select="selectDayAction"
             />
-            <NButton v-if="props.mode === 'read'" class="diary-day-icon-button diary-day-edit" attr-type="button" quaternary :disabled="editActionsDisabled" data-testid="diary-edit-entry" aria-label="编辑日记" title="编辑日记" @click="emit('edit')"><NIcon aria-hidden="true" :size="18"><Pencil /></NIcon></NButton>
-            <NButton v-else class="diary-day-icon-button" attr-type="button" quaternary :disabled="props.busy || props.attachmentBusy" data-testid="diary-cancel-edit" aria-label="取消" title="取消编辑" @click="emit('cancel-edit')"><NIcon aria-hidden="true" :size="18"><ArrowBackUp /></NIcon></NButton>
+            <NButton v-if="props.mode === 'read' && !props.futureDate" class="diary-day-icon-button diary-day-edit" attr-type="button" quaternary :disabled="editActionsDisabled" data-testid="diary-edit-entry" aria-label="编辑日记" title="编辑日记" @click="emit('edit')"><NIcon aria-hidden="true" :size="18"><Pencil /></NIcon></NButton>
+            <NButton v-else-if="props.mode === 'edit'" class="diary-day-icon-button" attr-type="button" quaternary :disabled="props.busy || props.attachmentBusy" data-testid="diary-cancel-edit" aria-label="取消" title="取消编辑" @click="emit('cancel-edit')"><NIcon aria-hidden="true" :size="18"><ArrowBackUp /></NIcon></NButton>
             <NButton attr-type="button" quaternary class="diary-day-icon-button" :disabled="props.busy || props.attachmentBusy" aria-label="关闭日记" @click="emit('close')"><NIcon aria-hidden="true" :size="18"><X /></NIcon></NButton>
           </div>
         </header>
@@ -198,6 +199,7 @@ function selectAttachments(event: Event) {
               />
             </template>
           </DiaryBulletReader>
+          <p v-else-if="props.futureDate && !props.day" class="diary-day-message diary-future-day">未来的日子还没有日记。可以在事件中安排计划。</p>
           <DiaryBulletReader v-else-if="props.mode === 'read' && !props.attachments.length" :entries="[]" />
           <DiaryBulletEditor
             v-else-if="props.mode === 'edit'"
@@ -299,6 +301,7 @@ function selectAttachments(event: Event) {
 .diary-attachment-status { display: flex; align-items: center; gap: 8px; margin: 0; color: var(--text-muted); font-size: .88rem; }
 .diary-attachment-error { margin: 0; color: var(--error, #d03050); font-size: .88rem; white-space: pre-line; }
 .diary-day-message { margin: 4px 0; line-height: 1.6; }
+.diary-future-day { color: var(--text-muted); }
 .diary-day-body { display: flex; min-width: 0; flex-direction: column; gap: 16px; padding-block: 4px 8px; }
 .diary-day-stream { display: flex; min-width: 0; flex-direction: column; gap: 12px; }
 .diary-day-mood { display: flex; align-items: center; min-width: 0; }

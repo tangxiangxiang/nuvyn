@@ -1,29 +1,28 @@
 <script setup lang="ts">
-import { computed, ref } from 'vue'
+import { computed } from 'vue'
 import { NCalendar } from 'naive-ui'
 import { useI18n } from '../../composables/useI18n'
 
-defineProps<{ today: string; markers: Record<string, { source?: string; emoji?: string; count?: number; hasEntries?: boolean; hasAttachments?: boolean }> }>()
+defineProps<{ today: string; selectedDate: string | null; markers: Record<string, { source?: string; emoji?: string; count?: number; hasEntries?: boolean; hasAttachments?: boolean }> }>()
 const emit = defineEmits<{ select: [date: string]; month: [date: string] }>()
-const selected = ref<number>()
 const { locale } = useI18n()
 // Match the firstDayOfWeek of the zhCN and enUS locales in NuvynUiRoot.
 const weekdays = computed(() => locale.value === 'zh'
   ? ['周一', '周二', '周三', '周四', '周五', '周六', '周日']
   : ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'])
 const dateFor = (year: number, month: number, date: number) => `${String(year).padStart(4, '0')}-${String(month).padStart(2, '0')}-${String(date).padStart(2, '0')}`
-const selectedDate = computed(() => selected.value === undefined ? '' : dateFor(new Date(selected.value).getFullYear(), new Date(selected.value).getMonth() + 1, new Date(selected.value).getDate()))
-function choose(year: number, month: number, day: number) {
-  const d = new Date(0)
-  d.setFullYear(year, month - 1, day)
-  d.setHours(12, 0, 0, 0)
-  selected.value = d.getTime()
-  emit('select', dateFor(year, month, day))
+
+function selectDate(date: string, event: MouseEvent) {
+  // Escape can turn focus left by a pointer click into a visible focus ring.
+  if (event.detail > 0 && event.currentTarget instanceof HTMLButtonElement) {
+    event.currentTarget.blur()
+  }
+  emit('select', date)
 }
 </script>
 
 <template>
-  <NCalendar class="diary-life-calendar" :value="selected" @panel-change="({ year, month }) => emit('month', dateFor(year, month, 1))">
+  <NCalendar class="diary-life-calendar" @panel-change="({ year, month }) => emit('month', dateFor(year, month, 1))">
     <template #header="{ year, month }">
       <strong class="life-month">{{ dateFor(year, month, 1).slice(0, 7) }}</strong>
       <div class="life-weekdays">
@@ -33,7 +32,7 @@ function choose(year: number, month: number, day: number) {
     <template #default="{ year, month, date }">
       <button type="button" class="life-date" :class="{ today: dateFor(year, month, date) === today, selected: selectedDate === dateFor(year, month, date) }"
         :data-date="dateFor(year, month, date)" :aria-label="dateFor(year, month, date)" :aria-pressed="selectedDate === dateFor(year, month, date)"
-        @click.stop="choose(year, month, date)">
+        @click.stop="selectDate(dateFor(year, month, date), $event)">
         <span class="life-date-badge"><span class="life-date-number">{{ date }}</span></span>
         <span v-if="markers[dateFor(year, month, date)]" class="life-marker">
           <img v-if="markers[dateFor(year, month, date)]?.source" :src="markers[dateFor(year, month, date)]?.source" alt="">
@@ -186,8 +185,10 @@ function choose(year: number, month: number, day: number) {
   border-radius: 8px;
 }
 
-.life-date:hover .life-date-badge {
-  background: color-mix(in srgb, var(--accent) 7%, transparent);
+@media (hover: hover) and (pointer: fine) {
+  .life-date:hover .life-date-badge {
+    background: color-mix(in srgb, var(--accent) 7%, transparent);
+  }
 }
 
 .life-date:focus-visible {

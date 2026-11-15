@@ -4,6 +4,7 @@ import { bodyLimit } from 'hono/body-limit'
 import { civilDate, dayDistance, parseDay, parseEvent, occursOn, nextOccurrence } from '../../shared/diaryLife.js'
 import { withDiaryBodyOperation } from '../diaryAccess/guard.js'
 import { diaryLifeStore, DiaryConflict } from '../diaryLife.js'
+import { diaryToday } from '../diaryDate.js'
 import { DiaryAttachmentError } from '../diaryAttachments/service.js'
 import { cleanupDiaryAttachmentStorage, DiaryAttachmentStorage, ensureDiaryAttachmentStorage } from '../diaryAttachments/storage.js'
 import { MAX_DIARY_DAY_ATTACHMENTS } from '../../shared/diaryAttachments.js'
@@ -32,6 +33,7 @@ async function guarded(c: Context<Env>, run: (store: Store, db: Database) => Pro
 }
 const version = (v: unknown): v is number => Number.isSafeInteger(v) && (v as number) >= 0 && (v as number) < Number.MAX_SAFE_INTEGER
 const idValid = (id: string) => /^[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/.test(id)
+routes.get('/day-policy', c => guarded(c, () => c.json({ today: diaryToday() })))
 routes.get('/days', c => guarded(c, store => {
   const { start, end } = c.req.query()
   if (!civilDate(start) || !civilDate(end) || end < start || dayDistance(start, end) > 62) return c.json({ code: 'invalid-diary-range' }, 400)
@@ -43,14 +45,16 @@ routes.get('/days/:date', c => guarded(c, async (store, db) => {
   const storage = new DiaryAttachmentStorage(db)
   await ensureDiaryAttachmentStorage(db, storage)
   await cleanupDiaryAttachmentStorage(db, storage, c.get('authUser')?.id)
-  return c.json({ day: store.getDay(date), version: store.dayVersion(date), attachments: store.dayAttachments(date) })
+  return c.json({ day: store.getDay(date), version: store.dayVersion(date), attachments: store.dayAttachments(date), today: diaryToday() })
 }))
 routes.put('/days/:date', c => guarded(c, async (store, db) => {
   const date = c.req.param('date')
+  if (!civilDate(date)) return c.json({ code: 'invalid-diary-day' }, 400)
+  if (date > diaryToday()) return c.json({ code: 'diary-future-date' }, 403)
   const body = await c.req.json().catch(() => null)
   const fields = parseDay(body)
   const attachmentIds = body?.attachments
-  if (!civilDate(date) || !fields || !version(body?.expectedVersion)
+  if (!fields || !version(body?.expectedVersion)
     || (attachmentIds !== undefined && (!Array.isArray(attachmentIds) || attachmentIds.length > MAX_DIARY_DAY_ATTACHMENTS || attachmentIds.some((id: unknown) => typeof id !== 'string' || !idValid(id))))
     || (!fields.moodId && !fields.entries.length && !(Array.isArray(attachmentIds) && attachmentIds.length))) return c.json({ code: 'invalid-diary-day' }, 400)
   const day = store.putDay(date, fields, body.expectedVersion, attachmentIds)
@@ -100,6 +104,7 @@ for (const kind of ['days', 'events'] as const) {
     const body = await c.req.json().catch(() => null)
     const id = c.req.param('id')
     if (!version(body?.expectedVersion) || body.expectedVersion < 1 || !(kind === 'days' ? civilDate(id) : idValid(id))) return c.json({ code: 'invalid-diary-delete' }, 400)
+    if (kind === 'days' && id > diaryToday()) return c.json({ code: 'diary-future-date' }, 403)
     store.remove(kind === 'days' ? 'day' : 'event', id, body.expectedVersion)
     if (kind === 'days') await cleanupDiaryAttachmentStorage(db, undefined, c.get('authUser')?.id).catch(() => {})
     return c.json({ ok: true })

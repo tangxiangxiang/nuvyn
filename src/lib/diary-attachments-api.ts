@@ -14,6 +14,7 @@ async function assertResponse(response: Response): Promise<void> {
   if (response.ok) return
   let code = ''
   try { code = String((await response.clone().json() as { code?: unknown }).code ?? '') } catch { /* use the stable fallback below */ }
+  if (code === 'diary-future-date') throw new Error('未来日期的日记只能查看。')
   if (response.status === 413 || code === 'diary-attachment-too-large') throw new Error('单个附件不能超过 20 MiB。')
   if (code === 'diary-attachment-too-many') throw new Error('每天最多添加 20 个附件。')
   if (response.status === 409) throw new Error('日记附件已发生变化，请重新打开后再试。')

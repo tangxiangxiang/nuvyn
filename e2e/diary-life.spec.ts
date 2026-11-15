@@ -36,6 +36,7 @@ for (const [index, viewport] of [{ width: 390, height: 844 }, { width: 768, heig
         await cell.focus()
         await cell.press('Enter')
       })
+      await expect(cell).toHaveAttribute('aria-pressed', 'true')
       await chooseDiaryDayAction(page, '添加一条', viewport.width <= 768)
       const input = page.getByRole('textbox', { name: '第 1 条日记', exact: true })
       await expect(input).toBeVisible()
@@ -109,13 +110,14 @@ for (const [index, viewport] of [{ width: 390, height: 844 }, { width: 768, heig
       }
       const reopenedInput = page.getByRole('textbox', { name: '第 1 条日记', exact: true })
       await expect(reopenedInput).toHaveValue(`日记录 ${viewport.width}`)
+      await expect(dialog.locator('.diary-bullet-number')).toHaveText('01')
       await expect(heading.getByRole('button', { name: '选择心情' }).locator('img')).toHaveCSS('width', '24px')
       const textAlignment = await dialog.evaluate(element => {
         const content = element.querySelector('[data-testid="diary-day-content"]')!
         const textarea = content.querySelector('textarea')!
         return textarea.getBoundingClientRect().left - content.getBoundingClientRect().left
       })
-      expect(Math.abs(textAlignment)).toBeLessThan(1)
+      expect(textAlignment).toBeCloseTo(30, 0)
       const cancelEdit = dialog.getByRole('button', { name: '取消', exact: true })
       await expect(cancelEdit).toHaveCSS('opacity', '1')
       await expect(cancelEdit.locator('svg')).toHaveCount(1)
@@ -123,16 +125,18 @@ for (const [index, viewport] of [{ width: 390, height: 844 }, { width: 768, heig
       await page.screenshot({ path: testInfo.outputPath(`diary-day-edit-${viewport.width}.png`) })
       await page.getByTestId('diary-cancel-edit').click()
       await expect(reopenedInput).toBeHidden()
+      await expect(dialog.locator('.diary-bullet-number')).toHaveCount(0)
       await page.getByRole('button', { name: '关闭日记' }).click()
       await expect(cell.locator('img')).toHaveCount(1)
       const numberBefore = await dateNumberOffset(cell)
       const monthBefore = await calendar.locator('.n-calendar-header').innerText()
       await page.getByRole('button', { name: '切换到人生事件' }).click()
-      await expect(cell).toHaveAttribute('aria-pressed', 'true')
+      await expect(cell).toHaveAttribute('aria-pressed', 'false')
       await expect(cell.locator('img')).toHaveCount(0)
       expect(await dateNumberOffset(cell)).toEqual(numberBefore)
       expect(await calendar.locator('.n-calendar-header').innerText()).toBe(monthBefore)
       await cell.click()
+      await expect(cell).toHaveAttribute('aria-pressed', 'true')
       await page.getByRole('button', { name: '新增事件', exact: true }).click()
       const eventTitle = `人生事件 ${viewport.width} (${testInfo.repeatEachIndex + 1})`
       await page.getByRole('textbox', { name: '事件标题', exact: true }).fill(eventTitle)
@@ -150,6 +154,7 @@ for (const [index, viewport] of [{ width: 390, height: 844 }, { width: 768, heig
       await listedEvent.click()
       await expect(page.getByRole('textbox', { name: '事件标题', exact: true })).toHaveValue(eventTitle)
       await page.getByRole('button', { name: '取消', exact: true }).click()
+      await expect(cell).toHaveAttribute('aria-pressed', 'false')
       await cell.click()
       await expect(page.getByRole('button', { name: eventTitle, exact: true })).toBeVisible()
       await page.reload()
@@ -196,7 +201,74 @@ test('text-only Diary days have a calendar marker and preserve bullet editing in
   await expect(page.getByTestId('diary-bullet-reader').locator('li')).toHaveCount(2)
   await expect(page.getByTestId('diary-bullet-reader').locator('li').nth(1)).toContainText('第二条记录\n续写')
   await page.getByRole('button', { name: '关闭日记' }).click()
+  await expect(cell).toHaveAttribute('aria-pressed', 'false')
+  await expect(cell).not.toHaveClass(/\bselected\b/)
   await expect(cell.locator('.life-entry-marker')).toBeVisible()
+})
+
+test('clears the date highlight on Escape after opening with a pointer', async ({ page }) => {
+  await page.goto('/diary')
+  await unlockDiary(page)
+  const cell = page.locator('.diary-life-calendar [data-date$="-01-27"]')
+  await openEmptyDiaryDay(page, cell)
+  await page.mouse.move(0, 0)
+  await page.keyboard.press('Escape')
+  await expect(page.getByTestId('diary-day-dialog')).toHaveCount(0)
+  await expect(cell).toHaveAttribute('aria-pressed', 'false')
+  await expect(cell.locator('.life-date-badge')).toHaveCSS('outline-style', 'none')
+
+  await openEmptyDiaryDay(page, cell, async () => {
+    await cell.focus()
+    await cell.press('Enter')
+  })
+  await page.keyboard.press('Escape')
+  await expect(page.getByTestId('diary-day-dialog')).toHaveCount(0)
+  await expect(cell).toHaveAttribute('aria-pressed', 'false')
+  await expect(cell).toBeFocused()
+  await expect(cell.locator('.life-date-badge')).toHaveCSS('outline-style', 'solid')
+})
+
+test('uses the server day boundary and enables editing after midnight without reopening', async ({ page }, testInfo) => {
+  const year = 2024 + testInfo.repeatEachIndex
+  const date = `${year}-01-28`
+  await page.clock.install({ time: new Date(year, 0, 29, 12) })
+  await page.goto('/diary')
+  await unlockDiary(page)
+
+  let serverToday = `${year}-01-27`
+  await page.route(`**/api/diary/life/days/${date}`, async route => {
+    const response = await route.fetch()
+    await route.fulfill({ response, json: { ...await response.json(), today: serverToday } })
+  })
+  let policyChecks = 0
+  await page.route('**/api/diary/life/day-policy', route => {
+    policyChecks++
+    return route.fulfill({ json: { today: serverToday } })
+  })
+  const heartbeats: string[] = []
+  page.on('request', request => {
+    if (request.url().endsWith('/heartbeat')) heartbeats.push(request.url())
+  })
+  await page.locator(`.diary-life-calendar [data-date="${date}"]`).click()
+  const dialog = page.getByTestId('diary-day-dialog')
+  await expect(dialog.getByText('未来的日子还没有日记。可以在事件中安排计划。')).toBeVisible()
+  await expect(dialog.getByTestId('diary-edit-entry')).toHaveCount(0)
+  await expect(dialog.getByTestId('diary-day-actions-menu')).toHaveCount(0)
+  await expect(dialog.getByTestId('diary-bullet-editor')).toHaveCount(0)
+  await expect(dialog.getByRole('button', { name: '选择心情' })).toHaveCount(0)
+  await page.clock.fastForward(30_000)
+  await expect.poll(() => policyChecks).toBeGreaterThan(0)
+  expect(heartbeats).toHaveLength(0)
+
+  serverToday = date
+  await page.clock.fastForward(30_000)
+  const edit = dialog.getByTestId('diary-edit-entry')
+  await expect(edit).toBeVisible()
+  await edit.click()
+  const first = dialog.getByRole('textbox', { name: '第 1 条日记', exact: true })
+  await first.fill('跨日后的日记')
+  await page.clock.fastForward(30_000)
+  await expect(first).toHaveValue('跨日后的日记')
 })
 
 test('restores focus for entry shortcuts without treating Chinese composition as a shortcut', async ({ page, context }) => {
@@ -371,7 +443,7 @@ for (const [index, viewport] of [
       expect(layout.rowRight).toBeLessThanOrEqual(layout.editorRight + 1)
       expect(layout.buttonRight).toBeLessThanOrEqual(layout.rowRight + 1)
       expect(layout.inputWidth).toBeGreaterThan(100)
-      expect(Math.abs(layout.inputLeft - layout.editorLeft)).toBeLessThanOrEqual(3)
+      expect(layout.inputLeft - layout.editorLeft).toBeCloseTo(30, 0)
       expect(layout.documentWidth).toBeLessThanOrEqual(viewport.width)
       expect(layout.dialogBottom).toBeLessThanOrEqual(viewport.height + 1)
       if (viewport.width <= 430) expect(layout.bodyScrollHeight).toBeGreaterThan(layout.bodyClientHeight)
@@ -533,12 +605,14 @@ for (const viewport of [
     await expect(title).toHaveText(monthBefore)
 
     await openEmptyDiaryDay(page, today)
+    await expect(today).toHaveAttribute('aria-pressed', 'true')
     await expect(page.getByTestId('diary-edit-entry')).toHaveCount(0)
     await page.getByTestId('diary-cancel-edit').click()
     await expect(page.getByTestId('diary-day-dialog')).toHaveCount(0)
+    await expect(today).toHaveAttribute('aria-pressed', 'false')
     const numberBefore = await dateNumberOffset(today)
     await page.getByRole('button', { name: '切换到人生事件' }).click()
-    await expect(today).toHaveAttribute('aria-pressed', 'true')
+    await expect(today).toHaveAttribute('aria-pressed', 'false')
     await expect(title).toHaveText(monthBefore)
     expect((await calendar.boundingBox())!.height).toBe(calendarBox.height)
     expect(await dateNumberOffset(today)).toEqual(numberBefore)

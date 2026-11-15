@@ -3,11 +3,13 @@ import { promises as fs } from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import Database from 'better-sqlite3'
+import { Temporal } from '@js-temporal/polyfill'
 import { beforeEach, afterEach, describe, it, expect, vi } from 'vitest'
 import app from '../index'
 import { closeAuthTestContext, createAuthenticatedTestContext, jsonRequest, unlockDiaryAccessForTesting, withAuthCookie, withDiaryCapability, type AuthenticatedTestContext } from './helpers/auth'
 import { diaryLifeCrypto } from '../diaryAccess/lifeCrypto'
 import { diaryLifeStore } from '../diaryLife'
+import { diaryToday } from '../diaryDate'
 import * as database from '../db'
 import { DiaryAttachmentStorage } from '../diaryAttachments/storage'
 
@@ -23,15 +25,46 @@ function request(method: string, path: string, body?: unknown, unlocked = true) 
 const event = { title: '私人生日', description: '加密正文', emoji: '🎂', type: 'anniversary', startDate: '2024-02-29', endDate: '2024-02-29', startTime: null, endTime: null, allDay: true, recurrence: 'yearly', showCountdown: true, isPrimary: false, expectedVersion: 0 }
 describe('Diary database API', () => {
   beforeEach(async () => {
+    vi.useFakeTimers({ toFake: ['Date'] })
+    vi.setSystemTime(new Date('2026-11-16T07:59:00Z'))
     tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'nuvyn-diary-life-'))
     db = new Database(path.join(tempRoot, 'fixture.db'))
     auth = createAuthenticatedTestContext({ db })
     capability = await unlockDiaryAccessForTesting(auth)
   })
   afterEach(async () => {
+    vi.useRealTimers()
     closeAuthTestContext(auth)
     db.close()
     await fs.rm(tempRoot, { recursive: true, force: true })
+  })
+
+  it('uses the server time zone at midnight and protects future dates without blocking future Events', async () => {
+    const zone = vi.spyOn(Temporal.Now, 'timeZoneId').mockReturnValue('America/Los_Angeles')
+    const fields = { moodId: null, entries: ['测试日记'], expectedVersion: 0 }
+    try {
+      expect(await (await request('GET', '/day-policy')).json()).toEqual({ today: '2026-11-15' })
+      for (const date of ['2026-11-14', '2026-11-15']) {
+        expect((await request('PUT', `/days/${date}`, fields)).status).toBe(200)
+        expect((await request('PUT', `/days/${date}`, { ...fields, expectedVersion: 1 })).status).toBe(200)
+      }
+      for (const date of ['2026-11-16', '2026-12-01', '2027-01-01']) {
+        const denied = await request('PUT', `/days/${date}`, { ...fields, today: date })
+        expect(denied.status).toBe(403)
+        expect(await denied.json()).toEqual({ code: 'diary-future-date' })
+        const deletion = await request('DELETE', `/days/${date}`, { expectedVersion: 1 })
+        expect(deletion.status).toBe(403)
+        expect(await deletion.json()).toEqual({ code: 'diary-future-date' })
+        expect(await (await request('GET', `/days/${date}`)).json()).toMatchObject({ day: null, version: 0 })
+      }
+      expect((await request('PUT', `/events/${randomUUID()}`, {
+        ...event, startDate: '2027-01-01', endDate: '2027-01-01',
+      })).status).toBe(200)
+
+      vi.setSystemTime(new Date('2026-11-16T08:00:00Z'))
+      expect(await (await request('GET', '/day-policy')).json()).toEqual({ today: '2026-11-16' })
+      expect((await request('PUT', '/days/2026-11-16', fields)).status).toBe(200)
+    } finally { zone.mockRestore() }
   })
 
   it('reconciles only the attachment files belonging to the active database', async () => {
@@ -72,7 +105,7 @@ describe('Diary database API', () => {
     database.applyMigrations(db)
     const emptyDay = await request('GET', path)
     expect(emptyDay.status).toBe(200)
-    expect(await emptyDay.json()).toEqual({ day: null, version: 0, attachments: [] })
+    expect(await emptyDay.json()).toEqual({ day: null, version: 0, attachments: [], today: diaryToday() })
     expect((await request('PUT', path, day)).status).toBe(200)
     expect((await request('PUT', eventPath, event)).status).toBe(200)
     expect((await request('DELETE', path, { expectedVersion: 1 })).status).toBe(200)

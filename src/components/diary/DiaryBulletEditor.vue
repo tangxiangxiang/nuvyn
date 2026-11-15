@@ -158,33 +158,36 @@ onMounted(() => { void nextTick(() => textareas.forEach(resize)) })
   <div class="diary-bullet-editor" data-testid="diary-bullet-editor">
     <ul role="list">
       <li v-for="(row, index) in rows" :key="row.key" class="diary-bullet-entry" :data-entry-id="row.id">
-        <div class="diary-bullet-row">
-          <textarea
-            :ref="element => setTextareaRef(element, row.key)"
-            :value="row.entry"
-            :placeholder="!props.entries.length ? '写下今天的事…' : undefined"
-            rows="1"
-            :aria-label="`第 ${index + 1} 条日记`"
-            @input="onInput(index, $event)"
-            @keydown="onKeydown(index, $event)"
-            @focus="onFocus"
-            @blur="onBlur"
-            @compositionstart="onCompositionStart"
-            @compositionend="onCompositionEnd"
-          />
-          <DiaryActionMenu
-            contextual
-            class="diary-bullet-actions"
-            :label="`第 ${index + 1} 条日记的操作`"
-            :disabled="props.actionsDisabled || !props.entries.length"
-            :options="[
-              { key: 'add-image', label: '添加图片', disabled: !row.id },
-              { key: 'remove', label: '删除此条' },
-            ]"
-            @select="selectEntryAction($event, index, row.id)"
-          />
+        <span class="diary-bullet-number" aria-hidden="true">{{ String(index + 1).padStart(2, '0') }}</span>
+        <div class="diary-bullet-content">
+          <div class="diary-bullet-row">
+            <textarea
+              :ref="element => setTextareaRef(element, row.key)"
+              :value="row.entry"
+              :placeholder="!props.entries.length ? '写下今天的事…' : undefined"
+              rows="1"
+              :aria-label="`第 ${index + 1} 条日记`"
+              @input="onInput(index, $event)"
+              @keydown="onKeydown(index, $event)"
+              @focus="onFocus"
+              @blur="onBlur"
+              @compositionstart="onCompositionStart"
+              @compositionend="onCompositionEnd"
+            />
+            <DiaryActionMenu
+              contextual
+              class="diary-bullet-actions"
+              :label="`第 ${index + 1} 条日记的操作`"
+              :disabled="props.actionsDisabled || !props.entries.length"
+              :options="[
+                { key: 'add-image', label: '添加图片', disabled: !row.id },
+                { key: 'remove', label: '删除此条' },
+              ]"
+              @select="selectEntryAction($event, index, row.id)"
+            />
+          </div>
+          <slot name="after-entry" :entry-id="row.id ?? null" :entry="row.entry" :index="index" />
         </div>
-        <slot name="after-entry" :entry-id="row.id ?? null" :entry="row.entry" :index="index" />
       </li>
     </ul>
   </div>
@@ -192,7 +195,9 @@ onMounted(() => { void nextTick(() => textareas.forEach(resize)) })
 
 <style scoped>
 .diary-bullet-editor ul { margin: 0; padding: 0; list-style: none; }
-.diary-bullet-editor li { min-width: 0; font-size: 1rem; }
+.diary-bullet-editor li { display: grid; grid-template-columns: 24px minmax(0, 1fr); gap: 6px; min-width: 0; font-size: 1rem; }
+.diary-bullet-number { color: var(--text-muted); font-size: 0.75rem; font-variant-numeric: tabular-nums; line-height: 1.7rem; user-select: none; text-align: end; }
+.diary-bullet-content { min-width: 0; }
 .diary-bullet-editor li + li { margin-block-start: 10px; }
 .diary-bullet-editor li :deep(.diary-attachment-section) { margin-top: 8px; }
 .diary-bullet-row { position: relative; min-width: 0; padding-inline-end: 44px; }

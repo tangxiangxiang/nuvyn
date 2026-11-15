@@ -22,6 +22,16 @@ function mountControlled(entries: string[]) {
 }
 
 describe('DiaryBulletEditor', () => {
+  it('numbers entries rather than lines and supports the hundredth entry', async () => {
+    const wrapper = mount(DiaryBulletEditor, { props: { entries: ['第一行\n第二行'] } })
+    const numbers = () => wrapper.findAll('.diary-bullet-number').map(node => node.text())
+    expect(numbers()).toEqual(['01'])
+    await wrapper.setProps({ entries: Array.from({ length: 100 }, (_, index) => `条目 ${index + 1}`) })
+    expect(numbers()).toHaveLength(100)
+    expect(numbers().slice(0, 3)).toEqual(['01', '02', '03'])
+    expect(numbers().at(-1)).toBe('100')
+  })
+
   it.each([0, 1, 2])('focuses the surviving textarea after deleting row %i', async index => {
     const { wrapper, content } = mountControlled(['第一条', '第二条', '第三条'])
     try {
@@ -34,6 +44,7 @@ describe('DiaryBulletEditor', () => {
       await nextTick()
 
       expect(content.value.entryIds).toEqual(expectedIds)
+      expect(wrapper.findAll('.diary-bullet-number').map(node => node.text())).toEqual(['01', '02'])
       expect(wrapper.findAll('textarea')[targetIndex]!.element).toBe(survivingTextarea)
       expect(document.activeElement).toBe(survivingTextarea)
     } finally { wrapper.unmount() }
@@ -58,6 +69,7 @@ describe('DiaryBulletEditor', () => {
       expect(document.activeElement).toBe(second)
       expect(second.selectionStart).toBe(0)
       expect(content.value.entries).toEqual(['前', '后'])
+      expect(wrapper.findAll('.diary-bullet-number').map(node => node.text())).toEqual(['01', '02'])
       expect(content.value.entryIds[0]).toBe(firstId)
     } finally { wrapper.unmount() }
   })
