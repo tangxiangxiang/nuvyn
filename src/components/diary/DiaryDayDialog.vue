@@ -86,7 +86,7 @@ function updateMood(moodId: string | null) {
         <DiaryBulletEditor v-else :entries="props.draft.entries" @update:entries="emit('update:draft', { ...props.draft, entries: $event })" />
       </template>
 
-      <template v-if="props.day || props.mode === 'edit'" #footer>
+      <template v-if="props.mode === 'edit'" #footer>
         <div class="diary-day-actions">
           <NButton v-if="props.day" text type="error" :disabled="props.busy" data-testid="diary-delete-entry" @click="emit('remove')">删除</NButton>
           <span />

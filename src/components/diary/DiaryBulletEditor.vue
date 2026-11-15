@@ -1,11 +1,11 @@
 <script setup lang="ts">
-import { nextTick, onMounted, ref, watch } from 'vue'
+import { nextTick, onMounted, watch } from 'vue'
 import { NButton, NIcon } from 'naive-ui'
 import { Trash } from '@vicons/tabler'
 
 const props = defineProps<{ entries: string[] }>()
 const emit = defineEmits<{ 'update:entries': [entries: string[]] }>()
-const composing = ref(false)
+let composingTextarea: HTMLTextAreaElement | null = null
 const textareas: Array<HTMLTextAreaElement | null> = []
 const visibleEntries = () => props.entries.length ? props.entries : ['']
 
@@ -54,10 +54,36 @@ function onInput(index: number, event: Event) {
   resize(textarea)
 }
 
+function onCompositionStart(event: CompositionEvent) {
+  composingTextarea = event.currentTarget as HTMLTextAreaElement
+}
+
+function onCompositionEnd(event: CompositionEvent) {
+  const textarea = event.currentTarget as HTMLTextAreaElement
+  if (composingTextarea === textarea) composingTextarea = null
+}
+
+function onFocus(event: FocusEvent) {
+  const textarea = event.currentTarget as HTMLTextAreaElement
+  if (composingTextarea && composingTextarea !== textarea) composingTextarea = null
+}
+
+function onBlur(event: FocusEvent) {
+  const textarea = event.currentTarget as HTMLTextAreaElement
+  if (composingTextarea === textarea) composingTextarea = null
+}
+
 function onKeydown(index: number, event: KeyboardEvent) {
   const textarea = event.currentTarget as HTMLTextAreaElement
-  if (event.key === 'Enter' && !event.shiftKey && !event.altKey && !event.ctrlKey && !event.metaKey
-    && !composing.value && !event.isComposing && event.keyCode !== 229) {
+  if (composingTextarea === textarea || event.isComposing || event.keyCode === 229) return
+
+  if (
+    event.key === 'Enter'
+    && !event.shiftKey
+    && !event.altKey
+    && !event.ctrlKey
+    && !event.metaKey
+  ) {
     event.preventDefault()
     const start = textarea.selectionStart
     const end = textarea.selectionEnd
@@ -88,25 +114,29 @@ onMounted(() => { void nextTick(() => textareas.forEach(resize)) })
   <div class="diary-bullet-editor" data-testid="diary-bullet-editor">
     <ul>
       <li v-for="(entry, index) in visibleEntries()" :key="index">
-        <textarea
-          :ref="element => setTextareaRef(element, index)"
-          :value="entry"
-          rows="1"
-          :aria-label="`第 ${index + 1} 条日记`"
-          @input="onInput(index, $event)"
-          @keydown="onKeydown(index, $event)"
-          @compositionstart="composing = true"
-          @compositionend="composing = false"
-        />
-        <NButton
-          attr-type="button"
-          quaternary
-          size="small"
-          class="diary-bullet-remove"
-          :disabled="!props.entries.length"
-          :aria-label="`删除第 ${index + 1} 条日记`"
-          @click="removeEntry(index)"
-        ><NIcon aria-hidden="true" :size="16"><Trash /></NIcon></NButton>
+        <div class="diary-bullet-row">
+          <textarea
+            :ref="element => setTextareaRef(element, index)"
+            :value="entry"
+            rows="1"
+            :aria-label="`第 ${index + 1} 条日记`"
+            @input="onInput(index, $event)"
+            @keydown="onKeydown(index, $event)"
+            @focus="onFocus"
+            @blur="onBlur"
+            @compositionstart="onCompositionStart"
+            @compositionend="onCompositionEnd"
+          />
+          <NButton
+            attr-type="button"
+            quaternary
+            size="small"
+            class="diary-bullet-remove"
+            :disabled="!props.entries.length"
+            :aria-label="`删除第 ${index + 1} 条日记`"
+            @click="removeEntry(index)"
+          ><NIcon aria-hidden="true" :size="16"><Trash /></NIcon></NButton>
+        </div>
       </li>
     </ul>
     <NButton attr-type="button" quaternary class="diary-bullet-add" data-testid="diary-add-entry" @click="addEntry">+ 添加一条</NButton>
@@ -114,12 +144,14 @@ onMounted(() => { void nextTick(() => textareas.forEach(resize)) })
 </template>
 
 <style scoped>
-.diary-bullet-editor ul { display: flex; flex-direction: column; gap: 8px; margin: 0; padding-inline-start: 1.4em; }
-.diary-bullet-editor li { position: relative; padding-inline-end: 36px; }
+.diary-bullet-editor ul { margin: 0; padding-inline-start: 1.4em; }
+.diary-bullet-editor li { min-width: 0; }
+.diary-bullet-editor li + li { margin-block-start: 8px; }
 .diary-bullet-editor li::marker { color: var(--text-muted); }
-.diary-bullet-editor textarea { display: block; width: 100%; min-height: 1.6em; max-height: 12em; box-sizing: border-box; overflow-y: auto; resize: none; padding: 3px 0; border: 0; outline: 0; background: transparent; color: var(--text); font: inherit; line-height: 1.6; overflow-wrap: anywhere; }
+.diary-bullet-row { display: grid; grid-template-columns: minmax(0, 1fr) 40px; align-items: start; column-gap: 4px; min-width: 0; }
+.diary-bullet-editor textarea { display: block; width: 100%; min-width: 0; min-height: 1.6em; max-height: 12em; box-sizing: border-box; overflow-y: auto; resize: none; padding: 3px 0; border: 0; outline: 0; background: transparent; color: var(--text); font: inherit; line-height: 1.6; overflow-wrap: anywhere; }
 .diary-bullet-editor textarea:focus-visible { box-shadow: 0 1px 0 color-mix(in srgb, var(--accent) 55%, transparent); }
-.diary-bullet-remove { position: absolute; top: 0; right: -36px; opacity: .7; }
+.diary-bullet-remove { width: 40px; min-width: 40px; height: 40px; padding: 0; opacity: .7; }
 .diary-bullet-remove:hover { opacity: 1; }
 .diary-bullet-add { margin-top: 10px; }
 </style>

@@ -132,6 +132,95 @@ test('text-only Diary days have a calendar marker and preserve bullet editing in
 })
 
 for (const viewport of [
+  { width: 320, height: 568 },
+  { width: 390, height: 844 },
+  { width: 768, height: 1024 },
+  { width: 1280, height: 800 },
+]) {
+  test.describe(`Diary bullet editor at ${viewport.width}px`, () => {
+    test.use({ hasTouch: viewport.width <= 768 })
+
+    test('keeps long entries inside the dialog and removes the day from the calendar', async ({ page }) => {
+      await page.setViewportSize(viewport)
+      await page.goto('/diary')
+      await unlockDiary(page)
+      const calendar = page.locator('.diary-life-calendar')
+      const cell = calendar.locator('[data-date$="-22"]')
+      if (viewport.width <= 768) await cell.tap()
+      else await cell.click()
+
+      const editButton = page.getByTestId('diary-edit-entry')
+      if (await editButton.isVisible()) await editButton.click()
+
+      const editor = page.getByTestId('diary-bullet-editor')
+      await expect(editor).toBeVisible()
+      const removeButtons = editor.locator('.diary-bullet-remove')
+      while (true) {
+        const last = removeButtons.last()
+        await expect(last).toBeVisible()
+        if (await last.isDisabled()) break
+        await last.click()
+      }
+
+      const longText = '这是一条很长的日记内容用于验证窄屏自动换行'.repeat(24)
+      const first = page.getByRole('textbox', { name: '第 1 条日记', exact: true })
+      await first.fill(longText)
+      await first.press('End')
+      await first.press('Enter')
+      const second = page.getByRole('textbox', { name: '第 2 条日记', exact: true })
+      await second.fill('保留这一条')
+
+      const dialog = page.getByTestId('diary-day-dialog')
+      const layout = await dialog.evaluate(node => {
+        const editorNode = node.querySelector<HTMLElement>('[data-testid="diary-bullet-editor"]')!
+        const row = editorNode.querySelector<HTMLElement>('.diary-bullet-row')!
+        const button = row.querySelector<HTMLElement>('.diary-bullet-remove')!
+        const dialogBounds = node.getBoundingClientRect()
+        const rowBounds = row.getBoundingClientRect()
+        const buttonBounds = button.getBoundingClientRect()
+        return {
+          dialogRight: dialogBounds.right,
+          dialogWidth: node.clientWidth,
+          dialogScrollWidth: node.scrollWidth,
+          editorRight: editorNode.getBoundingClientRect().right,
+          rowRight: rowBounds.right,
+          buttonRight: buttonBounds.right,
+          inputWidth: row.querySelector('textarea')!.getBoundingClientRect().width,
+          documentWidth: document.documentElement.scrollWidth,
+        }
+      })
+      expect(layout.dialogRight).toBeLessThanOrEqual(viewport.width + 1)
+      expect(layout.dialogScrollWidth).toBeLessThanOrEqual(layout.dialogWidth + 1)
+      expect(layout.rowRight).toBeLessThanOrEqual(layout.editorRight + 1)
+      expect(layout.buttonRight).toBeLessThanOrEqual(layout.rowRight + 1)
+      expect(layout.inputWidth).toBeGreaterThan(100)
+      expect(layout.documentWidth).toBeLessThanOrEqual(viewport.width)
+
+      const deleteFirst = page.getByRole('button', { name: '删除第 1 条日记', exact: true })
+      if (viewport.width <= 768) await deleteFirst.tap()
+      else await deleteFirst.click()
+      const remaining = page.getByRole('textbox', { name: '第 1 条日记', exact: true })
+      await expect(remaining).toHaveValue('保留这一条')
+      await expect(remaining).toBeFocused()
+      await page.getByTestId('diary-save-entry').click()
+      await expect(page.getByTestId('diary-bullet-reader')).toContainText('保留这一条')
+      await page.getByRole('button', { name: '关闭日记' }).click()
+      await expect(cell.locator('.life-marker')).toBeVisible()
+
+      if (viewport.width <= 768) await cell.tap()
+      else await cell.click()
+      await expect(page.getByTestId('diary-delete-entry')).toHaveCount(0)
+      await page.getByTestId('diary-edit-entry').click()
+      await page.getByTestId('diary-delete-entry').click()
+      const confirmation = page.getByRole('dialog', { name: '删除这条记录？' })
+      await confirmation.getByRole('button', { name: /^(Confirm|确认|确定)$/ }).click()
+      await expect(cell.locator('.life-marker')).toHaveCount(0)
+      expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true)
+    })
+  })
+}
+
+for (const viewport of [
   { width: 1800, height: 830 },
   { width: 1280, height: 800 },
   { width: 768, height: 1024 },
