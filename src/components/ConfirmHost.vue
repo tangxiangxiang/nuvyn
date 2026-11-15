@@ -50,7 +50,7 @@ async function focusSafeCancel(requestId: number): Promise<void> {
   await new Promise<void>((resolve) => window.setTimeout(resolve, 0))
   await nextTick()
   const request = displayed.value
-  if (!request || request.id !== requestId) return
+  if (!show.value || !request || request.id !== requestId) return
   const candidates = Array.from(document.querySelectorAll<HTMLElement>('[role="alertdialog"], [role="dialog"]'))
   const dialog = candidates.find((candidate) => candidate.textContent?.includes(request.message))
   if (!dialog) return
@@ -84,14 +84,14 @@ function handleVisibilityChange(value: boolean): void {
   settle(displayed.value.id, false)
 }
 
-function handlePositiveClick(): true {
-  if (displayed.value) answer(displayed.value.id, true)
-  return true
+function handlePositiveClick(): false {
+  if (displayed.value) settle(displayed.value.id, true)
+  return false
 }
 
-function handleNegativeClick(): true {
-  if (displayed.value) answer(displayed.value.id, false)
-  return true
+function handleNegativeClick(): false {
+  if (displayed.value) settle(displayed.value.id, false)
+  return false
 }
 
 function handleAfterEnter(): void {

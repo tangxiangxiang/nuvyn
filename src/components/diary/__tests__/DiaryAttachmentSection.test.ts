@@ -5,6 +5,7 @@ import { nextTick } from 'vue'
 import type { DiaryAttachment } from '../../../../shared/diaryAttachments'
 import { diaryAttachmentsApi } from '../../../lib/diary-attachments-api'
 import DiaryAttachmentSection from '../DiaryAttachmentSection.vue'
+import DiaryActionMenu from '../DiaryActionMenu.vue'
 
 const staged: DiaryAttachment = {
   id: '92f3bb2b-2ded-43f3-8db2-dc77954bc918',
@@ -88,29 +89,33 @@ describe('DiaryAttachmentSection staged image previews', () => {
         },
       },
     })
-    const removeButtons = wrapper.findAll('button.diary-attachment-remove')
+    const removeButtons = wrapper.findAll('button.diary-action-trigger')
     expect(removeButtons).toHaveLength(2)
     expect(removeButtons.map(button => button.attributes('type'))).toEqual(['button', 'button'])
     expect(removeButtons.map(button => button.attributes('aria-label'))).toEqual([
-      '移除 memory.png',
-      '移除 memory.pdf',
+      'memory.png 的操作',
+      'memory.pdf 的操作',
     ])
     expect(wrapper.get(`[data-testid="diary-attachment-${staged.id}"]`).find('.diary-attachment-meta').exists()).toBe(false)
     const pdfMeta = wrapper.get(`[data-testid="diary-attachment-${pdf.id}"] .diary-attachment-meta`)
     expect(pdfMeta.text()).toBe('memory.pdf')
     expect(pdfMeta.find('small').exists()).toBe(false)
 
-    await removeButtons[0]!.trigger('click')
+    const imageMenu = wrapper.findAllComponents(DiaryActionMenu)[0]!
+    expect(imageMenu.props('options')).toContainEqual({ key: 'remove', label: '移除图片' })
+    expect(wrapper.findAllComponents(DiaryActionMenu)[1]!.props('options')).toEqual([{ key: 'remove', label: '移除附件' }])
+    imageMenu.vm.$emit('select', 'remove')
+    await nextTick()
     expect(wrapper.emitted('remove')).toEqual([[staged.id]])
     expect(wrapper.find('.diary-attachment-preview').exists()).toBe(false)
 
     await wrapper.setProps({ disabled: true })
-    expect((wrapper.get('button.diary-attachment-remove').element as HTMLButtonElement).disabled).toBe(true)
-    await wrapper.get('button.diary-attachment-remove').trigger('click')
+    expect((wrapper.get('button.diary-action-trigger').element as HTMLButtonElement).disabled).toBe(true)
+    await wrapper.get('button.diary-action-trigger').trigger('click')
     expect(wrapper.emitted('remove')).toEqual([[staged.id]])
 
     await wrapper.setProps({ mode: 'read', disabled: false })
-    expect(wrapper.find('button.diary-attachment-remove').exists()).toBe(false)
+    expect(wrapper.find('button.diary-action-trigger').exists()).toBe(false)
     expect(wrapper.get(`[data-testid="diary-attachment-${pdf.id}"] .diary-attachment-meta`).text()).toBe('memory.pdf')
     wrapper.unmount()
   })
@@ -125,7 +130,7 @@ describe('DiaryAttachmentSection staged image previews', () => {
         mode: 'edit',
         embedded: true,
         targetEntryId: entryId,
-        placementOptions: [{ id: entryId, label: '早餐' }, { id: targetId, label: '学习' }],
+        placementOptions: [{ id: entryId, line: 1 }, { id: targetId, line: 2 }],
       },
       global: {
         stubs: {
@@ -136,11 +141,16 @@ describe('DiaryAttachmentSection staged image previews', () => {
       },
     })
     const card = wrapper.get(`[data-testid="diary-attachment-${staged.id}"]`)
-    const move = card.get('select')
-    expect(move.attributes('aria-label')).toBe('移动 memory.png 到其他日记条目')
+    const menu = card.getComponent(DiaryActionMenu)
+    expect(menu.props('label')).toBe('memory.png 的操作')
+    expect(menu.props('options')).toEqual([
+      { key: targetId, label: '移动到第 2 行后' },
+      { key: 'end', label: '移动到日记末尾' },
+      { key: 'remove', label: '移除图片' },
+    ])
     expect(card.find('.diary-attachment-meta').exists()).toBe(false)
     expect(wrapper.find('h3').exists()).toBe(false)
-    await move.setValue(targetId)
+    menu.vm.$emit('select', targetId)
     expect(wrapper.emitted('move')).toEqual([[staged.id, targetId]])
     wrapper.unmount()
   })

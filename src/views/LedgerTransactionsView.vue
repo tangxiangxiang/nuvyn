@@ -986,7 +986,7 @@ const visibleTransactionColumns = computed(() => {
         :loading="loading"
         :flex-height="desktopTableFlexHeight"
         :max-height="desktopTableFlexHeight ? undefined : 268"
-        :scroll-x="tabletTable ? undefined : (compactTableScroll ? 760 : 1190)"
+        :scroll-x="tabletTable ? undefined : '100%'"
         size="small"
         :bordered="false"
         :bottom-bordered="false"

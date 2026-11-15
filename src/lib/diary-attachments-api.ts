@@ -1,7 +1,7 @@
 import { diaryAuthFetch } from './auth-session'
 import { MAX_DIARY_ATTACHMENT_BYTES, type DiaryAttachment } from '../../shared/diaryAttachments'
 
-function createRequestKey(): string {
+export function createDiaryAttachmentClientId(): string {
   if (typeof crypto.randomUUID === 'function') return crypto.randomUUID()
   const bytes = crypto.getRandomValues(new Uint8Array(16))
   bytes[6] = (bytes[6]! & 0x0f) | 0x40
@@ -30,7 +30,7 @@ export const diaryAttachmentsApi = {
     form.append('sessionId', sessionId)
     form.append('file', file, file.name)
     const response = await diaryAuthFetch('/api/diary/attachments/stage', {
-      method: 'POST', signal, cache: 'no-store', headers: { 'Idempotency-Key': createRequestKey() }, body: form,
+      method: 'POST', signal, cache: 'no-store', headers: { 'Idempotency-Key': createDiaryAttachmentClientId() }, body: form,
     })
     await assertResponse(response)
     const result = await response.json() as { attachment?: DiaryAttachment }

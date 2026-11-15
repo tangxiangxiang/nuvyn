@@ -1,10 +1,10 @@
 <script setup lang="ts">
-import { computed, nextTick, ref, watch } from 'vue'
+import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue'
 import { NAlert, NButton, NCard, NIcon, NModal, NStatistic } from 'naive-ui'
 import { X } from '@vicons/tabler'
 import { ledgerTransactionContributesToStatistics } from '../../../shared/ledgerAnalytics'
 import type { LedgerTransactionDto } from '../../../shared/ledgerProtocol'
-import { useConfirm } from '../../composables/useConfirm'
+import { useConfirm, type CancellableConfirm } from '../../composables/useConfirm'
 import { useToast } from '../../composables/useToast'
 import { ledgerErrorMessage } from '../../features/ledger/ledgerErrors'
 import { formatLedgerMoney } from '../../features/ledger/money'
@@ -24,7 +24,7 @@ const emit = defineEmits<{
 
 const store = useLedgerStore()
 const toast = useToast()
-const { confirm } = useConfirm()
+const { confirm, confirmCancellable } = useConfirm()
 const detailFocusTarget = ref<HTMLElement | null>(null)
 const currentTransaction = ref<LedgerTransactionDto | null>(null)
 const groupTransactions = ref<readonly LedgerTransactionDto[]>([])
@@ -32,6 +32,7 @@ const groupStatus = ref<'loading' | 'ready' | 'error'>('ready')
 let groupRequestSerial = 0
 const editSession = ref<{ transaction: LedgerTransactionDto; group: readonly LedgerTransactionDto[] } | null>(null)
 const editDirty = ref(false)
+let pendingDiscard: CancellableConfirm | null = null
 const actionError = ref('')
 const restoringId = ref<string | null>(null)
 const updatingStatistics = ref(false)
@@ -145,25 +146,51 @@ function focusInitialDetail(): void {
   void nextTick(() => detailFocusTarget.value?.focus())
 }
 
-async function confirmDiscardEdit(): Promise<boolean> {
-  if (!editSession.value || !editDirty.value) return true
-  return confirm('放弃这笔尚未保存的修改？', '已填写的内容将不会保存。')
+watch(editSession, () => pendingDiscard?.cancel(), { flush: 'sync' })
+onBeforeUnmount(() => pendingDiscard?.cancel())
+
+async function requestExit(destination: 'read' | 'close'): Promise<void> {
+  if (!props.open || pendingDiscard || restoringId.value) return
+  const session = editSession.value
+  if (session && editDirty.value) {
+    const request = confirmCancellable('放弃这笔尚未保存的修改？', '已填写的内容将不会保存。')
+    pendingDiscard = request
+    try {
+      const confirmed = await request.promise
+      if (!confirmed || !props.open || editSession.value !== session) return
+    } finally {
+      pendingDiscard = null
+    }
+  }
+
+  if (destination === 'close') {
+    emit('close')
+  } else {
+    editDirty.value = false
+    editSession.value = null
+    focusInitialDetail()
+  }
 }
 
-async function requestClose(): Promise<void> {
-  if (restoringId.value) return
-  if (!await confirmDiscardEdit()) return
-  emit('close')
+function requestClose(): Promise<void> {
+  return requestExit('close')
 }
 
-async function requestEditCancel(): Promise<void> {
-  if (!await confirmDiscardEdit()) return
-  editDirty.value = false
-  editSession.value = null
+function requestEditCancel(): Promise<void> {
+  return requestExit('read')
 }
 
-function handleVisibilityChange(value: boolean): void {
-  if (!value && props.open) void requestClose()
+function handleMaskClick(event: MouseEvent | TouchEvent): void {
+  const target = event.target
+  // The scroll wrapper can receive backdrop clicks. Use container ownership
+  // to exclude other teleported dialogs from Naive's outside-click callback.
+  if (!(target instanceof Element)) return
+  const container = detailFocusTarget.value?.closest('.n-modal-container')
+  if (!container || target.closest('.n-modal-container') !== container) return
+  // A backdrop tap can open the confirm on touchend. Suppress the synthetic
+  // mouse events so the same tap cannot also dismiss that new confirm.
+  if (event.type === 'touchend') event.preventDefault()
+  void requestClose()
 }
 
 async function restoreAccount(id: string): Promise<void> {
@@ -248,8 +275,7 @@ async function remove(): Promise<void> {
     :auto-focus="false"
     :trap-focus="true"
     :on-esc="requestClose"
-    :on-mask-click="requestClose"
-    :on-update-show="handleVisibilityChange"
+    :on-mask-click="handleMaskClick"
     :on-after-enter="focusInitialDetail"
   >
     <NCard

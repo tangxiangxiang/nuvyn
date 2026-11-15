@@ -1,4 +1,5 @@
 import { Hono, type Context } from 'hono'
+import type { Database } from 'better-sqlite3'
 import { bodyLimit } from 'hono/body-limit'
 import { civilDate, dayDistance, parseDay, parseEvent, occursOn, nextOccurrence } from '../../shared/diaryLife.js'
 import { withDiaryBodyOperation } from '../diaryAccess/guard.js'
@@ -13,12 +14,13 @@ const routes = new Hono<Env>()
 routes.use('*', async (c, next) => { c.header('Cache-Control', 'no-store'); await next() })
 routes.use('*', bodyLimit({ maxSize: 32768 }))
 type Store = ReturnType<typeof diaryLifeStore>
-async function guarded(c: Context<Env>, run: (store: Store) => Promise<Response> | Response) {
+async function guarded(c: Context<Env>, run: (store: Store, db: Database) => Promise<Response> | Response) {
   const owner = c.get('authUser')?.id
   if (!owner) return c.json({ code: 'auth-session-required' }, 401)
   try {
     return await withDiaryBodyOperation(c, async (op) => {
-      const result = await run(diaryLifeStore(metadataDb(), owner, op))
+      const db = metadataDb()
+      const result = await run(diaryLifeStore(db, owner, op), db)
       op.assertCurrent()
       return result
     }) ?? c.json({ code: 'diary-locked' }, 423)
@@ -35,16 +37,15 @@ routes.get('/days', c => guarded(c, store => {
   if (!civilDate(start) || !civilDate(end) || end < start || dayDistance(start, end) > 62) return c.json({ code: 'invalid-diary-range' }, 400)
   return c.json({ days: store.days(start, end).map(({ date, moodId, entries, hasAttachments, version }) => ({ date, moodId, hasEntries: entries.length > 0, hasAttachments, version })) })
 }))
-routes.get('/days/:date', c => guarded(c, async store => {
+routes.get('/days/:date', c => guarded(c, async (store, db) => {
   const date = c.req.param('date')
   if (!civilDate(date)) return c.json({ code: 'invalid-diary-date' }, 400)
-  const db = metadataDb()
-  const storage = new DiaryAttachmentStorage()
+  const storage = new DiaryAttachmentStorage(db)
   await ensureDiaryAttachmentStorage(db, storage)
   await cleanupDiaryAttachmentStorage(db, storage, c.get('authUser')?.id)
   return c.json({ day: store.getDay(date), version: store.dayVersion(date), attachments: store.dayAttachments(date) })
 }))
-routes.put('/days/:date', c => guarded(c, async store => {
+routes.put('/days/:date', c => guarded(c, async (store, db) => {
   const date = c.req.param('date')
   const body = await c.req.json().catch(() => null)
   const fields = parseDay(body)
@@ -56,7 +57,7 @@ routes.put('/days/:date', c => guarded(c, async store => {
   // The SQLite transaction has already committed. Physical deletion is
   // represented by durable tombstones and will be retried on later requests
   // or startup recovery, so cleanup failure must not report a false save error.
-  await cleanupDiaryAttachmentStorage(metadataDb(), new DiaryAttachmentStorage(), c.get('authUser')?.id).catch(() => {})
+  await cleanupDiaryAttachmentStorage(db, undefined, c.get('authUser')?.id).catch(() => {})
   return c.json({ day, version: day.version, attachments: store.dayAttachments(date) })
 }))
 routes.get('/events', c => guarded(c, store => {
@@ -95,12 +96,12 @@ routes.put('/events/:id', c => guarded(c, async store => {
   return c.json({ event: store.putEvent(id, fields, body.expectedVersion) })
 }))
 for (const kind of ['days', 'events'] as const) {
-  routes.delete(`/${kind}/:id`, c => guarded(c, async store => {
+  routes.delete(`/${kind}/:id`, c => guarded(c, async (store, db) => {
     const body = await c.req.json().catch(() => null)
     const id = c.req.param('id')
     if (!version(body?.expectedVersion) || body.expectedVersion < 1 || !(kind === 'days' ? civilDate(id) : idValid(id))) return c.json({ code: 'invalid-diary-delete' }, 400)
     store.remove(kind === 'days' ? 'day' : 'event', id, body.expectedVersion)
-    if (kind === 'days') await cleanupDiaryAttachmentStorage(metadataDb(), new DiaryAttachmentStorage(), c.get('authUser')?.id).catch(() => {})
+    if (kind === 'days') await cleanupDiaryAttachmentStorage(db, undefined, c.get('authUser')?.id).catch(() => {})
     return c.json({ ok: true })
   }))
 }

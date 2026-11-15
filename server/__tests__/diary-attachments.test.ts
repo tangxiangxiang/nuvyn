@@ -7,7 +7,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import app from '../index.js'
 import { createSession } from '../auth/session.js'
 import { DIARY_ATTACHMENT_STAGE_LEASE_MS, MAX_DIARY_ATTACHMENT_BYTES } from '../../shared/diaryAttachments.js'
-import { cleanupDiaryAttachmentStorage, __setDiaryAttachmentRootForTesting, DiaryAttachmentStorage } from '../diaryAttachments/storage.js'
+import { cleanupDiaryAttachmentStorage, DiaryAttachmentStorage } from '../diaryAttachments/storage.js'
 import { discardStagedDiaryAttachment, stageDiaryAttachment } from '../diaryAttachments/service.js'
 import { __setDurableArtifactTestHooksForTesting } from '../durableCreateOnlyFile.js'
 import { closeAuthTestContext, createAuthenticatedTestContext, jsonRequest, unlockDiaryAccessForTesting, withAuthCookie, withDiaryCapability, type AuthenticatedTestContext } from './helpers/auth.js'
@@ -69,17 +69,16 @@ function seedStagedRows(count: number, expiresAt: number, sessionId = SESSION_A)
 }
 
 beforeEach(async () => {
-  db = new Database(':memory:')
+  tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'nuvyn-diary-attachments-'))
+  db = new Database(path.join(tempRoot, 'fixture.db'))
   auth = createAuthenticatedTestContext({ db })
   capability = await unlockDiaryAccessForTesting(auth)
-  tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'nuvyn-diary-attachments-'))
-  __setDiaryAttachmentRootForTesting(path.join(tempRoot, 'private'))
 })
 
 afterEach(async () => {
   closeAuthTestContext(auth)
+  db.close()
   __setDurableArtifactTestHooksForTesting(null)
-  __setDiaryAttachmentRootForTesting(null)
   await fs.rm(tempRoot, { recursive: true, force: true })
 })
 
@@ -117,7 +116,7 @@ describe('Diary private attachments', () => {
     const stagedResponse = await upload()
     expect(stagedResponse.status).toBe(201)
     const staged = (await stagedResponse.json() as { attachment: { id: string; name: string; mimeType: string; size: number } }).attachment
-    const storage = new DiaryAttachmentStorage()
+    const storage = new DiaryAttachmentStorage(db)
     const ciphertext = await fs.readFile(storage.pathFor(staged.id))
     const row = db.prepare('SELECT encrypted_metadata, status FROM diary_day_attachments WHERE id = ?').get(staged.id) as { encrypted_metadata: Buffer; status: string }
     expect(row.status).toBe('staged')
@@ -225,7 +224,7 @@ describe('Diary private attachments', () => {
     const secondId = (await second.json() as { attachment: { id: string } }).attachment.id
     expect(secondId).toBe(firstId)
 
-    const storage = new DiaryAttachmentStorage()
+    const storage = new DiaryAttachmentStorage(db)
     const before = await fs.readFile(storage.pathFor(firstId))
     await auth.runtime.diaryAccess.withBodyOperation(auth.session.id, capability, async operation => {
       await discardStagedDiaryAttachment({ db, owner: auth.userId + 1, id: firstId, operation, storage })
@@ -260,7 +259,7 @@ describe('Diary private attachments', () => {
     ) VALUES ('other-owner', 'other-owner', 'test-hash', 0, 1, 1)`).run().lastInsertRowid)
     const staged = await upload('other-owner.png')
     const otherId = (await staged.json() as { attachment: { id: string } }).attachment.id
-    const storage = new DiaryAttachmentStorage()
+    const storage = new DiaryAttachmentStorage(db)
     db.prepare('UPDATE diary_day_attachments SET owner_user_id = ?, expires_at = 0 WHERE id = ?').run(otherOwner, otherId)
 
     const currentUpload = await upload('current-owner.png')
@@ -287,12 +286,12 @@ describe('Diary private attachments', () => {
     expect(db.prepare('SELECT id FROM diary_day_attachments WHERE id = ?').get(abandonedIds[0]!)).toBeUndefined()
     expect(db.prepare("SELECT COUNT(*) AS count FROM diary_day_attachments WHERE status = 'staged' AND expires_at <= ?").get(Date.now())).toEqual({ count: 0 })
     expect(db.prepare('SELECT COUNT(*) AS count FROM diary_day_attachments WHERE owner_user_id = ? AND day_date = ? AND status IN (\'staged\', \'attached\')').get(auth.userId, DATE)).toEqual({ count: 2 })
-    expect(await fs.stat(new DiaryAttachmentStorage().pathFor(activeId))).toBeDefined()
-    expect(await fs.stat(new DiaryAttachmentStorage().pathFor(replacementId))).toBeDefined()
+    expect(await fs.stat(new DiaryAttachmentStorage(db).pathFor(activeId))).toBeDefined()
+    expect(await fs.stat(new DiaryAttachmentStorage(db).pathFor(replacementId))).toBeDefined()
   }, 30_000)
 
   it('keeps a deleting tombstone when rollback cleanup fails, then retries it', async () => {
-    const storage = new DiaryAttachmentStorage()
+    const storage = new DiaryAttachmentStorage(db)
     const remove = vi.spyOn(storage, 'remove').mockRejectedValue(new Error('simulated unlink failure'))
     const result = await auth.runtime.diaryAccess.withBodyOperation(auth.session.id, capability, async operation => {
       const failingOperation = new Proxy(operation, {
@@ -332,7 +331,7 @@ describe('Diary private attachments', () => {
     const failed = await upload('orphan.png')
     expect(failed.status).toBe(503)
     expect(db.prepare('SELECT id FROM diary_day_attachments').all()).toEqual([])
-    const storage = new DiaryAttachmentStorage()
+    const storage = new DiaryAttachmentStorage(db)
     const [orphanId] = await storage.list()
     expect(orphanId).toMatch(/^[a-f0-9-]{36}$/u)
     expect(await fs.stat(storage.pathFor(orphanId!))).toBeDefined()
@@ -359,7 +358,7 @@ describe('Diary private attachments', () => {
     const response = await upload('oversized.png', oversized, 'image/png')
     expect(response.status).toBe(413)
     expect(db.prepare('SELECT id FROM diary_day_attachments').all()).toEqual([])
-    expect(await new DiaryAttachmentStorage().list()).toEqual([])
+    expect(await new DiaryAttachmentStorage(db).list()).toEqual([])
   }, 30_000)
 
   it('removes encrypted bytes when the attachment metadata transaction fails', async () => {
@@ -368,13 +367,13 @@ describe('Diary private attachments', () => {
     const response = await upload()
     expect(response.status).toBe(503)
     expect(db.prepare('SELECT id FROM diary_day_attachments').all()).toEqual([])
-    expect(await new DiaryAttachmentStorage().list()).toEqual([])
+    expect(await new DiaryAttachmentStorage(db).list()).toEqual([])
   })
 
   it('removes expired staged files and filesystem orphans during recovery', async () => {
     const staged = await upload()
     const id = (await staged.json() as { attachment: { id: string } }).attachment.id
-    const storage = new DiaryAttachmentStorage()
+    const storage = new DiaryAttachmentStorage(db)
     const orphanId = randomUUID().toLowerCase()
     await fs.writeFile(storage.pathFor(orphanId), Buffer.from('orphan ciphertext'))
     db.prepare('UPDATE diary_day_attachments SET expires_at = 0 WHERE id = ?').run(id)
@@ -393,7 +392,7 @@ describe('Diary private attachments', () => {
     const staged = await upload()
     const id = (await staged.json() as { attachment: { id: string } }).attachment.id
     expect((await saveDay(DATE, { moodId: null, entries: [], expectedVersion: 0, attachments: [id] })).status).toBe(200)
-    const storage = new DiaryAttachmentStorage()
+    const storage = new DiaryAttachmentStorage(db)
     const encrypted = await fs.readFile(storage.pathFor(id))
     encrypted[encrypted.length - 1] = encrypted[encrypted.length - 1]! ^ 1
     await fs.writeFile(storage.pathFor(id), encrypted)
@@ -423,7 +422,7 @@ describe('Diary private attachments', () => {
     const staged = await upload()
     const id = (await staged.json() as { attachment: { id: string } }).attachment.id
     expect((await saveDay(DATE, { moodId: null, entries: [], expectedVersion: 0, attachments: [id] })).status).toBe(200)
-    const storage = new DiaryAttachmentStorage()
+    const storage = new DiaryAttachmentStorage(db)
     __setDurableArtifactTestHooksForTesting({ beforeDurableArtifactUnlink: () => { throw new Error('simulated unlink failure') } })
 
     const deleted = await app.fetch(withDiaryCapability(auth, jsonRequest(`${life}/days/${DATE}`, {

@@ -50,7 +50,15 @@ const api = vi.hoisted(() => ({
 const confirm = vi.hoisted(() => vi.fn())
 
 vi.mock('../../features/ledger/api', () => api)
-vi.mock('../../composables/useConfirm', () => ({ useConfirm: () => ({ confirm }) }))
+vi.mock('../../composables/useConfirm', () => ({
+  useConfirm: () => ({
+    confirm,
+    confirmCancellable: (message: string, detail?: string) => ({
+      promise: confirm(message, detail),
+      cancel: vi.fn(),
+    }),
+  }),
+}))
 
 const settings: LedgerSettingsDto = {
   baseCurrency: 'CNY',

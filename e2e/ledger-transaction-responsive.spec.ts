@@ -6,7 +6,7 @@ type LedgerCategory = {
   archivedAt: number | null
 }
 
-async function ensureTransactionHistoryFixture(request: APIRequestContext): Promise<void> {
+async function ensureTransactionHistoryFixture(request: APIRequestContext, count = 1): Promise<void> {
   await ensureLedgerDashboardFixtures(request)
 
   const accounts = await getAccounts(request)
@@ -29,19 +29,22 @@ async function ensureTransactionHistoryFixture(request: APIRequestContext): Prom
   expect(category).toBeTruthy()
   if (!category) throw new Error('No expense category available for the responsive fixture')
 
-  const createTransaction = await request.post('/api/ledger/transactions', {
-    data: {
-      type: 'expense',
-      amountMinor: 123,
-      accountId: account.id,
-      categoryId: category.id,
-      occurredAt: Date.now(),
-      payee: 'Responsive layout fixture',
-      note: '',
-    },
-    headers: { 'Idempotency-Key': `responsive-layout-transaction-${Date.now()}` },
-  })
-  expect(createTransaction.status(), await createTransaction.text()).toBe(201)
+  const now = Date.now()
+  for (let index = 0; index < count; index++) {
+    const createTransaction = await request.post('/api/ledger/transactions', {
+      data: {
+        type: 'expense',
+        amountMinor: 123,
+        accountId: account.id,
+        categoryId: category.id,
+        occurredAt: now - index,
+        payee: 'Responsive layout fixture',
+        note: '',
+      },
+      headers: { 'Idempotency-Key': `responsive-layout-transaction-${now}-${index}` },
+    })
+    expect(createTransaction.status(), await createTransaction.text()).toBe(201)
+  }
 }
 
 type LayoutMetrics = {
@@ -178,4 +181,61 @@ test('transaction table grows with desktop viewport height and keeps pagination 
   await mobileRow.click()
   await expect(page.getByRole('dialog')).toBeVisible()
   await expect(page.getByTestId('ledger-transaction-detail-sheet')).toBeVisible()
+})
+
+test('desktop transaction table has no horizontal scroll and keeps the original row spacing', async ({ page, request }) => {
+  await ensureTransactionHistoryFixture(request, 25)
+  for (const width of [1200, 1280, 1440, 1920, 2560]) {
+    await page.setViewportSize({ width, height: 900 })
+    await page.goto('/ledger/transactions')
+    const table = page.getByTestId('ledger-transaction-list')
+    await expect(table.locator('.ledger-transaction-row').first()).toBeVisible()
+
+    const layout = await table.evaluate((root) => {
+      const header = root.querySelector<HTMLElement>('.n-data-table-base-table-header')!
+      const headerTable = header.querySelector<HTMLTableElement>('table')!
+      const scroller = root.querySelector<HTMLElement>('.n-data-table-base-table-body .n-scrollbar-container')!
+      const content = scroller.querySelector<HTMLElement>('.n-scrollbar-content')!
+      const firstRow = scroller.querySelector<HTMLElement>('.ledger-transaction-row')!
+      const columns = Array.from(headerTable.querySelectorAll('th'))
+      const cells = Array.from(firstRow.querySelectorAll('td'))
+      const spacing = () => ({
+        headerTop: header.getBoundingClientRect().top - root.getBoundingClientRect().top,
+        headerHeight: header.getBoundingClientRect().height,
+        rowTop: firstRow.getBoundingClientRect().top - header.getBoundingClientRect().bottom,
+        rowHeight: firstRow.getBoundingClientRect().height,
+      })
+      const current = spacing()
+      scroller.scrollLeft = 100
+      const overflow = Math.max(header.scrollWidth - header.clientWidth, scroller.scrollWidth - scroller.clientWidth)
+      const scrollLeft = scroller.scrollLeft
+      const aligned = columns.every((column, index) => {
+        const head = column.getBoundingClientRect()
+        const cell = cells[index]!.getBoundingClientRect()
+        return Math.abs(head.left - cell.left) <= 1 && Math.abs(head.right - cell.right) <= 1
+      })
+      const amountRight = cells.at(-1)!.getBoundingClientRect().right
+      const clipRight = scroller.getBoundingClientRect().right
+
+      // Naive UI applied the former scroll-x value to these two elements.
+      headerTable.style.minWidth = '1190px'
+      content.style.minWidth = '1190px'
+      const original = spacing()
+      headerTable.style.minWidth = '100%'
+      content.style.minWidth = '100%'
+      const pagination = root.parentElement!.querySelector('.ledger-transaction-pagination')!
+      const paginationTop = pagination.getBoundingClientRect().top
+      scroller.scrollTop = scroller.scrollHeight
+      const scrollTop = scroller.scrollTop
+      const paginationStayedPut = pagination.getBoundingClientRect().top === paginationTop
+      return { current, original, overflow, scrollLeft, aligned, amountRight, clipRight, scrollTop, paginationStayedPut }
+    })
+    expect(layout.overflow, `${width}px`).toBeLessThanOrEqual(1)
+    expect(layout.scrollLeft, `${width}px`).toBe(0)
+    expect(layout.aligned, `${width}px`).toBe(true)
+    expect(layout.amountRight, `${width}px`).toBeLessThanOrEqual(layout.clipRight + 1)
+    expect(layout.current, `${width}px`).toEqual(layout.original)
+    expect(layout.scrollTop, `${width}px`).toBeGreaterThan(0)
+    expect(layout.paginationStayedPut, `${width}px`).toBe(true)
+  }
 })

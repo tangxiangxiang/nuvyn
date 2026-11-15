@@ -11,7 +11,6 @@ import { metadataDb } from './shared.js'
 
 type Env = { Variables: { authUser: { id: number }; authSessionId: number } }
 const routes = new Hono<Env>()
-const attachmentStorage = () => new DiaryAttachmentStorage()
 const MAX_MULTIPART_OVERHEAD = 64 * 1024
 routes.use('*', async (c, next) => {
   c.header('Cache-Control', 'no-store')
@@ -54,9 +53,10 @@ routes.post('/stage', c => guarded(c, async (owner, operation) => {
       name: file.name,
     })
     if (!validated) return c.json({ code: 'diary-attachment-unsupported' }, 415)
+    const db = metadataDb()
     const metadata = await stageDiaryAttachment({
-      db: metadataDb(), owner, date, sessionId, name: validated.name, mimeType: validated.mimeType,
-      bytes, requestKey, operation, storage: attachmentStorage(),
+      db, owner, date, sessionId, name: validated.name, mimeType: validated.mimeType,
+      bytes, requestKey, operation, storage: new DiaryAttachmentStorage(db),
     })
     return c.json({ attachment: metadata }, 201)
   } finally { bytes.fill(0) }
@@ -68,15 +68,17 @@ routes.post('/sessions/:sessionId/heartbeat', c => guarded(c, async (owner, oper
   if (!body || typeof body !== 'object' || typeof (body as { date?: unknown }).date !== 'string' || !civilDate((body as { date: string }).date)) {
     return c.json({ code: 'diary-attachment-invalid' }, 400)
   }
+  const db = metadataDb()
   await renewDiaryAttachmentStageSession({
-    db: metadataDb(), owner, date: (body as { date: string }).date,
-    sessionId: c.req.param('sessionId'), operation, storage: attachmentStorage(),
+    db, owner, date: (body as { date: string }).date,
+    sessionId: c.req.param('sessionId'), operation, storage: new DiaryAttachmentStorage(db),
   })
   return c.body(null, 204)
 }))
 
 routes.get('/:id/content', c => guarded(c, async (owner, operation) => {
-  const result = await readDiaryAttachment({ db: metadataDb(), owner, id: c.req.param('id'), operation, storage: attachmentStorage() })
+  const db = metadataDb()
+  const result = await readDiaryAttachment({ db, owner, id: c.req.param('id'), operation, storage: new DiaryAttachmentStorage(db) })
   if (!result) return c.json({ code: 'diary-attachment-not-found' }, 404)
   let responseBytes: Uint8Array | null = null
   try {
@@ -100,7 +102,8 @@ routes.get('/:id/content', c => guarded(c, async (owner, operation) => {
 }))
 
 routes.delete('/:id', c => guarded(c, async (owner, operation) => {
-  await discardStagedDiaryAttachment({ db: metadataDb(), owner, id: c.req.param('id'), operation, storage: attachmentStorage() })
+  const db = metadataDb()
+  await discardStagedDiaryAttachment({ db, owner, id: c.req.param('id'), operation, storage: new DiaryAttachmentStorage(db) })
   return c.json({ ok: true })
 }))
 

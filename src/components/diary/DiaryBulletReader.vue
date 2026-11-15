@@ -13,10 +13,9 @@ defineProps<{ entries: string[]; entryIds?: string[] }>()
 </template>
 
 <style scoped>
-.diary-bullet-reader { margin: 0; padding-inline-start: 1.4em; list-style: disc; }
-.diary-bullet-reader li { display: list-item; min-width: 0; color: var(--text); font-size: 1rem; line-height: 1.7; white-space: pre-wrap; overflow-wrap: anywhere; }
+.diary-bullet-reader { margin: 0; padding-inline-start: 0; list-style: none; }
+.diary-bullet-reader li { display: block; min-width: 0; color: var(--text); font-size: 1rem; line-height: 1.7; white-space: pre-wrap; overflow-wrap: anywhere; }
 .diary-bullet-reader li + li { margin-block-start: 10px; }
-.diary-bullet-reader li::marker { color: var(--text-muted); font-size: .8em; }
 .diary-bullet-reader li :deep(.diary-attachment-section) { margin-top: 8px; }
 .diary-empty-reading { margin: 0; color: var(--text-muted); line-height: 1.7; }
 </style>

@@ -9,8 +9,9 @@ import { captureDiarySessionGeneration, isDiarySessionGenerationCurrent, subscri
 import { useDiaryMoodIconPreferences } from '../composables/diary/useDiaryMoodIconPreferences'
 import { useAuth } from '../composables/useAuth'
 import { useConfirm } from '../composables/useConfirm'
+import { useToast } from '../composables/useToast'
 import { createDiaryEntryId, createDiaryEventId, diaryLifeApi } from '../lib/diary-life-api'
-import { diaryAttachmentsApi } from '../lib/diary-attachments-api'
+import { createDiaryAttachmentClientId, diaryAttachmentsApi } from '../lib/diary-attachments-api'
 import { DiaryAttachmentPreviewUrls } from '../lib/diaryAttachmentPreviewUrls'
 import { addDays, compareEvents, dayDistance, localToday, MAX_DIARY_IMAGE_GROUP_SIZE, nextOccurrence, occursOn, parseDay, parseEvent, type DiaryDay, type DiaryDaySummary, type DiaryEvent, type DayFields, type DiaryImageGroup, type EventFields } from '../../shared/diaryLife'
 import { DIARY_ATTACHMENT_STAGE_HEARTBEAT_INTERVAL_MS, MAX_DIARY_ATTACHMENT_BYTES, MAX_DIARY_DAY_ATTACHMENTS, type DiaryAttachment } from '../../shared/diaryAttachments'
@@ -27,6 +28,7 @@ const appShell = inject(AppShellContextKey, null)
 const preferences = useDiaryMoodIconPreferences()
 const auth = useAuth()
 const { confirmCancellable } = useConfirm()
+const toast = useToast()
 let cancelConfirmation: (() => void) | undefined
 async function confirm(message: string) {
   if (cancelConfirmation) return false
@@ -127,7 +129,7 @@ async function renewAttachmentSession() {
 
 function startAttachmentSession() {
   stopAttachmentSession()
-  attachmentSessionId.value = crypto.randomUUID().toLowerCase()
+  attachmentSessionId.value = createDiaryAttachmentClientId()
   void renewAttachmentSession()
   attachmentLeaseTimer = setInterval(() => { void renewAttachmentSession() }, DIARY_ATTACHMENT_STAGE_HEARTBEAT_INTERVAL_MS)
 }
@@ -538,6 +540,7 @@ async function save() {
       initial.value = JSON.stringify({ fields: draft.value, attachments: draftAttachments.value.map(item => item.id) })
       stopAttachmentSession()
       dayMode.value = 'read'
+      if (day.value) toast.success('日记已保存')
       await load()
       return
     } else {

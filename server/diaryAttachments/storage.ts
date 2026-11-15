@@ -3,12 +3,10 @@ import { promises as fs } from 'node:fs'
 import path from 'node:path'
 import type { Database } from 'better-sqlite3'
 import { MAX_DIARY_ATTACHMENT_BYTES } from '../../shared/diaryAttachments.js'
-import { getDataDir } from '../db.js'
 import { captureDurableFile, removeCreatedDurableFile, writeCreateOnlyDurableFile } from '../durableCreateOnlyFile.js'
 
 const UUID_V4 = /^[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/u
 const HEADER_BYTES = 29
-let rootOverride: string | null = null
 const readyByDatabase = new WeakMap<Database, Promise<void>>()
 const orphanScanRequired = new WeakSet<Database>()
 let storageQueue = Promise.resolve()
@@ -25,15 +23,13 @@ export async function withDiaryAttachmentStorageLock<T>(run: () => Promise<T>): 
   try { return await run() } finally { release() }
 }
 
-export function __setDiaryAttachmentRootForTesting(root: string | null): void {
-  rootOverride = root ? path.resolve(root) : null
-}
-
 export class DiaryAttachmentStorage {
   readonly directory: string
 
-  constructor(directory = rootOverride ?? path.join(getDataDir(), 'diary-attachments')) {
-    this.directory = path.resolve(directory)
+  constructor(db: Database) {
+    if (db.memory || !db.name) throw new Error('Diary attachment storage requires a file-backed database')
+    // Orphan detection must use the database that owns this directory.
+    this.directory = path.join(path.dirname(path.resolve(db.name)), 'diary-attachments')
   }
 
   async ensureDirectory(): Promise<void> {
@@ -124,7 +120,7 @@ async function recover(db: Database, storage: DiaryAttachmentStorage): Promise<v
   if (!await cleanupOrphans(db, storage)) markDiaryAttachmentOrphanScan(db)
 }
 
-export async function ensureDiaryAttachmentStorage(db: Database, storage = new DiaryAttachmentStorage()): Promise<void> {
+export async function ensureDiaryAttachmentStorage(db: Database, storage = new DiaryAttachmentStorage(db)): Promise<void> {
   let pending = readyByDatabase.get(db)
   if (!pending) {
     pending = recover(db, storage).catch(error => {
@@ -137,7 +133,7 @@ export async function ensureDiaryAttachmentStorage(db: Database, storage = new D
 }
 
 /** Retry tombstoned and expired staged-file cleanup on attachment requests. */
-export async function cleanupDiaryAttachmentStorage(db: Database, storage = new DiaryAttachmentStorage(), owner?: number): Promise<void> {
+export async function cleanupDiaryAttachmentStorage(db: Database, storage = new DiaryAttachmentStorage(db), owner?: number): Promise<void> {
   const now = Date.now()
   const needsCleanup = owner === undefined
     ? db.prepare(`SELECT 1 AS found FROM diary_day_attachments
@@ -176,7 +172,7 @@ async function cleanupOrphans(db: Database, storage: DiaryAttachmentStorage): Pr
   return complete
 }
 
-export async function reconcileDiaryAttachmentOrphans(db: Database, storage = new DiaryAttachmentStorage()): Promise<void> {
+export async function reconcileDiaryAttachmentOrphans(db: Database, storage = new DiaryAttachmentStorage(db)): Promise<void> {
   await ensureDiaryAttachmentStorage(db, storage)
   await withDiaryAttachmentStorageLock(async () => {
     if (await cleanupOrphans(db, storage)) orphanScanRequired.delete(db)

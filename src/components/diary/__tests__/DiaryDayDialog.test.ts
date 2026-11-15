@@ -3,6 +3,7 @@ import { afterEach, describe, expect, it } from 'vitest'
 import { mount } from '@vue/test-utils'
 import { nextTick } from 'vue'
 import DiaryDayDialog from '../DiaryDayDialog.vue'
+import DiaryActionMenu from '../DiaryActionMenu.vue'
 import type { DiaryDay } from '../../../../shared/diaryLife'
 import type { DiaryAttachment } from '../../../../shared/diaryAttachments'
 
@@ -19,6 +20,11 @@ const pdf: DiaryAttachment = {
   name: 'memory.pdf',
   mimeType: 'application/pdf',
 }
+const newDayActions = [
+  { key: 'save', label: '保存日记' },
+  { key: 'add-entry', label: '添加一条' },
+  { key: 'add-attachment', label: '添加附件' },
+]
 
 afterEach(() => {
   document.body.replaceChildren()
@@ -141,13 +147,12 @@ describe('DiaryDayDialog reading mode', () => {
     for (const scenario of cases) {
       const wrapper = mountMixed('edit', scenario.currentDay, scenario.attachments)
       await nextTick()
-      const addButtons = document.body.querySelectorAll('[data-testid="diary-add-attachment"]')
-      expect(addButtons, scenario.label).toHaveLength(1)
-      const generalSection = addButtons[0]?.closest('section')
-      expect(generalSection?.getAttribute('data-testid')).toBe('diary-attachment-gallery')
-      expect(generalSection?.querySelectorAll('[data-testid="diary-attachment-input"]'), scenario.label).toHaveLength(1)
-      expect(document.body.querySelectorAll('[data-testid="diary-add-entry-image"]'), scenario.label)
-        .toHaveLength(scenario.currentDay.entryIds ? 1 : 0)
+      const menu = wrapper.getComponent(DiaryActionMenu)
+      expect(menu.props('options'), scenario.label).toEqual([...newDayActions, { key: 'remove', label: '删除日记' }])
+      expect(document.body.querySelectorAll('[data-testid="diary-add-attachment"]'), scenario.label).toHaveLength(0)
+      expect(document.body.querySelectorAll('[data-testid="diary-attachment-input"]'), scenario.label).toHaveLength(1)
+      expect(document.body.querySelectorAll('[data-testid="diary-add-entry-image"]'), scenario.label).toHaveLength(0)
+      expect(document.body.querySelectorAll('[data-testid="diary-entry-image-input"]'), scenario.label).toHaveLength(1)
 
       if (scenario.label === 'mixed') {
         const accept = document.body.querySelector<HTMLInputElement>('[data-testid="diary-attachment-input"]')?.accept ?? ''
@@ -170,15 +175,25 @@ describe('DiaryDayDialog reading mode', () => {
     const entryDay: DiaryDay = { ...day, entryIds: [entryId] }
     const editor = mountMixed('edit', entryDay, [])
     await nextTick()
-    expect(document.body.querySelectorAll('[data-testid="diary-add-entry-image"]')).toHaveLength(1)
-    expect(document.body.querySelectorAll('[data-testid="diary-add-attachment"]')).toHaveLength(1)
-    expect(document.body.querySelectorAll('[data-testid="diary-attachment-input"]')).toHaveLength(2)
+    const rowMenu = editor.findAllComponents(DiaryActionMenu).find(menu => menu.props('label') === '第 1 条日记的操作')!
+    expect(rowMenu.props('options')).toContainEqual({ key: 'add-image', label: '添加图片', disabled: false })
+    const input = document.body.querySelector<HTMLInputElement>('[data-testid="diary-entry-image-input"]')!
+    expect(input.accept).not.toContain('application/pdf')
+    const png = new File(['image'], 'breakfast.png', { type: 'image/png' })
+    rowMenu.vm.$emit('select', 'add-image')
+    Object.defineProperty(input, 'files', { value: [png] })
+    input.dispatchEvent(new Event('change'))
+    expect(editor.emitted('add-attachments')).toEqual([[[png], entryId]])
+    expect(document.body.querySelectorAll('[data-testid="diary-add-attachment"]')).toHaveLength(0)
+    expect(document.body.querySelectorAll('[data-testid="diary-attachment-input"]')).toHaveLength(1)
+    expect(document.body.querySelectorAll('[data-testid="diary-entry-image-input"]')).toHaveLength(1)
     editor.unmount()
     document.body.replaceChildren()
 
     const reader = mountMixed('read', entryDay, [image, pdf])
     await nextTick()
-    expect(document.body.querySelector('[data-testid="diary-add-entry-image"]')).toBeNull()
+    expect(document.body.querySelector('[data-testid="diary-entry-image-input"]')).toBeNull()
+    expect(reader.findAllComponents(DiaryActionMenu)).toHaveLength(0)
     expect(document.body.querySelector('[data-testid="diary-add-attachment"]')).toBeNull()
     expect(document.body.querySelector('[data-testid="diary-attachment-input"]')).toBeNull()
     reader.unmount()
@@ -216,7 +231,7 @@ describe('DiaryDayDialog reading mode', () => {
     expect(document.body.querySelector('[data-testid="diary-save-entry"]')).toBeNull()
     expect(document.body.querySelector('[data-testid="diary-bullet-add"]')).toBeNull()
     expect(document.body.querySelector('[data-testid="diary-edit-entry"]')).not.toBeNull()
-    expect(document.body.querySelector('[data-testid="diary-delete-entry"]')).toBeNull()
+    expect(document.body.querySelector('[data-testid="diary-day-actions-menu"]')).toBeNull()
     expect(document.body.querySelector('.diary-day-actions')).toBeNull()
     expect(document.body.querySelector('[aria-label="选择心情"]')).toBeNull()
     wrapper.unmount()
@@ -253,19 +268,28 @@ describe('DiaryDayDialog reading mode', () => {
   it('shows delete only while editing an existing day and emits remove', async () => {
     const wrapper = mountDialog('edit', day)
 
-    document.body.querySelector<HTMLButtonElement>('[data-testid="diary-delete-entry"]')!.click()
+    const menu = wrapper.getComponent(DiaryActionMenu)
+    expect(menu.props('options')).toEqual([
+      ...newDayActions,
+      { key: 'remove', label: '删除日记' },
+    ])
+    menu.vm.$emit('select', 'remove')
     await nextTick()
 
     expect(wrapper.emitted('remove')).toHaveLength(1)
-    expect(document.body.querySelector('[data-testid="diary-save-entry"]')).not.toBeNull()
+    expect(document.body.querySelector('.diary-day-actions')).toBeNull()
     wrapper.unmount()
   })
 
-  it('does not show delete while editing a new day', () => {
+  it('offers save and add while editing a new day and disables actions during upload', async () => {
     const wrapper = mountDialog('edit', null)
 
-    expect(document.body.querySelector('[data-testid="diary-delete-entry"]')).toBeNull()
-    expect(document.body.querySelector('[data-testid="diary-save-entry"]')).not.toBeNull()
+    const menu = wrapper.getComponent(DiaryActionMenu)
+    expect(menu.props('options')).toEqual(newDayActions)
+    await wrapper.setProps({ attachmentBusy: true })
+    expect(menu.props('disabled')).toBe(true)
+    menu.vm.$emit('select', 'save')
+    expect(wrapper.emitted('save')).toBeUndefined()
     wrapper.unmount()
   })
 
@@ -279,7 +303,7 @@ describe('DiaryDayDialog reading mode', () => {
 
     const edit = mountDialog('edit', day)
     document.body.querySelector<HTMLButtonElement>('[data-testid="diary-cancel-edit"]')!.click()
-    document.body.querySelector<HTMLButtonElement>('[data-testid="diary-save-entry"]')!.click()
+    edit.getComponent(DiaryActionMenu).vm.$emit('select', 'save')
     await nextTick()
     expect(edit.emitted('cancel-edit')).toHaveLength(1)
     expect(edit.emitted('save')).toHaveLength(1)

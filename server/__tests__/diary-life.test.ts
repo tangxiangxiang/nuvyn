@@ -1,15 +1,20 @@
 import { randomUUID } from 'node:crypto'
+import { promises as fs } from 'node:fs'
+import os from 'node:os'
+import path from 'node:path'
 import Database from 'better-sqlite3'
-import { beforeEach, afterEach, describe, it, expect } from 'vitest'
+import { beforeEach, afterEach, describe, it, expect, vi } from 'vitest'
 import app from '../index'
 import { closeAuthTestContext, createAuthenticatedTestContext, jsonRequest, unlockDiaryAccessForTesting, withAuthCookie, withDiaryCapability, type AuthenticatedTestContext } from './helpers/auth'
 import { diaryLifeCrypto } from '../diaryAccess/lifeCrypto'
 import { diaryLifeStore } from '../diaryLife'
-import { applyMigrations } from '../db'
+import * as database from '../db'
+import { DiaryAttachmentStorage } from '../diaryAttachments/storage'
 
 let db: Database.Database
 let auth: AuthenticatedTestContext
 let capability: string
+let tempRoot: string
 const base = '/api/diary/life'
 function request(method: string, path: string, body?: unknown, unlocked = true) {
   const req = jsonRequest(`${base}${path}`, { method, body, origin: auth.runtime.config.publicOrigin })
@@ -17,8 +22,37 @@ function request(method: string, path: string, body?: unknown, unlocked = true) 
 }
 const event = { title: '私人生日', description: '加密正文', emoji: '🎂', type: 'anniversary', startDate: '2024-02-29', endDate: '2024-02-29', startTime: null, endTime: null, allDay: true, recurrence: 'yearly', showCountdown: true, isPrimary: false, expectedVersion: 0 }
 describe('Diary database API', () => {
-  beforeEach(async () => { db = new Database(':memory:'); auth = createAuthenticatedTestContext({ db }); capability = await unlockDiaryAccessForTesting(auth) })
-  afterEach(() => { closeAuthTestContext(auth); db.close() })
+  beforeEach(async () => {
+    tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'nuvyn-diary-life-'))
+    db = new Database(path.join(tempRoot, 'fixture.db'))
+    auth = createAuthenticatedTestContext({ db })
+    capability = await unlockDiaryAccessForTesting(auth)
+  })
+  afterEach(async () => {
+    closeAuthTestContext(auth)
+    db.close()
+    await fs.rm(tempRoot, { recursive: true, force: true })
+  })
+
+  it('reconciles only the attachment files belonging to the active database', async () => {
+    const unrelatedRoot = path.join(tempRoot, 'other-instance')
+    const unrelatedStorage = path.join(unrelatedRoot, 'diary-attachments')
+    await fs.mkdir(unrelatedRoot)
+    await fs.mkdir(unrelatedStorage, { mode: 0o700 })
+    const otherFile = path.join(unrelatedStorage, randomUUID())
+    const otherBytes = Buffer.from('attachment bytes from another instance')
+    await fs.writeFile(otherFile, otherBytes, { mode: 0o600 })
+    const storage = new DiaryAttachmentStorage(db)
+    const orphan = randomUUID()
+    await storage.write(orphan, Buffer.from('local orphan'))
+
+    const configuredDataDir = vi.spyOn(database, 'getDataDir').mockReturnValue(unrelatedRoot)
+    try {
+      expect((await request('GET', '/days/2026-11-15')).status).toBe(200)
+      expect(await storage.list()).toEqual([])
+      expect(await fs.readFile(otherFile)).toEqual(otherBytes)
+    } finally { configuredDataDir.mockRestore() }
+  })
   it('requires unlock and never caches private responses', async () => {
     const response = await request('GET', '/days/2026-11-15', undefined, false)
     expect(response.status).toBe(423)
@@ -35,7 +69,7 @@ describe('Diary database API', () => {
     expect((await request('GET', path)).status).toBe(503)
     expect((await request('PUT', eventPath, event)).status).toBe(503)
 
-    applyMigrations(db)
+    database.applyMigrations(db)
     const emptyDay = await request('GET', path)
     expect(emptyDay.status).toBe(200)
     expect(await emptyDay.json()).toEqual({ day: null, version: 0, attachments: [] })
@@ -45,7 +79,7 @@ describe('Diary database API', () => {
 
     // Migration 44 is idempotent for installations that already had deletion receipts.
     db.exec('UPDATE schema_version SET version = 43')
-    applyMigrations(db, 44)
+    database.applyMigrations(db, 44)
     expect((await request('PUT', path, day)).status).toBe(409)
     expect((await request('GET', eventPath)).status).toBe(200)
   })
