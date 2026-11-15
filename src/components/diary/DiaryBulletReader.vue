@@ -10,8 +10,7 @@ defineProps<{ entries: string[] }>()
 </template>
 
 <style scoped>
-.diary-bullet-reader { display: flex; flex-direction: column; gap: 10px; margin: 0; padding-inline-start: 1.4em; }
-.diary-bullet-reader li { min-width: 0; padding-inline-start: 2px; color: var(--text); font-size: 1rem; line-height: 1.7; white-space: pre-wrap; overflow-wrap: anywhere; }
-.diary-bullet-reader li::marker { color: var(--text-muted); }
+.diary-bullet-reader { display: flex; flex-direction: column; gap: 10px; margin: 0; padding: 0; list-style: none; }
+.diary-bullet-reader li { min-width: 0; color: var(--text); font-size: 1rem; line-height: 1.7; white-space: pre-wrap; overflow-wrap: anywhere; }
 .diary-empty-reading { margin: 0; color: var(--text-muted); line-height: 1.7; }
 </style>

@@ -15,6 +15,12 @@ const staged: DiaryAttachment = {
   createdAt: 1,
   order: 0,
 }
+const pdf: DiaryAttachment = {
+  ...staged,
+  id: '7be4f457-e73f-4e7c-8ea2-85ce5b17c7f4',
+  name: 'memory.pdf',
+  mimeType: 'application/pdf',
+}
 let originalCreateObjectURL: PropertyDescriptor | undefined
 let originalRevokeObjectURL: PropertyDescriptor | undefined
 
@@ -53,6 +59,10 @@ describe('DiaryAttachmentSection staged image previews', () => {
     })
     await nextTick()
 
+    const imageCard = wrapper.get(`[data-testid="diary-attachment-${staged.id}"]`)
+    expect(imageCard.find('.diary-attachment-meta').exists()).toBe(false)
+    expect(imageCard.text()).not.toContain('memory.png')
+    expect(imageCard.get('button.diary-attachment-image').attributes('aria-label')).toBe('预览 memory.png')
     expect(wrapper.get('img').attributes('src')).toBe('blob:staged-preview')
     expect(content).not.toHaveBeenCalled()
 
@@ -64,6 +74,44 @@ describe('DiaryAttachmentSection staged image previews', () => {
     expect(content).toHaveBeenCalledWith(staged, expect.any(AbortSignal))
     expect(wrapper.get('img').attributes('src')).not.toBe('blob:staged-preview')
     expect(document.body.querySelector('.diary-attachment-preview')).not.toBeNull()
+    wrapper.unmount()
+  })
+
+  it('uses the same accessible native remove control for image and PDF only in edit mode', async () => {
+    const wrapper = mount(DiaryAttachmentSection, {
+      props: { date: staged.date, attachments: [staged, pdf], mode: 'edit' },
+      global: {
+        stubs: {
+          NButton: { template: '<button><slot /></button>' },
+          NModal: { template: '<div><slot /></div>' },
+          NSpin: { template: '<span />' },
+        },
+      },
+    })
+    const removeButtons = wrapper.findAll('button.diary-attachment-remove')
+    expect(removeButtons).toHaveLength(2)
+    expect(removeButtons.map(button => button.attributes('type'))).toEqual(['button', 'button'])
+    expect(removeButtons.map(button => button.attributes('aria-label'))).toEqual([
+      '移除 memory.png',
+      '移除 memory.pdf',
+    ])
+    expect(wrapper.get(`[data-testid="diary-attachment-${staged.id}"]`).find('.diary-attachment-meta').exists()).toBe(false)
+    const pdfMeta = wrapper.get(`[data-testid="diary-attachment-${pdf.id}"] .diary-attachment-meta`)
+    expect(pdfMeta.text()).toBe('memory.pdf')
+    expect(pdfMeta.find('small').exists()).toBe(false)
+
+    await removeButtons[0]!.trigger('click')
+    expect(wrapper.emitted('remove')).toEqual([[staged.id]])
+    expect(wrapper.find('.diary-attachment-preview').exists()).toBe(false)
+
+    await wrapper.setProps({ disabled: true })
+    expect((wrapper.get('button.diary-attachment-remove').element as HTMLButtonElement).disabled).toBe(true)
+    await wrapper.get('button.diary-attachment-remove').trigger('click')
+    expect(wrapper.emitted('remove')).toEqual([[staged.id]])
+
+    await wrapper.setProps({ mode: 'read', disabled: false })
+    expect(wrapper.find('button.diary-attachment-remove').exists()).toBe(false)
+    expect(wrapper.get(`[data-testid="diary-attachment-${pdf.id}"] .diary-attachment-meta`).text()).toBe('memory.pdf')
     wrapper.unmount()
   })
 })

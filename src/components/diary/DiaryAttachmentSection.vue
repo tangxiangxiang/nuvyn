@@ -211,9 +211,6 @@ async function downloadPdf(attachment: DraftAttachment) {
   }
 }
 
-function formatSize(bytes: number): string {
-  return bytes < 1024 * 1024 ? `${Math.max(1, Math.round(bytes / 1024))} KB` : `${(bytes / (1024 * 1024)).toFixed(1)} MB`
-}
 </script>
 
 <template>
@@ -239,11 +236,11 @@ function formatSize(bytes: number): string {
           <NSpin v-if="loading.has(attachment.id)" size="small" />
           <Download v-else :size="22" />
         </button>
-        <div class="diary-attachment-meta">
+        <div v-if="attachment.mimeType === 'application/pdf'" class="diary-attachment-meta">
           <span class="diary-attachment-name" :title="attachment.name">{{ attachment.name }}</span>
-          <small>{{ attachment.pending ? '待保存' : formatSize(attachment.size) }}</small>
+          <small v-if="attachment.pending">待保存</small>
         </div>
-        <NButton v-if="props.mode === 'edit'" attr-type="button" quaternary circle class="diary-attachment-remove" :disabled="props.disabled || props.uploading" :aria-label="`移除 ${attachment.name}`" @click="emit('remove', attachment.id)"><X :size="16" /></NButton>
+        <button v-if="props.mode === 'edit'" type="button" class="diary-attachment-remove" :disabled="props.disabled || props.uploading" :aria-label="`移除 ${attachment.name}`" @click="emit('remove', attachment.id)"><X :size="16" /></button>
       </article>
     </div>
     <NModal v-if="preview" :show="true" :mask-closable="true" :close-on-esc="true" @update:show="value => !value && closePreview()">
@@ -266,15 +263,32 @@ function formatSize(bytes: number): string {
 .diary-attachment-error { margin: 0; color: var(--error, #d03050); font-size: .88rem; white-space: pre-line; }
 .diary-attachment-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; }
 .diary-attachment-item { position: relative; min-width: 0; overflow: hidden; border-radius: 10px; background: color-mix(in srgb, var(--text) 5%, transparent); }
-.diary-attachment-image, .diary-attachment-pdf { display: grid; width: 100%; aspect-ratio: 1; place-items: center; padding: 0; border: 0; background: transparent; color: var(--text-muted); cursor: pointer; }
+.diary-attachment-image, .diary-attachment-pdf { display: grid; width: 100%; aspect-ratio: 1; place-items: center; padding: 0; border: 0; border-radius: 10px 10px 0 0; background: transparent; color: var(--text-muted); cursor: pointer; overflow: hidden; }
 .diary-attachment-image img { display: block; width: 100%; height: 100%; object-fit: cover; }
 .diary-attachment-placeholder { display: grid; width: 100%; height: 100%; place-items: center; color: var(--text-muted); }
 .diary-attachment-placeholder.is-error { font-size: .78rem; }
 .diary-attachment-pdf { background: color-mix(in srgb, var(--accent) 8%, transparent); color: var(--accent); }
 .diary-attachment-meta { display: flex; min-width: 0; flex-direction: column; gap: 2px; padding: 7px 9px 9px; }
 .diary-attachment-name { overflow: hidden; color: var(--text); font-size: .82rem; text-overflow: ellipsis; white-space: nowrap; }
-.diary-attachment-meta small { color: var(--text-muted); font-size: .72rem; }
-.diary-attachment-remove { position: absolute; top: 6px; right: 6px; min-width: 36px; min-height: 36px; background: color-mix(in srgb, var(--card) 88%, transparent); }
+.diary-attachment-remove { position: absolute; z-index: 1; top: 4px; right: 4px; display: grid; width: 40px; min-width: 40px; height: 40px; place-items: center; padding: 0; border: 0; border-radius: 10px; background: transparent; color: #fff; cursor: pointer; opacity: 1; transition: opacity 140ms ease; }
+.diary-attachment-remove::before { position: absolute; inset: 4px; border-radius: 8px; background: rgb(18 20 24 / 68%); content: ''; transition: background-color 140ms ease; }
+.diary-attachment-remove > svg { position: relative; width: 16px; height: 16px; }
+.diary-attachment-remove:hover:not(:disabled)::before { background: rgb(12 14 18 / 82%); }
+.diary-attachment-remove:focus-visible { outline: 2px solid var(--accent); outline-offset: -1px; opacity: 1; }
+.diary-attachment-remove:disabled { cursor: not-allowed; }
+@media (hover: hover) and (pointer: fine) {
+  .diary-attachment-remove { opacity: 0; pointer-events: none; }
+  .diary-attachment-item:hover .diary-attachment-remove,
+  .diary-attachment-item:focus-within .diary-attachment-remove,
+  .diary-attachment-remove:focus-visible { opacity: 1; pointer-events: auto; }
+}
+@media (hover: none) {
+  .diary-attachment-remove { opacity: 1; pointer-events: auto; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .diary-attachment-remove,
+  .diary-attachment-remove::before { transition: none; }
+}
 .diary-attachment-preview { position: relative; display: grid; width: min(94vw, 1100px); height: min(90dvh, 900px); place-items: center; gap: 8px; padding: 24px; border-radius: 12px; background: var(--card); color: var(--text); box-sizing: border-box; }
 .diary-attachment-preview img { display: block; max-width: 100%; max-height: calc(100% - 38px); object-fit: contain; }
 .diary-attachment-preview p { max-width: 100%; margin: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

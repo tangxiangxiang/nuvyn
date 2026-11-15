@@ -14,6 +14,12 @@ import { closeAuthTestContext, createAuthenticatedTestContext, jsonRequest, unlo
 
 // Structurally valid 1x1 PNG used only as deterministic test content.
 const PNG = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAAAAAA6fptVAAAACklEQVR4nGNgAAAAAgABSK+kcQAAAABJRU5ErkJggg==', 'base64')
+const JPEG = Buffer.from([
+  0xff, 0xd8,
+  0xff, 0xc0, 0x00, 0x0b, 0x08, 0x00, 0x01, 0x00, 0x01, 0x01, 0x01, 0x11, 0x00,
+  0xff, 0xda, 0x00, 0x08, 0x01, 0x01, 0x00, 0x00, 0x3f, 0x00,
+  0x00, 0xff, 0xd9,
+])
 const PDF = Buffer.from('%PDF-1.4\n1 0 obj\n<< /Type /Catalog >>\nendobj\nstartxref\n9\n%%EOF\n')
 const DATE = '2026-11-15'
 const SESSION_A = randomUUID()
@@ -82,6 +88,7 @@ describe('Diary private attachments', () => {
     expect((await upload('private-memory.png', PNG, 'image/png', randomUUID(), false)).status).toBe(423)
     const stagedResponse = await upload()
     expect(stagedResponse.status).toBe(201)
+    expect((await upload('photo.jpeg', JPEG, 'image/jpeg')).status).toBe(201)
     const staged = await stagedResponse.json() as { attachment: { id: string } }
     const request = new Request(`http://localhost${attachment}/${staged.attachment.id}/content`, {
       headers: { Origin: auth.runtime.config.publicOrigin },

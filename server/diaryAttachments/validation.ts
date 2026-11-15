@@ -54,7 +54,9 @@ function validJpeg(bytes: Uint8Array): boolean {
   let offset = 2
   let sawFrame = false
   let sawScan = false
-  while (offset + 4 <= bytes.length) {
+  // EOI is a standalone two-byte marker, so the scan loop must allow the
+  // final marker even when no segment length follows it.
+  while (offset + 2 <= bytes.length) {
     if (bytes[offset] !== 0xff) return false
     while (bytes[offset] === 0xff) offset += 1
     const marker = bytes[offset++]!
