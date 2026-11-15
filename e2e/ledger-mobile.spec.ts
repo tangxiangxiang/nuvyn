@@ -220,17 +220,18 @@ test('the create sheet focuses amount only on wider screens', async ({ page, req
   }
 })
 
-test('DateTime dialog stays usable on phones, tablets and desktop', async ({ page, request }) => {
-  await ensureLedgerDashboardFixtures(request)
-  const viewports = [
-    { width: 320, height: 568 },
-    { width: 390, height: 844 },
-    { width: 844, height: 390 },
-    { width: 768, height: 1024 },
-    { width: 1024, height: 650 },
-    { width: 1440, height: 700 },
-  ]
-  for (const viewport of viewports) {
+const dateTimeViewports = [
+  { width: 320, height: 568 },
+  { width: 390, height: 844 },
+  { width: 844, height: 390 },
+  { width: 768, height: 1024 },
+  { width: 1024, height: 650 },
+  { width: 1440, height: 700 },
+]
+
+for (const viewport of dateTimeViewports) {
+  test(`DateTime dialog stays usable at ${viewport.width}×${viewport.height}`, async ({ page, request }) => {
+    await ensureLedgerDashboardFixtures(request)
     await page.setViewportSize(viewport)
     await page.goto('/ledger')
     await page.getByTestId('ledger-record-button').tap()
@@ -285,7 +286,8 @@ test('DateTime dialog stays usable on phones, tablets and desktop', async ({ pag
     await panel.getByRole('textbox', { name: 'Select Time' }).tap()
     const timePanel = panel.locator('.n-time-picker-panel')
     const hour = initial.slice(11, 13) === '08' ? '09' : '08'
-    await timePanel.getByText(hour, { exact: true }).first().tap()
+    const hourColumn = timePanel.locator('.n-time-picker-cols > .n-time-picker-col').first()
+    await hourColumn.getByText(hour, { exact: true }).tap()
     await expect(trigger).toHaveValue(initial)
     await dialog.getByRole('button', { name: '确认' }).tap()
     await expect(dialog).toBeHidden()
@@ -296,5 +298,5 @@ test('DateTime dialog stays usable on phones, tablets and desktop', async ({ pag
     await sheet.getByRole('button', { name: '保存', exact: true }).tap({ trial: true })
     await sheet.getByRole('button', { name: '取消', exact: true }).tap({ trial: true })
     expect(await page.evaluate(() => document.documentElement.scrollWidth - innerWidth)).toBeLessThanOrEqual(1)
-  }
-})
+  })
+}
