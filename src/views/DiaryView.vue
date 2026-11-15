@@ -230,9 +230,11 @@ onBeforeUnmount(() => {
 <template>
   <main class="diary-life" data-testid="diary-life">
     <template v-if="access.isUnlocked.value">
-      <div class="diary-life-toolbar"><NTooltip><template #trigger><NButton quaternary circle :aria-label="mode === 'diary' ? '切换到人生事件' : '切换到情绪日记'" @click="toggle"><NIcon><CalendarEvent v-if="mode === 'diary'" /><MoodSmile v-else /></NIcon></NButton></template>{{ mode === 'diary' ? '人生事件' : '情绪日记' }}</NTooltip></div>
-      <div v-if="error" role="alert">{{ error }} <NButton text @click="load">重试</NButton></div>
-      <DiaryLifeCalendar :markers="markers" :today="today" @select="open" @month="month = $event" />
+      <div class="diary-life-calendar-stage">
+        <div class="diary-life-toolbar"><NTooltip><template #trigger><NButton quaternary circle :aria-label="mode === 'diary' ? '切换到人生事件' : '切换到情绪日记'" @click="toggle"><NIcon><CalendarEvent v-if="mode === 'diary'" /><MoodSmile v-else /></NIcon></NButton></template>{{ mode === 'diary' ? '人生事件' : '情绪日记' }}</NTooltip></div>
+        <div v-if="error" class="diary-life-error" role="alert">{{ error }} <NButton text @click="load">重试</NButton></div>
+        <DiaryLifeCalendar :markers="markers" :today="today" @select="open" @month="month = $event" />
+      </div>
       <section v-if="mode === 'events' && countdowns.length" class="countdowns" aria-label="倒数日">
         <button v-for="item in (allCountdowns ? countdowns : countdowns.slice(0, 3))" :key="item.event.id" type="button" @click="openCountdown(item.event, item.date)"><span><img v-if="eventEmojiSource(item.event.emoji)" :src="eventEmojiSource(item.event.emoji)" class="event-emoji" alt=""><template v-else>{{ item.event.emoji }}</template> {{ item.event.title }}</span><small>{{ item.days === 0 ? '就是今天' : `还有 ${item.days} 天` }}</small></button>
         <NButton v-if="countdowns.length > 3" text @click="allCountdowns = !allCountdowns">{{ allCountdowns ? '收起' : '查看全部' }}</NButton>
@@ -257,8 +259,25 @@ onBeforeUnmount(() => {
 </template>
 
 <style scoped>
-.diary-life { width: 100%; min-width: 0; box-sizing: border-box; padding: 4px 20px 20px; overflow: auto; color: var(--text); }
-.diary-life-toolbar { display: flex; justify-content: flex-end; height: 36px; }
+.diary-life {
+  width: 100%;
+  min-width: 0;
+  height: calc(100dvh - var(--navbar-h, 36px));
+  box-sizing: border-box;
+  padding: 8px 20px clamp(16px, 3dvh, 32px);
+  overflow: auto;
+  color: var(--text);
+  scrollbar-gutter: stable both-edges;
+}
+.diary-life-calendar-stage {
+  /* Countdown cards continue below the calendar in the same scroll area. */
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  min-height: 100%;
+}
+.diary-life-toolbar { position: absolute; top: 4px; right: 0; z-index: 1; }
+.diary-life-error { margin-top: 44px; padding: 8px 0; }
 .countdowns { display: flex; gap: 16px; flex-wrap: wrap; padding: 12px 0; }
 .countdowns button, .day-events > button { text-align: left; background: transparent; color: inherit; border: 0; font: inherit; cursor: pointer; display: flex; flex-direction: column; gap: 6px; padding: 8px; }
 .countdowns small, .day-events span { opacity: .65; }
@@ -268,7 +287,7 @@ onBeforeUnmount(() => {
 .mood-preview { width: 32px; height: 32px; }
 .life-mood-picker { position: static !important; max-width: 100%; margin-bottom: 12px; }
 .unlock-diary { display: block; margin: 20vh auto; }
-@media (max-width: 600px) { .diary-life { padding: 4px 8px 16px; } }
+@media (max-width: 600px) { .diary-life { padding-inline: 8px; } }
 </style>
 <style>
 .diary-life-dialog.n-card { width: min(520px, calc(100vw - 32px)); max-height: calc(100dvh - 32px); overflow: auto; }

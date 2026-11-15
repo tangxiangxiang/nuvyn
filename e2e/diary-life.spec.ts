@@ -1,5 +1,14 @@
+import type { Locator } from '@playwright/test'
 import { test, expect } from './fixtures/auth'
 import { unlockDiary } from './helpers/diary-life'
+
+function dateNumberOffset(cell: Locator) {
+  return cell.locator('.life-date-number').evaluate(number => {
+    const date = number.closest('.life-date')!.getBoundingClientRect()
+    const text = number.getBoundingClientRect()
+    return { x: text.x - date.x, y: text.y - date.y }
+  })
+}
 
 for (const viewport of [{ width: 390, height: 844 }, { width: 768, height: 1024 }, { width: 1280, height: 800 }]) {
   test.describe(`Diary at ${viewport.width}`, () => {
@@ -37,10 +46,12 @@ for (const viewport of [{ width: 390, height: 844 }, { width: 768, height: 1024 
       await expect(input).toHaveValue(`日记录 ${viewport.width}`)
       await page.getByRole('button', { name: '取消', exact: true }).click()
       await expect(cell.locator('img')).toHaveCount(1)
+      const numberBefore = await dateNumberOffset(cell)
       const monthBefore = await calendar.locator('.n-calendar-header').innerText()
       await page.getByRole('button', { name: '切换到人生事件' }).click()
       await expect(cell).toHaveAttribute('aria-pressed', 'true')
       await expect(cell.locator('img')).toHaveCount(0)
+      expect(await dateNumberOffset(cell)).toEqual(numberBefore)
       expect(await calendar.locator('.n-calendar-header').innerText()).toBe(monthBefore)
       await cell.click()
       await page.getByRole('button', { name: '新增事件', exact: true }).click()
@@ -60,12 +71,96 @@ for (const viewport of [{ width: 390, height: 844 }, { width: 768, height: 1024 
       await page.screenshot({ path: testInfo.outputPath('diary-calendar.png') })
       expect(await page.locator('.monaco-editor').count()).toBe(0)
       if (viewport.width === 1280) {
-        await page.getByRole('region', { name: '倒数日' }).getByRole('button', { name: /人生事件 1280/ }).click()
+        const countdowns = page.getByRole('region', { name: '倒数日' })
+        await expect(countdowns).toBeVisible()
+        const calendarHeight = (await calendar.boundingBox())!.height
+        await page.getByRole('button', { name: '切换到情绪日记' }).click()
+        await expect(countdowns).toBeHidden()
+        expect((await calendar.boundingBox())!.height).toBe(calendarHeight)
+        await page.getByRole('button', { name: '切换到人生事件' }).click()
+        await countdowns.getByRole('button', { name: /人生事件 1280/ }).click()
         await expect(page.getByRole('textbox', { name: '事件标题' })).toHaveValue('人生事件 1280')
         await page.getByRole('button', { name: '删除', exact: true }).click()
         await page.getByRole('dialog', { name: '删除这条记录？' }).getByRole('button', { name: /^(Confirm|确认|确定)$/ }).click()
         await expect(cell.locator('img')).toHaveCount(0)
       }
     })
+  })
+}
+
+for (const viewport of [
+  { width: 1800, height: 830 },
+  { width: 1280, height: 800 },
+  { width: 768, height: 1024 },
+  { width: 390, height: 844 },
+  { width: 320, height: 568 },
+]) {
+  test(`calendar layout stays aligned at ${viewport.width}×${viewport.height}`, async ({ page }, testInfo) => {
+    await page.setViewportSize(viewport)
+    const english = viewport.width === 1280
+    if (!english) await page.addInitScript(() => Object.defineProperty(navigator, 'language', { value: 'zh-CN' }))
+    await page.goto('/diary')
+    await unlockDiary(page)
+    const calendar = page.locator('.diary-life-calendar')
+    await expect(calendar).toBeVisible()
+    const title = calendar.locator('.life-month')
+    const header = calendar.locator('.n-calendar-header')
+    const arrows = header.getByRole('button')
+    const grid = calendar.locator('.n-calendar-dates')
+    const today = calendar.locator('.life-date.today')
+    const number = today.locator('.life-date-number')
+    const center = (box: { x: number; width: number }) => box.x + box.width / 2
+    const calendarBox = (await calendar.boundingBox())!
+    const titleBox = (await title.boundingBox())!
+
+    await expect(title).toHaveText(/^\d{4}-\d{2}$/)
+    await expect(arrows).toHaveCount(2)
+    expect(Math.abs(center(calendarBox) - center(titleBox))).toBeLessThan(1)
+    const left = (await arrows.first().boundingBox())!
+    const right = (await arrows.last().boundingBox())!
+    expect(Math.abs((center(left) + center(right)) / 2 - center(titleBox))).toBeLessThan(1)
+    expect([left.width, left.height, right.width, right.height]).toEqual([44, 44, 44, 44])
+    await expect(grid).toHaveCSS('border-top-width', '0px')
+    await expect(grid.locator('.n-calendar-cell').first()).toHaveCSS('border-bottom-width', '0px')
+    expect(await number.evaluate(node => getComputedStyle(node, '::after').width)).toBe('14px')
+
+    const labels = calendar.locator('.life-weekdays span')
+    const dates = calendar.locator('.life-date')
+    const week = await labels.allTextContents()
+    expect(week).toEqual(english
+      ? ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
+      : ['周一', '周二', '周三', '周四', '周五', '周六', '周日'])
+    for (let i = 0; i < 7; i++) {
+      const label = (await labels.nth(i).boundingBox())!
+      const date = (await dates.nth(i).boundingBox())!
+      expect(Math.abs(center(label) - center(date))).toBeLessThan(1)
+      const dateKey = await dates.nth(i).getAttribute('data-date')
+      expect(new Date(dateKey!).getUTCDay()).toBe((i + (english ? 0 : 1)) % 7)
+    }
+
+    const scroll = await page.getByTestId('diary-life').evaluate(node => ({
+      horizontal: Math.max(node.scrollWidth - node.clientWidth, document.documentElement.scrollWidth - innerWidth),
+      vertical: Math.max(node.scrollHeight - node.clientHeight, document.documentElement.scrollHeight - innerHeight),
+    }))
+    expect(scroll.horizontal).toBeLessThanOrEqual(0)
+    expect(scroll.vertical).toBeLessThanOrEqual(1)
+    const monthBefore = await title.innerText()
+    const rowHeight = (await dates.first().boundingBox())!.height
+    await arrows.last().click()
+    await expect(title).not.toHaveText(monthBefore)
+    expect((await calendar.boundingBox())!.height).toBe(calendarBox.height)
+    expect((await dates.first().boundingBox())!.height).toBeCloseTo(rowHeight, 0)
+    await arrows.first().click()
+    await expect(title).toHaveText(monthBefore)
+
+    await today.click()
+    await page.getByRole('button', { name: '取消', exact: true }).click()
+    const numberBefore = await dateNumberOffset(today)
+    await page.getByRole('button', { name: '切换到人生事件' }).click()
+    await expect(today).toHaveAttribute('aria-pressed', 'true')
+    await expect(title).toHaveText(monthBefore)
+    expect((await calendar.boundingBox())!.height).toBe(calendarBox.height)
+    expect(await dateNumberOffset(today)).toEqual(numberBefore)
+    await page.screenshot({ path: testInfo.outputPath('calendar-layout.png') })
   })
 }

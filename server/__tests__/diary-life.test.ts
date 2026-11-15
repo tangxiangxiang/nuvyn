@@ -5,6 +5,7 @@ import app from '../index'
 import { closeAuthTestContext, createAuthenticatedTestContext, jsonRequest, unlockDiaryAccessForTesting, withAuthCookie, withDiaryCapability, type AuthenticatedTestContext } from './helpers/auth'
 import { diaryLifeCrypto } from '../diaryAccess/lifeCrypto'
 import { diaryLifeStore } from '../diaryLife'
+import { applyMigrations } from '../db'
 
 let db: Database.Database
 let auth: AuthenticatedTestContext
@@ -22,6 +23,30 @@ describe('Diary database API', () => {
     const response = await request('GET', '/days/2026-11-15', undefined, false)
     expect(response.status).toBe(423)
     expect(response.headers.get('cache-control')).toBe('no-store')
+  })
+  it('repairs a version 43 database missing Diary deletion receipts', async () => {
+    db.exec('DROP TABLE diary_deleted_records; UPDATE schema_version SET version = 43')
+    const path = '/days/2026-11-15'
+    const eventPath = `/events/${randomUUID()}`
+    const day = { moodId: null, description: 'Diary upgrade test', expectedVersion: 0 }
+
+    expect((await request('PUT', path, day)).status).toBe(503)
+    expect((await request('GET', path)).status).toBe(503)
+    expect((await request('PUT', eventPath, event)).status).toBe(503)
+
+    applyMigrations(db)
+    const emptyDay = await request('GET', path)
+    expect(emptyDay.status).toBe(200)
+    expect(await emptyDay.json()).toEqual({ day: null, version: 0 })
+    expect((await request('PUT', path, day)).status).toBe(200)
+    expect((await request('PUT', eventPath, event)).status).toBe(200)
+    expect((await request('DELETE', path, { expectedVersion: 1 })).status).toBe(200)
+
+    // A complete version 43 database already has the table and can have receipts.
+    db.exec('UPDATE schema_version SET version = 43')
+    applyMigrations(db)
+    expect((await request('PUT', path, day)).status).toBe(409)
+    expect((await request('GET', eventPath)).status).toBe(200)
   })
   it('creates one day, encrypts fields, detects conflicts, clears mood, and deletes', async () => {
     const fields = { moodId: 'happy', description: '仅用于测试的私人记录', expectedVersion: 0 }

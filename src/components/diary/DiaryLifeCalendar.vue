@@ -7,8 +7,9 @@ defineProps<{ today: string; markers: Record<string, { source?: string; emoji?: 
 const emit = defineEmits<{ select: [date: string]; month: [date: string] }>()
 const selected = ref<number>()
 const { locale } = useI18n()
+// Match the firstDayOfWeek of the zhCN and enUS locales in NuvynUiRoot.
 const weekdays = computed(() => locale.value === 'zh'
-  ? ['一', '二', '三', '四', '五', '六', '日']
+  ? ['周一', '周二', '周三', '周四', '周五', '周六', '周日']
   : ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'])
 const dateFor = (year: number, month: number, date: number) => `${String(year).padStart(4, '0')}-${String(month).padStart(2, '0')}-${String(date).padStart(2, '0')}`
 const selectedDate = computed(() => selected.value === undefined ? '' : dateFor(new Date(selected.value).getFullYear(), new Date(selected.value).getMonth() + 1, new Date(selected.value).getDate()))
@@ -23,13 +24,18 @@ function choose(year: number, month: number, day: number) {
 
 <template>
   <NCalendar class="diary-life-calendar" :value="selected" @panel-change="({ year, month }) => emit('month', dateFor(year, month, 1))">
-    <template #header="{ year, month }"><strong>{{ year }}-{{ String(month).padStart(2, '0') }}</strong><div class="life-weekdays" aria-hidden="true"><span v-for="label in weekdays" :key="label">{{ label }}</span></div></template>
+    <template #header="{ year, month }">
+      <strong class="life-month">{{ dateFor(year, month, 1).slice(0, 7) }}</strong>
+      <div class="life-weekdays">
+        <span v-for="label in weekdays" :key="label">{{ label }}</span>
+      </div>
+    </template>
     <template #default="{ year, month, date }">
       <button type="button" class="life-date" :class="{ today: dateFor(year, month, date) === today, selected: selectedDate === dateFor(year, month, date) }"
         :data-date="dateFor(year, month, date)" :aria-label="dateFor(year, month, date)" :aria-pressed="selectedDate === dateFor(year, month, date)"
         @click.stop="choose(year, month, date)">
-        <span>{{ date }}</span>
-        <span class="life-marker">
+        <span class="life-date-badge"><span class="life-date-number">{{ date }}</span></span>
+        <span v-if="markers[dateFor(year, month, date)]" class="life-marker">
           <img v-if="markers[dateFor(year, month, date)]?.source" :src="markers[dateFor(year, month, date)]?.source" alt="">
           <span v-else>{{ markers[dateFor(year, month, date)]?.emoji }}</span>
           <small v-if="(markers[dateFor(year, month, date)]?.count ?? 0) > 1">+{{ markers[dateFor(year, month, date)]!.count! - 1 }}</small>
@@ -40,17 +46,207 @@ function choose(year: number, month: number, day: number) {
 </template>
 
 <style scoped>
-.diary-life-calendar { min-width: 0; height: max(460px, calc(100dvh - 150px)); }
-.diary-life-calendar :deep(.n-calendar-date) { display: none; }
-.diary-life-calendar :deep(.n-calendar-cell) { padding: 0; border-color: transparent; }
-.diary-life-calendar :deep(.n-calendar-header) { position: relative; padding: 12px 8px 40px; }
-.life-weekdays { position: absolute; left: 0; right: 0; bottom: 6px; display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); text-align: center; opacity: .6; font-size: 12px; }
-.life-date { width: 100%; height: 100%; min-height: 58px; padding: 6px 2px; border: 0; background: transparent; color: inherit; font: inherit; cursor: pointer; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 6px; }
-.life-date:focus-visible { outline: 2px solid var(--accent, #6366f1); outline-offset: -2px; border-radius: 6px; }
-.life-date.selected > span:first-child { border-radius: 50%; background: var(--n-date-color-current); color: var(--n-date-text-color-current); min-width: 26px; padding: 2px; }
-.life-date.today:not(.selected) > span:first-child { color: var(--accent, #6366f1); font-weight: 700; text-decoration: underline; text-underline-offset: 5px; }
-.life-marker { height: 30px; display: flex; align-items: center; justify-content: center; gap: 2px; font-size: 26px; }
-.life-marker img { width: 28px; height: 28px; }
-.life-marker small { font-size: 10px; opacity: .65; }
-@media (max-width: 600px) { .diary-life-calendar { height: max(440px, calc(100dvh - 150px)); } .life-marker img { width: 24px; height: 24px; } }
+.diary-life-calendar {
+  flex: 1 0 auto;
+  min-width: 0;
+  height: auto;
+  color: var(--text);
+  background: transparent;
+}
+
+.diary-life-calendar :deep(.n-calendar-header) {
+  position: relative;
+  flex: 0 0 76px;
+  padding: 0;
+}
+
+.diary-life-calendar :deep(.n-calendar-header__title) {
+  display: grid;
+  grid-template-rows: 44px 20px;
+  align-self: stretch;
+  width: 100%;
+  color: var(--text);
+}
+
+.life-month {
+  align-self: center;
+  justify-self: center;
+  font-size: 0.95rem;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+}
+
+.life-weekdays {
+  display: grid;
+  grid-template-columns: repeat(7, minmax(0, 1fr));
+  align-items: center;
+  color: var(--text-muted);
+  font-size: 0.72rem;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-align: center;
+}
+
+.diary-life-calendar :deep(.n-calendar-header__extra) {
+  position: absolute;
+  inset: 0 0 auto;
+  justify-content: center;
+  pointer-events: none;
+}
+
+.diary-life-calendar :deep(.n-calendar-header__extra .n-button-group) {
+  display: grid;
+  grid-template-columns: 44px 88px 44px;
+}
+
+.diary-life-calendar :deep(.n-calendar-header__extra .n-button) {
+  width: 44px;
+  height: 44px;
+  margin: 0;
+  padding: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--text-muted);
+  pointer-events: auto;
+}
+
+.diary-life-calendar :deep(.n-calendar-header__extra .n-button:nth-child(2)),
+.diary-life-calendar :deep(.n-calendar-header__extra .n-button__border),
+.diary-life-calendar :deep(.n-calendar-header__extra .n-button__state-border) {
+  display: none;
+}
+
+.diary-life-calendar :deep(.n-calendar-header__extra .n-button:last-child) {
+  grid-column: 3;
+}
+
+.diary-life-calendar :deep(.n-calendar-header__extra .n-button:hover) {
+  background: color-mix(in srgb, var(--accent) 8%, transparent);
+  color: var(--text);
+}
+
+.diary-life-calendar :deep(.n-calendar-header__extra .n-button:focus-visible) {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+
+.diary-life-calendar :deep(.n-calendar-dates) {
+  /* Naive UI renders four to six weeks. Reserve six tracks so the row
+     height and number alignment stay stable between months. */
+  grid-template-rows: repeat(6, minmax(72px, 1fr));
+  min-height: 432px;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+}
+
+.diary-life-calendar :deep(.n-calendar-cell),
+.diary-life-calendar :deep(.n-calendar-cell:hover),
+.diary-life-calendar :deep(.n-calendar-cell--selected) {
+  min-width: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+}
+
+.diary-life-calendar :deep(.n-calendar-date),
+.diary-life-calendar :deep(.n-calendar-cell__bar) {
+  display: none;
+}
+
+.life-date {
+  display: grid;
+  grid-template-rows: max(0px, calc(50% - 36px)) 44px 24px;
+  justify-items: center;
+  width: 100%;
+  height: 100%;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.diary-life-calendar :deep(.n-calendar-cell--other-month) .life-date {
+  color: var(--text-muted);
+  opacity: 0.7;
+}
+
+.life-date-badge {
+  display: grid;
+  grid-row: 2;
+  place-items: center;
+  width: min(44px, 100%);
+  height: 44px;
+  box-sizing: border-box;
+  border: 1px solid transparent;
+  border-radius: 8px;
+}
+
+.life-date:hover .life-date-badge {
+  background: color-mix(in srgb, var(--accent) 7%, transparent);
+}
+
+.life-date:focus-visible {
+  outline: none;
+}
+
+.life-date:focus-visible .life-date-badge {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+
+.life-date.selected .life-date-badge {
+  border-color: color-mix(in srgb, var(--accent) 26%, transparent);
+  background: color-mix(in srgb, var(--accent) 11%, transparent);
+}
+
+.life-date-number {
+  position: relative;
+}
+
+.life-date.today .life-date-number,
+.life-date.selected .life-date-number {
+  color: var(--accent);
+  font-weight: 650;
+}
+
+.life-date.today .life-date-number::after {
+  position: absolute;
+  top: calc(100% + 5px);
+  left: 50%;
+  width: 14px;
+  height: 2px;
+  transform: translateX(-50%);
+  border-radius: 999px;
+  background: var(--accent);
+  content: '';
+}
+
+.life-marker {
+  grid-row: 3;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
+  font-size: 21px;
+}
+
+.life-marker img {
+  width: 21px;
+  height: 21px;
+  object-fit: contain;
+}
+
+.life-marker small {
+  font-size: 10px;
+  opacity: 0.65;
+}
+
+@media (max-width: 420px) {
+  .life-marker { font-size: 18px; }
+  .life-marker img { width: 18px; height: 18px; }
+}
 </style>
