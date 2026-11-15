@@ -40,6 +40,7 @@ function requiresJsonBody(method: string, path: string): boolean {
   return !(
     (method === 'PUT' && /^\/api\/assets\/[^/]+$/.test(path))
     || (method === 'POST' && path === '/api/note/images')
+    || (method === 'POST' && path === '/api/diary/attachments/stage')
   )
 }
 

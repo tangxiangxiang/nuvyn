@@ -10,7 +10,9 @@ import { useDiaryMoodIconPreferences } from '../composables/diary/useDiaryMoodIc
 import { useAuth } from '../composables/useAuth'
 import { useConfirm } from '../composables/useConfirm'
 import { createDiaryEventId, diaryLifeApi } from '../lib/diary-life-api'
+import { diaryAttachmentsApi } from '../lib/diary-attachments-api'
 import { addDays, compareEvents, dayDistance, localToday, nextOccurrence, occursOn, parseDay, parseEvent, type DiaryDay, type DiaryDaySummary, type DiaryEvent, type DayFields, type EventFields } from '../../shared/diaryLife'
+import { MAX_DIARY_ATTACHMENT_BYTES, MAX_DIARY_DAY_ATTACHMENTS, type DiaryAttachment } from '../../shared/diaryAttachments'
 import { NUVYN_BROWSER_STORAGE_KEYS, ownerScopedStorageKey, readStorageKey, writeStorageKey } from '../technicalNamespace'
 import DiaryLifeCalendar from '../components/diary/DiaryLifeCalendar.vue'
 import DiaryDayDialog from '../components/diary/DiaryDayDialog.vue'
@@ -42,6 +44,8 @@ const events = ref<DiaryEvent[]>([])
 const upcoming = ref<DiaryEvent[]>([])
 const selected = ref<string | null>(null)
 const day = ref<DiaryDay | null>(null)
+const dayAttachments = ref<DiaryAttachment[]>([])
+const draftAttachments = ref<Array<DiaryAttachment & { pending?: boolean }>>([])
 const dayVersion = ref(0)
 const draft = ref<DayFields>({ moodId: null, entries: [] })
 const dayMode = ref<'read' | 'edit'>('read')
@@ -51,6 +55,8 @@ const newId = ref('')
 const initial = ref('')
 const busy = ref(false)
 const loadingDay = ref(false)
+const attachmentBusy = ref(false)
+const attachmentError = ref('')
 const dayReadFailed = ref(false)
 const error = ref('')
 const formError = ref('')
@@ -65,13 +71,14 @@ const eventListLoadingMore = ref(false)
 const eventListError = ref('')
 let request: AbortController | null = null
 let detailRequest: AbortController | null = null
+let attachmentUploadRequest: AbortController | null = null
 let eventListRequest: AbortController | null = null
 let timer: ReturnType<typeof setInterval> | undefined
 const dirty = computed(() => {
   if (selected.value === null || loadingDay.value || dayReadFailed.value) return false
   if (eventDraft.value) return JSON.stringify(eventDraft.value) !== initial.value
   if (mode.value !== 'diary' || dayMode.value !== 'edit') return false
-  return JSON.stringify(draft.value) !== initial.value
+  return JSON.stringify({ fields: draft.value, attachments: draftAttachments.value.map(item => item.id) }) !== initial.value
 })
 const storageKey = computed(() => auth.user.value ? ownerScopedStorageKey(NUVYN_BROWSER_STORAGE_KEYS.diaryLifeView, auth.user.value) : null)
 watch(storageKey, key => {
@@ -87,11 +94,11 @@ const countdowns = computed(() => upcoming.value.filter(e => e.showCountdown).fl
   return date ? [{ event, date, days: dayDistance(today.value, date) }] : []
 }).sort((a, b) => a.date.localeCompare(b.date) || a.event.id.localeCompare(b.event.id)))
 const markers = computed(() => {
-  const result: Record<string, { source?: string; emoji?: string; count?: number; hasEntries?: boolean }> = {}
+  const result: Record<string, { source?: string; emoji?: string; count?: number; hasEntries?: boolean; hasAttachments?: boolean }> = {}
   if (mode.value === 'diary') {
     for (const d of days.value) {
-      if (d.moodId) result[d.date] = { source: preferences.sourceFor(d.moodId) }
-      else if (d.hasEntries) result[d.date] = { hasEntries: true }
+      if (d.moodId) result[d.date] = { source: preferences.sourceFor(d.moodId), hasAttachments: d.hasAttachments }
+      else if (d.hasEntries || d.hasAttachments) result[d.date] = { hasEntries: d.hasEntries, hasAttachments: d.hasAttachments }
     }
   } else {
     for (let date = range.value.start; date <= range.value.end; date = addDays(date, 1)) {
@@ -121,10 +128,16 @@ async function load() {
 }
 function resetForm() {
   detailRequest?.abort()
+  attachmentUploadRequest?.abort()
+  attachmentUploadRequest = null
   selected.value = null
   eventDraft.value = null
   editing.value = null
   day.value = null
+  dayAttachments.value = []
+  draftAttachments.value = []
+  attachmentBusy.value = false
+  attachmentError.value = ''
   draft.value = { moodId: null, entries: [] }
   dayMode.value = 'read'
   dayVersion.value = 0
@@ -183,6 +196,7 @@ async function loadEventList(reset = false) {
 
 async function openEventList() {
   if (!(await canLeave()) || !access.isUnlocked.value) return
+  await discardPendingAttachments()
   resetForm()
   eventListVisible.value = true
   if (!eventListLoaded.value) void loadEventList(true)
@@ -238,46 +252,121 @@ watch(eventListVisible, visible => {
   }
 })
 async function canLeave() {
-  return !busy.value && (!dirty.value || await confirm('放弃未保存的修改？'))
+  return !busy.value && !attachmentBusy.value && (!dirty.value || await confirm('放弃未保存的修改？'))
 }
 async function close() {
-  if (await canLeave()) resetForm()
+  if (await canLeave()) {
+    await discardPendingAttachments()
+    resetForm()
+  }
 }
 function editDay() { dayMode.value = 'edit' }
 async function cancelDayEdit() {
-  if (busy.value) return
+  if (busy.value || attachmentBusy.value) return
   if (dirty.value && !await confirm('放弃未保存的修改？')) return
   if (!day.value) {
+    await discardPendingAttachments()
     resetForm()
     return
   }
+  await discardPendingAttachments()
   draft.value = { moodId: day.value?.moodId ?? null, entries: [...(day.value?.entries ?? [])] }
-  initial.value = JSON.stringify(draft.value)
+  draftAttachments.value = dayAttachments.value.map(item => ({ ...item }))
+  initial.value = JSON.stringify({ fields: draft.value, attachments: draftAttachments.value.map(item => item.id) })
   dayMode.value = 'read'
   formError.value = ''
 }
 function updateDayDraft(next: DayFields) { draft.value = next }
+async function discardPendingAttachments() {
+  const pending = draftAttachments.value.filter(item => item.pending)
+  for (const item of pending) {
+    try { await diaryAttachmentsApi.discard(item.id) } catch {
+      attachmentError.value = '部分未保存附件将在过期后自动清理。'
+    }
+  }
+  draftAttachments.value = dayAttachments.value.map(item => ({ ...item }))
+}
+async function addDayAttachments(files: File[]) {
+  if (!selected.value || dayMode.value !== 'edit' || attachmentBusy.value) return
+  const generation = captureDiarySessionGeneration()
+  const date = selected.value
+  const failures: string[] = []
+  const controller = new AbortController()
+  attachmentUploadRequest = controller
+  attachmentBusy.value = true
+  attachmentError.value = ''
+  try {
+    for (const file of files) {
+      if (controller.signal.aborted || !isDiarySessionGenerationCurrent(generation) || selected.value !== date) return
+      if (draftAttachments.value.length >= MAX_DIARY_DAY_ATTACHMENTS) {
+        failures.push(`${file.name}：每天最多添加 20 个附件。`)
+        continue
+      }
+      if (file.size > MAX_DIARY_ATTACHMENT_BYTES) {
+        failures.push(`${file.name}：单个附件不能超过 20 MiB。`)
+        continue
+      }
+      try {
+        const attachment = await diaryAttachmentsApi.stage(date, file, controller.signal)
+        if (controller.signal.aborted || !isDiarySessionGenerationCurrent(generation) || selected.value !== date) {
+          void diaryAttachmentsApi.discard(attachment.id).catch(() => {})
+          return
+        }
+        draftAttachments.value = [...draftAttachments.value, { ...attachment, pending: true }]
+      } catch (error) {
+        if (!controller.signal.aborted) failures.push(`${file.name}：${(error as Error).message}`)
+      }
+    }
+  } finally {
+    if (attachmentUploadRequest === controller) {
+      attachmentUploadRequest = null
+      attachmentBusy.value = false
+      attachmentError.value = isDiarySessionGenerationCurrent(generation) && selected.value === date
+        ? failures.join('\n')
+        : ''
+    }
+  }
+}
+async function removeDayAttachment(id: string) {
+  const attachment = draftAttachments.value.find(item => item.id === id)
+  if (!attachment || attachmentBusy.value || busy.value) return
+  attachmentError.value = ''
+  if (attachment.pending) {
+    attachmentBusy.value = true
+    try {
+      await diaryAttachmentsApi.discard(id)
+      draftAttachments.value = draftAttachments.value.filter(item => item.id !== id)
+    } catch (error) { attachmentError.value = (error as Error).message }
+    finally { attachmentBusy.value = false }
+    return
+  }
+  draftAttachments.value = draftAttachments.value.filter(item => item.id !== id)
+}
 async function open(date: string) {
   if (!(await canLeave()) || !access.isUnlocked.value) return false
+  await discardPendingAttachments()
   detailRequest?.abort()
   const scope = new AbortController(); detailRequest = scope
   selected.value = date; eventDraft.value = null; editing.value = null; formError.value = ''; initial.value = 'null'
-  day.value = null; draft.value = { moodId: null, entries: [] }; dayMode.value = 'edit'; dayReadFailed.value = false
+  day.value = null; dayAttachments.value = []; draftAttachments.value = []; draft.value = { moodId: null, entries: [] }; dayMode.value = 'edit'; dayReadFailed.value = false
   if (mode.value !== 'diary') return true
   loadingDay.value = true
   try {
     const result = await diaryLifeApi.day(date, scope.signal)
     if (scope.signal.aborted) return
     day.value = result.day
+    dayAttachments.value = result.attachments
+    draftAttachments.value = result.attachments.map(item => ({ ...item }))
     dayVersion.value = result.version
     draft.value = { moodId: result.day?.moodId ?? null, entries: [...(result.day?.entries ?? [])] }
     dayMode.value = result.day ? 'read' : 'edit'
-    initial.value = JSON.stringify(draft.value)
+    initial.value = JSON.stringify({ fields: draft.value, attachments: draftAttachments.value.map(item => item.id) })
   } catch { if (!scope.signal.aborted) { dayReadFailed.value = true; formError.value = '读取失败，请关闭后重试。' } }
   finally { if (!scope.signal.aborted) loadingDay.value = false }
 }
 async function toggle() {
   if (!(await canLeave())) return
+  await discardPendingAttachments()
   resetForm()
   mode.value = mode.value === 'diary' ? 'events' : 'diary'
 }
@@ -288,7 +377,7 @@ function edit(event?: DiaryEvent) {
   initial.value = JSON.stringify(eventDraft.value)
 }
 async function save() {
-  if (busy.value || loadingDay.value || dayReadFailed.value || !selected.value) return
+  if (busy.value || attachmentBusy.value || loadingDay.value || dayReadFailed.value || !selected.value) return
   const generation = captureDiarySessionGeneration()
   const date = selected.value
   busy.value = true; formError.value = ''
@@ -296,28 +385,33 @@ async function save() {
     if (!eventDraft.value) {
       const fields = parseDay(draft.value)
       if (!fields) { formError.value = '日记最多 100 条，每条和全部文字均不能超过 4000 个字符。'; return }
-      if (!fields.moodId && !fields.entries.length) {
+      const attachmentIds = draftAttachments.value.map(item => item.id)
+      if (!fields.moodId && !fields.entries.length && !attachmentIds.length) {
         if (day.value) {
           const version = dayVersion.value
           if (!await confirm('删除当天记录？') || !isDiarySessionGenerationCurrent(generation)) return
           await diaryLifeApi.deleteDay(date, version)
           if (!isDiarySessionGenerationCurrent(generation) || !access.isUnlocked.value) return
-          day.value = null
-          dayVersion.value = version + 1
+          resetForm()
+          await load()
+          return
         }
         draft.value = { moodId: null, entries: [] }
       } else {
         const unchanged = day.value
           && JSON.stringify(fields) === JSON.stringify({ moodId: day.value.moodId, entries: day.value.entries })
+          && JSON.stringify(attachmentIds) === JSON.stringify(dayAttachments.value.map(item => item.id))
         if (!unchanged) {
-          const result = await diaryLifeApi.saveDay(date, fields, dayVersion.value)
+          const result = await diaryLifeApi.saveDay(date, fields, dayVersion.value, attachmentIds)
           if (!isDiarySessionGenerationCurrent(generation) || !access.isUnlocked.value) return
           day.value = result.day
-          dayVersion.value = result.day.version
+          dayVersion.value = result.version
+          dayAttachments.value = result.attachments
+          draftAttachments.value = result.attachments.map(item => ({ ...item }))
         }
         draft.value = { moodId: fields.moodId, entries: [...fields.entries] }
       }
-      initial.value = JSON.stringify(draft.value)
+      initial.value = JSON.stringify({ fields: draft.value, attachments: draftAttachments.value.map(item => item.id) })
       dayMode.value = 'read'
       await load()
       return
@@ -336,7 +430,7 @@ async function save() {
 async function remove() {
   const date = selected.value
   const entry = eventDraft.value ? editing.value : day.value
-  if (busy.value || !date || !entry) return
+  if (busy.value || attachmentBusy.value || !date || !entry) return
   const generation = captureDiarySessionGeneration()
   busy.value = true
   try {
@@ -390,18 +484,23 @@ onBeforeUnmount(() => {
         :show="selected !== null && mode === 'diary' && !eventDraft"
         :date="selected"
         :day="day"
+        :attachments="draftAttachments"
         :draft="draft"
         :mode="dayMode"
         :loading="loadingDay"
         :read-failed="dayReadFailed"
         :busy="busy"
         :error="formError"
+        :attachment-busy="attachmentBusy"
+        :attachment-error="attachmentError"
         @edit="editDay"
         @cancel-edit="cancelDayEdit"
         @close="close"
         @save="save"
         @remove="remove"
         @update:draft="updateDayDraft"
+        @add-attachments="addDayAttachments"
+        @remove-attachment="removeDayAttachment"
       />
       <NModal v-if="selected !== null && (mode === 'events' || eventDraft)" :show="selected !== null && (mode === 'events' || eventDraft !== null)" preset="card" :title="selected ?? ''" class="diary-life-dialog" :mask-closable="!busy" :close-on-esc="!busy" :closable="!busy" @update:show="!$event && close()">
         <p v-if="formError" role="alert">{{ formError }}</p>

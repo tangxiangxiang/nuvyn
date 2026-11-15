@@ -7,6 +7,7 @@ import boardRoutes from './board/routes.js'
 import boardFolderRoutes from './board/folderRoutes.js'
 import boardMaterialRoutes from './board/materialRoutes.js'
 import diaryLifeRoutes from './routes/diaryLife.js'
+import diaryAttachmentRoutes from './routes/diaryAttachments.js'
 import diaryAccessRoutes from './routes/diaryAccess.js'
 import diaryMoodIconRoutes from './routes/diaryMoodIcons.js'
 import historyRoutes from './history/routes.js'
@@ -39,6 +40,7 @@ app.route('/', vaultIdentityRoutes)
 app.route('/', metadataRoutes)
 app.route('/', folderRoutes)
 app.route('/api/diary/life', diaryLifeRoutes)
+app.route('/api/diary/attachments', diaryAttachmentRoutes)
 app.route('/', diaryAccessRoutes)
 app.route('/api/diary/mood-icons', diaryMoodIconRoutes)
 app.route('/', postRoutes)

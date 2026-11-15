@@ -3,21 +3,26 @@ import { computed, ref } from 'vue'
 import { NButton, NCard, NIcon, NModal } from 'naive-ui'
 import { X } from '@vicons/tabler'
 import type { DayFields, DiaryDay } from '../../../shared/diaryLife'
+import type { DiaryAttachment } from '../../../shared/diaryAttachments'
 import { useDiaryMoodIconPreferences } from '../../composables/diary/useDiaryMoodIconPreferences'
 import DiaryMoodPicker from './DiaryMoodPicker.vue'
 import DiaryBulletEditor from './DiaryBulletEditor.vue'
 import DiaryBulletReader from './DiaryBulletReader.vue'
+import DiaryAttachmentSection from './DiaryAttachmentSection.vue'
 
 const props = defineProps<{
   show: boolean
   date: string
   day: DiaryDay | null
+  attachments: Array<DiaryAttachment & { pending?: boolean }>
   draft: DayFields
   mode: 'read' | 'edit'
   loading?: boolean
   readFailed?: boolean
   busy?: boolean
   error?: string
+  attachmentBusy?: boolean
+  attachmentError?: string
 }>()
 const emit = defineEmits<{
   edit: []
@@ -26,6 +31,8 @@ const emit = defineEmits<{
   save: []
   remove: []
   'update:draft': [draft: DayFields]
+  'add-attachments': [files: File[]]
+  'remove-attachment': [id: string]
 }>()
 const preferences = useDiaryMoodIconPreferences()
 const picker = ref(false)
@@ -41,8 +48,8 @@ function updateMood(moodId: string | null) {
 <template>
   <NModal
     :show="props.show"
-    :mask-closable="!props.busy"
-    :close-on-esc="!props.busy"
+    :mask-closable="!props.busy && !props.attachmentBusy"
+    :close-on-esc="!props.busy && !props.attachmentBusy"
     :auto-focus="false"
     @update:show="value => !value && emit('close')"
   >
@@ -60,9 +67,9 @@ function updateMood(moodId: string | null) {
         <header class="diary-day-header">
           <strong>{{ props.date }}</strong>
           <div class="diary-day-header-actions">
-            <NButton v-if="props.mode === 'read'" attr-type="button" quaternary :disabled="props.busy || props.loading || props.readFailed" data-testid="diary-edit-entry" @click="emit('edit')">编辑</NButton>
-            <NButton v-else attr-type="button" quaternary :disabled="props.busy" data-testid="diary-cancel-edit" @click="emit('cancel-edit')">取消</NButton>
-            <NButton attr-type="button" quaternary class="diary-day-close" :disabled="props.busy" aria-label="关闭日记" @click="emit('close')"><NIcon aria-hidden="true" :size="18"><X /></NIcon></NButton>
+            <NButton v-if="props.mode === 'read'" attr-type="button" quaternary :disabled="props.busy || props.attachmentBusy || props.loading || props.readFailed" data-testid="diary-edit-entry" @click="emit('edit')">编辑</NButton>
+            <NButton v-else attr-type="button" quaternary :disabled="props.busy || props.attachmentBusy" data-testid="diary-cancel-edit" @click="emit('cancel-edit')">取消</NButton>
+            <NButton attr-type="button" quaternary class="diary-day-close" :disabled="props.busy || props.attachmentBusy" aria-label="关闭日记" @click="emit('close')"><NIcon aria-hidden="true" :size="18"><X /></NIcon></NButton>
           </div>
         </header>
       </template>
@@ -86,15 +93,24 @@ function updateMood(moodId: string | null) {
 
           <DiaryBulletReader v-if="props.mode === 'read'" :entries="props.draft.entries" />
           <DiaryBulletEditor v-else :entries="props.draft.entries" @update:entries="emit('update:draft', { ...props.draft, entries: $event })" />
-          <!-- Diary attachments will be rendered after the entries in Phase 2. -->
+          <DiaryAttachmentSection
+            :date="props.date"
+            :attachments="props.attachments"
+            :mode="props.mode"
+            :disabled="props.busy || props.loading || props.readFailed"
+            :uploading="props.attachmentBusy"
+            :error="props.attachmentError"
+            @add="emit('add-attachments', $event)"
+            @remove="emit('remove-attachment', $event)"
+          />
         </div>
       </template>
 
       <template v-if="props.mode === 'edit'" #footer>
         <div class="diary-day-actions">
-          <NButton v-if="props.day" text type="error" :disabled="props.busy" data-testid="diary-delete-entry" @click="emit('remove')">删除</NButton>
+          <NButton v-if="props.day" text type="error" :disabled="props.busy || props.attachmentBusy" data-testid="diary-delete-entry" @click="emit('remove')">删除</NButton>
           <span />
-          <NButton type="primary" :loading="props.busy" :disabled="props.loading || props.readFailed" data-testid="diary-save-entry" @click="emit('save')">保存</NButton>
+          <NButton type="primary" :loading="props.busy || props.attachmentBusy" :disabled="props.loading || props.readFailed || props.attachmentBusy" data-testid="diary-save-entry" @click="emit('save')">保存</NButton>
         </div>
       </template>
     </NCard>

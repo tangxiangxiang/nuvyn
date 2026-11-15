@@ -3,6 +3,9 @@ import { bodyLimit } from 'hono/body-limit'
 import { civilDate, dayDistance, parseDay, parseEvent, occursOn, nextOccurrence } from '../../shared/diaryLife.js'
 import { withDiaryBodyOperation } from '../diaryAccess/guard.js'
 import { diaryLifeStore, DiaryConflict } from '../diaryLife.js'
+import { DiaryAttachmentError } from '../diaryAttachments/service.js'
+import { cleanupDiaryAttachmentStorage, DiaryAttachmentStorage, ensureDiaryAttachmentStorage } from '../diaryAttachments/storage.js'
+import { MAX_DIARY_DAY_ATTACHMENTS } from '../../shared/diaryAttachments.js'
 import { metadataDb } from './shared.js'
 
 type Env = { Variables: { authUser: { id: number }; authSessionId: number } }
@@ -20,7 +23,9 @@ async function guarded(c: Context<Env>, run: (store: Store) => Promise<Response>
       return result
     }) ?? c.json({ code: 'diary-locked' }, 423)
   } catch (error) {
-    return error instanceof DiaryConflict ? c.json({ code: 'diary-conflict' }, 409) : c.json({ code: 'diary-unavailable' }, 503)
+    if (error instanceof DiaryConflict) return c.json({ code: 'diary-conflict' }, 409)
+    if (error instanceof DiaryAttachmentError) return c.json({ code: `diary-attachment-${error.code}` }, error.status)
+    return c.json({ code: 'diary-unavailable' }, 503)
   }
 }
 const version = (v: unknown): v is number => Number.isSafeInteger(v) && (v as number) >= 0 && (v as number) < Number.MAX_SAFE_INTEGER
@@ -28,19 +33,31 @@ const idValid = (id: string) => /^[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-
 routes.get('/days', c => guarded(c, store => {
   const { start, end } = c.req.query()
   if (!civilDate(start) || !civilDate(end) || end < start || dayDistance(start, end) > 62) return c.json({ code: 'invalid-diary-range' }, 400)
-  return c.json({ days: store.days(start, end).map(({ date, moodId, entries, version }) => ({ date, moodId, hasEntries: entries.length > 0, version })) })
+  return c.json({ days: store.days(start, end).map(({ date, moodId, entries, hasAttachments, version }) => ({ date, moodId, hasEntries: entries.length > 0, hasAttachments, version })) })
 }))
-routes.get('/days/:date', c => guarded(c, store => {
+routes.get('/days/:date', c => guarded(c, async store => {
   const date = c.req.param('date')
   if (!civilDate(date)) return c.json({ code: 'invalid-diary-date' }, 400)
-  return c.json({ day: store.getDay(date), version: store.dayVersion(date) })
+  const db = metadataDb()
+  const storage = new DiaryAttachmentStorage()
+  await ensureDiaryAttachmentStorage(db, storage)
+  await cleanupDiaryAttachmentStorage(db, storage)
+  return c.json({ day: store.getDay(date), version: store.dayVersion(date), attachments: store.dayAttachments(date) })
 }))
 routes.put('/days/:date', c => guarded(c, async store => {
   const date = c.req.param('date')
   const body = await c.req.json().catch(() => null)
   const fields = parseDay(body)
-  if (!civilDate(date) || !fields || !version(body?.expectedVersion) || (!fields.moodId && !fields.entries.length)) return c.json({ code: 'invalid-diary-day' }, 400)
-  return c.json({ day: store.putDay(date, fields, body.expectedVersion) })
+  const attachmentIds = body?.attachments
+  if (!civilDate(date) || !fields || !version(body?.expectedVersion)
+    || (attachmentIds !== undefined && (!Array.isArray(attachmentIds) || attachmentIds.length > MAX_DIARY_DAY_ATTACHMENTS || attachmentIds.some((id: unknown) => typeof id !== 'string' || !idValid(id))))
+    || (!fields.moodId && !fields.entries.length && !(Array.isArray(attachmentIds) && attachmentIds.length))) return c.json({ code: 'invalid-diary-day' }, 400)
+  const day = store.putDay(date, fields, body.expectedVersion, attachmentIds)
+  // The SQLite transaction has already committed. Physical deletion is
+  // represented by durable tombstones and will be retried on later requests
+  // or startup recovery, so cleanup failure must not report a false save error.
+  await cleanupDiaryAttachmentStorage(metadataDb(), new DiaryAttachmentStorage()).catch(() => {})
+  return c.json({ day, version: day.version, attachments: store.dayAttachments(date) })
 }))
 routes.get('/events', c => guarded(c, store => {
   const { start, end, offset = '0', date } = c.req.query()
@@ -83,6 +100,7 @@ for (const kind of ['days', 'events'] as const) {
     const id = c.req.param('id')
     if (!version(body?.expectedVersion) || body.expectedVersion < 1 || !(kind === 'days' ? civilDate(id) : idValid(id))) return c.json({ code: 'invalid-diary-delete' }, 400)
     store.remove(kind === 'days' ? 'day' : 'event', id, body.expectedVersion)
+    if (kind === 'days') await cleanupDiaryAttachmentStorage(metadataDb(), new DiaryAttachmentStorage()).catch(() => {})
     return c.json({ ok: true })
   }))
 }

@@ -156,6 +156,26 @@ describe('Phase 5 central authentication boundary', () => {
       expect(validOrigin.status).not.toBe(403)
       expect(validOrigin.headers.get('cache-control')).toBe('no-store')
 
+      const multipart = new FormData()
+      multipart.set('date', '2026-11-15')
+      multipart.set('file', new File([Buffer.from('private')], 'private.png', { type: 'image/png' }))
+      const multipartStage = await app.fetch(new Request('http://localhost/api/diary/attachments/stage', {
+        method: 'POST',
+        headers: { Cookie: context.cookie, Origin: context.runtime.config.publicOrigin },
+        body: multipart,
+      }))
+      // Multipart is accepted only at the dedicated stage endpoint, then the
+      // Diary capability boundary still rejects the request while locked.
+      expect(multipartStage.status).toBe(423)
+
+      const crossOriginMultipart = await app.fetch(new Request('http://localhost/api/diary/attachments/stage', {
+        method: 'POST',
+        headers: { Cookie: context.cookie, Origin: 'http://evil.example' },
+        body: multipart,
+      }))
+      expect(crossOriginMultipart.status).toBe(403)
+      expect(await crossOriginMultipart.json()).toMatchObject({ code: 'csrf-origin-mismatch' })
+
       const emptyStream = new ReadableStream<Uint8Array>({
         start(controller) {
           controller.close()

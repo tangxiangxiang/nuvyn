@@ -7,10 +7,11 @@ Nuvyn server persistence spans the vault, the data directory, and any externally
 | Markdown notes | `src/content/**/*.md` | Required. |
 | Vault versions and identity | `src/content/.git/`, `src/content/.nuvyn/`, vault dotfiles | Required if History must survive. |
 | SQLite metadata, AI data, Authentication v1 state, and Ledger financial state | `data/nuvyn.db` plus active WAL/SHM files | Required for titles, summaries, tags, document IDs, migration records, `users`, `auth_instance`, `auth_sessions`, AI settings, encrypted credentials, sessions, messages, and Ledger's `ledger_settings`, `ledger_accounts`, `ledger_categories`, `ledger_transactions`, and `ledger_idempotency` tables. |
+| Diary private attachment ciphertext | `data/diary-attachments/` (Docker: `/app/data/diary-attachments/` in the `nuvyn-data` volume) | Required alongside SQLite. Copy this directory together with the database and active WAL/SHM files at one consistent point; neither side can restore the attachment relation alone. |
 | AI master key | `data/.nuvyn-master-key` or an external environment/secret file | Required to decrypt stored AI credentials. |
 | Unsaved drafts | Browser IndexedDB `nuvyn-draft-recovery` | Browser-local; not included in server or Docker backups. |
 
-A complete server backup includes the full vault, the full data directory, and the master key when it is managed outside `data/`.
+A complete server backup includes the full vault, the full data directory (including `diary-attachments/`), and the master key when it is managed outside `data/`.
 
 Ledger has no separate database and does not store financial records in
 Markdown. Its five `ledger_*` tables are server-owned structured state in the

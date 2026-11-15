@@ -2,7 +2,7 @@ import { Temporal } from '@js-temporal/polyfill'
 import { isMoodId, isDiaryCustomMoodId } from './diaryMood.js'
 
 export interface DayFields { moodId: string | null; entries: string[] }
-export interface DiaryDaySummary { date: string; moodId: string | null; hasEntries: boolean; version: number }
+export interface DiaryDaySummary { date: string; moodId: string | null; hasEntries: boolean; hasAttachments: boolean; version: number }
 export interface EventFields {
   title: string
   description: string

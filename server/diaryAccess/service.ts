@@ -35,6 +35,7 @@ import {
 } from './body.js'
 import { NUVYN_DIARY_ACCESS_CAPABILITY_HEADER } from '../../shared/technicalNamespace.js'
 import { diaryLifeCrypto } from './lifeCrypto.js'
+import { diaryAttachmentCrypto } from './attachmentCrypto.js'
 
 export const DIARY_ACCESS_CAPABILITY_HEADER = NUVYN_DIARY_ACCESS_CAPABILITY_HEADER
 
@@ -126,6 +127,7 @@ type CapabilityIssuance = {
 
 export type DiaryBodyOperation = {
   readonly life?: ReturnType<typeof diaryLifeCrypto>
+  readonly attachments?: ReturnType<typeof diaryAttachmentCrypto>
   readonly assertCurrent: () => void
   readonly isCurrent: () => boolean
   readonly encrypt: (raw: string, context: DiaryDocumentContext) => Buffer
@@ -594,6 +596,9 @@ export class DiaryAccessService {
     const operation: DiaryBodyOperation = {
       get life() {
         return diaryLifeCrypto(capability.dek, capability.vaultId, operation.assertCurrent)
+      },
+      get attachments() {
+        return diaryAttachmentCrypto(capability.dek, capability.vaultId, operation.assertCurrent)
       },
       isCurrent,
       assertCurrent: () => {

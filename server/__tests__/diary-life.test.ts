@@ -26,7 +26,7 @@ describe('Diary database API', () => {
     expect((await request('GET', '/events/list', undefined, false)).status).toBe(423)
   })
   it('repairs a version 43 database missing Diary deletion receipts', async () => {
-    db.exec('DROP TABLE diary_deleted_records; UPDATE schema_version SET version = 43')
+    db.exec('DROP TABLE diary_day_attachments; DROP TABLE diary_deleted_records; UPDATE schema_version SET version = 43')
     const path = '/days/2026-11-15'
     const eventPath = `/events/${randomUUID()}`
     const day = { moodId: null, description: 'Diary upgrade test', expectedVersion: 0 }
@@ -38,14 +38,14 @@ describe('Diary database API', () => {
     applyMigrations(db)
     const emptyDay = await request('GET', path)
     expect(emptyDay.status).toBe(200)
-    expect(await emptyDay.json()).toEqual({ day: null, version: 0 })
+    expect(await emptyDay.json()).toEqual({ day: null, version: 0, attachments: [] })
     expect((await request('PUT', path, day)).status).toBe(200)
     expect((await request('PUT', eventPath, event)).status).toBe(200)
     expect((await request('DELETE', path, { expectedVersion: 1 })).status).toBe(200)
 
-    // A complete version 43 database already has the table and can have receipts.
+    // Migration 44 is idempotent for installations that already had deletion receipts.
     db.exec('UPDATE schema_version SET version = 43')
-    applyMigrations(db)
+    applyMigrations(db, 44)
     expect((await request('PUT', path, day)).status).toBe(409)
     expect((await request('GET', eventPath)).status).toBe(200)
   })
@@ -78,7 +78,7 @@ describe('Diary database API', () => {
     const legacy = await request('GET', `/days/${date}`)
     expect((await legacy.json()).day).toMatchObject({ moodId: null, entries: [legacyText], version: 1 })
     const summary = await request('GET', '/days?start=2026-11-01&end=2026-11-30')
-    expect((await summary.json()).days).toContainEqual({ date, moodId: null, hasEntries: true, version: 1 })
+    expect((await summary.json()).days).toContainEqual({ date, moodId: null, hasEntries: true, hasAttachments: false, version: 1 })
     expect((await request('GET', '/days?start=2026-11-01&end=2026-11-30', undefined, false)).status).toBe(423)
 
     const replacement = ['新的第一条', '新的第二条']

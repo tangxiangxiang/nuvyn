@@ -1,0 +1,98 @@
+import { Hono, type Context } from 'hono'
+import { bodyLimit } from 'hono/body-limit'
+import { civilDate } from '../../shared/diaryLife.js'
+import { MAX_DIARY_ATTACHMENT_BYTES } from '../../shared/diaryAttachments.js'
+import { withDiaryBodyOperation } from '../diaryAccess/guard.js'
+import type { DiaryBodyOperation } from '../diaryAccess/service.js'
+import { DiaryAttachmentError, discardStagedDiaryAttachment, readDiaryAttachment, stageDiaryAttachment } from '../diaryAttachments/service.js'
+import { DiaryAttachmentStorage } from '../diaryAttachments/storage.js'
+import { validateDiaryAttachmentInput } from '../diaryAttachments/validation.js'
+import { metadataDb } from './shared.js'
+
+type Env = { Variables: { authUser: { id: number }; authSessionId: number } }
+const routes = new Hono<Env>()
+const attachmentStorage = () => new DiaryAttachmentStorage()
+const MAX_MULTIPART_OVERHEAD = 64 * 1024
+routes.use('*', async (c, next) => {
+  c.header('Cache-Control', 'no-store')
+  await next()
+})
+routes.use('*', bodyLimit({ maxSize: MAX_DIARY_ATTACHMENT_BYTES + MAX_MULTIPART_OVERHEAD }))
+
+async function guarded(c: Context<Env>, run: (owner: number, operation: DiaryBodyOperation) => Promise<Response> | Response) {
+  const owner = c.get('authUser')?.id
+  if (!owner) return c.json({ code: 'auth-session-required' }, 401)
+  try {
+    return await withDiaryBodyOperation(c, async operation => {
+      if (!operation.attachments) return c.json({ code: 'diary-unavailable' }, 503)
+      const response = await run(owner, operation)
+      operation.assertCurrent()
+      return response
+    }) ?? c.json({ code: 'diary-locked' }, 423)
+  } catch (error) {
+    if (error instanceof DiaryAttachmentError) return c.json({ code: `diary-attachment-${error.code}` }, error.status)
+    c.header('Cache-Control', 'no-store')
+    return c.json({ code: 'diary-attachment-unavailable' }, 503)
+  }
+}
+
+routes.post('/stage', c => guarded(c, async (owner, operation) => {
+  let form: FormData
+  try { form = await c.req.formData() } catch { return c.json({ code: 'diary-attachment-invalid' }, 400) }
+  const date = form.get('date')
+  const file = form.get('file')
+  const requestKey = c.req.header('Idempotency-Key') ?? ''
+  if (typeof date !== 'string' || !civilDate(date) || !(file instanceof File)) return c.json({ code: 'diary-attachment-invalid' }, 400)
+  if (file.size < 1) return c.json({ code: 'diary-attachment-invalid' }, 400)
+  if (file.size > MAX_DIARY_ATTACHMENT_BYTES) return c.json({ code: 'diary-attachment-too-large' }, 413)
+  const bytes = Buffer.from(await file.arrayBuffer())
+  try {
+    const validated = validateDiaryAttachmentInput({
+      bytes,
+      mimeType: file.type.trim().toLowerCase(),
+      name: file.name,
+    })
+    if (!validated) return c.json({ code: 'diary-attachment-unsupported' }, 415)
+    const metadata = await stageDiaryAttachment({
+      db: metadataDb(), owner, date, name: validated.name, mimeType: validated.mimeType,
+      bytes, requestKey, operation, storage: attachmentStorage(),
+    })
+    return c.json({ attachment: metadata }, 201)
+  } finally { bytes.fill(0) }
+}))
+
+routes.get('/:id/content', c => guarded(c, async (owner, operation) => {
+  const result = await readDiaryAttachment({ db: metadataDb(), owner, id: c.req.param('id'), operation, storage: attachmentStorage() })
+  if (!result) return c.json({ code: 'diary-attachment-not-found' }, 404)
+  let responseBytes: Uint8Array | null = null
+  try {
+    const encodedName = encodeURIComponent(result.metadata.name).replace(/[!'()*]/gu, char => `%${char.charCodeAt(0).toString(16).toUpperCase()}`)
+    const disposition = result.metadata.mimeType === 'application/pdf' ? 'attachment' : 'inline'
+    responseBytes = Uint8Array.from(result.bytes)
+    return new Response(responseBytes, { status: 200, headers: {
+      'Cache-Control': 'no-store',
+      'X-Content-Type-Options': 'nosniff',
+      'Content-Type': result.metadata.mimeType,
+      'Content-Disposition': `${disposition}; filename*=UTF-8''${encodedName}`,
+      'Content-Length': String(responseBytes.byteLength),
+      'Content-Security-Policy': "default-src 'none'; sandbox",
+    } })
+  } catch (error) {
+    responseBytes?.fill(0)
+    throw error
+  } finally {
+    result.bytes.fill(0)
+  }
+}))
+
+routes.delete('/:id', c => guarded(c, async (owner, operation) => {
+  await discardStagedDiaryAttachment({ db: metadataDb(), owner, id: c.req.param('id'), operation, storage: attachmentStorage() })
+  return c.json({ ok: true })
+}))
+
+routes.onError((_error, c) => {
+  c.header('Cache-Control', 'no-store')
+  return c.json({ code: 'diary-attachment-unavailable' }, 503)
+})
+
+export default routes
