@@ -45,6 +45,10 @@ for (const viewport of [{ width: 390, height: 844 }, { width: 768, height: 1024 
       await page.getByTestId('diary-save-entry').click()
       await expect(page.getByTestId('diary-edit-entry')).toBeVisible()
       await expect(page.getByTestId('diary-bullet-reader')).toContainText(`日记录 ${viewport.width}`)
+      await expect(page.getByTestId('diary-save-entry')).toHaveCount(0)
+      await expect(page.getByTestId('diary-delete-entry')).toHaveCount(0)
+      const initialTheme = await page.locator('html').getAttribute('data-theme')
+      await page.screenshot({ path: testInfo.outputPath(`diary-day-read-${viewport.width}-${initialTheme ?? 'default'}.png`) })
       await page.getByRole('button', { name: '关闭日记' }).click()
       if (viewport.width <= 768) await cell.tap()
       else await cell.click()
@@ -53,6 +57,7 @@ for (const viewport of [{ width: 390, height: 844 }, { width: 768, height: 1024 
       await page.getByTestId('diary-edit-entry').click()
       const reopenedInput = page.getByRole('textbox', { name: '第 1 条日记', exact: true })
       await expect(reopenedInput).toHaveValue(`日记录 ${viewport.width}`)
+      await page.screenshot({ path: testInfo.outputPath(`diary-day-edit-${viewport.width}.png`) })
       await page.getByTestId('diary-cancel-edit').click()
       await expect(reopenedInput).toBeHidden()
       await page.getByRole('button', { name: '关闭日记' }).click()
@@ -131,16 +136,75 @@ test('text-only Diary days have a calendar marker and preserve bullet editing in
   await expect(cell.locator('.life-entry-marker')).toBeVisible()
 })
 
+test('mood-only Diary day stays compact in read and edit modes across themes', async ({ page }, testInfo) => {
+  await page.setViewportSize({ width: 390, height: 844 })
+  await page.goto('/diary')
+  await unlockDiary(page)
+  const cell = page.locator('.diary-life-calendar [data-date$="-26"]')
+  await cell.click()
+  await page.getByRole('button', { name: '选择心情' }).click()
+  await page.getByTestId('diary-mood-picker').locator('[data-mood-id="happy"]').click()
+  await page.getByTestId('diary-save-entry').click()
+
+  const dialog = page.getByTestId('diary-day-dialog')
+  await expect(dialog.getByTestId('diary-day-mood')).toBeVisible()
+  await expect(dialog.getByTestId('diary-empty-reading')).toBeVisible()
+  await expect(dialog.getByTestId('diary-save-entry')).toHaveCount(0)
+  const originalTheme = await page.locator('html').getAttribute('data-theme')
+  await page.screenshot({ path: testInfo.outputPath(`diary-mood-only-read-${originalTheme ?? 'default'}.png`) })
+  await page.getByRole('button', { name: '关闭日记' }).click()
+
+  await page.locator('.theme-toggle').click()
+  const alternateTheme = await page.locator('html').getAttribute('data-theme')
+  expect(alternateTheme).not.toBe(originalTheme)
+  await cell.click()
+  await expect(dialog.getByTestId('diary-day-mood')).toBeVisible()
+  await expect(dialog.getByTestId('diary-empty-reading')).toBeVisible()
+  await page.screenshot({ path: testInfo.outputPath(`diary-mood-only-read-${alternateTheme ?? 'default'}.png`) })
+  await page.getByTestId('diary-edit-entry').click()
+  await expect(page.getByRole('button', { name: '选择心情' })).toBeVisible()
+  await expect(page.getByTestId('diary-save-entry')).toBeVisible()
+  await page.screenshot({ path: testInfo.outputPath(`diary-mood-only-edit-${alternateTheme ?? 'default'}.png`) })
+  await page.getByRole('button', { name: '关闭日记' }).click()
+  await page.locator('.theme-toggle').click()
+})
+
+test('closes the active day dialog when a save discovers the Diary was locked', async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 })
+  await page.goto('/diary')
+  await unlockDiary(page)
+  await page.locator('.diary-life-calendar [data-date$="-24"]').click()
+  const dialog = page.getByTestId('diary-day-dialog')
+  await expect(dialog).toBeVisible()
+  await page.getByRole('textbox', { name: '第 1 条日记', exact: true }).fill('锁定前的未保存内容')
+
+  const lockStatus = await page.evaluate(async () => {
+    const response = await fetch('/api/diary/access/lock', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: '{}',
+    })
+    return response.status
+  })
+  expect(lockStatus).toBe(200)
+
+  await page.getByTestId('diary-save-entry').click()
+  await expect(dialog).toHaveCount(0)
+  await expect(page.getByRole('button', { name: /解锁日记|Unlock Diary/ })).toBeVisible()
+})
+
 for (const viewport of [
   { width: 320, height: 568 },
   { width: 390, height: 844 },
+  { width: 430, height: 844 },
   { width: 768, height: 1024 },
+  { width: 1024, height: 768 },
   { width: 1280, height: 800 },
 ]) {
   test.describe(`Diary bullet editor at ${viewport.width}px`, () => {
     test.use({ hasTouch: viewport.width <= 768 })
 
-    test('keeps long entries inside the dialog and removes the day from the calendar', async ({ page }) => {
+    test('keeps long entries inside the dialog and removes the day from the calendar', async ({ page }, testInfo) => {
       await page.setViewportSize(viewport)
       await page.goto('/diary')
       await unlockDiary(page)
@@ -175,9 +239,13 @@ for (const viewport of [
         const editorNode = node.querySelector<HTMLElement>('[data-testid="diary-bullet-editor"]')!
         const row = editorNode.querySelector<HTMLElement>('.diary-bullet-row')!
         const button = row.querySelector<HTMLElement>('.diary-bullet-remove')!
+        const bodyScroller = node.querySelector<HTMLElement>('.n-card__content-scrollbar .n-scrollbar-container')!
         const dialogBounds = node.getBoundingClientRect()
         const rowBounds = row.getBoundingClientRect()
         const buttonBounds = button.getBoundingClientRect()
+        const addText = editorNode.querySelector<HTMLElement>('.diary-bullet-add .n-button__content')!
+        const footer = node.querySelector<HTMLElement>('.n-card__footer')!
+        const footerBounds = footer.getBoundingClientRect()
         return {
           dialogRight: dialogBounds.right,
           dialogWidth: node.clientWidth,
@@ -186,6 +254,11 @@ for (const viewport of [
           rowRight: rowBounds.right,
           buttonRight: buttonBounds.right,
           inputWidth: row.querySelector('textarea')!.getBoundingClientRect().width,
+          inputLeft: row.querySelector('textarea')!.getBoundingClientRect().left,
+          addTextLeft: addText.getBoundingClientRect().left,
+          bodyScrollHeight: bodyScroller.scrollHeight,
+          bodyClientHeight: bodyScroller.clientHeight,
+          footerBottom: footerBounds.bottom,
           documentWidth: document.documentElement.scrollWidth,
         }
       })
@@ -194,7 +267,11 @@ for (const viewport of [
       expect(layout.rowRight).toBeLessThanOrEqual(layout.editorRight + 1)
       expect(layout.buttonRight).toBeLessThanOrEqual(layout.rowRight + 1)
       expect(layout.inputWidth).toBeGreaterThan(100)
+      expect(Math.abs(layout.inputLeft - layout.addTextLeft)).toBeLessThanOrEqual(3)
       expect(layout.documentWidth).toBeLessThanOrEqual(viewport.width)
+      expect(layout.footerBottom).toBeLessThanOrEqual(viewport.height + 1)
+      if (viewport.width <= 430) expect(layout.bodyScrollHeight).toBeGreaterThan(layout.bodyClientHeight)
+      if (viewport.width === 390) await page.screenshot({ path: testInfo.outputPath('diary-editor-mobile.png') })
 
       const deleteFirst = page.getByRole('button', { name: '删除第 1 条日记', exact: true })
       if (viewport.width <= 768) await deleteFirst.tap()
@@ -217,6 +294,49 @@ for (const viewport of [
       await expect(cell.locator('.life-marker')).toHaveCount(0)
       expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true)
     })
+  })
+}
+
+for (const viewport of [
+  { width: 320, height: 568 },
+  { width: 390, height: 844 },
+  { width: 430, height: 844 },
+  { width: 768, height: 1024 },
+  { width: 1024, height: 768 },
+  { width: 1280, height: 800 },
+]) {
+  test(`cancel closes a new Diary date dialog at ${viewport.width}×${viewport.height}`, async ({ page }) => {
+    await page.setViewportSize(viewport)
+    await page.goto('/diary')
+    await unlockDiary(page)
+    const calendar = page.locator('.diary-life-calendar')
+    const cell = calendar.locator('[data-date$="-27"]')
+    await cell.click()
+
+    const dialog = page.getByTestId('diary-day-dialog')
+    await expect(dialog).toBeVisible()
+    const bounds = await dialog.evaluate(node => ({
+      left: node.getBoundingClientRect().left,
+      right: node.getBoundingClientRect().right,
+      width: node.clientWidth,
+      scrollWidth: node.scrollWidth,
+    }))
+    expect(bounds.left).toBeGreaterThanOrEqual(-1)
+    expect(bounds.right).toBeLessThanOrEqual(viewport.width + 1)
+    expect(bounds.scrollWidth).toBeLessThanOrEqual(bounds.width + 1)
+
+    const input = page.getByRole('textbox', { name: '第 1 条日记', exact: true })
+    await input.fill('暂不保存的草稿')
+    await page.getByTestId('diary-cancel-edit').click()
+    const confirmation = page.getByRole('dialog', { name: '放弃未保存的修改？' })
+    await expect(confirmation).toBeVisible()
+    await confirmation.getByRole('button', { name: /^(Cancel|取消)$/ }).click()
+    await expect(input).toHaveValue('暂不保存的草稿')
+
+    await page.getByTestId('diary-cancel-edit').click()
+    const discard = page.getByRole('dialog', { name: '放弃未保存的修改？' })
+    await discard.getByRole('button', { name: /^(OK|Confirm|确认|确定)$/ }).click()
+    await expect(dialog).toHaveCount(0)
   })
 }
 

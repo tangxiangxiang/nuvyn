@@ -37,6 +37,14 @@ describe('DiaryBulletEditor', () => {
     expect(wrapper.emitted('update:entries')?.at(-1)?.[0]).toEqual(['粘贴第一行\n粘贴第二行'])
   })
 
+  it('keeps the remove control in the row and exposes the add action after the list', () => {
+    const wrapper = mount(DiaryBulletEditor, { props: { entries: ['一条日记'] } })
+    const row = wrapper.get('.diary-bullet-row')
+    expect(row.find('textarea').exists()).toBe(true)
+    expect(row.find('.diary-bullet-remove').exists()).toBe(true)
+    expect(wrapper.get('.diary-bullet-add').text()).toContain('添加一条')
+  })
+
   it('does not split Enter or remove an entry while composition is active', async () => {
     const wrapper = mount(DiaryBulletEditor, { props: { entries: ['保留', ''] } })
     const empty = wrapper.findAll('textarea')[1]!.element as HTMLTextAreaElement

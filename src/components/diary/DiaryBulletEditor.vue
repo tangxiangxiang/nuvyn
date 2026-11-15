@@ -17,7 +17,7 @@ function setTextareaRef(element: unknown, index: number) {
 function resize(textarea: HTMLTextAreaElement | null | undefined) {
   if (!textarea) return
   textarea.style.height = 'auto'
-  textarea.style.height = `${Math.min(textarea.scrollHeight, 192)}px`
+  textarea.style.height = `${textarea.scrollHeight}px`
 }
 
 function update(index: number, value: string) {
@@ -149,9 +149,9 @@ onMounted(() => { void nextTick(() => textareas.forEach(resize)) })
 .diary-bullet-editor li + li { margin-block-start: 8px; }
 .diary-bullet-editor li::marker { color: var(--text-muted); }
 .diary-bullet-row { display: grid; grid-template-columns: minmax(0, 1fr) 40px; align-items: start; column-gap: 4px; min-width: 0; }
-.diary-bullet-editor textarea { display: block; width: 100%; min-width: 0; min-height: 1.6em; max-height: 12em; box-sizing: border-box; overflow-y: auto; resize: none; padding: 3px 0; border: 0; outline: 0; background: transparent; color: var(--text); font: inherit; line-height: 1.6; overflow-wrap: anywhere; }
+.diary-bullet-editor textarea { display: block; width: 100%; min-width: 0; min-height: 1.7em; box-sizing: border-box; overflow: hidden; resize: none; padding: 3px 0; border: 0; outline: 0; background: transparent; color: var(--text); font: inherit; line-height: 1.7; overflow-wrap: anywhere; }
 .diary-bullet-editor textarea:focus-visible { box-shadow: 0 1px 0 color-mix(in srgb, var(--accent) 55%, transparent); }
 .diary-bullet-remove { width: 40px; min-width: 40px; height: 40px; padding: 0; opacity: .7; }
 .diary-bullet-remove:hover { opacity: 1; }
-.diary-bullet-add { margin-top: 10px; }
+.diary-bullet-add { min-height: 40px; margin: 10px 0 0 1.4em; padding-inline: 0; }
 </style>

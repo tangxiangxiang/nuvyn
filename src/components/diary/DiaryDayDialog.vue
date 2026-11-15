@@ -47,10 +47,11 @@ function updateMood(moodId: string | null) {
     @update:show="value => !value && emit('close')"
   >
     <NCard
-      class="diary-life-dialog"
+      class="diary-life-dialog diary-day-dialog-card"
       data-testid="diary-day-dialog"
       :bordered="false"
       size="small"
+      :content-scrollable="true"
       role="dialog"
       aria-modal="true"
       :aria-label="props.date"
@@ -66,31 +67,34 @@ function updateMood(moodId: string | null) {
         </header>
       </template>
 
-      <p v-if="props.error" role="alert">{{ props.error }}</p>
-      <p v-else-if="props.loading" role="status">正在读取…</p>
-      <p v-else-if="props.readFailed" role="alert">读取失败，请关闭后重试。</p>
+      <p v-if="props.error" class="diary-day-message" role="alert">{{ props.error }}</p>
+      <p v-else-if="props.loading" class="diary-day-message" role="status">正在读取…</p>
+      <p v-else-if="props.readFailed" class="diary-day-message" role="alert">读取失败，请关闭后重试。</p>
       <template v-else>
-        <div v-if="props.mode === 'read' && props.draft.moodId" class="diary-day-mood" data-testid="diary-day-mood">
-          <img v-if="moodSource" :src="moodSource" :alt="moodLabel">
-          <span v-else-if="moodLabel">{{ moodLabel }}</span>
-        </div>
-        <div v-else-if="props.mode === 'edit'" class="diary-day-mood-editor">
-          <NButton attr-type="button" quaternary aria-label="选择心情" @click="picker = !picker">
-            <img v-if="moodSource" class="mood-preview" :src="moodSource" :alt="moodLabel">
-            <span v-else>选择心情</span>
-          </NButton>
-          <DiaryMoodPicker v-if="picker" class="life-mood-picker" :current-mood="props.draft.moodId" @select="updateMood($event)" @clear="updateMood(null)" @close="picker = false" />
-        </div>
+        <div class="diary-day-body" data-testid="diary-day-content">
+          <div v-if="props.mode === 'read' && props.draft.moodId" class="diary-day-mood" data-testid="diary-day-mood">
+            <img v-if="moodSource" :src="moodSource" :alt="moodLabel">
+            <span v-else-if="moodLabel">{{ moodLabel }}</span>
+          </div>
+          <div v-else-if="props.mode === 'edit'" class="diary-day-mood-editor">
+            <NButton attr-type="button" quaternary aria-label="选择心情" @click="picker = !picker">
+              <img v-if="moodSource" class="mood-preview" :src="moodSource" :alt="moodLabel">
+              <span v-else>选择心情</span>
+            </NButton>
+            <DiaryMoodPicker v-if="picker" class="life-mood-picker" :current-mood="props.draft.moodId" @select="updateMood($event)" @clear="updateMood(null)" @close="picker = false" />
+          </div>
 
-        <DiaryBulletReader v-if="props.mode === 'read'" :entries="props.draft.entries" />
-        <DiaryBulletEditor v-else :entries="props.draft.entries" @update:entries="emit('update:draft', { ...props.draft, entries: $event })" />
+          <DiaryBulletReader v-if="props.mode === 'read'" :entries="props.draft.entries" />
+          <DiaryBulletEditor v-else :entries="props.draft.entries" @update:entries="emit('update:draft', { ...props.draft, entries: $event })" />
+          <!-- Diary attachments will be rendered after the entries in Phase 2. -->
+        </div>
       </template>
 
       <template v-if="props.mode === 'edit'" #footer>
         <div class="diary-day-actions">
           <NButton v-if="props.day" text type="error" :disabled="props.busy" data-testid="diary-delete-entry" @click="emit('remove')">删除</NButton>
           <span />
-          <NButton v-if="props.mode === 'edit'" type="primary" :loading="props.busy" :disabled="props.loading || props.readFailed" data-testid="diary-save-entry" @click="emit('save')">保存</NButton>
+          <NButton type="primary" :loading="props.busy" :disabled="props.loading || props.readFailed" data-testid="diary-save-entry" @click="emit('save')">保存</NButton>
         </div>
       </template>
     </NCard>
@@ -98,15 +102,28 @@ function updateMood(moodId: string | null) {
 </template>
 
 <style scoped>
-.diary-day-header { display: flex; align-items: center; justify-content: space-between; gap: 16px; min-width: 0; }
-.diary-day-header > strong { font-size: 1.05rem; font-weight: 600; }
+.diary-day-header { display: flex; align-items: center; justify-content: space-between; gap: 12px; min-width: 0; }
+.diary-day-header > strong { font-size: 1rem; font-weight: 600; line-height: 1.4; }
 .diary-day-header-actions { display: flex; align-items: center; gap: 4px; }
-.diary-day-close { min-width: 32px; }
-.diary-day-mood { min-height: 34px; margin-top: 4px; font-size: 30px; line-height: 1; }
+.diary-day-header-actions :deep(.n-button) { min-height: 40px; }
+.diary-day-close { min-width: 40px; height: 40px; padding: 0; }
+.diary-day-message { margin: 4px 0; line-height: 1.6; }
+.diary-day-body { display: flex; min-width: 0; flex-direction: column; gap: 16px; padding-block: 4px 8px; }
+.diary-day-mood { display: flex; min-height: 40px; align-items: center; font-size: 28px; line-height: 1; }
 .diary-day-mood img { display: block; width: 32px; height: 32px; object-fit: contain; }
-.diary-day-mood-editor { margin: 0 0 10px; }
+.diary-day-mood-editor { min-width: 0; }
+.diary-day-mood-editor :deep(.n-button) { min-width: 40px; min-height: 40px; padding-inline: 0; color: var(--text-muted); }
+.diary-day-mood-editor :deep(.n-button__content) { justify-content: flex-start; }
 .mood-preview { width: 32px; height: 32px; }
-.life-mood-picker { position: static !important; max-width: 100%; margin-bottom: 12px; }
-.diary-day-actions { display: flex; align-items: center; gap: 12px; }
+.life-mood-picker { position: static !important; max-width: 100%; margin-top: 8px; }
+.diary-day-actions { display: flex; align-items: center; gap: 8px; }
 .diary-day-actions > span { flex: 1; }
+.diary-day-actions :deep(.n-button) { min-height: 40px; }
+</style>
+
+<style>
+.diary-life-dialog.diary-day-dialog-card.n-card { overflow: hidden; }
+.diary-day-dialog-card .n-card__content-scrollbar { min-height: 0; flex: 1 1 auto; overflow: hidden; }
+.diary-day-dialog-card .n-card__content-scrollbar .n-scrollbar { min-height: 0; flex: 1 1 auto; }
+.diary-day-dialog-card .n-card__content-scrollbar .n-scrollbar-container { overscroll-behavior: contain; }
 </style>

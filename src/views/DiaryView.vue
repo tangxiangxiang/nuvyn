@@ -247,6 +247,10 @@ function editDay() { dayMode.value = 'edit' }
 async function cancelDayEdit() {
   if (busy.value) return
   if (dirty.value && !await confirm('放弃未保存的修改？')) return
+  if (!day.value) {
+    resetForm()
+    return
+  }
   draft.value = { moodId: day.value?.moodId ?? null, entries: [...(day.value?.entries ?? [])] }
   initial.value = JSON.stringify(draft.value)
   dayMode.value = 'read'

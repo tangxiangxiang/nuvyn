@@ -63,7 +63,35 @@ describe('DiaryDayDialog reading mode', () => {
     expect(document.body.querySelector('[data-testid="diary-bullet-add"]')).toBeNull()
     expect(document.body.querySelector('[data-testid="diary-edit-entry"]')).not.toBeNull()
     expect(document.body.querySelector('[data-testid="diary-delete-entry"]')).toBeNull()
+    expect(document.body.querySelector('.diary-day-actions')).toBeNull()
     expect(document.body.querySelector('[aria-label="选择心情"]')).toBeNull()
+    wrapper.unmount()
+  })
+
+  it('keeps a mood-only day readable without turning mood selection into an edit control', () => {
+    const wrapper = mount(DiaryDayDialog, {
+      props: {
+        show: true,
+        date: day.date,
+        day: { ...day, moodId: 'happy', entries: [] },
+        draft: { moodId: 'happy', entries: [] },
+        mode: 'read',
+      },
+      attachTo: document.body,
+      global: {
+        stubs: {
+          NModal: { template: '<div><slot /></div>' },
+          NCard: { template: '<section><slot name="header" /><slot /><slot name="footer" /></section>' },
+          NButton: { template: '<button><slot /></button>' },
+          NIcon: { template: '<i><slot /></i>' },
+        },
+      },
+    })
+
+    expect(document.body.querySelector('[data-testid="diary-day-mood"] img')?.getAttribute('src')).toBe('/emoji/开心.svg')
+    expect(document.body.querySelector('[data-testid="diary-empty-reading"]')?.textContent).toBe('今天还没有文字记录。')
+    expect(document.body.querySelector('[aria-label="选择心情"]')).toBeNull()
+    expect(document.body.querySelector('.diary-day-actions')).toBeNull()
     wrapper.unmount()
   })
 
