@@ -13,11 +13,13 @@ test('Diary attachments upload privately, remain linked to the day, preview, and
   const leaseHeartbeat = page.waitForResponse(response => response.url().includes('/api/diary/attachments/sessions/') && response.url().endsWith('/heartbeat') && response.status() === 204)
   await cell.click()
   await leaseHeartbeat
+  await expect(page.getByTestId('diary-add-attachment')).toHaveCount(1)
   await page.getByTestId('diary-add-attachment').click()
   await page.getByTestId('diary-attachment-input').setInputFiles([
     { name: 'private-memory.png', mimeType: 'image/png', buffer: png },
     { name: 'private-memory.pdf', mimeType: 'application/pdf', buffer: pdf },
   ])
+  await expect(page.getByTestId('diary-add-attachment')).toHaveCount(1)
 
   const attachments = page.getByTestId('diary-attachments')
   await expect(attachments.getByRole('button', { name: '预览 private-memory.png' })).toBeVisible()
@@ -202,13 +204,15 @@ test('Diary entries keep photo groups attached through movement, refresh, cancel
   await cell.click()
   await page.getByTestId('diary-add-entry').click()
   const first = page.getByRole('textbox', { name: '第 1 条日记', exact: true })
-  await first.fill('早餐')
+  await first.fill('早餐\n今天早上吃了南瓜饼，记录食物的味道和当时的感受。')
   await page.getByTestId('diary-add-entry').click()
   const second = page.getByRole('textbox', { name: '第 2 条日记', exact: true })
   await second.fill('学习')
 
   const firstRow = page.locator('.diary-bullet-editor li').nth(0)
   const secondRow = page.locator('.diary-bullet-editor li').nth(1)
+  await expect(page.getByTestId('diary-add-entry-image')).toHaveCount(2)
+  await expect(page.getByTestId('diary-add-attachment')).toHaveCount(1)
   const firstEntryId = await firstRow.getAttribute('data-entry-id')
   const secondEntryId = await secondRow.getAttribute('data-entry-id')
   expect(firstEntryId).toBeTruthy()
@@ -234,6 +238,26 @@ test('Diary entries keep photo groups attached through movement, refresh, cancel
   let reader = page.getByTestId('diary-bullet-reader')
   let firstReadRow = reader.locator('li').nth(0)
   let secondReadRow = reader.locator('li').nth(1)
+  const listStyle = await reader.evaluate(element => {
+    const firstItem = element.querySelector('li')!
+    const marker = getComputedStyle(firstItem, '::marker')
+    const probe = document.createElement('span')
+    probe.style.color = 'var(--text-muted)'
+    document.body.append(probe)
+    const mutedColor = getComputedStyle(probe).color
+    probe.remove()
+    return {
+      listStyleType: getComputedStyle(element).listStyleType,
+      markerColor: marker.color,
+      mutedColor,
+      markerFontSize: Number.parseFloat(marker.fontSize),
+      paddingInlineStart: Number.parseFloat(getComputedStyle(element).paddingInlineStart),
+    }
+  })
+  expect(listStyle.listStyleType).toBe('disc')
+  expect(listStyle.markerColor).toBe(listStyle.mutedColor)
+  expect(listStyle.markerFontSize).toBeLessThan(16)
+  expect(listStyle.paddingInlineStart).toBeGreaterThan(0)
   await expect(firstReadRow.locator('.diary-attachment-item')).toHaveCount(9)
   await expect(secondReadRow.locator('.diary-attachment-item')).toHaveCount(2)
   for (const viewport of [
@@ -257,6 +281,31 @@ test('Diary entries keep photo groups attached through movement, refresh, cancel
     expect(layout.rootScrollWidth).toBeLessThanOrEqual(viewport.width)
     expect(layout.cardWidths).toHaveLength(8)
     expect(layout.cardWidths.every(width => width > 0 && width < layout.width)).toBe(true)
+
+    const bulletLayout = await reader.evaluate(node => {
+      const firstItem = node.querySelector('li')!
+      const text = firstItem.querySelector<HTMLElement>('.diary-bullet-reader-text')!
+      const gallery = firstItem.querySelector<HTMLElement>('.diary-attachment-section')!
+      const listStyle = getComputedStyle(node)
+      const listBounds = node.getBoundingClientRect()
+      const textBounds = text.getBoundingClientRect()
+      const galleryBounds = gallery.getBoundingClientRect()
+      return {
+        scrollWidth: node.scrollWidth,
+        width: node.clientWidth,
+        textOffset: textBounds.left - listBounds.left,
+        expectedTextOffset: Number.parseFloat(listStyle.paddingInlineStart),
+        textHeight: textBounds.height,
+        galleryOffset: galleryBounds.left - textBounds.left,
+        galleryTop: galleryBounds.top,
+        textBottom: textBounds.bottom,
+      }
+    })
+    expect(bulletLayout.scrollWidth).toBeLessThanOrEqual(bulletLayout.width)
+    expect(bulletLayout.textOffset).toBeGreaterThanOrEqual(bulletLayout.expectedTextOffset - 1)
+    expect(bulletLayout.textHeight).toBeGreaterThan(16)
+    expect(Math.abs(bulletLayout.galleryOffset)).toBeLessThanOrEqual(1)
+    expect(bulletLayout.galleryTop).toBeGreaterThanOrEqual(bulletLayout.textBottom)
   }
   await page.getByRole('button', { name: '关闭日记' }).click()
   await page.reload()

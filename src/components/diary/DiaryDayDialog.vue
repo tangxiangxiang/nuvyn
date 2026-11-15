@@ -153,8 +153,7 @@ function updateMood(moodId: string | null) {
                   image-only
                   :target-entry-id="entryId"
                   :placement-options="placementOptions"
-                  :disabled="props.busy || props.loading || props.readFailed"
-                  :uploading="props.attachmentBusy"
+                  :disabled="props.busy || props.loading || props.readFailed || props.attachmentBusy"
                   @add="(files, target) => emit('add-attachments', files, target)"
                   @remove="emit('remove-attachment', $event)"
                   @move="(id, target) => emit('move-attachment', id, target)"
@@ -169,8 +168,7 @@ function updateMood(moodId: string | null) {
                   image-only
                   :target-entry-id="entryId"
                   :placement-options="placementOptions"
-                  :disabled="props.busy || props.loading || props.readFailed"
-                  :uploading="props.attachmentBusy"
+                  :disabled="props.busy || props.loading || props.readFailed || props.attachmentBusy"
                   @add="(files, target) => emit('add-attachments', files, target)"
                 />
               </template>
@@ -183,14 +181,10 @@ function updateMood(moodId: string | null) {
             :attachments="group"
             :mode="props.mode"
             embedded
-            :show-add="groupIndex === 0 && !pdfAttachments.length"
-            add-label="添加附件"
+            :show-add="false"
             :target-entry-id="null"
             :placement-options="placementOptions"
-            :disabled="props.busy || props.loading || props.readFailed"
-            :uploading="props.attachmentBusy"
-            :error="groupIndex === 0 ? props.attachmentError : undefined"
-            @add="(files, target) => emit('add-attachments', files, target)"
+            :disabled="props.busy || props.loading || props.readFailed || props.attachmentBusy"
             @remove="emit('remove-attachment', $event)"
             @move="(id, target) => emit('move-attachment', id, target)"
           />
@@ -200,26 +194,22 @@ function updateMood(moodId: string | null) {
             :attachments="pdfAttachments"
             :mode="props.mode"
             embedded
-            :show-add="endImageGroups.length === 0"
-            add-label="添加附件"
+            :show-add="false"
             :target-entry-id="null"
             :placement-options="placementOptions"
-            :disabled="props.busy || props.loading || props.readFailed"
-            :uploading="props.attachmentBusy"
-            :error="!endImageGroups.length ? props.attachmentError : undefined"
-            @add="(files, target) => emit('add-attachments', files, target)"
+            :disabled="props.busy || props.loading || props.readFailed || props.attachmentBusy"
             @remove="emit('remove-attachment', $event)"
           />
           <DiaryAttachmentSection
-            v-if="props.mode === 'edit' && !endImageGroups.length && !pdfAttachments.length"
+            v-if="props.mode === 'edit'"
             :date="props.date"
             :attachments="[]"
             mode="edit"
             embedded
+            show-add
             add-label="添加附件"
             :target-entry-id="null"
-            :placement-options="placementOptions"
-            :disabled="props.busy || props.loading || props.readFailed"
+            :disabled="props.busy || props.loading || props.readFailed || props.attachmentBusy"
             :uploading="props.attachmentBusy"
             :error="props.attachmentError"
             @add="(files, target) => emit('add-attachments', files, target)"

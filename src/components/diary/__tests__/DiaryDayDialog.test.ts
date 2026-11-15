@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it } from 'vitest'
 import { mount } from '@vue/test-utils'
 import { nextTick } from 'vue'
 import DiaryDayDialog from '../DiaryDayDialog.vue'
@@ -13,6 +13,16 @@ const image: DiaryAttachment = {
   id: '92f3bb2b-2ded-43f3-8db2-dc77954bc918', date: day.date, name: 'breakfast.png',
   mimeType: 'image/png', size: 12, createdAt: 1, order: 0,
 }
+const pdf: DiaryAttachment = {
+  ...image,
+  id: '7be4f457-e73f-4e7c-8ea2-85ce5b17c7f4',
+  name: 'memory.pdf',
+  mimeType: 'application/pdf',
+}
+
+afterEach(() => {
+  document.body.replaceChildren()
+})
 
 function mountMixed(mode: 'read' | 'edit', currentDay: DiaryDay, attachments: DiaryAttachment[]) {
   return mount(DiaryDayDialog, {
@@ -99,6 +109,79 @@ describe('DiaryDayDialog reading mode', () => {
     expect(document.body.querySelector('[data-testid="diary-bullet-editor"]')).toBeNull()
     expect(document.body.querySelector('[data-testid="diary-add-attachment"]')).toBeNull()
     photoOnly.unmount()
+  })
+
+  it('keeps exactly one general attachment entry at the end for every attachment mix', async () => {
+    const entryId = '08a5c822-0d61-4e6c-a62c-1931a4da0771'
+    const manyImages = Array.from({ length: 10 }, (_, index): DiaryAttachment => ({
+      ...image,
+      id: `90000000-0000-4000-8000-${String(index + 1).padStart(12, '0')}`,
+      name: `photo-${index + 1}.png`,
+      order: index,
+    }))
+    const cases: Array<{ label: string; currentDay: DiaryDay; attachments: DiaryAttachment[] }> = [
+      { label: 'empty', currentDay: day, attachments: [] },
+      { label: 'images', currentDay: day, attachments: [image] },
+      { label: 'PDF', currentDay: day, attachments: [pdf] },
+      { label: 'mixed', currentDay: day, attachments: [image, pdf] },
+      {
+        label: 'multiple end groups',
+        currentDay: {
+          ...day,
+          entryIds: [entryId],
+          imageGroups: [
+            { entryId: null, attachmentIds: manyImages.slice(0, 9).map(item => item.id) },
+            { entryId: null, attachmentIds: manyImages.slice(9).map(item => item.id) },
+          ],
+        },
+        attachments: manyImages,
+      },
+    ]
+
+    for (const scenario of cases) {
+      const wrapper = mountMixed('edit', scenario.currentDay, scenario.attachments)
+      await nextTick()
+      const addButtons = document.body.querySelectorAll('[data-testid="diary-add-attachment"]')
+      expect(addButtons, scenario.label).toHaveLength(1)
+      const generalSection = addButtons[0]?.closest('section')
+      expect(generalSection?.getAttribute('data-testid')).toBe('diary-attachment-gallery')
+      expect(generalSection?.querySelectorAll('[data-testid="diary-attachment-input"]'), scenario.label).toHaveLength(1)
+      expect(document.body.querySelectorAll('[data-testid="diary-add-entry-image"]'), scenario.label)
+        .toHaveLength(scenario.currentDay.entryIds ? 1 : 0)
+
+      if (scenario.label === 'mixed') {
+        const accept = document.body.querySelector<HTMLInputElement>('[data-testid="diary-attachment-input"]')?.accept ?? ''
+        expect(accept).toContain('image/png')
+        expect(accept).toContain('application/pdf')
+      }
+
+      if (scenario.label === 'multiple end groups') {
+        await wrapper.setProps({ attachmentBusy: true, attachmentError: '上传失败' })
+        expect(document.body.querySelectorAll('[role="status"]')).toHaveLength(1)
+        expect(document.body.querySelectorAll('[role="alert"]')).toHaveLength(1)
+      }
+      wrapper.unmount()
+      document.body.replaceChildren()
+    }
+  })
+
+  it('keeps per-entry image upload separate and hides all upload controls in reading mode', async () => {
+    const entryId = '08a5c822-0d61-4e6c-a62c-1931a4da0771'
+    const entryDay: DiaryDay = { ...day, entryIds: [entryId] }
+    const editor = mountMixed('edit', entryDay, [])
+    await nextTick()
+    expect(document.body.querySelectorAll('[data-testid="diary-add-entry-image"]')).toHaveLength(1)
+    expect(document.body.querySelectorAll('[data-testid="diary-add-attachment"]')).toHaveLength(1)
+    expect(document.body.querySelectorAll('[data-testid="diary-attachment-input"]')).toHaveLength(2)
+    editor.unmount()
+    document.body.replaceChildren()
+
+    const reader = mountMixed('read', entryDay, [image, pdf])
+    await nextTick()
+    expect(document.body.querySelector('[data-testid="diary-add-entry-image"]')).toBeNull()
+    expect(document.body.querySelector('[data-testid="diary-add-attachment"]')).toBeNull()
+    expect(document.body.querySelector('[data-testid="diary-attachment-input"]')).toBeNull()
+    reader.unmount()
   })
 
   it('renders entries as plain text and hides editing controls', async () => {
