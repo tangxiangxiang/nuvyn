@@ -3,7 +3,7 @@ import { computed, ref } from 'vue'
 import { NCalendar } from 'naive-ui'
 import { useI18n } from '../../composables/useI18n'
 
-defineProps<{ today: string; markers: Record<string, { source?: string; emoji?: string; count?: number }> }>()
+defineProps<{ today: string; markers: Record<string, { source?: string; emoji?: string; count?: number; hasEntries?: boolean }> }>()
 const emit = defineEmits<{ select: [date: string]; month: [date: string] }>()
 const selected = ref<number>()
 const { locale } = useI18n()
@@ -37,7 +37,8 @@ function choose(year: number, month: number, day: number) {
         <span class="life-date-badge"><span class="life-date-number">{{ date }}</span></span>
         <span v-if="markers[dateFor(year, month, date)]" class="life-marker">
           <img v-if="markers[dateFor(year, month, date)]?.source" :src="markers[dateFor(year, month, date)]?.source" alt="">
-          <span v-else>{{ markers[dateFor(year, month, date)]?.emoji }}</span>
+          <span v-else-if="markers[dateFor(year, month, date)]?.emoji">{{ markers[dateFor(year, month, date)]?.emoji }}</span>
+          <span v-else-if="markers[dateFor(year, month, date)]?.hasEntries" class="life-entry-marker" aria-label="有文字日记">•</span>
           <small v-if="(markers[dateFor(year, month, date)]?.count ?? 0) > 1">+{{ markers[dateFor(year, month, date)]!.count! - 1 }}</small>
         </span>
       </button>
@@ -243,6 +244,12 @@ function choose(year: number, month: number, day: number) {
 .life-marker small {
   font-size: 10px;
   opacity: 0.65;
+}
+
+.life-entry-marker {
+  color: var(--accent);
+  font-size: 22px;
+  line-height: 1;
 }
 
 @media (max-width: 420px) {

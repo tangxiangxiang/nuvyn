@@ -995,8 +995,8 @@ onBeforeUnmount(() => {
           @click="appShell?.diaryViewToggleCommand?.value?.()"
         >
           <NIcon aria-hidden="true">
-            <CalendarEvent v-if="appShell.diaryViewMode?.value === 'diary'" />
-            <MoodSmile v-else />
+            <MoodSmile v-if="appShell.diaryViewMode?.value === 'diary'" />
+            <CalendarEvent v-else />
           </NIcon>
         </NButton>
         <NButton

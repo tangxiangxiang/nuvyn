@@ -1,7 +1,7 @@
 <script setup lang="ts">
-import { computed, inject, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { computed, inject, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { onBeforeRouteLeave } from 'vue-router'
-import { NButton, NInput, NModal } from 'naive-ui'
+import { NButton, NModal } from 'naive-ui'
 import { Temporal } from '@js-temporal/polyfill'
 import { DiaryAccessContextKey } from '../composables/diary/diaryAccessContext'
 import { AppShellContextKey } from '../composables/appShellContext'
@@ -10,10 +10,10 @@ import { useDiaryMoodIconPreferences } from '../composables/diary/useDiaryMoodIc
 import { useAuth } from '../composables/useAuth'
 import { useConfirm } from '../composables/useConfirm'
 import { createDiaryEventId, diaryLifeApi } from '../lib/diary-life-api'
-import { addDays, compareEvents, dayDistance, localToday, nextOccurrence, occursOn, parseEvent, type DiaryDay, type DiaryEvent, type DayFields, type EventFields } from '../../shared/diaryLife'
+import { addDays, compareEvents, dayDistance, localToday, nextOccurrence, occursOn, parseDay, parseEvent, type DiaryDay, type DiaryDaySummary, type DiaryEvent, type DayFields, type EventFields } from '../../shared/diaryLife'
 import { NUVYN_BROWSER_STORAGE_KEYS, ownerScopedStorageKey, readStorageKey, writeStorageKey } from '../technicalNamespace'
 import DiaryLifeCalendar from '../components/diary/DiaryLifeCalendar.vue'
-import DiaryMoodPicker from '../components/diary/DiaryMoodPicker.vue'
+import DiaryDayDialog from '../components/diary/DiaryDayDialog.vue'
 import DiaryEventForm from '../components/diary/DiaryEventForm.vue'
 import DiaryEventListDialog from '../components/diary/DiaryEventListDialog.vue'
 import { eventEmojiSource } from '../features/diary/eventEmoji'
@@ -37,13 +37,14 @@ async function confirm(message: string) {
 }
 const mode = ref<'diary' | 'events'>('diary')
 const month = ref(`${localToday().slice(0, 7)}-01`)
-const days = ref<Pick<DiaryDay, 'date' | 'moodId' | 'version'>[]>([])
+const days = ref<DiaryDaySummary[]>([])
 const events = ref<DiaryEvent[]>([])
 const upcoming = ref<DiaryEvent[]>([])
 const selected = ref<string | null>(null)
 const day = ref<DiaryDay | null>(null)
 const dayVersion = ref(0)
-const draft = ref<DayFields>({ moodId: null, description: '' })
+const draft = ref<DayFields>({ moodId: null, entries: [] })
+const dayMode = ref<'read' | 'edit'>('read')
 const eventDraft = ref<EventFields | null>(null)
 const editing = ref<DiaryEvent | null>(null)
 const newId = ref('')
@@ -51,7 +52,6 @@ const initial = ref('')
 const busy = ref(false)
 const loadingDay = ref(false)
 const dayReadFailed = ref(false)
-const picker = ref(false)
 const error = ref('')
 const formError = ref('')
 const allCountdowns = ref(false)
@@ -67,8 +67,12 @@ let request: AbortController | null = null
 let detailRequest: AbortController | null = null
 let eventListRequest: AbortController | null = null
 let timer: ReturnType<typeof setInterval> | undefined
-const dirty = computed(() => selected.value !== null && !loadingDay.value && !dayReadFailed.value
-  && JSON.stringify(eventDraft.value ? eventDraft.value : draft.value) !== initial.value)
+const dirty = computed(() => {
+  if (selected.value === null || loadingDay.value || dayReadFailed.value) return false
+  if (eventDraft.value) return JSON.stringify(eventDraft.value) !== initial.value
+  if (mode.value !== 'diary' || dayMode.value !== 'edit') return false
+  return JSON.stringify(draft.value) !== initial.value
+})
 const storageKey = computed(() => auth.user.value ? ownerScopedStorageKey(NUVYN_BROWSER_STORAGE_KEYS.diaryLifeView, auth.user.value) : null)
 watch(storageKey, key => {
   mode.value = key && readStorageKey(key) === 'events' ? 'events' : 'diary'
@@ -83,9 +87,12 @@ const countdowns = computed(() => upcoming.value.filter(e => e.showCountdown).fl
   return date ? [{ event, date, days: dayDistance(today.value, date) }] : []
 }).sort((a, b) => a.date.localeCompare(b.date) || a.event.id.localeCompare(b.event.id)))
 const markers = computed(() => {
-  const result: Record<string, { source?: string; emoji?: string; count?: number }> = {}
+  const result: Record<string, { source?: string; emoji?: string; count?: number; hasEntries?: boolean }> = {}
   if (mode.value === 'diary') {
-    for (const d of days.value) if (d.moodId) result[d.date] = { source: preferences.sourceFor(d.moodId) }
+    for (const d of days.value) {
+      if (d.moodId) result[d.date] = { source: preferences.sourceFor(d.moodId) }
+      else if (d.hasEntries) result[d.date] = { hasEntries: true }
+    }
   } else {
     for (let date = range.value.start; date <= range.value.end; date = addDays(date, 1)) {
       const matches = events.value.filter(e => occursOn(e, date)).sort(compareEvents)
@@ -118,12 +125,12 @@ function resetForm() {
   eventDraft.value = null
   editing.value = null
   day.value = null
-  draft.value = { moodId: null, description: '' }
+  draft.value = { moodId: null, entries: [] }
+  dayMode.value = 'read'
   dayVersion.value = 0
   loadingDay.value = false
   dayReadFailed.value = false
   initial.value = ''
-  picker.value = false
   formError.value = ''
 }
 
@@ -206,11 +213,10 @@ function clearShellCommands() {
 const diaryViewToggleCommand = () => { void toggle() }
 const diaryEventListCommand = () => { void openEventList() }
 
-async function selectEventFromList(event: DiaryEvent) {
+function selectEventFromList(event: DiaryEvent) {
   eventListVisible.value = false
   resetForm()
   selected.value = event.startDate
-  await nextTick()
   edit(event)
 }
 
@@ -237,12 +243,22 @@ async function canLeave() {
 async function close() {
   if (await canLeave()) resetForm()
 }
+function editDay() { dayMode.value = 'edit' }
+async function cancelDayEdit() {
+  if (busy.value) return
+  if (dirty.value && !await confirm('放弃未保存的修改？')) return
+  draft.value = { moodId: day.value?.moodId ?? null, entries: [...(day.value?.entries ?? [])] }
+  initial.value = JSON.stringify(draft.value)
+  dayMode.value = 'read'
+  formError.value = ''
+}
+function updateDayDraft(next: DayFields) { draft.value = next }
 async function open(date: string) {
   if (!(await canLeave()) || !access.isUnlocked.value) return false
   detailRequest?.abort()
   const scope = new AbortController(); detailRequest = scope
-  selected.value = date; eventDraft.value = null; editing.value = null; picker.value = false; formError.value = ''; initial.value = 'null'
-  day.value = null; draft.value = { moodId: null, description: '' }; dayReadFailed.value = false
+  selected.value = date; eventDraft.value = null; editing.value = null; formError.value = ''; initial.value = 'null'
+  day.value = null; draft.value = { moodId: null, entries: [] }; dayMode.value = 'edit'; dayReadFailed.value = false
   if (mode.value !== 'diary') return true
   loadingDay.value = true
   try {
@@ -250,7 +266,8 @@ async function open(date: string) {
     if (scope.signal.aborted) return
     day.value = result.day
     dayVersion.value = result.version
-    draft.value = { moodId: result.day?.moodId ?? null, description: result.day?.description ?? '' }
+    draft.value = { moodId: result.day?.moodId ?? null, entries: [...(result.day?.entries ?? [])] }
+    dayMode.value = result.day ? 'read' : 'edit'
     initial.value = JSON.stringify(draft.value)
   } catch { if (!scope.signal.aborted) { dayReadFailed.value = true; formError.value = '读取失败，请关闭后重试。' } }
   finally { if (!scope.signal.aborted) loadingDay.value = false }
@@ -273,13 +290,33 @@ async function save() {
   busy.value = true; formError.value = ''
   try {
     if (!eventDraft.value) {
-      if (!draft.value.moodId && !draft.value.description.trim()) {
+      const fields = parseDay(draft.value)
+      if (!fields) { formError.value = '日记最多 100 条，每条和全部文字均不能超过 4000 个字符。'; return }
+      if (!fields.moodId && !fields.entries.length) {
         if (day.value) {
-          const version = day.value.version
+          const version = dayVersion.value
           if (!await confirm('删除当天记录？') || !isDiarySessionGenerationCurrent(generation)) return
           await diaryLifeApi.deleteDay(date, version)
+          if (!isDiarySessionGenerationCurrent(generation) || !access.isUnlocked.value) return
+          day.value = null
+          dayVersion.value = version + 1
         }
-      } else await diaryLifeApi.saveDay(selected.value, draft.value, dayVersion.value)
+        draft.value = { moodId: null, entries: [] }
+      } else {
+        const unchanged = day.value
+          && JSON.stringify(fields) === JSON.stringify({ moodId: day.value.moodId, entries: day.value.entries })
+        if (!unchanged) {
+          const result = await diaryLifeApi.saveDay(date, fields, dayVersion.value)
+          if (!isDiarySessionGenerationCurrent(generation) || !access.isUnlocked.value) return
+          day.value = result.day
+          dayVersion.value = result.day.version
+        }
+        draft.value = { moodId: fields.moodId, entries: [...fields.entries] }
+      }
+      initial.value = JSON.stringify(draft.value)
+      dayMode.value = 'read'
+      await load()
+      return
     } else {
       const fields = parseEvent(eventDraft.value)
       if (!fields) { formError.value = '请检查标题、日期和时间范围。'; return }
@@ -344,19 +381,31 @@ onBeforeUnmount(() => {
         <button v-for="item in (allCountdowns ? countdowns : countdowns.slice(0, 3))" :key="item.event.id" type="button" @click="openCountdown(item.event, item.date)"><span><img v-if="eventEmojiSource(item.event.emoji)" :src="eventEmojiSource(item.event.emoji)" class="event-emoji" alt=""><template v-else>{{ item.event.emoji }}</template> {{ item.event.title }}</span><small>{{ item.days === 0 ? '就是今天' : `还有 ${item.days} 天` }}</small></button>
         <NButton v-if="countdowns.length > 3" text @click="allCountdowns = !allCountdowns">{{ allCountdowns ? '收起' : '查看全部' }}</NButton>
       </section>
-      <NModal :show="selected !== null" preset="card" :title="selected ?? ''" class="diary-life-dialog" :mask-closable="!busy" :close-on-esc="!busy" :closable="!busy" @update:show="!$event && close()">
+      <DiaryDayDialog
+        v-if="selected !== null && mode === 'diary' && !eventDraft"
+        :show="selected !== null && mode === 'diary' && !eventDraft"
+        :date="selected"
+        :day="day"
+        :draft="draft"
+        :mode="dayMode"
+        :loading="loadingDay"
+        :read-failed="dayReadFailed"
+        :busy="busy"
+        :error="formError"
+        @edit="editDay"
+        @cancel-edit="cancelDayEdit"
+        @close="close"
+        @save="save"
+        @remove="remove"
+        @update:draft="updateDayDraft"
+      />
+      <NModal v-if="selected !== null && (mode === 'events' || eventDraft)" :show="selected !== null && (mode === 'events' || eventDraft !== null)" preset="card" :title="selected ?? ''" class="diary-life-dialog" :mask-closable="!busy" :close-on-esc="!busy" :closable="!busy" @update:show="!$event && close()">
         <p v-if="formError" role="alert">{{ formError }}</p>
-        <p v-else-if="loadingDay" role="status">正在读取…</p>
-        <template v-if="mode === 'diary' && !eventDraft && !loadingDay && !dayReadFailed">
-          <NButton quaternary aria-label="选择心情" @click="picker = !picker"><img v-if="draft.moodId && preferences.sourceFor(draft.moodId)" class="mood-preview" :src="preferences.sourceFor(draft.moodId)" alt="心情"><span v-else>选择心情</span></NButton>
-          <DiaryMoodPicker v-if="picker" class="life-mood-picker" :current-mood="draft.moodId" @select="draft.moodId = $event; picker = false" @clear="draft.moodId = null; picker = false" @close="picker = false" />
-          <NInput v-model:value="draft.description" type="textarea" :input-props="{ 'aria-label': '记录' }" placeholder="记录今天的感受…" :maxlength="4000" :rows="5" />
-        </template>
-        <template v-else-if="mode === 'events' || eventDraft">
+        <template v-if="mode === 'events' || eventDraft">
           <DiaryEventForm v-if="eventDraft" v-model="eventDraft" />
           <div v-else class="day-events"><button v-for="event in selectedEvents" :key="event.id" type="button" @click="edit(event)"><strong><img v-if="eventEmojiSource(event.emoji)" :src="eventEmojiSource(event.emoji)" class="event-emoji" alt=""><template v-else>{{ event.emoji }}</template> {{ event.title }}</strong><span v-if="event.description">{{ event.description }}</span></button><p v-if="!selectedEvents.length">还没有事件</p><NButton @click="edit()">新增事件</NButton></div>
         </template>
-        <template #footer><div class="life-actions"><NButton v-if="(!eventDraft && mode === 'diary' && day) || editing" text type="error" :disabled="busy" @click="remove">删除</NButton><span /><NButton :disabled="busy" @click="close">取消</NButton><NButton v-if="mode === 'diary' || eventDraft" type="primary" :loading="busy" :disabled="loadingDay || dayReadFailed" @click="save">保存</NButton></div></template>
+        <template #footer><div class="life-actions"><NButton v-if="editing" text type="error" :disabled="busy" @click="remove">删除</NButton><span /><NButton :disabled="busy" @click="close">取消</NButton><NButton v-if="eventDraft" type="primary" :loading="busy" @click="save">保存</NButton></div></template>
       </NModal>
       <DiaryEventListDialog
         v-model:show="eventListVisible"
@@ -399,8 +448,6 @@ onBeforeUnmount(() => {
 .day-events { display: flex; flex-direction: column; gap: 12px; }
 .life-actions { display: flex; align-items: center; gap: 12px; }.life-actions > span { flex: 1; }
 .event-emoji { width: 20px; height: 20px; vertical-align: middle; margin-inline-end: 4px; }
-.mood-preview { width: 32px; height: 32px; }
-.life-mood-picker { position: static !important; max-width: 100%; margin-bottom: 12px; }
 .unlock-diary { display: block; margin: 20vh auto; }
 @media (max-width: 600px) { .diary-life { padding-inline: 8px; } }
 </style>

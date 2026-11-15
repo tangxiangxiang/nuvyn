@@ -50,12 +50,14 @@ describe('Diary database API', () => {
     expect((await request('GET', eventPath)).status).toBe(200)
   })
   it('creates one day, encrypts fields, detects conflicts, clears mood, and deletes', async () => {
-    const fields = { moodId: 'happy', description: '仅用于测试的私人记录', expectedVersion: 0 }
+    const fields = { moodId: 'happy', entries: ['仅用于测试的私人记录'], expectedVersion: 0 }
     expect((await request('PUT', '/days/2026-11-15', fields)).status).toBe(200)
     expect((await request('PUT', '/days/2026-11-15', fields)).status).toBe(409)
     const row = db.prepare('SELECT * FROM diary_days').get() as { encrypted_fields: Buffer }
-    expect(row.encrypted_fields.toString()).not.toContain(fields.description)
-    expect((await request('PUT', '/days/2026-11-15', { ...fields, moodId: null, expectedVersion: 1 })).status).toBe(200)
+    expect(row.encrypted_fields.toString()).not.toContain(fields.entries[0])
+    expect((await request('PUT', '/days/2026-11-15', { moodId: null, entries: [], expectedVersion: 1 })).status).toBe(400)
+    expect((await request('PUT', '/days/2026-11-15', { moodId: null, entries: ['  '], expectedVersion: 1 })).status).toBe(400)
+    expect((await request('PUT', '/days/2026-11-15', { moodId: null, entries: ['更新'], expectedVersion: 1 })).status).toBe(200)
     expect((await (await request('GET', '/days/2026-11-15')).json()).day.moodId).toBeNull()
     expect((await request('DELETE', '/days/2026-11-15', { expectedVersion: 1 })).status).toBe(409)
     expect((await request('DELETE', '/days/2026-11-15', { expectedVersion: 2 })).status).toBe(200)
@@ -64,6 +66,27 @@ describe('Diary database API', () => {
     expect(deleted.day).toBeNull()
     expect((await request('PUT', '/days/2026-11-15', { ...fields, expectedVersion: deleted.version })).status).toBe(200)
     expect((await request('PUT', '/days/2026-11-15', { ...fields, expectedVersion: 1 })).status).toBe(409)
+  })
+  it('reads legacy encrypted descriptions as one entry and writes the new entries payload', async () => {
+    const date = '2026-11-15'
+    const legacyText = '第一行  \n第二行保留原换行\n'
+    await auth.runtime.diaryAccess.withBodyOperation(auth.session.id, capability, operation => {
+      const payload = operation.life!.encrypt({ moodId: null, description: legacyText }, JSON.stringify([auth.userId, 'day', date, 1]))
+      db.prepare('INSERT INTO diary_days VALUES (?, ?, ?, ?, ?, ?)').run(auth.userId, date, payload, 1, 1, 1)
+    })
+
+    const legacy = await request('GET', `/days/${date}`)
+    expect((await legacy.json()).day).toMatchObject({ moodId: null, entries: [legacyText], version: 1 })
+    const summary = await request('GET', '/days?start=2026-11-01&end=2026-11-30')
+    expect((await summary.json()).days).toContainEqual({ date, moodId: null, hasEntries: true, version: 1 })
+    expect((await request('GET', '/days?start=2026-11-01&end=2026-11-30', undefined, false)).status).toBe(423)
+
+    const replacement = ['新的第一条', '新的第二条']
+    expect((await request('PUT', `/days/${date}`, { moodId: 'happy', entries: replacement, expectedVersion: 1 })).status).toBe(200)
+    const saved = await request('GET', `/days/${date}`)
+    expect((await saved.json()).day).toMatchObject({ moodId: 'happy', entries: replacement, version: 2 })
+    const row = db.prepare('SELECT encrypted_fields FROM diary_days WHERE date = ?').get(date) as { encrypted_fields: Buffer }
+    expect(row.encrypted_fields.toString()).not.toContain(replacement[0])
   })
   it('rejects invalid date and empty day', async () => {
     expect((await request('PUT', '/days/2026-02-29', { moodId: 'happy', description: '', expectedVersion: 0 })).status).toBe(400)

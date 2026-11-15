@@ -4,9 +4,9 @@ Diary is an independent workspace at `/diary`. SQLite is the source of truth for
 
 ## UI
 
-`DiaryView.vue` owns the displayed month, view preference, day and event dialogs and countdowns. `DiaryLifeCalendar.vue` wraps Naive UI Calendar and displays a single marker per cell. `DiaryEventForm.vue` handles event creation and editing, and `DiaryMoodPicker.vue` provides shared mood choices. Switching views keeps the calendar mounted, including its month and date selection. Only the view preference is stored in browser storage, scoped to the signed-in owner.
+`DiaryView.vue` owns the displayed month, view preference, day and event state and countdowns. `DiaryDayDialog.vue` presents one day's mood and bullet entries in reading or editing mode. `DiaryBulletReader.vue` renders entries as text, and `DiaryBulletEditor.vue` handles list input. `DiaryLifeCalendar.vue` wraps Naive UI Calendar and displays a single marker per cell. `DiaryEventForm.vue` handles event creation and editing, and `DiaryMoodPicker.vue` provides shared mood choices. Switching views keeps the calendar mounted, including its month and date selection. Only the view preference is stored in browser storage, scoped to the signed-in owner.
 
-Diary mode batches the month's mood markers and fetches the selected date's text on demand. Events mode reads events in pages, displays a primary event first, then sorts by start time, creation time and ID. A date shows one emoji and a count of any additional events. Preset event emojis use the same Fluent Emoji collection as moods. Custom event emojis use the device's emoji font. The dialog is centered on larger screens and appears at the bottom on phones.
+Diary mode batches the month's mood and text-entry markers, with the selected date's encrypted content fetched on demand. Existing encrypted `description` payloads are presented as one unchanged entry and are rewritten as `entries` only when saved. Events mode reads events in pages, displays a primary event first, then sorts by start time, creation time and ID. A date shows one emoji and a count of any additional events. Preset event emojis use the same Fluent Emoji collection as moods. Custom event emojis use the device's emoji font. The dialogs are centered on larger screens and appear at the bottom on phones.
 
 ## SQLite and privacy
 
@@ -14,9 +14,11 @@ Migration `0043_diary_life.sql` creates the following tables and removes the obs
 
 | Table | Key | Storage |
 | --- | --- | --- |
-| `diary_days` | owner, date | Encrypted mood ID and description |
+| `diary_days` | owner, date | Encrypted mood ID and entries (legacy description payloads are read compatibly) |
 | `diary_events` | owner, event UUID | Indexed start and end dates and recurrence, plus encrypted event fields |
 | `diary_deleted_records` | owner, kind, ID or date | Latest deletion version to reject a stale write |
+
+Bullet entries reuse `diary_days` and the existing encrypted payload; this change adds no SQLite migration.
 
 Owner, dates, event UUIDs, recurrence, version and creation/update timestamps are visible in an offline database inspection. Titles, descriptions, mood IDs, event emojis, categories, times, all-day, primary and countdown flags are encrypted. There is no public listing of Diary metadata. Each request checks authentication, owner scope and a valid Diary capability.
 
@@ -28,7 +30,7 @@ All endpoints are relative to `/api/diary/life`.
 
 | Method | Path | Purpose |
 | --- | --- | --- |
-| GET | `/days?start=&end=` | Batch mood markers |
+| GET | `/days?start=&end=` | Batch mood and `hasEntries` markers; requires unlocked Diary access |
 | GET | `/days/:date` | Read the day and its current version |
 | PUT, DELETE | `/days/:date` | Save or delete with `expectedVersion` |
 | GET | `/events?start=&end=&offset=` | Paged event range, with optional `date` filter |

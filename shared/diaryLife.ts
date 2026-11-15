@@ -1,7 +1,8 @@
 import { Temporal } from '@js-temporal/polyfill'
 import { isMoodId, isDiaryCustomMoodId } from './diaryMood.js'
 
-export interface DayFields { moodId: string | null; description: string }
+export interface DayFields { moodId: string | null; entries: string[] }
+export interface DiaryDaySummary { date: string; moodId: string | null; hasEntries: boolean; version: number }
 export interface EventFields {
   title: string
   description: string
@@ -27,12 +28,27 @@ export function dayDistance(from: string, to: string): number {
   return Temporal.PlainDate.from(from).until(Temporal.PlainDate.from(to)).days
 }
 export function addDays(date: string, days: number): string { return Temporal.PlainDate.from(date).add({ days }).toString() }
+export const MAX_DAY_ENTRIES = 100
+export const MAX_DAY_ENTRY_CHARACTERS = 4000
+export const MAX_DAY_TOTAL_CHARACTERS = 4000
 export function parseDay(value: unknown): DayFields | null {
   if (!value || typeof value !== 'object') return null
   const v = value as Record<string, unknown>
   if (v.moodId !== null && !isMoodId(v.moodId) && !isDiaryCustomMoodId(v.moodId)) return null
-  if (typeof v.description !== 'string' || v.description.length > 4000) return null
-  return { moodId: v.moodId as string | null, description: v.description.trim() }
+  let entries: unknown[]
+  if (Array.isArray(v.entries)) {
+    entries = v.entries
+  } else if (typeof v.description === 'string' && v.description.length <= MAX_DAY_TOTAL_CHARACTERS) {
+    // Existing encrypted records used one description string. Preserve it as
+    // one entry (including its original spacing and line breaks) on read.
+    entries = v.description.length > 0 ? [v.description] : []
+  } else {
+    return null
+  }
+  if (entries.length > MAX_DAY_ENTRIES || entries.some(entry => typeof entry !== 'string' || entry.length > MAX_DAY_ENTRY_CHARACTERS)) return null
+  const textEntries = entries as string[]
+  if (textEntries.reduce((total, entry) => total + entry.length, 0) > MAX_DAY_TOTAL_CHARACTERS) return null
+  return { moodId: v.moodId as string | null, entries: textEntries.filter(entry => entry.trim().length > 0) }
 }
 export function parseEvent(value: unknown): EventFields | null {
   if (!value || typeof value !== 'object') return null

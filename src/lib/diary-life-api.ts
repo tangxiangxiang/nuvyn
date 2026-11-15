@@ -1,5 +1,5 @@
 import { diaryAuthFetch } from './auth-session'
-import type { DiaryDay, DiaryEvent, DayFields, EventFields } from '../../shared/diaryLife'
+import type { DiaryDay, DiaryDaySummary, DiaryEvent, DayFields, EventFields } from '../../shared/diaryLife'
 
 export function createDiaryEventId(): string {
   if (typeof crypto.randomUUID === 'function') return crypto.randomUUID()
@@ -30,7 +30,7 @@ export const diaryLifeApi = {
     } while (offset !== null)
     return items
   },
-  days: (start: string, end: string, signal?: AbortSignal) => request<{ days: Pick<DiaryDay, 'date' | 'moodId' | 'version'>[] }>(`/days?start=${start}&end=${end}`, 'GET', undefined, signal),
+  days: (start: string, end: string, signal?: AbortSignal) => request<{ days: DiaryDaySummary[] }>(`/days?start=${start}&end=${end}`, 'GET', undefined, signal),
   day: (date: string, signal?: AbortSignal) => request<{ day: DiaryDay | null; version: number }>(`/days/${date}`, 'GET', undefined, signal),
   saveDay: (date: string, fields: DayFields, expectedVersion: number) => request<{ day: DiaryDay }>(`/days/${date}`, 'PUT', { ...fields, expectedVersion }),
   deleteDay: (date: string, expectedVersion: number) => request(`/days/${date}`, 'DELETE', { expectedVersion }),

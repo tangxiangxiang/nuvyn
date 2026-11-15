@@ -3,11 +3,21 @@ import { civilDate, dayDistance, nextOccurrence, occursOn, parseDay, parseEvent,
 
 const event: EventFields = { title: '生日', description: '', emoji: '🎂', type: 'anniversary', startDate: '2024-02-29', endDate: '2024-02-29', startTime: null, endTime: null, allDay: true, recurrence: 'yearly', showCountdown: true, isPrimary: false }
 describe('Diary natural days', () => {
-  it('rejects invalid dates and empty records are handled by the write boundary', () => {
+  it('normalizes legacy descriptions without losing their original text', () => {
     for (const value of ['2025-02-29', '2026-04-31', '2026-1-01', '0000-01-01', '2026-11-15T00:00:00Z']) expect(civilDate(value)).toBe(false)
     expect(civilDate('2024-02-29')).toBe(true)
-    expect(parseDay({ moodId: null, description: '  记录  ' })).toEqual({ moodId: null, description: '记录' })
-    expect(parseDay({ moodId: 'not-a-mood', description: '' })).toBeNull()
+    expect(parseDay({ moodId: null, description: '  第一行  \n第二行\n' })).toEqual({ moodId: null, entries: ['  第一行  \n第二行\n'] })
+    expect(parseDay({ moodId: null, description: '' })).toEqual({ moodId: null, entries: [] })
+    expect(parseDay({ moodId: 'not-a-mood', entries: [] })).toBeNull()
+  })
+  it('validates Bullet Entries limits without truncating existing 4000-character records', () => {
+    const legacy = '日'.repeat(4000)
+    expect(parseDay({ moodId: 'happy', description: legacy })).toEqual({ moodId: 'happy', entries: [legacy] })
+    expect(parseDay({ moodId: null, description: `${legacy}x` })).toBeNull()
+    expect(parseDay({ moodId: null, entries: ['一', '  ', '二\n行'] })).toEqual({ moodId: null, entries: ['一', '二\n行'] })
+    expect(parseDay({ moodId: null, entries: Array.from({ length: 101 }, () => 'a') })).toBeNull()
+    expect(parseDay({ moodId: null, entries: ['a'.repeat(4001)] })).toBeNull()
+    expect(parseDay({ moodId: null, entries: ['a'.repeat(2500), 'b'.repeat(1501)] })).toBeNull()
   })
   it('constrains Feb 29 to Feb 28 and finds the next year after occurrence', () => {
     expect(nextOccurrence(event, '2025-02-01')).toBe('2025-02-28')

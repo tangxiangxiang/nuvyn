@@ -28,7 +28,7 @@ const idValid = (id: string) => /^[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-
 routes.get('/days', c => guarded(c, store => {
   const { start, end } = c.req.query()
   if (!civilDate(start) || !civilDate(end) || end < start || dayDistance(start, end) > 62) return c.json({ code: 'invalid-diary-range' }, 400)
-  return c.json({ days: store.days(start, end).map(({ date, moodId, version }) => ({ date, moodId, version })) })
+  return c.json({ days: store.days(start, end).map(({ date, moodId, entries, version }) => ({ date, moodId, hasEntries: entries.length > 0, version })) })
 }))
 routes.get('/days/:date', c => guarded(c, store => {
   const date = c.req.param('date')
@@ -39,7 +39,7 @@ routes.put('/days/:date', c => guarded(c, async store => {
   const date = c.req.param('date')
   const body = await c.req.json().catch(() => null)
   const fields = parseDay(body)
-  if (!civilDate(date) || !fields || !version(body?.expectedVersion) || (!fields.moodId && !fields.description)) return c.json({ code: 'invalid-diary-day' }, 400)
+  if (!civilDate(date) || !fields || !version(body?.expectedVersion) || (!fields.moodId && !fields.entries.length)) return c.json({ code: 'invalid-diary-day' }, 400)
   return c.json({ day: store.putDay(date, fields, body.expectedVersion) })
 }))
 routes.get('/events', c => guarded(c, store => {

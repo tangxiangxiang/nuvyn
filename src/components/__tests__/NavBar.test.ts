@@ -10,7 +10,7 @@ import { useTheme } from '../../composables/useTheme'
 import { useScopeFilter } from '../../composables/vault/useScopeFilter'
 import { __resetVaultLayoutState } from '../../composables/vault/useVaultLayout'
 import { AppShellContextKey } from '../../composables/appShellContext'
-import { Calendar, Lock } from '@vicons/tabler'
+import { Calendar, CalendarEvent, Lock, MoodSmile } from '@vicons/tabler'
 
 function installWorkspaceMobileMediaQuery(initialMatches: boolean) {
   const originalDescriptor = Object.getOwnPropertyDescriptor(window, 'matchMedia')
@@ -268,6 +268,33 @@ describe('NavBar — scope chips', () => {
 
     expect(wrapper.findComponent(Lock).exists()).toBe(false)
     expect(wrapper.findComponent(Calendar).exists()).toBe(true)
+    wrapper.unmount()
+  })
+
+  it('shows the icon for the current Diary view while preserving the action label', async () => {
+    const diaryViewMode = ref<'diary' | 'events'>('diary')
+    const diaryViewToggleCommand = vi.fn()
+    const appShell = {
+      settingsRequestTick: ref(0),
+      diaryViewMode,
+      diaryViewToggleCommand: ref(diaryViewToggleCommand),
+      diaryEventListCommand: ref(vi.fn()),
+    }
+    const wrapper = mount(NavBar, {
+      props: { workspaceKind: 'diary', diaryUnlocked: true },
+      global: { provide: { [AppShellContextKey as symbol]: appShell }, stubs: { transition: false } },
+    })
+    const toggle = wrapper.get('[data-testid="diary-view-toggle"]')
+    expect(wrapper.findComponent(MoodSmile).exists()).toBe(true)
+    expect(toggle.attributes('aria-label')).toBe('切换到人生事件')
+    expect(wrapper.find('[data-testid="diary-event-list-toggle"]').exists()).toBe(true)
+    await toggle.trigger('click')
+    expect(diaryViewToggleCommand).toHaveBeenCalledOnce()
+
+    diaryViewMode.value = 'events'
+    await nextTick()
+    expect(wrapper.findComponent(CalendarEvent).exists()).toBe(true)
+    expect(toggle.attributes('aria-label')).toBe('切换到情绪日记')
     wrapper.unmount()
   })
 
