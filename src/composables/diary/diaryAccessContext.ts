@@ -1,9 +1,10 @@
-import type { InjectionKey } from 'vue'
+import type { InjectionKey, Ref } from 'vue'
 import type { ScopeKey } from '../../../shared/scopeProtocol'
 import type { DiaryAccessSession } from './useDiaryAccessSession'
 
 export interface DiaryAccessContext {
   readonly session: DiaryAccessSession
+  readonly dialogOpen: Readonly<Ref<boolean>>
   readonly requestAccess: () => Promise<boolean>
   readonly requestScopeChange: (scope: ScopeKey) => Promise<void>
   readonly lock: () => Promise<void>

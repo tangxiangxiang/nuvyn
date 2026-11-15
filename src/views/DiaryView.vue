@@ -658,7 +658,7 @@ onBeforeUnmount(() => {
         @select="selectEventFromList"
       />
     </template>
-    <NButton v-else class="unlock-diary" @click="accessContext?.requestAccess()">解锁日记</NButton>
+    <NButton v-else v-show="!accessContext?.dialogOpen.value" class="unlock-diary" @click="accessContext?.requestAccess()">解锁日记</NButton>
   </main>
 </template>
 

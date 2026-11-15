@@ -371,6 +371,7 @@ async function lockDiary(): Promise<void> {
 
 provide(DiaryAccessContextKey, {
   session: diaryAccess,
+  dialogOpen: diaryAccessOpen,
   requestAccess: requestDiaryAccess,
   requestScopeChange,
   lock: lockDiary,

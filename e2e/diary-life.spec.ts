@@ -300,7 +300,13 @@ test('closes the active day dialog when a save discovers the Diary was locked', 
 
   await saveDiaryDay(page)
   await expect(dialog).toHaveCount(0)
-  await expect(page.getByRole('button', { name: /解锁日记|Unlock Diary/ })).toBeVisible()
+  const unlockButton = page.getByRole('button', { name: '解锁日记', exact: true })
+  await expect(unlockButton).toBeVisible()
+  await unlockButton.click()
+  await expect(page.getByRole('dialog', { name: /解锁日记|Unlock Diary/ })).toBeVisible()
+  await expect(unlockButton).toBeHidden()
+  await page.getByTestId('diary-access-cancel').click()
+  await expect(unlockButton).toBeFocused()
 })
 
 for (const [index, viewport] of [
