@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, ref } from 'vue'
-import { NCalendar } from 'naive-ui'
+import { NCalendar, NDatePicker } from 'naive-ui'
 import { useI18n } from '../../composables/useI18n'
 import { diaryCalendarMonthFromFields, diaryDateFromCalendarFields, naiveCalendarValueForMonth } from './diaryCalendarAdapter'
 
@@ -18,6 +18,8 @@ const weekdays = computed(() => locale.value === 'zh'
   : ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'])
 const dateFor = (year: number, month: number, date: number) => diaryDateFromCalendarFields({ year, month, date }) ?? ''
 const calendarRef = ref<InstanceType<typeof NCalendar> | null>(null)
+const calendarPickerRevision = ref(0)
+const calendarKey = computed(() => `${props.revision}-${calendarPickerRevision.value}`)
 const initialMonthTimestamp = computed(() => {
   const [year, month] = props.month.split('-').map(Number)
   return naiveCalendarValueForMonth({ year: year!, month: month! }) ?? Date.now()
@@ -143,6 +145,21 @@ function onPanelChange(value: { year: number; month: number }) {
   if (firstDay) emit('month', firstDay)
 }
 
+function calendarMonthValue(year: number, month: number) {
+  return `${year}-${String(month).padStart(2, '0')}`
+}
+
+function onMonthPickerUpdate(value: string | null) {
+  const match = /^(\d{4})-(\d{2})$/.exec(value ?? '')
+  if (!match) return
+  const year = Number(match[1])
+  const month = Number(match[2])
+  const firstDay = dateFor(year, month, 1)
+  if (!firstDay || firstDay.slice(0, 7) === props.month.slice(0, 7)) return
+  calendarPickerRevision.value += 1
+  emit('month', firstDay)
+}
+
 function selectDate(date: string, event: MouseEvent) {
   // Escape can turn focus left by a pointer click into a visible focus ring.
   if (event.detail > 0 && event.currentTarget instanceof HTMLButtonElement) {
@@ -154,7 +171,7 @@ function selectDate(date: string, event: MouseEvent) {
 
 <template>
   <NCalendar
-    :key="props.revision"
+    :key="calendarKey"
     ref="calendarRef"
     class="diary-life-calendar"
     :default-value="initialMonthTimestamp"
@@ -167,7 +184,21 @@ function selectDate(date: string, event: MouseEvent) {
     @wheel="onWheel"
   >
     <template #header="{ year, month }">
-      <strong class="life-month">{{ dateFor(year, month, 1).slice(0, 7) }}</strong>
+      <div class="life-month-control">
+        <strong class="life-month-label">{{ calendarMonthValue(year, month) }}</strong>
+        <NDatePicker
+          class="life-month-picker"
+          type="month"
+          format="yyyy-MM"
+          value-format="yyyy-MM"
+          :bordered="false"
+          input-readonly
+          :formatted-value="calendarMonthValue(year, month)"
+          aria-label="选择日历月份"
+          data-testid="diary-calendar-month-picker"
+          @update:formatted-value="onMonthPickerUpdate"
+        />
+      </div>
       <div class="life-weekdays">
         <span v-for="label in weekdays" :key="label">{{ label }}</span>
       </div>
@@ -212,12 +243,71 @@ function selectDate(date: string, event: MouseEvent) {
   color: var(--text);
 }
 
-.life-month {
+.life-month-control {
+  position: relative;
+  z-index: 1;
+  display: grid;
+  align-self: center;
+  justify-self: center;
+  place-items: center;
+  width: 88px;
+  height: 44px;
+  border-radius: 8px;
+  transition: background-color .14s ease;
+}
+
+.life-month-label {
   align-self: center;
   justify-self: center;
   font-size: 0.95rem;
   font-weight: 600;
   letter-spacing: 0.02em;
+}
+
+.life-month-picker {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  opacity: 0;
+  cursor: pointer;
+}
+
+.life-month-picker :deep(.n-input) {
+  width: 100%;
+  height: 100%;
+  padding: 0;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  box-shadow: none;
+  text-align: center;
+}
+
+.life-month-picker :deep(.n-input__border),
+.life-month-picker :deep(.n-input__state-border),
+.life-month-picker :deep(.n-input__suffix) {
+  display: none;
+}
+
+.life-month-picker :deep(.n-input__input-el) {
+  height: 44px;
+  padding: 0;
+  color: var(--text);
+  font: inherit;
+  font-size: 0.95rem;
+  font-weight: 600;
+  line-height: 44px;
+  text-align: center;
+  cursor: pointer;
+}
+
+.life-month-control:hover,
+.life-month-control:focus-within {
+  background: color-mix(in srgb, var(--accent) 5%, transparent);
+}
+
+.life-month-control:focus-within .life-month-label {
+  color: var(--accent);
 }
 
 .life-weekdays {
