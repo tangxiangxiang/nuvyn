@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import { NButton, NEmpty, NSpin } from 'naive-ui'
-import { dayDistance, nextOccurrence, type DiaryEvent } from '../../../shared/diaryLife'
+import { dayDistance, displayEventTitle, nextOccurrence, type DiaryEvent } from '../../../shared/diaryLife'
 import { formatLunarRule } from '../../../shared/lunarCalendar'
 import { eventEmojiSource } from '../../features/diary/eventEmoji'
 
@@ -28,6 +28,7 @@ const emit = defineEmits<{
 const typeLabels: Record<DiaryEvent['type'], string> = {
   milestone: '人生时刻',
   anniversary: '纪念日',
+  birthday: '生日',
   schedule: '重要日程',
 }
 
@@ -43,14 +44,19 @@ function formatDate(event: DiaryEvent): string {
 }
 
 function secondaryLabel(event: DiaryEvent): string {
-  if (event.dateRule?.calendar === 'chinese') return `${formatLunarRule(event.dateRule)} · 每年`
-  if (event.recurrence === 'yearly') return `每年重复 · ${formatDate(event)}`
+  if (event.dateRule?.calendar === 'chinese') return formatLunarRule(event.dateRule)
+  if (event.recurrence === 'yearly') return formatDate(event)
   return `${formatDate(event)} · ${typeLabels[event.type]}`
+}
+
+const occurrenceDates = computed(() => new Map(props.items.map(event => [event.id, nextOccurrence(event, props.today)])))
+function eventTitle(event: DiaryEvent): string {
+  return displayEventTitle(event, occurrenceDates.value.get(event.id))
 }
 
 const countdowns = computed(() => new Map(props.items.map(event => {
   if (!event.showCountdown) return [event.id, null]
-  const date = nextOccurrence(event, props.today)
+  const date = occurrenceDates.value.get(event.id)
   return [event.id, date ? dayDistance(props.today, date) : null]
 })))
 const isEmpty = computed(() => !props.loading && !props.error && props.items.length === 0)
@@ -66,14 +72,14 @@ const isEmpty = computed(() => !props.loading && !props.error && props.items.len
       <span>{{ error }}</span>
       <NButton text type="primary" @click="emit('retry')">重试</NButton>
     </div>
-    <NEmpty v-else-if="isEmpty" description="还没有人生事件" />
+    <NEmpty v-else-if="isEmpty" description="还没有近期事项" />
     <div v-else class="diary-event-list-scroll">
       <button
         v-for="event in items"
         :key="event.id"
         type="button"
         class="diary-event-list-item"
-        :aria-label="event.title"
+        :aria-label="eventTitle(event)"
         @click="emit('select', event)"
       >
         <span class="diary-event-list-emoji" aria-hidden="true">
@@ -81,7 +87,7 @@ const isEmpty = computed(() => !props.loading && !props.error && props.items.len
           <span v-else>{{ event.emoji }}</span>
         </span>
         <span class="diary-event-list-copy">
-          <strong>{{ event.title }}</strong>
+          <strong>{{ eventTitle(event) }}</strong>
           <span class="diary-event-list-meta">{{ secondaryLabel(event) }}</span>
         </span>
         <span v-if="countdowns.get(event.id) !== null && countdowns.get(event.id) !== undefined" class="diary-event-list-countdown">
@@ -100,6 +106,9 @@ const isEmpty = computed(() => !props.loading && !props.error && props.items.len
 .diary-event-list-content { min-height: 0; }
 .diary-event-list-scroll {
   max-height: min(60dvh, 560px);
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
   overflow: auto;
   scrollbar-width: none;
 }
@@ -110,17 +119,25 @@ const isEmpty = computed(() => !props.loading && !props.error && props.items.len
   grid-template-columns: 32px minmax(0, 1fr) auto;
   gap: 12px;
   align-items: center;
-  padding: 13px 4px;
+  padding: 13px 12px;
   border: 0;
   border-bottom: 1px solid var(--border, #d9dce5);
-  background: transparent;
+  border-radius: 12px;
+  background-color: var(--bg);
+  background-image: url('/diary-events-cloud-pattern.png');
+  background-position: center;
+  background-size: cover;
+  background-blend-mode: multiply;
   color: inherit;
   font: inherit;
   text-align: left;
   cursor: pointer;
 }
 .diary-event-list-item:hover,
-.diary-event-list-item:focus-visible { outline: none; background: color-mix(in srgb, var(--text) 4%, transparent); }
+.diary-event-list-item:focus-visible {
+  outline: none;
+  background-color: color-mix(in srgb, var(--bg) 96%, var(--text) 4%);
+}
 .diary-event-list-emoji { width: 32px; height: 32px; display: grid; place-items: center; font-size: 22px; }
 .diary-event-list-emoji img { width: 26px; height: 26px; object-fit: contain; }
 .diary-event-list-copy { min-width: 0; display: flex; flex-direction: column; gap: 4px; }
@@ -140,7 +157,7 @@ const isEmpty = computed(() => !props.loading && !props.error && props.items.len
 .diary-event-list-status { display: flex; align-items: center; justify-content: center; gap: 8px; min-height: 120px; color: var(--text-muted, #6b7280); }
 .diary-event-list-more { display: flex; justify-content: center; padding: 14px 0 4px; }
 @media (max-width: 420px) {
-  .diary-event-list-item { grid-template-columns: 28px minmax(0, 1fr) auto; gap: 8px; }
+  .diary-event-list-item { grid-template-columns: 28px minmax(0, 1fr) auto; gap: 8px; padding-inline: 8px; }
   .diary-event-list-countdown { min-width: 52px; }
 }
 </style>

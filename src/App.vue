@@ -123,6 +123,7 @@ const isVaultRoute = computed(() => (
   && auth.state.value === 'authenticated'
   && vaultIdentity.state.value === 'ready'
 ))
+const isDiaryRoute = computed(() => workspaceKind.value === 'diary')
 const isLedgerRoute = computed(() => workspaceKind.value === 'ledger')
 const isBoardHomeRoute = computed(() => route.name === 'board' || route.name === 'board-folder')
 const usesWorkspacePullRefresh = computed(() => isLedgerRoute.value || isBoardHomeRoute.value || workspaceKind.value === 'diary')
@@ -441,9 +442,11 @@ watch(
 /* The vault uses an internal scrollable surface (FileTree, Editor,
    Preview). It must NOT let the outer document scroll, otherwise
    two scrollbars fight and the page wobbles. Route-scoped classes keep
-   the Vault body lock and the Ledger scrollbar treatment isolated. */
+   workspace scrollbar treatments isolated. */
 watchEffect(() => {
   document.body.classList.toggle('vault-mode', isVaultRoute.value)
+  document.body.classList.toggle('diary-mode', isDiaryRoute.value)
+  document.documentElement.classList.toggle('diary-mode', isDiaryRoute.value)
   document.body.classList.toggle('ledger-mode', isLedgerRoute.value)
   document.documentElement.classList.toggle('ledger-mode', isLedgerRoute.value)
   document.body.classList.toggle('board-mode', isBoardHomeRoute.value)

@@ -1,7 +1,7 @@
 import { Temporal } from '@js-temporal/polyfill'
 import { isMoodId, isDiaryCustomMoodId } from './diaryMood.js'
 import { MAX_DIARY_DAY_ATTACHMENTS } from './diaryAttachments.js'
-import { lunarOccurrenceInYear, MAX_LUNAR_SOLAR_DATE, MIN_LUNAR_SOLAR_DATE, nextLunarOccurrence, solarToLunar, type EventDateRule } from './lunarCalendar.js'
+import { lunarOccurrenceInYear, lunarToSolar, MAX_LUNAR_SOLAR_DATE, MIN_LUNAR_SOLAR_DATE, nextLunarOccurrence, solarToLunar, type EventDateRule } from './lunarCalendar.js'
 
 export interface DiaryImageGroup { entryId: string | null; attachmentIds: string[] }
 export interface DayFields {
@@ -25,7 +25,9 @@ export interface EventFields {
   title: string
   description: string
   emoji: string
-  type: 'milestone' | 'anniversary' | 'schedule'
+  type: 'milestone' | 'anniversary' | 'schedule' | 'birthday'
+  /** Birth lunar year for age-aware annual lunar birthday events. */
+  birthday?: { birthLunarYear: number }
   startDate: string
   endDate: string
   startTime: string | null
@@ -120,7 +122,7 @@ export function parseDay(value: unknown): DayFields | null {
 }
 export function parseEvent(value: unknown): EventFields | null {
   if (!value || typeof value !== 'object') return null
-  const v = value as EventFields & { dateRule?: unknown }
+  const v = value as EventFields & { dateRule?: unknown; birthday?: unknown }
   const dateRule = parseEventDateRule(v.dateRule)
   if (!dateRule) return null
   if (typeof v.title !== 'string' || !v.title.trim() || v.title.length > 160
@@ -128,7 +130,7 @@ export function parseEvent(value: unknown): EventFields | null {
     || typeof v.emoji !== 'string' || !v.emoji || v.emoji.length > 100
     || !/\p{Extended_Pictographic}|\p{Regional_Indicator}|\u20e3/u.test(v.emoji)
     || [...new Intl.Segmenter(undefined, { granularity: 'grapheme' }).segment(v.emoji)].length !== 1
-    || !['milestone', 'anniversary', 'schedule'].includes(v.type)
+    || !['milestone', 'anniversary', 'schedule', 'birthday'].includes(v.type)
     || !civilDate(v.startDate) || !civilDate(v.endDate) || v.endDate < v.startDate
     || dayDistance(v.startDate, v.endDate) > 366
     || typeof v.allDay !== 'boolean' || typeof v.showCountdown !== 'boolean' || typeof v.isPrimary !== 'boolean'
@@ -140,10 +142,30 @@ export function parseEvent(value: unknown): EventFields | null {
   if (dateRule.calendar === 'chinese' && (v.recurrence !== 'yearly' || !v.allDay
     || v.startDate !== v.endDate || v.startTime !== null || v.endTime !== null
     || v.startDate < MIN_LUNAR_SOLAR_DATE || v.startDate > MAX_LUNAR_SOLAR_DATE || !solarToLunar(v.startDate))) return null
-  return { title: v.title.trim(), description: v.description.trim(), emoji: v.emoji, type: v.type,
+  let birthday: EventFields['birthday']
+  if (v.type === 'birthday') {
+    if (!v.birthday || typeof v.birthday !== 'object' || Array.isArray(v.birthday)
+      || dateRule.calendar !== 'chinese' || v.recurrence !== 'yearly' || !v.allDay
+      || v.startDate !== v.endDate || v.startTime !== null || v.endTime !== null) return null
+    const birthLunarYear = (v.birthday as Record<string, unknown>).birthLunarYear
+    if (!Number.isInteger(birthLunarYear) || (birthLunarYear as number) < 1901 || (birthLunarYear as number) > 2100) return null
+    const birthDate = lunarToSolar({
+      year: birthLunarYear as number,
+      month: dateRule.lunarMonth,
+      day: dateRule.lunarDay,
+      isLeapMonth: dateRule.isLeapMonth,
+    })
+    if (!birthDate || birthDate !== v.startDate) return null
+    birthday = { birthLunarYear: birthLunarYear as number }
+    if (!birthdayPersonName(v.title)) return null
+  } else if (v.birthday !== undefined) {
+    return null
+  }
+  const title = v.type === 'birthday' ? birthdayPersonName(v.title) : v.title.trim()
+  return { title, description: v.description.trim(), emoji: v.emoji, type: v.type,
     startDate: v.startDate, endDate: v.endDate, startTime: v.allDay ? null : v.startTime,
     endTime: v.allDay ? null : v.endTime, allDay: v.allDay, dateRule, recurrence: v.recurrence,
-    showCountdown: v.showCountdown, isPrimary: v.isPrimary }
+    ...(birthday ? { birthday } : {}), showCountdown: v.showCountdown, isPrimary: v.isPrimary }
 }
 
 function parseEventDateRule(value: unknown): EventDateRule | null {
@@ -196,6 +218,29 @@ export function nextOccurrence(event: EventFields, today: string): string | null
     next = occurrenceInYear(event, ++year)!
   }
   return next
+}
+/** Returns the age reached on this exact lunar birthday occurrence. */
+export function birthdayAgeAt(event: EventFields, date: string): number | null {
+  if (event.type !== 'birthday' || !event.birthday || event.dateRule?.calendar !== 'chinese') return null
+  const lunarDate = solarToLunar(date)
+  if (!lunarDate || lunarDate.year < event.birthday.birthLunarYear
+    || lunarOccurrenceInYear(event.dateRule, lunarDate.year) !== date) return null
+  return lunarDate.year - event.birthday.birthLunarYear
+}
+/** Removes generated birthday suffixes from titles saved by older UI versions. */
+export function birthdayPersonName(title: string): string {
+  return title
+    .replace(/\s*[·•,，]\s*\d+\s*岁生日$/u, '')
+    .replace(/\s*\d+\s*岁生日$/u, '')
+    .replace(/\s*生日$/u, '')
+    .trim()
+}
+/** Birthday event titles are generated for the occurrence being displayed. */
+export function displayEventTitle(event: EventFields, date?: string | null): string {
+  if (event.type !== 'birthday') return event.title
+  const person = birthdayPersonName(event.title)
+  const age = date ? birthdayAgeAt(event, date) : null
+  return age === null ? `${person || ''}生日` : `${person}${age}岁生日`
 }
 export function compareEvents(a: DiaryEvent, b: DiaryEvent): number {
   return Number(b.isPrimary) - Number(a.isPrimary) || (a.startTime ?? '').localeCompare(b.startTime ?? '')

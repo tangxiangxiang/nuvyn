@@ -1,9 +1,14 @@
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, onBeforeUnmount, ref } from 'vue'
 import { NCalendar } from 'naive-ui'
 import { useI18n } from '../../composables/useI18n'
 import { diaryCalendarMonthFromFields, diaryDateFromCalendarFields, naiveCalendarValueForMonth } from './diaryCalendarAdapter'
 
+const PIXEL_WHEEL_MONTH_THRESHOLD = 220
+const LINE_WHEEL_MONTH_THRESHOLD = 6
+const WHEEL_GESTURE_GAP_MS = 120
+const WHEEL_TAIL_MAX_DELTA = 24
+const WHEEL_RESTART_MIN_INCREASE = 12
 const props = defineProps<{ today: string; selectedDate: string | null; month: string; revision: number; markers: Record<string, { source?: string; emoji?: string; count?: number; hasEntries?: boolean; hasAttachments?: boolean }> }>()
 const emit = defineEmits<{ select: [date: string]; month: [date: string] }>()
 const { locale } = useI18n()
@@ -12,10 +17,124 @@ const weekdays = computed(() => locale.value === 'zh'
   ? ['周一', '周二', '周三', '周四', '周五', '周六', '周日']
   : ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'])
 const dateFor = (year: number, month: number, date: number) => diaryDateFromCalendarFields({ year, month, date }) ?? ''
+const calendarRef = ref<InstanceType<typeof NCalendar> | null>(null)
 const initialMonthTimestamp = computed(() => {
   const [year, month] = props.month.split('-').map(Number)
   return naiveCalendarValueForMonth({ year: year!, month: month! }) ?? Date.now()
 })
+let touchStart: { x: number; y: number } | null = null
+let suppressCalendarClick = false
+let suppressCalendarClickTimer: ReturnType<typeof setTimeout> | null = null
+let wheelDistance = 0
+let wheelPeak = 0
+let wheelDirection = 0
+let wheelMode = -1
+let lastWheelAt = -Infinity
+let wheelTail: { peak: number; low: number } | null = null
+
+onBeforeUnmount(() => {
+  if (suppressCalendarClickTimer) clearTimeout(suppressCalendarClickTimer)
+})
+
+function navigateMonthByGesture(offset: number) {
+  if (offset > 0) calendarRef.value?.handleNextClick()
+  else calendarRef.value?.handlePrevClick()
+}
+
+function onTouchStart(event: TouchEvent) {
+  if (suppressCalendarClick) {
+    suppressCalendarClick = false
+    if (suppressCalendarClickTimer) clearTimeout(suppressCalendarClickTimer)
+    suppressCalendarClickTimer = null
+  }
+  if (event.touches.length !== 1) {
+    touchStart = null
+    return
+  }
+  const touch = event.touches[0]!
+  touchStart = { x: touch.clientX, y: touch.clientY }
+}
+
+function onTouchMove(event: TouchEvent) {
+  if (!touchStart || event.touches.length !== 1) return
+  const touch = event.touches[0]!
+  const deltaX = touch.clientX - touchStart.x
+  const deltaY = touch.clientY - touchStart.y
+  if (Math.abs(deltaY) > 10 && Math.abs(deltaY) > Math.abs(deltaX)) event.preventDefault()
+}
+
+function onTouchEnd(event: TouchEvent) {
+  const start = touchStart
+  touchStart = null
+  const touch = event.changedTouches[0]
+  if (!start || !touch) return
+  const deltaX = touch.clientX - start.x
+  const deltaY = touch.clientY - start.y
+  if (Math.abs(deltaY) < 80 || Math.abs(deltaY) < Math.abs(deltaX) * 1.25) return
+  suppressCalendarClick = true
+  suppressCalendarClickTimer = setTimeout(() => {
+    suppressCalendarClick = false
+    suppressCalendarClickTimer = null
+  }, 500)
+  navigateMonthByGesture(deltaY < 0 ? 1 : -1)
+}
+
+function onCalendarClickCapture(event: MouseEvent) {
+  if (!suppressCalendarClick || event.detail === 0) return
+  suppressCalendarClick = false
+  if (suppressCalendarClickTimer) clearTimeout(suppressCalendarClickTimer)
+  suppressCalendarClickTimer = null
+  event.preventDefault()
+  event.stopPropagation()
+}
+
+function onWheel(event: WheelEvent) {
+  const mode = event.deltaMode
+  const distance = Math.abs(event.deltaY)
+  if (event.ctrlKey || distance <= Math.abs(event.deltaX)) return
+  event.preventDefault()
+
+  const direction = Math.sign(event.deltaY)
+  const idle = event.timeStamp - lastWheelAt >= WHEEL_GESTURE_GAP_MS
+  lastWheelAt = event.timeStamp
+  if (idle || mode !== wheelMode) {
+    wheelDistance = 0
+    wheelPeak = 0
+    wheelTail = null
+    wheelDirection = direction
+    wheelMode = mode
+  } else if (direction !== wheelDirection) {
+    if (wheelTail && distance < WHEEL_RESTART_MIN_INCREASE) return
+    wheelDistance = 0
+    wheelPeak = 0
+    wheelTail = null
+    wheelDirection = direction
+  }
+
+  if (wheelTail) {
+    // A fresh push can start before the previous gesture's momentum has stopped.
+    wheelTail.low = Math.min(wheelTail.low, distance)
+    const hasDecayed = wheelTail.low <= Math.min(WHEEL_TAIL_MAX_DELTA, wheelTail.peak / 2)
+    const accelerates = distance >= Math.max(wheelTail.low * 2, wheelTail.low + WHEEL_RESTART_MIN_INCREASE)
+    if (!hasDecayed || !accelerates) {
+      if (distance > wheelTail.peak) wheelTail = { peak: distance, low: distance }
+      return
+    }
+    wheelTail = null
+  }
+
+  const pixelMode = mode === WheelEvent.DOM_DELTA_PIXEL
+  const threshold = pixelMode ? PIXEL_WHEEL_MONTH_THRESHOLD
+    : mode === WheelEvent.DOM_DELTA_LINE ? LINE_WHEEL_MONTH_THRESHOLD : 1
+  wheelDistance += distance
+  wheelPeak = Math.max(wheelPeak, distance)
+  if (wheelDistance < threshold) return
+
+  if (pixelMode) wheelTail = { peak: wheelPeak, low: distance }
+  wheelDistance = 0
+  wheelPeak = 0
+  navigateMonthByGesture(direction)
+}
 
 function onPanelChange(value: { year: number; month: number }) {
   const month = diaryCalendarMonthFromFields(value)
@@ -34,7 +153,19 @@ function selectDate(date: string, event: MouseEvent) {
 </script>
 
 <template>
-  <NCalendar :key="props.revision" class="diary-life-calendar" :default-value="initialMonthTimestamp" @panel-change="onPanelChange">
+  <NCalendar
+    :key="props.revision"
+    ref="calendarRef"
+    class="diary-life-calendar"
+    :default-value="initialMonthTimestamp"
+    @panel-change="onPanelChange"
+    @touchstart.passive="onTouchStart"
+    @touchmove="onTouchMove"
+    @touchend.passive="onTouchEnd"
+    @touchcancel="touchStart = null"
+    @click.capture="onCalendarClickCapture"
+    @wheel="onWheel"
+  >
     <template #header="{ year, month }">
       <strong class="life-month">{{ dateFor(year, month, 1).slice(0, 7) }}</strong>
       <div class="life-weekdays">
@@ -64,6 +195,7 @@ function selectDate(date: string, event: MouseEvent) {
   height: auto;
   color: var(--text);
   background: transparent;
+  touch-action: pan-x;
 }
 
 .diary-life-calendar :deep(.n-calendar-header) {
@@ -195,12 +327,6 @@ function selectDate(date: string, event: MouseEvent) {
   box-sizing: border-box;
   border: 1px solid transparent;
   border-radius: 8px;
-}
-
-@media (hover: hover) and (pointer: fine) {
-  .life-date:hover .life-date-badge {
-    background: color-mix(in srgb, var(--accent) 7%, transparent);
-  }
 }
 
 .life-date:focus-visible {

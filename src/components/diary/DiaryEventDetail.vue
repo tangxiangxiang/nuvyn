@@ -13,6 +13,7 @@ const props = defineProps<{
 const typeLabels: Record<DiaryEvent['type'], string> = {
   milestone: '人生时刻',
   anniversary: '纪念日',
+  birthday: '生日',
   schedule: '重要日程',
 }
 

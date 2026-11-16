@@ -151,11 +151,24 @@ html.ledger-mode {
   scrollbar-width: none;
 }
 html.ledger-mode,
-html.board-mode {
+html.board-mode,
+html.diary-mode {
   overscroll-behavior-y: none;
 }
 body.ledger-mode::-webkit-scrollbar,
 html.ledger-mode::-webkit-scrollbar {
+  display: none;
+  width: 0;
+  height: 0;
+}
+/* Diary calendar keeps document scrolling available without showing the
+   browser scrollbar, matching Ledger's workspace treatment. */
+body.diary-mode,
+html.diary-mode {
+  scrollbar-width: none;
+}
+body.diary-mode::-webkit-scrollbar,
+html.diary-mode::-webkit-scrollbar {
   display: none;
   width: 0;
   height: 0;

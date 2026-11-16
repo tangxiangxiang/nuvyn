@@ -249,7 +249,11 @@ for (const viewport of [{ width: 390, height: 844 }, { width: 430, height: 900 }
       expect(await calendar.locator('.n-calendar-header').innerText()).toBe(monthBefore)
       await cell.click()
       await expect(cell).toHaveAttribute('aria-pressed', 'true')
-      await page.getByRole('button', { name: '新增事件', exact: true }).click()
+      const dayActions = page.getByRole('button', { name: '更多当天事件操作' })
+      await expect(dayActions).toBeVisible()
+      await expect(page.locator('.diary-event-create')).toHaveCount(0)
+      await dayActions.click()
+      await page.getByRole('menuitem', { name: '新增事件', exact: true }).click()
       const eventTitle = `人生事件 ${viewport.width} (${testInfo.repeatEachIndex + 1})`
       await page.getByRole('textbox', { name: '事件标题', exact: true }).fill(eventTitle)
       if (viewport.width === 1280) {
@@ -512,7 +516,10 @@ test('lunar Events preserve their rule across details, countdowns, editing and c
   const calendar = page.locator('.diary-life-calendar')
   const startCell = calendar.locator('[data-date="2026-11-16"]')
   await startCell.click()
-  await page.getByRole('button', { name: '新增事件', exact: true }).click()
+  const dayActions = page.getByRole('button', { name: '更多当天事件操作' })
+  await expect(dayActions).toBeVisible()
+  await dayActions.click()
+  await page.getByRole('menuitem', { name: '新增事件', exact: true }).click()
 
   const title = `农历生日 ${testInfo.repeatEachIndex + 1}`
   await page.getByRole('textbox', { name: '事件标题', exact: true }).fill(title)

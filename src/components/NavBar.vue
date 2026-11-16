@@ -990,8 +990,8 @@ onBeforeUnmount(() => {
           size="small"
           quaternary
           :bordered="false"
-          :aria-label="appShell.diaryViewMode?.value === 'diary' ? '切换到人生事件' : '切换到情绪日记'"
-          :title="appShell.diaryViewMode?.value === 'diary' ? '切换到人生事件' : '切换到情绪日记'"
+          :aria-label="appShell.diaryViewMode?.value === 'diary' ? '切换到近期事项' : '切换到情绪日记'"
+          :title="appShell.diaryViewMode?.value === 'diary' ? '切换到近期事项' : '切换到情绪日记'"
           data-testid="diary-view-toggle"
           @click="appShell?.diaryViewToggleCommand?.value?.()"
         >
@@ -1007,8 +1007,8 @@ onBeforeUnmount(() => {
           size="small"
           quaternary
           :bordered="false"
-          aria-label="人生事件"
-          title="人生事件"
+          aria-label="近期事项"
+          title="近期事项"
           aria-haspopup="dialog"
           data-testid="diary-event-list-toggle"
           @click="appShell?.diaryEventListCommand?.value?.()"

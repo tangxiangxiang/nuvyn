@@ -1,8 +1,8 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
 import { NInput, NSelect, NCheckbox } from 'naive-ui'
-import { lunarDayLabel, lunarMonthLabel, nextLunarOccurrence, solarToLunar, type ChineseEventDateRule, type EventDateRule } from '../../../shared/lunarCalendar'
-import type { EventFields } from '../../../shared/diaryLife'
+import { lunarDayLabel, lunarMonthLabel, lunarToSolar, nextLunarOccurrence, solarToLunar, type ChineseEventDateRule, type EventDateRule } from '../../../shared/lunarCalendar'
+import { birthdayPersonName, type EventFields } from '../../../shared/diaryLife'
 import { EVENT_EMOJI } from '../../features/diary/eventEmoji'
 
 const value = defineModel<EventFields>({ required: true })
@@ -10,6 +10,11 @@ const props = defineProps<{ today: string }>()
 const calendarError = ref('')
 const dateRule = computed<EventDateRule>(() => value.value.dateRule ?? { calendar: 'gregory' })
 const chineseRule = computed(() => dateRule.value.calendar === 'chinese' ? dateRule.value : null)
+const isBirthday = computed(() => value.value.type === 'birthday')
+const titleInput = computed({
+  get: () => isBirthday.value ? birthdayPersonName(value.value.title) : value.value.title,
+  set: (title: string) => { value.value.title = title },
+})
 const canUseLunar = computed(() => value.value.recurrence === 'yearly' && value.value.allDay
   && value.value.startDate === value.value.endDate && solarToLunar(value.value.startDate) !== null)
 const lunarMonthOptions = Array.from({ length: 12 }, (_, index) => ({ value: index + 1, label: lunarMonthLabel(index + 1) }))
@@ -19,11 +24,119 @@ const lunarPreviewDate = computed(() => {
   const fromDate = props.today > value.value.startDate ? props.today : value.value.startDate
   return nextLunarOccurrence(chineseRule.value, fromDate)
 })
+const birthdayPreview = computed(() => {
+  const rule = chineseRule.value
+  const birthLunarYear = value.value.birthday?.birthLunarYear
+  if (!isBirthday.value || !rule || !Number.isInteger(birthLunarYear)
+    || birthLunarYear! < 1901 || birthLunarYear! > 2100) return null
+  const birthDate = lunarToSolar({
+    year: birthLunarYear!,
+    month: rule.lunarMonth,
+    day: rule.lunarDay,
+    isLeapMonth: rule.isLeapMonth,
+  })
+  if (!birthDate || birthDate !== value.value.startDate) return null
+  const fromDate = props.today > value.value.startDate ? props.today : value.value.startDate
+  const date = nextLunarOccurrence(rule, fromDate)
+  const occurrence = date ? solarToLunar(date) : null
+  return date && occurrence ? { date, age: occurrence.year - birthLunarYear! } : null
+})
 const types = [
   { label: '人生时刻', value: 'milestone' },
   { label: '纪念日', value: 'anniversary' },
+  { label: '生日', value: 'birthday' },
   { label: '重要日程', value: 'schedule' },
 ]
+
+function setEventType(type: string | number | null) {
+  if (typeof type !== 'string' || !types.some(option => option.value === type)) return
+  const eventType = type as EventFields['type']
+  calendarError.value = ''
+  if (eventType !== 'birthday') {
+    value.value.type = eventType
+    delete value.value.birthday
+    return
+  }
+  const lunarDate = solarToLunar(value.value.startDate)
+  if (!lunarDate) {
+    calendarError.value = '生日日期仅支持 1901—2100 年的公历日期。'
+    return
+  }
+  const rule: ChineseEventDateRule = {
+    calendar: 'chinese',
+    lunarMonth: lunarDate.month,
+    lunarDay: lunarDate.day,
+    isLeapMonth: lunarDate.isLeapMonth,
+    leapMonthPolicy: 'regular-month',
+    shortMonthPolicy: 'last-day',
+  }
+  const birthDate = lunarToSolar({
+    year: lunarDate.year,
+    month: lunarDate.month,
+    day: lunarDate.day,
+    isLeapMonth: lunarDate.isLeapMonth,
+  })
+  if (!birthDate) {
+    calendarError.value = '无法识别这一天的农历生日，请更换日期后重试。'
+    return
+  }
+  value.value.type = eventType
+  value.value.title = birthdayPersonName(value.value.title)
+  value.value.birthday = { birthLunarYear: 0 }
+  value.value.dateRule = rule
+  value.value.startDate = birthDate
+  value.value.endDate = birthDate
+  value.value.recurrence = 'yearly'
+  value.value.allDay = true
+  value.value.startTime = null
+  value.value.endTime = null
+  value.value.emoji = '🎂'
+  value.value.showCountdown = true
+}
+
+function syncBirthdayDate() {
+  if (!isBirthday.value || !chineseRule.value) return
+  const birthLunarYear = value.value.birthday?.birthLunarYear
+  if (!Number.isInteger(birthLunarYear) || birthLunarYear! < 1901 || birthLunarYear! > 2100) {
+    calendarError.value = '出生农历年需在 1901—2100 年之间。'
+    return
+  }
+  const rule = chineseRule.value
+  const birthDate = lunarToSolar({
+    year: birthLunarYear!,
+    month: rule.lunarMonth,
+    day: rule.lunarDay,
+    isLeapMonth: rule.isLeapMonth,
+  })
+  if (!birthDate) {
+    calendarError.value = '该年份没有对应的农历生日，请检查出生年份、月份或日期。'
+    return
+  }
+  calendarError.value = ''
+  value.value.startDate = birthDate
+  value.value.endDate = birthDate
+  value.value.recurrence = 'yearly'
+  value.value.allDay = true
+  value.value.startTime = null
+  value.value.endTime = null
+}
+
+function updateBirthLunarYear(raw: string) {
+  value.value.birthday = { birthLunarYear: raw === '' ? 0 : Number(raw) }
+  syncBirthdayDate()
+}
+
+function isValidBirthdayDate(
+  day: number,
+  isLeapMonth = chineseRule.value?.isLeapMonth ?? false,
+  lunarMonth = chineseRule.value?.lunarMonth ?? 0,
+): boolean {
+  const rule = chineseRule.value
+  const birthLunarYear = value.value.birthday?.birthLunarYear
+  if (!rule || lunarMonth < 1) return false
+  if (!Number.isInteger(birthLunarYear) || birthLunarYear! < 1901 || birthLunarYear! > 2100) return true
+  return lunarToSolar({ year: birthLunarYear!, month: lunarMonth, day, isLeapMonth }) !== null
+}
 
 function setCalendar(calendar: 'gregory' | 'chinese') {
   calendarError.value = ''
@@ -64,6 +177,7 @@ function setCalendar(calendar: 'gregory' | 'chinese') {
 function updateChineseRule(updates: Partial<ChineseEventDateRule>) {
   if (!chineseRule.value) return
   value.value.dateRule = { ...chineseRule.value, ...updates }
+  if (isBirthday.value) syncBirthdayDate()
 }
 
 function formatGregorianDate(date: string): string {
@@ -87,10 +201,46 @@ function formatGregorianDate(date: string): string {
         ><img :src="`/emoji/event-${icon.asset}.svg`" alt=""></button>
       </div>
       <label class="event-field">
-        <span>事件标题</span>
-        <NInput v-model:value="value.title" :input-props="{ 'aria-label': '事件标题' }" placeholder="值得记住的事" :maxlength="160" />
+        <span>{{ isBirthday ? '称呼' : '事件标题' }}</span>
+        <NInput v-model:value="titleInput" :input-props="{ 'aria-label': isBirthday ? '生日称呼' : '事件标题' }" :placeholder="isBirthday ? '例如：爷爷' : '值得记住的事'" :maxlength="160" />
       </label>
-      <NSelect v-model:value="value.type" :options="types" aria-label="事件类型" />
+      <NSelect :value="value.type" :options="types" aria-label="事件类型" @update:value="setEventType" />
+      <template v-if="isBirthday && chineseRule">
+        <div class="event-dates">
+          <label class="event-field">
+            <span>出生农历年</span>
+            <input :value="value.birthday?.birthLunarYear ? value.birthday.birthLunarYear : ''" type="number" min="1901" max="2100" step="1" required aria-label="出生农历年" @input="updateBirthLunarYear(($event.target as HTMLInputElement).value)">
+          </label>
+          <label class="event-field">
+            <span>农历月份</span>
+            <select aria-label="农历月份" :value="chineseRule.lunarMonth" @change="updateChineseRule({ lunarMonth: Number(($event.target as HTMLSelectElement).value) })">
+              <option v-for="option in lunarMonthOptions" :key="option.value" :value="option.value" :disabled="!isValidBirthdayDate(chineseRule.lunarDay, chineseRule.isLeapMonth, option.value)">{{ option.label }}</option>
+            </select>
+          </label>
+        </div>
+        <div class="event-dates">
+          <label class="event-field">
+            <span>农历日期</span>
+            <select aria-label="农历日期" :value="chineseRule.lunarDay" @change="updateChineseRule({ lunarDay: Number(($event.target as HTMLSelectElement).value) })">
+              <option v-for="option in lunarDayOptions" :key="option.value" :value="option.value" :disabled="!isValidBirthdayDate(option.value)">{{ option.label }}</option>
+            </select>
+          </label>
+          <label class="event-field">
+            <span>出生月份</span>
+            <select aria-label="出生月份类型" :value="chineseRule.isLeapMonth ? 'leap' : 'regular'" @change="updateChineseRule({ isLeapMonth: ($event.target as HTMLSelectElement).value === 'leap' })">
+              <option value="regular">普通{{ lunarMonthLabel(chineseRule.lunarMonth) }}</option>
+              <option value="leap" :disabled="!isValidBirthdayDate(chineseRule.lunarDay, true)">闰{{ lunarMonthLabel(chineseRule.lunarMonth) }}</option>
+            </select>
+          </label>
+        </div>
+        <p v-if="birthdayPreview" class="event-date-preview" aria-live="polite">
+          自动标题：{{ birthdayPersonName(value.title) }}{{ birthdayPreview.age }}岁生日 · {{ formatGregorianDate(birthdayPreview.date) }}
+        </p>
+        <p v-else class="event-date-preview" aria-live="polite">填写有效的出生农历年和生日日期</p>
+        <p v-if="calendarError" class="event-date-error" role="alert">{{ calendarError }}</p>
+        <p class="event-date-help">保存一次即可；每年自动换算日期，并生成“称呼 + 年龄 + 生日”标题。</p>
+      </template>
+      <template v-else>
       <div class="event-date-calendar-toggle" role="group" aria-label="日期类型">
         <button type="button" :aria-pressed="dateRule.calendar === 'gregory'" @click="setCalendar('gregory')">公历</button>
         <button type="button" :aria-pressed="dateRule.calendar === 'chinese'" :disabled="dateRule.calendar !== 'chinese' && !canUseLunar" @click="setCalendar('chinese')">农历</button>
@@ -152,12 +302,14 @@ function formatGregorianDate(date: string): string {
         <label class="event-field"><span>开始时间</span><input :value="value.startTime ?? ''" type="time" aria-label="开始时间" @input="value.startTime = ($event.target as HTMLInputElement).value || null"></label>
         <label class="event-field"><span>结束时间</span><input :value="value.endTime ?? ''" type="time" aria-label="结束时间" @input="value.endTime = ($event.target as HTMLInputElement).value || null"></label>
       </div>
+      </template>
     </section>
 
     <section class="event-form-section" aria-labelledby="event-display-heading">
       <h2 id="event-display-heading">重复与展示</h2>
       <div class="event-checkboxes">
-        <NCheckbox :checked="value.recurrence === 'yearly'" :disabled="dateRule.calendar === 'chinese'" @update:checked="value.recurrence = $event ? 'yearly' : 'none'">每年重复</NCheckbox>
+        <NCheckbox v-if="!isBirthday" :checked="value.recurrence === 'yearly'" :disabled="dateRule.calendar === 'chinese'" @update:checked="value.recurrence = $event ? 'yearly' : 'none'">每年重复</NCheckbox>
+        <NCheckbox v-else :checked="true" disabled>按农历每年重复</NCheckbox>
         <NCheckbox v-model:checked="value.showCountdown">显示倒数日</NCheckbox>
         <NCheckbox v-model:checked="value.isPrimary">优先显示此事件</NCheckbox>
       </div>

@@ -15,7 +15,7 @@ import DiaryActionMenu from '../components/diary/DiaryActionMenu.vue'
 import { createDiaryEntryId, createDiaryEventId, diaryLifeApi } from '../lib/diary-life-api'
 import { createDiaryAttachmentClientId, diaryAttachmentsApi } from '../lib/diary-attachments-api'
 import { DiaryAttachmentPreviewUrls } from '../lib/diaryAttachmentPreviewUrls'
-import { addDays, compareEvents, localToday, MAX_DIARY_IMAGE_GROUP_SIZE, nextOccurrence, occursOn, parseDay, parseEvent, type DiaryDay, type DiaryDaySummary, type DiaryEvent, type DayFields, type DiaryImageGroup, type EventFields } from '../../shared/diaryLife'
+import { addDays, compareEvents, displayEventTitle, localToday, MAX_DIARY_IMAGE_GROUP_SIZE, nextOccurrence, occursOn, parseDay, parseEvent, type DiaryDay, type DiaryDaySummary, type DiaryEvent, type DayFields, type DiaryImageGroup, type EventFields } from '../../shared/diaryLife'
 import { DIARY_ATTACHMENT_STAGE_HEARTBEAT_INTERVAL_MS, MAX_DIARY_ATTACHMENT_BYTES, MAX_DIARY_DAY_ATTACHMENTS, type DiaryAttachment } from '../../shared/diaryAttachments'
 import { NUVYN_BROWSER_STORAGE_KEYS, ownerScopedStorageKey, readStorageKey, writeStorageKey } from '../technicalNamespace'
 import DiaryLifeCalendar from '../components/diary/DiaryLifeCalendar.vue'
@@ -24,7 +24,6 @@ import DiaryEventDetail from '../components/diary/DiaryEventDetail.vue'
 import DiaryEventForm from '../components/diary/DiaryEventForm.vue'
 import DiaryEventListDialog from '../components/diary/DiaryEventListDialog.vue'
 import { eventEmojiSource } from '../features/diary/eventEmoji'
-import { formatLunarRule } from '../../shared/lunarCalendar'
 import { clearDiarySearchOpen, consumeDiarySearchOpen, diarySearchOpenIntent, type DiarySearchOpenIntent } from '../composables/diary/useDiarySearchNavigation'
 
 const access = useDiaryAccessSession()
@@ -83,6 +82,7 @@ const eventListLoaded = ref(false)
 const eventListLoading = ref(false)
 const eventListLoadingMore = ref(false)
 const eventListError = ref('')
+const eventDayActions = [{ key: 'create', label: '新增事件' }]
 const eventDetailActions = [{ key: 'delete', label: '删除事件' }]
 const eventSurfaceVisible = computed(() => access.isUnlocked.value && (
   eventListVisible.value || eventDetail.value !== null || eventDraft.value !== null || (mode.value === 'events' && selected.value !== null)
@@ -182,6 +182,9 @@ watch(mode, value => { if (appShell?.diaryViewMode) appShell.diaryViewMode.value
 
 const range = computed(() => ({ start: addDays(month.value, -7), end: Temporal.PlainDate.from(month.value).add({ months: 1, days: 7 }).toString() }))
 const selectedEvents = computed(() => events.value.filter(e => selected.value && occursOn(e, selected.value)).sort(compareEvents))
+function dayEventLabel(event: DiaryEvent): string {
+  return displayEventTitle(event, selected.value)
+}
 const markers = computed(() => {
   const result: Record<string, { source?: string; emoji?: string; count?: number; hasEntries?: boolean; hasAttachments?: boolean }> = {}
   if (mode.value === 'diary') {
@@ -655,6 +658,10 @@ function createEvent() {
   initial.value = JSON.stringify(eventDraft.value)
 }
 
+function selectEventDayAction(action: string) {
+  if (action === 'create' && !busy.value && !attachmentBusy.value) createEvent()
+}
+
 function startEventEdit() {
   const event = eventDetail.value?.event
   if (!event || busy.value) return
@@ -727,7 +734,12 @@ async function save() {
       return
     } else {
       const fields = parseEvent(eventDraft.value)
-      if (!fields) { formError.value = '请检查标题、日期和时间范围。'; return }
+      if (!fields) {
+        formError.value = eventDraft.value.type === 'birthday'
+          ? '请检查姓名及出生农历年、月、日。'
+          : '请检查标题、日期和时间范围。'
+        return
+      }
       const result = await diaryLifeApi.saveEvent(newId.value, fields, editing.value?.version ?? 0)
       if (!isDiarySessionGenerationCurrent(generation) || !access.isUnlocked.value) return
       const previousOccurrence = eventDetail.value?.occurrenceDate
@@ -864,6 +876,7 @@ onBeforeUnmount(() => {
         :class="{ 'diary-event-list-dialog': eventListVisible, 'diary-event-detail-dialog': Boolean(eventDetail && !eventDraft) }"
         :mask-closable="!busy && !attachmentBusy"
         :close-on-esc="!busy && !attachmentBusy"
+        :auto-focus="false"
         :closable="false"
         @update:show="visible => !visible && closeEventSurface()"
       >
@@ -871,18 +884,26 @@ onBeforeUnmount(() => {
           <div v-if="eventDetail && !eventDraft" class="diary-event-modal-title">
             <img v-if="eventEmojiSource(eventDetail.event.emoji)" :src="eventEmojiSource(eventDetail.event.emoji)" alt="">
             <span v-else aria-hidden="true">{{ eventDetail.event.emoji }}</span>
-            <strong>{{ eventDetail.event.title }}</strong>
+            <strong>{{ displayEventTitle(eventDetail.event, eventDetail.occurrenceDate) }}</strong>
           </div>
           <span v-else-if="eventDraft">{{ editing ? '编辑事件' : '新增事件' }}</span>
-          <span v-else-if="eventListVisible">人生事件</span>
+          <span v-else-if="eventListVisible">近期事项</span>
           <span v-else>{{ selected }}</span>
         </template>
         <template #header-extra>
           <div class="diary-event-header-actions">
             <template v-if="eventDetail && !eventDraft">
-              <DiaryActionMenu label="更多事件操作" :options="eventDetailActions" :disabled="busy" @select="selectEventAction" />
+              <DiaryActionMenu class="diary-event-more-menu" label="更多事件操作" :options="eventDetailActions" :disabled="busy" @select="selectEventAction" />
               <NButton text class="diary-event-edit-button" :disabled="busy" @click="startEventEdit">编辑</NButton>
             </template>
+            <DiaryActionMenu
+              v-else-if="selected !== null && !eventDraft && !eventListVisible"
+              class="diary-event-more-menu"
+              label="更多当天事件操作"
+              :options="eventDayActions"
+              :disabled="busy || attachmentBusy"
+              @select="selectEventDayAction"
+            />
             <NButton quaternary class="diary-event-close-button" :disabled="busy || attachmentBusy" :aria-label="eventDraft ? '关闭事件编辑' : eventDetail ? '关闭事件详情' : eventListVisible ? '关闭事件列表' : '关闭当天事件'" @click="closeEventSurface">
               <NIcon aria-hidden="true" :size="18"><X /></NIcon>
             </NButton>
@@ -913,15 +934,14 @@ onBeforeUnmount(() => {
           <DiaryEventForm v-model="eventDraft" :today="today" />
         </div>
         <div v-else class="day-events">
-          <button v-for="event in selectedEvents" :key="event.id" type="button" :aria-label="event.title" @click="selectEventFromDay(event)">
+          <button v-for="event in selectedEvents" :key="event.id" type="button" :aria-label="dayEventLabel(event)" @click="selectEventFromDay(event)">
             <strong>
               <img v-if="eventEmojiSource(event.emoji)" :src="eventEmojiSource(event.emoji)" class="event-emoji" alt="">
-              <template v-else>{{ event.emoji }} </template>{{ event.title }}
+              <span v-else class="day-event-emoji" aria-hidden="true">{{ event.emoji }}</span>
+              <span class="day-event-title-text">{{ displayEventTitle(event, selected) }}</span>
             </strong>
-            <span>{{ event.dateRule?.calendar === 'chinese' ? formatLunarRule(event.dateRule) : event.startDate === event.endDate ? event.startDate : `${event.startDate} – ${event.endDate}` }} · {{ event.type === 'schedule' ? '重要日程' : event.type === 'anniversary' ? '纪念日' : '人生时刻' }}</span>
           </button>
           <p v-if="!selectedEvents.length">还没有事件</p>
-          <NButton class="diary-event-create" @click="createEvent">新增事件</NButton>
         </div>
 
         <template v-if="eventDraft" #footer>
@@ -957,15 +977,34 @@ onBeforeUnmount(() => {
 }
 .diary-life-error { margin-top: 8px; padding: 8px 0; }
 .day-events > button { text-align: left; background: transparent; color: inherit; border: 0; font: inherit; cursor: pointer; display: flex; flex-direction: column; gap: 6px; padding: 8px; }
-.day-events { display: flex; flex-direction: column; gap: 12px; }
-.day-events > button { align-items: flex-start; padding: 12px 4px; border-bottom: 1px solid var(--border, #d9dce5); }
-.day-events > button:hover, .day-events > button:focus-visible { outline: none; background: color-mix(in srgb, var(--text) 4%, transparent); }
-.day-events > button strong { max-width: 100%; overflow-wrap: anywhere; font-size: 16px; font-weight: 600; }
-.day-events > button span { color: var(--text-muted, #6b7280); font-size: 13px; }
-.diary-event-create { align-self: flex-start; margin-top: 4px; }
+.day-events {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.day-events > button {
+  width: 100%;
+  align-items: flex-start;
+  padding: 13px 12px;
+  border-bottom: 1px solid var(--border, #d9dce5);
+  border-radius: 12px;
+  background-color: var(--bg);
+  background-image: url('/diary-events-cloud-pattern.png');
+  background-position: center;
+  background-size: cover;
+  background-blend-mode: multiply;
+}
+.day-events > button:hover,
+.day-events > button:focus-visible {
+  outline: none;
+  background-color: color-mix(in srgb, var(--bg) 96%, var(--text) 4%);
+}
+.day-events > button strong { display: flex; max-width: 100%; align-items: center; gap: 6px; font-size: 16px; font-weight: 600; }
+.day-event-emoji { flex: none; font-size: 20px; line-height: 1; }
+.day-event-title-text { min-width: 0; line-height: 20px; overflow-wrap: anywhere; }
 .diary-event-form-error { margin: 0 0 14px; color: var(--danger, #dc2626); }
 .life-actions { display: flex; align-items: center; gap: 12px; }.life-actions > span { flex: 1; }
-.event-emoji { width: 20px; height: 20px; vertical-align: middle; margin-inline-end: 4px; }
+.event-emoji { width: 20px; height: 20px; flex: none; object-fit: contain; }
 .diary-event-modal-title { display: flex; min-width: 0; align-items: center; gap: 8px; }
 .diary-event-modal-title img { width: 24px; height: 24px; flex: none; object-fit: contain; }
 .diary-event-modal-title > span { flex: none; font-size: 22px; }
@@ -980,7 +1019,26 @@ onBeforeUnmount(() => {
 .diary-event-detail-dialog.n-card { width: min(620px, calc(100vw - 32px)); }
 .diary-event-list-dialog.n-card { width: min(620px, calc(100vw - 32px)); }
 .diary-event-detail-dialog .diary-event-edit-button { opacity: 1; }
+.diary-life-dialog .diary-event-close-button.n-button {
+  width: 40px;
+  height: 40px;
+  min-width: 40px;
+  border-radius: 10px;
+  color: var(--text-muted, #6b7280);
+  background-color: transparent;
+}
+.diary-life-dialog .diary-event-close-button.n-button:hover {
+  background-color: color-mix(in srgb, var(--text) 6%, transparent);
+}
+.diary-life-dialog .diary-event-close-button.n-button:focus-visible {
+  outline: 2px solid var(--primary, #6366f1);
+  outline-offset: 2px;
+}
 @media (hover: hover) and (pointer: fine) and (not (any-pointer: coarse)) {
+  .diary-event-more-menu { opacity: 0; }
+  .diary-event-more-menu:hover,
+  .diary-event-more-menu:focus-within,
+  .diary-event-more-menu.is-open { opacity: 1; }
   .diary-event-detail-dialog .diary-event-edit-button { opacity: 0; transition: opacity 150ms ease; }
   .diary-event-detail-dialog:hover .diary-event-edit-button,
   .diary-event-detail-dialog:focus-within .diary-event-edit-button { opacity: 1; }
