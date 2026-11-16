@@ -7,9 +7,7 @@ import { boardMetadataSource } from '../../../features/board/metadataSource'
 import { documentSearchSource } from '../../../lib/documentSearchSource'
 import { clearSearchReveal, requestSearchReveal, searchRevealIntent } from '../../../composables/useSearchReveal'
 import { clearDiarySearchOpen, diarySearchOpenIntent } from '../../../composables/diary/useDiarySearchNavigation'
-import type { BoardMetadata } from '../../../../shared/boardProtocol'
-
-const api = vi.hoisted(() => ({ listBoards: vi.fn(), listPosts: vi.fn() }))
+const api = vi.hoisted(() => ({ searchBoardContent: vi.fn(), listBoards: vi.fn(), listPosts: vi.fn() }))
 const diarySearch = vi.hoisted(() => vi.fn())
 const diarySessionState = vi.hoisted(() => ({ unlocked: true, accessRef: null as null | { value: boolean }, teardown: null as null | (() => void) }))
 vi.mock('../../../features/board/api', () => api)
@@ -27,10 +25,6 @@ vi.mock('../../../composables/diary/useDiaryAccessSession', async () => {
     },
   }
 })
-
-function board(id: string, title: string): BoardMetadata {
-  return { id, title, thumbnailAssetId: null, folderId: null, createdAt: 1, updatedAt: 1, lastOpenedAt: null }
-}
 
 const mountedHosts = new Set<ReturnType<typeof mount>>()
 function mountHost(router: Router) {
@@ -73,7 +67,9 @@ describe('App-level GlobalSearchHost', () => {
   })
 
   it('navigates a Board result to the thin Board Editor route from Board workspace', async () => {
-    api.listBoards.mockResolvedValue([board('atlas', 'Project Atlas')])
+    api.searchBoardContent.mockResolvedValue({ items: [
+      { boardId: 'atlas', title: 'Project Atlas', match: 'title', revision: 0, updatedAt: 1 },
+    ] })
     const router = createRouter({
       history: createMemoryHistory(),
       routes: [
@@ -197,7 +193,6 @@ describe('App-level GlobalSearchHost', () => {
   })
 
   it('loads Document results on the Vault workspace route', async () => {
-    api.listBoards.mockResolvedValue([board('atlas-board', 'Project Atlas')])
     api.listPosts.mockResolvedValue([{
       path: 'inbox/atlas', title: 'Project Atlas', created: '', updated: '', tags: [], size: 0, mtime: 1,
     }])
@@ -223,13 +218,13 @@ describe('App-level GlobalSearchHost', () => {
 
     expect(document.body.querySelectorAll('[role="option"]')).toHaveLength(1)
     expect(document.body.querySelector('[role="option"]')?.textContent).toContain('Project Atlas')
-    expect(api.listBoards).not.toHaveBeenCalled()
+    expect(api.searchBoardContent).not.toHaveBeenCalled()
     expect(api.listPosts).toHaveBeenCalledOnce()
     unmountHost(wrapper)
   })
 
   it('does not mix Document results into the Board workspace', async () => {
-    api.listBoards.mockResolvedValue([])
+    api.searchBoardContent.mockResolvedValue({ items: [] })
     api.listPosts.mockResolvedValue([{
       path: 'inbox/atlas', title: 'Project Atlas', created: '', updated: '', tags: [], size: 0, mtime: 1,
     }])
@@ -255,6 +250,7 @@ describe('App-level GlobalSearchHost', () => {
     expect(document.body.querySelector('.palette-empty')?.textContent).toContain('No matching results')
 
     expect(document.body.querySelector('[role="option"]')).toBeNull()
+    expect(api.searchBoardContent).toHaveBeenCalledOnce()
     expect(api.listPosts).not.toHaveBeenCalled()
     unmountHost(wrapper)
   })
@@ -299,7 +295,7 @@ describe('App-level GlobalSearchHost', () => {
     input.dispatchEvent(new Event('input', { bubbles: true }))
     await flushSearchDebounce()
 
-    expect(api.listBoards).not.toHaveBeenCalled()
+    expect(api.searchBoardContent).not.toHaveBeenCalled()
     expect(api.listPosts).not.toHaveBeenCalled()
     expect(diarySearch).toHaveBeenCalledWith('南瓜饼', 20, null, expect.any(AbortSignal))
     expect(document.body.querySelector('.palette-item')?.textContent).toContain('回忆到南瓜饼')

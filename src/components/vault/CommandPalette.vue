@@ -7,6 +7,7 @@ import { useFocusTrap } from '../../composables/useFocusTrap'
 import { useI18n } from '../../composables/useI18n'
 import { isNuvynShortcutBlocked } from '../../lib/keyboard'
 import type { DiarySearchPayload } from '../../features/diary/diarySearchProvider'
+import type { BoardSearchPayload } from '../../features/board/searchProvider'
 
 const props = withDefaults(defineProps<{
   posts?: PostSummary[]
@@ -222,6 +223,15 @@ function noteSnippetMatch(hit: SearchResult) {
   const needle = payload.match === 'body' ? payload.bodyQuery ?? query.value : query.value
   return exactMatchParts(payload.snippet, needle)
 }
+function boardBodySnippetMatch(hit: SearchResult) {
+  if (hit.type !== 'board') return null
+  const payload = hit.payload as Partial<BoardSearchPayload>
+  if (payload.match !== 'body' || typeof payload.snippet !== 'string') return null
+  return exactMatchParts(payload.snippet, query.value)
+}
+function boardBodyMatch(hit: SearchResult): boolean {
+  return hit.type === 'board' && (hit.payload as Partial<BoardSearchPayload>).match === 'body'
+}
 function optionDomId(hit: SearchResult): string {
   return `palette-option-${encodeURIComponent(hit.id)}`
 }
@@ -271,10 +281,14 @@ defineExpose({ show, hide, refresh })
                   <template v-else>{{ hit.title }}</template>
                 </span>
                 <span v-if="hit.type === 'file'" class="palette-badge">{{ matchLabel((hit.payload as DocumentSearchPayload).match) }}</span>
+                <span v-else-if="boardBodyMatch(hit)" class="palette-badge">{{ matchLabel('body') }}</span>
               </div>
               <div v-if="hit.type === 'file' && (hit.payload as DocumentSearchPayload).snippet" class="palette-snippet palette-note-snippet">
                 <template v-if="noteSnippetMatch(hit)"><span>{{ noteSnippetMatch(hit)?.before }}</span><mark class="palette-note-highlight">{{ noteSnippetMatch(hit)?.match }}</mark><span>{{ noteSnippetMatch(hit)?.after }}</span></template>
                 <template v-else>{{ (hit.payload as DocumentSearchPayload).snippet }}</template>
+              </div>
+              <div v-if="boardBodySnippetMatch(hit)" class="palette-snippet palette-note-snippet">
+                <span>{{ boardBodySnippetMatch(hit)?.before }}</span><mark class="palette-note-highlight">{{ boardBodySnippetMatch(hit)?.match }}</mark><span>{{ boardBodySnippetMatch(hit)?.after }}</span>
               </div>
               <div v-if="diarySnippet(hit)" class="palette-snippet"><span>{{ diarySnippet(hit)?.before }}</span><mark>{{ diarySnippet(hit)?.match }}</mark><span>{{ diarySnippet(hit)?.after }}</span></div>
               <div v-if="hit.subtitle && hit.type !== 'file'" class="palette-path">{{ hit.subtitle }}</div>

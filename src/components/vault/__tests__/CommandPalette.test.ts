@@ -155,6 +155,44 @@ describe('CommandPalette Chinese copy', () => {
     wrapper.unmount()
   })
 
+  it('renders saved Board body matches with one safe highlighted snippet and no path line', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
+    const hit: SearchResult = {
+      id: 'board:board-1',
+      type: 'board',
+      title: 'Java 并发',
+      score: 0,
+      payload: {
+        boardId: 'board-1',
+        match: 'body',
+        revision: 3,
+        snippet: '死锁的四个必要条件 a+b <img src=x onerror=alert(1)>',
+        elementId: 'text-1',
+      },
+    }
+    const provider = vi.fn(async (query: string): Promise<SearchResultSection> => ({
+      id: 'boards', label: 'Boards', results: query ? [hit] : [],
+    })) as SearchProvider
+    const wrapper = mount(CommandPalette, { props: { providers: [provider], allowCreate: false } })
+    ;(wrapper.vm as unknown as { show: () => void }).show()
+    await flushPromises()
+
+    const input = document.body.querySelector<HTMLInputElement>('.palette-input input')!
+    input.value = '死锁'
+    input.dispatchEvent(new Event('input', { bubbles: true }))
+    await flushPromises()
+    await vi.advanceTimersByTimeAsync(250)
+    await flushPromises()
+
+    const option = document.body.querySelector<HTMLElement>('[role="option"]')!
+    expect(option.querySelector('.palette-badge')?.textContent).toBe('正文')
+    expect(option.querySelector('.palette-note-highlight')?.textContent).toBe('死锁')
+    expect(option.textContent).toContain('a+b <img src=x onerror=alert(1)>')
+    expect(option.querySelector('img, script')).toBeNull()
+    expect(option.querySelector('.palette-path')).toBeNull()
+    wrapper.unmount()
+  })
+
   it('keeps duplicate Note titles free of directory labels while preserving keyboard selection', async () => {
     vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
     const hits: SearchResult[] = [

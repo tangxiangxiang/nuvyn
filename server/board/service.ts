@@ -7,11 +7,12 @@ import {
   type BoardFolderSummary,
   type BoardMetadata,
 } from '../../shared/boardProtocol.js'
+import type { BoardSearchItem } from '../../shared/boardSearchProtocol.js'
 import { AssetService } from '../assets/service.js'
 import { assertAssetId } from '../assets/validation.js'
 import type { AssetServiceDependencies } from '../assets/types.js'
 import { BoardError } from './errors.js'
-import { createBoardRepository, type BoardRepository } from './repository.js'
+import { createBoardRepository, type BoardRepository, type BoardSearchRecord } from './repository.js'
 import { notifyAttachmentReferencesChanged } from '../attachmentReferenceEvents.js'
 import {
   assertBoardId,
@@ -22,7 +23,10 @@ import {
   normalizeBoardScene,
   normalizeNullableBoardFolderId,
   normalizeBoardTitle,
+  normalizeBoardSearchLimit,
+  normalizeBoardSearchQuery,
 } from './validation.js'
+import { extractBoardSearchText } from './searchText.js'
 import type {
   BoardAggregate,
   BoardFolderMutationResult,
@@ -92,6 +96,46 @@ export class BoardService {
 
   listBoards(): BoardMetadata[] {
     return this.repository.listBoards()
+  }
+
+  search(query: unknown, limit?: unknown): BoardSearchItem[] {
+    const normalizedQuery = normalizeBoardSearchQuery(query)
+    const resultLimit = normalizeBoardSearchLimit(limit)
+    if (!normalizedQuery) return []
+
+    const needle = normalizeSearchText(normalizedQuery).toLocaleLowerCase()
+    const candidates: Array<{ priority: number; item: BoardSearchItem }> = []
+    for (const record of this.repository.listBoardSearchRecords()) {
+      const foldedTitle = normalizeSearchText(record.title).toLocaleLowerCase()
+      const revision = Number.isSafeInteger(record.revision) && (record.revision ?? -1) >= 0
+        ? record.revision!
+        : 0
+      if (foldedTitle === needle) {
+        candidates.push({ priority: 0, item: searchItem(record, revision, 'title') })
+        continue
+      }
+      if (foldedTitle.includes(needle)) {
+        candidates.push({ priority: 1, item: searchItem(record, revision, 'title') })
+        continue
+      }
+
+      const bodyMatch = findBodyMatch(record, needle)
+      if (bodyMatch) {
+        candidates.push({
+          priority: 2,
+          item: {
+            ...searchItem(record, revision, 'body'),
+            snippet: makeSearchSnippet(bodyMatch.text, needle),
+            elementId: bodyMatch.elementId,
+          },
+        })
+      }
+    }
+
+    candidates.sort((left, right) => left.priority - right.priority
+      || right.item.updatedAt - left.item.updatedAt
+      || right.item.boardId.localeCompare(left.item.boardId))
+    return candidates.slice(0, resultLimit).map(({ item }) => item)
   }
 
   listBoardFolders(): BoardFolderSummary[] {
@@ -209,6 +253,52 @@ export class BoardService {
     }
     return failures
   }
+}
+
+function normalizeSearchText(value: string): string {
+  return value.replace(/\s+/gu, ' ').trim()
+}
+
+function searchItem(record: BoardSearchRecord, revision: number, match: 'title' | 'body'): BoardSearchItem {
+  return {
+    boardId: record.id,
+    title: record.title,
+    match,
+    revision,
+    updatedAt: record.updatedAt,
+  }
+}
+
+function findBodyMatch(record: BoardSearchRecord, needle: string): { elementId: string; text: string } | null {
+  if (record.engine !== BOARD_ENGINE_EXCALIDRAW
+    || record.sceneVersion === null
+    || record.sceneVersion < 1
+    || record.sceneVersion > CURRENT_BOARD_SCENE_VERSION
+    || !record.engineDataJson) return null
+
+  try {
+    const engineData: unknown = JSON.parse(record.engineDataJson)
+    for (const element of extractBoardSearchText(engineData)) {
+      const text = normalizeSearchText(element.text)
+      if (text.toLocaleLowerCase().includes(needle)) return { elementId: element.elementId, text }
+    }
+  } catch {
+    // A damaged or unsupported scene should not hide a matching Board title
+    // or prevent other saved Boards from being searched.
+  }
+  return null
+}
+
+function makeSearchSnippet(text: string, needle: string): string {
+  const characters = Array.from(text)
+  const hitStart = Array.from(text.slice(0, text.toLocaleLowerCase().indexOf(needle))).length
+  const hitLength = Array.from(needle).length
+  const hitEnd = Math.min(characters.length, hitStart + hitLength)
+  const context = Math.max(0, 160 - hitLength)
+  let before = Math.min(hitStart, Math.ceil(context / 2))
+  let after = Math.min(characters.length - hitEnd, context - before)
+  before = Math.min(hitStart, context - after)
+  return characters.slice(hitStart - before, hitEnd + after).join('')
 }
 
 export function createBoardService(

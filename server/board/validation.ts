@@ -57,6 +57,27 @@ export function normalizeBoardTitle(value: unknown): string {
   return title.length === 0 ? DEFAULT_BOARD_TITLE : title
 }
 
+export const BOARD_SEARCH_MAX_QUERY_LENGTH = 120
+export const BOARD_SEARCH_DEFAULT_LIMIT = 20
+export const BOARD_SEARCH_MAX_LIMIT = 50
+
+export function normalizeBoardSearchQuery(value: unknown): string {
+  if (typeof value !== 'string') validationError('Board search query must be a string')
+  const query = value.trim()
+  if (Array.from(query).length > BOARD_SEARCH_MAX_QUERY_LENGTH) {
+    validationError(`Board search query must be at most ${BOARD_SEARCH_MAX_QUERY_LENGTH} characters`)
+  }
+  return query
+}
+
+export function normalizeBoardSearchLimit(value: unknown): number {
+  if (value === undefined) return BOARD_SEARCH_DEFAULT_LIMIT
+  if (!Number.isSafeInteger(value) || (value as number) < 1 || (value as number) > BOARD_SEARCH_MAX_LIMIT) {
+    validationError(`Board search limit must be an integer from 1 to ${BOARD_SEARCH_MAX_LIMIT}`)
+  }
+  return value as number
+}
+
 export function assertExpectedRevision(value: unknown): number {
   if (!Number.isSafeInteger(value) || (value as number) < 0) {
     validationError('Board scene revision must be a non-negative safe integer')

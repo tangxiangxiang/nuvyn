@@ -11,12 +11,34 @@ import {
   listBoardFolders,
   moveBoard,
   renameBoard,
+  searchBoardContent,
   renameBoardFolder,
   saveBoardScene,
   setBoardThumbnail,
 } from '../api'
 
 describe('Board API mutation uncertainty', () => {
+  it('searches saved Board text through the authenticated uncached endpoint', async () => {
+    authFetch.mockResolvedValueOnce(new Response(JSON.stringify({ items: [{
+      boardId: 'board-1', title: 'Concurrency', match: 'body', revision: 4,
+      updatedAt: 123, snippet: '死锁的四个条件', elementId: 'text-1',
+    }] }), {
+      status: 200,
+      headers: { 'content-type': 'application/json' },
+    }))
+
+    await expect(searchBoardContent('死锁')).resolves.toMatchObject({
+      items: [{ boardId: 'board-1', match: 'body', elementId: 'text-1', revision: 4 }],
+    })
+    expect(authFetch).toHaveBeenCalledWith('/api/board/search', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ query: '死锁', limit: 20 }),
+      cache: 'no-store',
+      signal: undefined,
+    })
+  })
+
   it('marks transport failures as uncertain', async () => {
     authFetch.mockRejectedValueOnce(new TypeError('network failed'))
 

@@ -56,10 +56,31 @@ interface SceneRow {
   persistent_app_state_json: string
 }
 
+interface BoardSearchRow {
+  id: string
+  title: string
+  updated_at: number
+  engine: string | null
+  scene_version: number | null
+  revision: number | null
+  engine_data_json: string | null
+}
+
+export interface BoardSearchRecord {
+  id: string
+  title: string
+  updatedAt: number
+  engine: string | null
+  sceneVersion: number | null
+  revision: number | null
+  engineDataJson: string | null
+}
+
 export interface BoardRepository {
   createBoard(id: string, title: string, createdAt: number, folderId: string | null): void
   getBoardMetadata(boardId: string): BoardMetadata | null
   listBoards(): BoardMetadata[]
+  listBoardSearchRecords(): BoardSearchRecord[]
   listBoardFolders(): BoardFolderSummary[]
   getBoardFolder(folderId: string): BoardFolderSummary | null
   createBoardFolder(id: string, name: string, parentId: string | null, createdAt: number): BoardFolderSummary
@@ -181,6 +202,25 @@ export class SqliteBoardRepository implements BoardRepository {
       ORDER BY b.updated_at DESC, b.id DESC
     `).all() as BoardRow[]
     return rows.map(metadataFromRow)
+  }
+
+  listBoardSearchRecords(): BoardSearchRecord[] {
+    const rows = this.db.prepare(`
+      SELECT b.id, b.title, b.updated_at,
+             s.engine, s.scene_version, s.revision, s.engine_data_json
+      FROM boards AS b
+      LEFT JOIN board_scenes AS s ON s.board_id = b.id
+      ORDER BY b.updated_at DESC, b.id DESC
+    `).all() as BoardSearchRow[]
+    return rows.map((row) => ({
+      id: row.id,
+      title: row.title,
+      updatedAt: row.updated_at,
+      engine: row.engine,
+      sceneVersion: row.scene_version,
+      revision: row.revision,
+      engineDataJson: row.engine_data_json,
+    }))
   }
 
   listBoardFolders(): BoardFolderSummary[] {

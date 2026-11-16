@@ -1,30 +1,38 @@
-import type { BoardMetadata } from '../../../shared/boardProtocol'
+import type { BoardSearchItem, BoardSearchMatch } from '../../../shared/boardSearchProtocol'
 import type { SearchProvider, SearchResult, SearchResultSection } from '../../lib/searchResults'
-import { boardMetadataSource, type BoardMetadataSource } from './boardMetadataSource'
+import { searchBoardContent } from './api'
 
 export interface BoardSearchPayload {
   boardId: string
+  match: BoardSearchMatch
+  revision: number
+  snippet?: string
+  elementId?: string
 }
 
-function boardResult(board: BoardMetadata): SearchResult<BoardSearchPayload> {
+export type BoardSearchRequest = (query: string) => Promise<{ items: BoardSearchItem[] }>
+
+function boardResult(item: BoardSearchItem): SearchResult<BoardSearchPayload> {
   return {
-    id: `board:${board.id}`,
+    id: `board:${item.boardId}`,
     type: 'board',
-    title: board.title,
-    subtitle: 'Board',
+    title: item.title,
     score: 0,
-    payload: { boardId: board.id },
+    payload: {
+      boardId: item.boardId,
+      match: item.match,
+      revision: item.revision,
+      ...(item.snippet ? { snippet: item.snippet } : {}),
+      ...(item.elementId ? { elementId: item.elementId } : {}),
+    },
   }
 }
 
-export function createBoardSearchProvider(source: BoardMetadataSource = boardMetadataSource): SearchProvider {
+export function createBoardSearchProvider(search: BoardSearchRequest = searchBoardContent): SearchProvider {
   return async (query) => {
     if (!query.trim()) return { id: 'boards', label: 'Boards', results: [] }
-    await source.ensureLoaded()
-    const normalizedQuery = query.trim().toLocaleLowerCase()
-    const results = source.getSnapshot()
-      .filter((board) => board.title.toLocaleLowerCase().includes(normalizedQuery))
-      .map(boardResult)
+    const response = await search(query.trim())
+    const results = response.items.map(boardResult)
     const section: SearchResultSection = { id: 'boards', label: 'Boards', results }
     return section
   }

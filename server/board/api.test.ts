@@ -156,6 +156,17 @@ function scene(assetRefs: readonly string[] = []) {
   }
 }
 
+function textScene(elements: Array<{ id: string; text: string; type?: string; isDeleted?: boolean }>) {
+  return {
+    engineData: {
+      elements: elements.map((element) => ({ type: 'text', ...element })),
+      fileMap: {},
+    },
+    persistentAppState: {},
+    assetRefs: [],
+  }
+}
+
 beforeAll(async () => {
   db.pragma('foreign_keys = ON')
   applyMigrations(db)
@@ -210,6 +221,181 @@ describe('Board V1 HTTP authentication boundary', () => {
 })
 
 describe('Board HTTP API', () => {
+  it('searches saved Board text with authenticated, uncached results and no activity writes', async () => {
+    const exact = await createBoard({ title: '死锁' })
+    const partial = await createBoard({ title: 'Java 并发与死锁' })
+    const bodyOlder = await createBoard({ title: 'Concurrency notes' })
+    now += 10
+    const olderSave = await request(`/api/board/${bodyOlder.metadata.id}/scene`, {
+      method: 'PUT',
+      body: { engine: 'excalidraw', sceneVersion: 1, expectedRevision: 0, scene: textScene([
+        { id: 'older-hit', text: '死锁的四个必要条件' },
+      ]) },
+    })
+    expect(olderSave.status).toBe(200)
+
+    const bodyNewer = await createBoard({ title: 'Database safety' })
+    now += 20
+    const newerSave = await request(`/api/board/${bodyNewer.metadata.id}/scene`, {
+      method: 'PUT',
+      body: { engine: 'excalidraw', sceneVersion: 1, expectedRevision: 0, scene: textScene([
+        { id: 'first-hit', text: '锁等待形成死锁的原因' },
+        { id: 'second-hit', text: '如何避免死锁' },
+      ]) },
+    })
+    expect(newerSave.status).toBe(200)
+
+    const before = await responseJson<{ updatedAt: number; lastOpenedAt: number | null }>(
+      await request(`/api/board/${bodyNewer.metadata.id}/metadata`),
+    )
+    const unauthenticated = await request('/api/board/search', {
+      method: 'POST', body: { query: '死锁' }, authenticated: false,
+    })
+    expect(unauthenticated.status).toBe(401)
+
+    const response = await request('/api/board/search', { method: 'POST', body: { query: '死锁' } })
+    expect(response.status).toBe(200)
+    expect(response.headers.get('Cache-Control')).toContain('no-store')
+    expect(response.headers.get('Pragma')).toBe('no-cache')
+    const result = await responseJson<{ items: Array<Record<string, unknown>> }>(response)
+    expect(result.items.map((item) => [item.boardId, item.match])).toEqual([
+      [exact.metadata.id, 'title'],
+      [partial.metadata.id, 'title'],
+      [bodyNewer.metadata.id, 'body'],
+      [bodyOlder.metadata.id, 'body'],
+    ])
+    expect(result.items[2]).toMatchObject({
+      title: 'Database safety',
+      match: 'body',
+      snippet: '锁等待形成死锁的原因',
+      elementId: 'first-hit',
+      revision: 1,
+    })
+    expect(result.items.filter((item) => item.boardId === bodyNewer.metadata.id)).toHaveLength(1)
+    expect(JSON.stringify(result)).not.toContain('second-hit')
+
+    const after = await responseJson<{ updatedAt: number; lastOpenedAt: number | null }>(
+      await request(`/api/board/${bodyNewer.metadata.id}/metadata`),
+    )
+    expect(after).toEqual(before)
+  })
+
+  it('indexes only the current successfully saved revision and removes deleted text and Boards', async () => {
+    const board = await createBoard({ title: 'SQL notes' })
+    const save = (expectedRevision: number, elements: Array<{ id: string; text: string }>) => request(
+      `/api/board/${board.metadata.id}/scene`,
+      { method: 'PUT', body: { engine: 'excalidraw', sceneVersion: 1, expectedRevision, scene: textScene(elements) } },
+    )
+    const search = async (query: string) => responseJson<{ items: Array<{ boardId: string; revision: number }> }>(
+      await request('/api/board/search', { method: 'POST', body: { query } }),
+    )
+
+    expect((await save(0, [{ id: 'v1', text: 'Java 死锁' }])).status).toBe(200)
+    expect((await search('死锁')).items).toMatchObject([{ boardId: board.metadata.id, revision: 1 }])
+
+    now += 100
+    expect((await save(1, [{ id: 'v2', text: 'Java 线程同步' }])).status).toBe(200)
+    expect((await search('线程同步')).items).toMatchObject([{ boardId: board.metadata.id, revision: 2 }])
+    expect((await search('死锁')).items).toEqual([])
+
+    const stale = await save(1, [{ id: 'stale', text: '未提交的线程安全内容' }])
+    expect(stale.status).toBe(409)
+    expect((await search('未提交')).items).toEqual([])
+    expect((await search('线程同步')).items).toHaveLength(1)
+
+    now += 100
+    expect((await save(2, [])).status).toBe(200)
+    expect((await search('线程同步')).items).toEqual([])
+
+    const deleted = await request(`/api/board/${board.metadata.id}`, { method: 'DELETE' })
+    expect(deleted.status).toBe(204)
+    expect((await search('SQL notes')).items).toEqual([])
+  })
+
+  it('bounds Board search requests and avoids scanning saved Scenes for empty queries', async () => {
+    const empty = await request('/api/board/search', { method: 'POST', body: { query: '  ' } })
+    expect(empty.status).toBe(200)
+    expect(await responseJson(empty)).toEqual({ items: [] })
+
+    const invalidQuery = await request('/api/board/search', { method: 'POST', body: { query: 42 } })
+    expect(invalidQuery.status).toBe(400)
+    const longQuery = await request('/api/board/search', { method: 'POST', body: { query: 'x'.repeat(121) } })
+    expect(longQuery.status).toBe(400)
+    const invalidLimit = await request('/api/board/search', { method: 'POST', body: { query: 'anything', limit: 51 } })
+    expect(invalidLimit.status).toBe(400)
+  })
+
+  it('matches multiline and case-insensitive text literally without searching IDs or shapes', async () => {
+    const board = await createBoard({ title: 'Literal search checks' })
+    const response = await request(`/api/board/${board.metadata.id}/scene`, {
+      method: 'PUT',
+      body: {
+        engine: 'excalidraw',
+        sceneVersion: 1,
+        expectedRevision: 0,
+        scene: textScene([
+          { id: 'case-sensitive-id', text: `SELECT FOR UPDATE: ${'x'.repeat(220)} a+b ${'y'.repeat(220)}` },
+          { id: 'multiline-id', text: '第一行\nSecond line 中文' },
+          { id: 'shape-property', type: 'rectangle', text: 'shape-only-secret' },
+        ]),
+      },
+    })
+    expect(response.status).toBe(200)
+
+    const caseMatch = await responseJson<{ items: Array<{ snippet: string }> }>(await request(
+      '/api/board/search', { method: 'POST', body: { query: 'select for update' } },
+    ))
+    expect(caseMatch.items).toHaveLength(1)
+    expect(caseMatch.items[0]?.snippet).toContain('SELECT FOR UPDATE')
+
+    const literalMatch = await responseJson<{ items: Array<{ snippet: string }> }>(await request(
+      '/api/board/search', { method: 'POST', body: { query: 'a+b' } },
+    ))
+    expect(literalMatch.items).toHaveLength(1)
+    expect(literalMatch.items[0]?.snippet).toContain('a+b')
+    expect(Array.from(literalMatch.items[0]?.snippet ?? '')).toHaveLength(160)
+
+    const multiline = await responseJson<{ items: Array<{ snippet: string }> }>(await request(
+      '/api/board/search', { method: 'POST', body: { query: '第一行 Second line' } },
+    ))
+    expect(multiline.items[0]?.snippet).toBe('第一行 Second line 中文')
+
+    for (const query of ['case-sensitive-id', 'shape-only-secret']) {
+      const notIndexed = await responseJson<{ items: unknown[] }>(await request(
+        '/api/board/search', { method: 'POST', body: { query } },
+      ))
+      expect(notIndexed.items).toEqual([])
+    }
+  })
+
+  it('searches a large saved canvas across multiple Boards within a bounded response time', async () => {
+    const boardCount = 40
+    const textElements = Array.from({ length: 250 }, (_, index) => ({
+      id: `text-${index}`,
+      text: index === 249 ? 'target-marker 查询性能' : `canvas element ${index} with unrelated text`,
+    }))
+
+    for (let index = 0; index < boardCount; index += 1) {
+      const board = await createBoard({ title: `Performance board ${index}` })
+      const response = await request(`/api/board/${board.metadata.id}/scene`, {
+        method: 'PUT',
+        body: { engine: 'excalidraw', sceneVersion: 1, expectedRevision: 0, scene: textScene(textElements) },
+      })
+      expect(response.status).toBe(200)
+    }
+
+    const startedAt = Date.now()
+    const response = await request('/api/board/search', {
+      method: 'POST', body: { query: 'target-marker', limit: 5 },
+    })
+    const elapsed = Date.now() - startedAt
+    expect(response.status).toBe(200)
+    const result = await responseJson<{ items: Array<{ match: string; snippet: string }> }>(response)
+    expect(result.items).toHaveLength(5)
+    expect(result.items[0]).toMatchObject({ match: 'body', snippet: 'target-marker 查询性能' })
+    expect(elapsed).toBeLessThan(5000)
+  })
+
   it('reads the latest preview without changing last-opened activity and requires authentication', async () => {
     const board = await createBoard({ title: 'Embedded diagram' })
     const url = `/api/board/${board.metadata.id}/preview`

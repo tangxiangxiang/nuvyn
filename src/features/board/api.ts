@@ -1,6 +1,7 @@
 import { authFetch } from '../../lib/auth-session'
 import { jsonOrThrow } from '../../lib/api'
 import type { BoardFolderSummary, BoardMetadata, BoardScene, BoardSceneRecord } from '../../../shared/boardProtocol'
+import type { BoardSearchResponse } from '../../../shared/boardSearchProtocol'
 import type { BoardMaterial } from '../../../shared/boardMaterialProtocol'
 
 export interface BoardAggregate {
@@ -93,6 +94,25 @@ async function requestJson<T>(
 export async function listBoards(): Promise<BoardMetadata[]> {
   try {
     return await readJson<BoardMetadata[]>(await authFetch('/api/board'))
+  } catch (error) {
+    throw asBoardApiError(error)
+  }
+}
+
+export async function searchBoardContent(
+  query: string,
+  limit = 20,
+  signal?: AbortSignal,
+): Promise<BoardSearchResponse> {
+  try {
+    const response = await authFetch('/api/board/search', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ query, limit }),
+      cache: 'no-store',
+      signal,
+    })
+    return await readJson<BoardSearchResponse>(response)
   } catch (error) {
     throw asBoardApiError(error)
   }

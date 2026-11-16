@@ -7,6 +7,7 @@ import { createBoardService, type BoardService } from './service.js'
 import type { BoardScene } from '../../shared/boardProtocol.js'
 
 export const BOARD_SCENE_MAX_JSON_BYTES = 5 * 1024 * 1024
+export const BOARD_SEARCH_MAX_JSON_BYTES = 8 * 1024
 
 export type BoardServiceFactory = () => BoardService
 
@@ -39,6 +40,26 @@ async function readBoardObject(request: Request, tooLargeCode: string, tooLargeM
 
 export function createBoardRoutes(getService: BoardServiceFactory = boardServiceForRequest): Hono {
   const routes = new Hono()
+
+  // Register before dynamic Board paths and return metadata/snippets only.
+  routes.post('/search', async (c) => {
+    c.header('Cache-Control', 'no-store, max-age=0')
+    c.header('Pragma', 'no-cache')
+    c.header('Expires', '0')
+    try {
+      const body = await readBoardObject(
+        c.req.raw,
+        'BOARD_SEARCH_REQUEST_TOO_LARGE',
+        'Board search request exceeds the size limit',
+      )
+      return c.json({ items: getService().search(body.query, body.limit) })
+    } catch (error) {
+      return apiErrorResponse(c, error, {
+        code: 'BOARD_INTERNAL_ERROR',
+        message: 'Board search failed.',
+      })
+    }
+  })
 
   routes.get('/', (c) => {
     try {

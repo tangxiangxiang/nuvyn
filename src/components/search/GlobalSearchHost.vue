@@ -19,7 +19,7 @@ const route = useRoute()
 const paletteRef = ref<InstanceType<typeof CommandPalette> | null>(null)
 const diaryAccess = useDiaryAccessSession()
 const documentProvider = createDocumentSearchProvider(documentSearchSource)
-const boardProvider = createBoardSearchProvider(boardMetadataSource)
+const boardProvider = createBoardSearchProvider()
 const diaryProvider = createDiarySearchProvider()
 const workspaceKind = computed<WorkspaceKind>(() => (
   route.meta.workspaceKind !== undefined
