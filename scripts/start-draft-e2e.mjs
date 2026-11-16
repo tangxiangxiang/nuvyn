@@ -5,8 +5,15 @@ import path from 'node:path'
 
 const port = process.argv[2] ?? '4175'
 const tempRoot = path.resolve(os.tmpdir())
-const vault = process.env.NUVYN_DRAFT_E2E_VAULT ?? path.join(tempRoot, `nuvyn-e2e-vault-${port}`)
-const dbPath = process.env.NUVYN_E2E_DB_PATH ?? path.join(tempRoot, `nuvyn-e2e-db-${port}`, 'data', 'nuvyn.db')
+const freshRoot = process.argv.includes('--fresh')
+  ? await fs.mkdtemp(path.join(tempRoot, 'nuvyn-e2e-'))
+  : undefined
+const vault = freshRoot
+  ? path.join(freshRoot, 'vault')
+  : process.env.NUVYN_DRAFT_E2E_VAULT ?? path.join(tempRoot, `nuvyn-e2e-vault-${port}`)
+const dbPath = freshRoot
+  ? path.join(freshRoot, 'data', 'nuvyn.db')
+  : process.env.NUVYN_E2E_DB_PATH ?? path.join(tempRoot, `nuvyn-e2e-db-${port}`, 'data', 'nuvyn.db')
 
 function assertTestOwnedTempPath(value, label) {
   const resolved = path.resolve(value)
@@ -30,7 +37,7 @@ for (const folder of ['inbox', 'archive', 'literature']) {
   await fs.mkdir(path.join(isolatedVault, folder), { recursive: true })
 }
 
-const child = spawn(process.execPath, ['node_modules/vite/bin/vite.js', '--host', '127.0.0.1', '--port', port], {
+const child = spawn(process.execPath, ['node_modules/vite/bin/vite.js', '--host', '127.0.0.1', '--port', port, '--strictPort'], {
   env: {
     ...process.env,
     VAULT_DIR: isolatedVault,
@@ -43,7 +50,7 @@ const child = spawn(process.execPath, ['node_modules/vite/bin/vite.js', '--host'
 for (const signal of ['SIGINT', 'SIGTERM']) {
   process.on(signal, () => child.kill(signal))
 }
-child.on('exit', (code, signal) => {
-  if (signal) process.kill(process.pid, signal)
-  else process.exit(code ?? 1)
+child.on('exit', async (code) => {
+  if (freshRoot) await fs.rm(freshRoot, { recursive: true, force: true })
+  process.exitCode = code ?? 1
 })

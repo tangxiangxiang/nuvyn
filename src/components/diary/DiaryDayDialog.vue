@@ -332,5 +332,10 @@ function selectAttachments(event: Event) {
 }
 .diary-day-dialog-card .n-card__content-scrollbar { min-height: 0; flex: 1 1 auto; overflow: hidden; }
 .diary-day-dialog-card .n-card__content-scrollbar .n-scrollbar { min-height: 0; flex: 1 1 auto; }
-.diary-day-dialog-card .n-card__content-scrollbar .n-scrollbar-container { overscroll-behavior: contain; }
+.diary-day-dialog-card .n-card__content-scrollbar > .n-scrollbar-container {
+  overscroll-behavior: contain;
+  scrollbar-width: none;
+}
+.diary-day-dialog-card .n-card__content-scrollbar > .n-scrollbar-container::-webkit-scrollbar { display: none; }
+.diary-day-dialog-card .n-card__content-scrollbar > .n-scrollbar-rail { display: none; }
 </style>

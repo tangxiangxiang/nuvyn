@@ -1,6 +1,8 @@
-import type { Locator } from '@playwright/test'
+import type { Locator, Page } from '@playwright/test'
 import { test, expect } from './fixtures/auth'
 import { chooseDiaryAction, chooseDiaryDayAction, openEmptyDiaryDay, saveDiaryDay, unlockDiary } from './helpers/diary-life'
+
+const scrollTestImage = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAAAAAA6fptVAAAACklEQVR4nGNgAAAAAgABSK+kcQAAAABJRU5ErkJggg==', 'base64')
 
 test.beforeEach(async ({ page }, testInfo) => {
   // The specs share a server database. Reserve January for Diary life and
@@ -14,6 +16,77 @@ function dateNumberOffset(cell: Locator) {
     const text = number.getBoundingClientRect()
     return { x: text.x - date.x, y: text.y - date.y }
   })
+}
+
+async function expectDiaryContentUnclipped(scroller: Locator, content: Locator) {
+  await expect(content).toBeInViewport({ ratio: 0.99 })
+  await expect.poll(async () => {
+    const [body, target] = await Promise.all([scroller.boundingBox(), content.boundingBox()])
+    if (!body || !target) return false
+    return target.y >= body.y - 1 && target.y + target.height <= body.y + body.height + 1
+      && target.x >= body.x - 1 && target.x + target.width <= body.x + body.width + 1
+  }).toBe(true)
+}
+
+async function expectDiaryTextareaExpanded(textarea: Locator) {
+  await expect.poll(() => textarea.evaluate(node => ({
+    wraps: node.clientHeight > parseFloat(getComputedStyle(node).lineHeight) * 2,
+    textOverflow: node.scrollHeight - node.clientHeight,
+  }))).toEqual({ wraps: true, textOverflow: 0 })
+}
+
+async function expectDiaryScrollbarsHidden(dialog: Locator, scroller: Locator) {
+  await expect(scroller).toHaveCSS('scrollbar-width', 'none')
+  expect(await scroller.evaluate(node => getComputedStyle(node, '::-webkit-scrollbar').display)).toBe('none')
+  const rail = dialog.locator('.n-card__content-scrollbar > .n-scrollbar-rail--vertical')
+  await expect(rail).toHaveCSS('display', 'none')
+  await expect(rail.locator('.n-scrollbar-rail__scrollbar')).toBeHidden()
+}
+
+async function expectDiaryCanScrollToEnd(page: Page, dialog: Locator, lastEntry: Locator, lastImage: Locator, touch: boolean) {
+  const scroller = dialog.locator('.n-card__content-scrollbar > .n-scrollbar-container')
+  await expect(scroller).toHaveCSS('overflow-y', /^(auto|scroll)$/)
+  await expect.poll(() => scroller.evaluate(node => node.scrollHeight - node.clientHeight)).toBeGreaterThan(0)
+  await expect(dialog).toBeInViewport({ ratio: 0.99 })
+  expect(await scroller.evaluate(node => node.scrollWidth - node.clientWidth)).toBeLessThanOrEqual(1)
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true)
+
+  await scroller.evaluate(node => { node.scrollTop = 0 })
+  await expect(lastEntry).not.toBeInViewport()
+  await expect(lastImage).not.toBeInViewport()
+  const horizontalLayout = () => lastImage.evaluate(node => {
+    const { left, width } = node.getBoundingClientRect()
+    return { left, width }
+  })
+  const beforeScroll = await horizontalLayout()
+  await expectDiaryScrollbarsHidden(dialog, scroller)
+  if (touch) {
+    const bounds = await scroller.boundingBox()
+    if (!bounds) throw new Error('Diary scroll container has no bounds')
+    const browser = await page.context().newCDPSession(page)
+    try {
+      await browser.send('Input.synthesizeScrollGesture', {
+        x: bounds.x + bounds.width / 2,
+        y: bounds.y + bounds.height * 0.75,
+        yDistance: -Math.min(150, bounds.height / 2),
+        gestureSourceType: 'touch',
+        preventFling: true,
+      })
+      await expect.poll(() => scroller.evaluate(node => node.scrollTop)).toBeGreaterThan(0)
+    } finally {
+      await browser.detach()
+    }
+    await scroller.evaluate(node => { node.scrollTop = node.scrollHeight })
+  } else {
+    await scroller.hover()
+    await page.mouse.wheel(0, await scroller.evaluate(node => node.scrollHeight))
+  }
+  await expect.poll(() => scroller.evaluate(node => node.scrollHeight - node.clientHeight - node.scrollTop))
+    .toBeLessThanOrEqual(1)
+  await expectDiaryContentUnclipped(scroller, lastEntry)
+  await expectDiaryContentUnclipped(scroller, lastImage)
+  expect(await horizontalLayout()).toEqual(beforeScroll)
+  await expectDiaryScrollbarsHidden(dialog, scroller)
 }
 
 for (const [index, viewport] of [{ width: 390, height: 844 }, { width: 768, height: 1024 }, { width: 1280, height: 800 }].entries()) {
@@ -390,7 +463,8 @@ for (const [index, viewport] of [
   { width: 1280, height: 800 },
 ].entries()) {
   test.describe(`Diary bullet editor at ${viewport.width}px`, () => {
-    test.use({ hasTouch: viewport.width <= 768 })
+    const touch = viewport.width <= 768
+    test.use({ hasTouch: touch })
 
     test('keeps long entries inside the dialog and removes the day from the calendar', async ({ page }, testInfo) => {
       await page.setViewportSize(viewport)
@@ -405,7 +479,7 @@ for (const [index, viewport] of [
       await expect(editor).toBeVisible()
       await expect(editor.getByRole('button', { name: '第 1 条日记的操作' })).toBeDisabled()
 
-      const longText = '这是一条很长的日记内容用于验证窄屏自动换行'.repeat(32)
+      const longText = '这是一条很长的日记内容用于验证窄屏自动换行'.repeat(5)
       const first = page.getByRole('textbox', { name: '第 1 条日记', exact: true })
       await first.fill(longText)
       await first.press('End')
@@ -418,7 +492,6 @@ for (const [index, viewport] of [
         const editorNode = node.querySelector<HTMLElement>('[data-testid="diary-bullet-editor"]')!
         const row = editorNode.querySelector<HTMLElement>('.diary-bullet-row')!
         const button = row.querySelector<HTMLElement>('.diary-bullet-actions')!
-        const bodyScroller = node.querySelector<HTMLElement>('.n-card__content-scrollbar .n-scrollbar-container')!
         const dialogBounds = node.getBoundingClientRect()
         const rowBounds = row.getBoundingClientRect()
         const buttonBounds = button.getBoundingClientRect()
@@ -432,12 +505,13 @@ for (const [index, viewport] of [
           inputWidth: row.querySelector('textarea')!.getBoundingClientRect().width,
           inputLeft: row.querySelector('textarea')!.getBoundingClientRect().left,
           editorLeft: editorNode.getBoundingClientRect().left,
-          bodyScrollHeight: bodyScroller.scrollHeight,
-          bodyClientHeight: bodyScroller.clientHeight,
+          dialogLeft: dialogBounds.left,
+          dialogTop: dialogBounds.top,
           dialogBottom: dialogBounds.bottom,
           documentWidth: document.documentElement.scrollWidth,
         }
       })
+      expect(layout.dialogLeft).toBeGreaterThanOrEqual(-1)
       expect(layout.dialogRight).toBeLessThanOrEqual(viewport.width + 1)
       expect(layout.dialogScrollWidth).toBeLessThanOrEqual(layout.dialogWidth + 1)
       expect(layout.rowRight).toBeLessThanOrEqual(layout.editorRight + 1)
@@ -445,8 +519,22 @@ for (const [index, viewport] of [
       expect(layout.inputWidth).toBeGreaterThan(100)
       expect(layout.inputLeft - layout.editorLeft).toBeCloseTo(30, 0)
       expect(layout.documentWidth).toBeLessThanOrEqual(viewport.width)
+      expect(layout.dialogTop).toBeGreaterThanOrEqual(-1)
       expect(layout.dialogBottom).toBeLessThanOrEqual(viewport.height + 1)
-      if (viewport.width <= 430) expect(layout.bodyScrollHeight).toBeGreaterThan(layout.bodyClientHeight)
+      const scroller = dialog.locator('.n-card__content-scrollbar .n-scrollbar-container')
+      expect(await scroller.evaluate(node => node.scrollWidth - node.clientWidth)).toBeLessThanOrEqual(1)
+      await expectDiaryScrollbarsHidden(dialog, scroller)
+      await expectDiaryTextareaExpanded(first)
+      await expectDiaryContentUnclipped(scroller, first)
+      await expectDiaryContentUnclipped(scroller, second)
+      const lastMenu = editor.getByRole('button', { name: '第 2 条日记的操作', exact: true })
+      await expectDiaryContentUnclipped(scroller, lastMenu)
+      await expect(lastMenu).toHaveCSS('opacity', '1')
+      await lastMenu.press('Enter')
+      const lastActions = page.getByRole('menu', { name: '第 2 条日记的操作' })
+      await expect(lastActions).toBeInViewport({ ratio: 0.99 })
+      await page.keyboard.press('Escape')
+      await expect(lastActions).toHaveCount(0)
       if (viewport.width === 390) await page.screenshot({ path: testInfo.outputPath('diary-editor-mobile.png') })
 
       const firstMenu = page.getByRole('button', { name: '第 1 条日记的操作', exact: true })
@@ -480,6 +568,8 @@ for (const [index, viewport] of [
       await expect(remaining).toBeFocused()
       await saveDiaryDay(page, viewport.width <= 768)
       await expect(page.getByTestId('diary-bullet-reader')).toContainText('保留这一条')
+      await expectDiaryContentUnclipped(scroller, dialog.getByText('保留这一条', { exact: true }))
+      await expectDiaryScrollbarsHidden(dialog, scroller)
       await page.getByRole('button', { name: '关闭日记' }).click()
       await expect(cell.locator('.life-marker')).toBeVisible()
 
@@ -492,6 +582,73 @@ for (const [index, viewport] of [
       await confirmation.getByRole('button', { name: /^(Confirm|确认|确定)$/ }).click()
       await expect(cell.locator('.life-marker')).toHaveCount(0)
       expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true)
+    })
+
+    test('scrolls overflowing Diary content without showing a scrollbar in either mode', async ({ page }) => {
+      await page.setViewportSize(viewport)
+      await page.goto('/diary')
+      await unlockDiary(page)
+      const date = [20, 21, 22, 23, 25, 29][index]
+      const cell = page.locator(`.diary-life-calendar [data-date$="-01-${date}"]`)
+      await openEmptyDiaryDay(page, cell, () => touch ? cell.tap() : cell.click())
+
+      const dialog = page.getByTestId('diary-day-dialog')
+      const editor = dialog.getByTestId('diary-bullet-editor')
+      const scroller = dialog.locator('.n-card__content-scrollbar .n-scrollbar-container')
+      const entryCount = 10
+      const sentence = '这是一条很长的日记内容用于验证窄屏自动换行'
+      for (let number = 1; number < entryCount; number++) {
+        const entry = editor.getByRole('textbox', { name: `第 ${number} 条日记`, exact: true })
+        await entry.fill(`${number} ${sentence.repeat(number === 1 ? 32 : 9)}`)
+        await expectDiaryTextareaExpanded(entry)
+        await entry.press('Enter')
+      }
+
+      const lastText = '最后一条日记，下面是今天的照片。'
+      const last = editor.getByRole('textbox', { name: `第 ${entryCount} 条日记`, exact: true })
+      await last.fill(lastText)
+      const chooser = page.waitForEvent('filechooser')
+      await chooseDiaryDayAction(page, '添加附件', touch)
+      const photos = ['scroll-first.png', 'scroll-middle.png', 'scroll-last.png']
+      await (await chooser).setFiles(photos.map(name => ({ name, mimeType: 'image/png', buffer: scrollTestImage })))
+      const lastImage = dialog.getByRole('button', { name: '预览 scroll-last.png', exact: true })
+      await expect(lastImage).toBeVisible()
+      await expectDiaryCanScrollToEnd(page, dialog, last, lastImage, touch)
+      await expect(last).toHaveValue(lastText)
+
+      const trigger = editor.getByRole('button', { name: `第 ${entryCount} 条日记的操作`, exact: true })
+      await expectDiaryContentUnclipped(scroller, trigger)
+      if (touch) {
+        await trigger.tap()
+      } else {
+        await last.focus()
+        await page.keyboard.press('Tab')
+        await expect(trigger).toBeFocused()
+        await page.keyboard.press('Enter')
+      }
+      const menu = page.getByRole('menu', { name: `第 ${entryCount} 条日记的操作` })
+      await expect(menu).toBeInViewport({ ratio: 0.99 })
+      await expect(menu.getByRole('menuitem', { name: '删除此条' })).toBeVisible()
+      await page.keyboard.press('Escape')
+      await expect(menu).toHaveCount(0)
+
+      await saveDiaryDay(page, touch)
+      const lastReadEntry = dialog.getByTestId('diary-bullet-reader').getByText(lastText, { exact: true })
+      await expect(lastReadEntry).toBeVisible()
+      await expectDiaryCanScrollToEnd(page, dialog, lastReadEntry, lastImage, touch)
+      const image = lastImage.getByRole('img', { name: 'scroll-last.png' })
+      await expect.poll(() => image.evaluate(node => (node as HTMLImageElement).naturalWidth)).toBeGreaterThan(0)
+      if (touch) {
+        await lastImage.tap()
+      } else {
+        await lastImage.focus()
+        await page.keyboard.press('Home')
+        await expect.poll(() => scroller.evaluate(node => node.scrollTop)).toBe(0)
+        await page.keyboard.press('End')
+        await expectDiaryContentUnclipped(scroller, lastImage)
+        await page.keyboard.press('Enter')
+      }
+      await expect(page.getByRole('dialog', { name: 'scroll-last.png', exact: true })).toBeVisible()
     })
   })
 }

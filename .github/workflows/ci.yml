@@ -128,6 +128,10 @@ jobs:
       - name: Run application browser E2E shard
         run: node node_modules/@playwright/test/cli.js test --config=playwright.cross-platform.config.ts --shard=${{ matrix.shard }}/4 --reporter=line,github
 
+      - name: Run isolated Ledger onboarding E2E
+        if: ${{ !cancelled() && matrix.shard == 2 }}
+        run: node node_modules/@playwright/test/cli.js test --config=playwright.ledger-onboarding.config.ts --reporter=line,github
+
       - name: Upload browser failure evidence
         if: failure()
         uses: actions/upload-artifact@v7
