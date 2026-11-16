@@ -43,6 +43,23 @@ async function expectDiaryScrollbarsHidden(dialog: Locator, scroller: Locator) {
   await expect(rail.locator('.n-scrollbar-rail__scrollbar')).toBeHidden()
 }
 
+async function readStableHoverColors(button: Locator) {
+  return button.evaluate(element => new Promise<string[]>((resolve) => {
+    let previous = ''
+    let stableFrames = 0
+    const sample = () => {
+      const style = getComputedStyle(element)
+      const values = [style.color, style.backgroundColor, style.borderColor]
+      const current = JSON.stringify(values)
+      stableFrames = current === previous ? stableFrames + 1 : 0
+      previous = current
+      if (stableFrames >= 2) resolve(values)
+      else requestAnimationFrame(sample)
+    }
+    requestAnimationFrame(sample)
+  }))
+}
+
 async function expectDiaryCanScrollToEnd(page: Page, dialog: Locator, lastEntry: Locator, lastImage: Locator, touch: boolean) {
   const scroller = dialog.locator('.n-card__content-scrollbar > .n-scrollbar-container')
   await expect(scroller).toHaveCSS('overflow-y', /^(auto|scroll)$/)
@@ -253,6 +270,64 @@ for (const [index, viewport] of [{ width: 390, height: 844 }, { width: 768, heig
     })
   })
 }
+
+test('Diary NavBar icon controls share the standard size across viewport widths', async ({ page }) => {
+  await page.goto('/diary')
+  await unlockDiary(page)
+
+  const viewportWidths = [390, 430, 768, 1024, 1280, 1440]
+  const selectors = [
+    '.diary-view-toggle',
+    '.diary-event-list-toggle',
+    '.nav-search',
+    '.theme-toggle',
+    '[data-testid="account-button"]',
+  ]
+
+  for (const width of viewportWidths) {
+    await page.setViewportSize({ width, height: 900 })
+    const controls = selectors.map(selector => page.locator(`.navbar .nav-actions ${selector}`))
+    for (const control of controls) await expect(control).toBeVisible()
+
+    const metrics = await Promise.all(controls.map(control => control.evaluate(button => {
+      const bounds = button.getBoundingClientRect()
+      const icon = button.querySelector('.n-icon')!.getBoundingClientRect()
+      const svg = button.querySelector('.n-icon svg')!.getBoundingClientRect()
+      return {
+        x: bounds.x,
+        y: bounds.y,
+        width: bounds.width,
+        height: bounds.height,
+        iconWidth: icon.width,
+        iconHeight: icon.height,
+        svgWidth: svg.width,
+        svgHeight: svg.height,
+      }
+    })))
+
+    expect(metrics.map(({ width: buttonWidth, height }) => [buttonWidth, height]))
+      .toEqual(Array.from({ length: controls.length }, () => [28, 28]))
+    expect(metrics.map(({ iconWidth, iconHeight, svgWidth, svgHeight }) => [iconWidth, iconHeight, svgWidth, svgHeight]))
+      .toEqual(Array.from({ length: controls.length }, () => [18, 18, 18, 18]))
+    expect(Math.max(...metrics.map(metric => metric.y)) - Math.min(...metrics.map(metric => metric.y)))
+      .toBeLessThan(1)
+    expect(metrics.slice(1).map((metric, index) => metric.x - metrics[index].x - metrics[index].width))
+      .toEqual(Array.from({ length: controls.length - 1 }, () => width <= 600 ? 2 : 6))
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true)
+  }
+
+  const diaryToggles = [
+    page.locator('.navbar .nav-actions .diary-view-toggle'),
+    page.locator('.navbar .nav-actions .diary-event-list-toggle'),
+  ]
+  const search = page.locator('.navbar .nav-actions .nav-search')
+  for (const diaryToggle of diaryToggles) {
+    await diaryToggle.hover()
+    const diaryHover = await readStableHoverColors(diaryToggle)
+    await search.hover()
+    expect(await readStableHoverColors(search)).toEqual(diaryHover)
+  }
+})
 
 test('text-only Diary days have a calendar marker and preserve bullet editing interactions', async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 })
