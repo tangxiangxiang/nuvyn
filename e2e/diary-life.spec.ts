@@ -275,6 +275,10 @@ for (const viewport of [{ width: 390, height: 844 }, { width: 430, height: 900 }
       await expect(eventList).toBeVisible()
       const listedEvent = eventList.getByRole('button').filter({ hasText: eventTitle })
       await expect(listedEvent).toBeVisible()
+      if (viewport.width === 1280) {
+        await expect(listedEvent.locator('.diary-event-list-countdown')).toBeVisible()
+        await expect(listedEvent.locator('.diary-event-list-countdown strong')).toHaveText(/^\d+$/)
+      }
       await listedEvent.click()
       await expect(eventDetail).toBeVisible()
       await expect(page.getByRole('textbox', { name: '事件标题', exact: true })).toBeHidden()
@@ -314,14 +318,19 @@ for (const viewport of [{ width: 390, height: 844 }, { width: 430, height: 900 }
       await page.screenshot({ path: testInfo.outputPath('diary-calendar.png') })
       expect(await page.locator('.monaco-editor').count()).toBe(0)
       if (viewport.width === 1280) {
-        const countdowns = page.getByRole('region', { name: '倒数日' })
-        await expect(countdowns).toBeVisible()
+        const countdowns = page.locator('.countdowns')
+        await expect(countdowns).toHaveCount(0)
         const calendarHeight = (await calendar.boundingBox())!.height
         await page.getByRole('button', { name: '切换到情绪日记' }).click()
-        await expect(countdowns).toBeHidden()
+        await expect(countdowns).toHaveCount(0)
         expect((await calendar.boundingBox())!.height).toBe(calendarHeight)
         await page.getByRole('button', { name: '切换到人生事件' }).click()
-        await countdowns.getByRole('button').filter({ hasText: updatedEventTitle }).click()
+        await expect(countdowns).toHaveCount(0)
+        await page.getByTestId('diary-event-list-toggle').click()
+        const eventList = page.locator('.diary-event-list-dialog')
+        await expect(eventList).toBeVisible()
+        await expect(eventList.locator('.diary-event-list-scroll')).toHaveCSS('overflow', 'auto')
+        await eventList.getByRole('button').filter({ hasText: updatedEventTitle }).click()
         await expect(eventDetail).toBeVisible()
         await expect(page.getByRole('textbox', { name: '事件标题' })).toBeHidden()
 
@@ -344,8 +353,10 @@ for (const viewport of [{ width: 390, height: 844 }, { width: 430, height: 900 }
         await expect(lockedDraft).toHaveCount(0)
         await unlockButton.click()
         await unlockDiary(page)
-        await expect(countdowns).toBeVisible()
-        await countdowns.getByRole('button').filter({ hasText: updatedEventTitle }).click()
+        await expect(countdowns).toHaveCount(0)
+        await page.getByTestId('diary-event-list-toggle').click()
+        await expect(eventList).toBeVisible()
+        await eventList.getByRole('button').filter({ hasText: updatedEventTitle }).click()
         await expect(eventDetail).toBeVisible()
         await expect(page.locator('.diary-event-modal-title')).toContainText(updatedEventTitle)
         await expect(page.locator('.diary-event-modal-title')).not.toContainText('锁定前草稿')
@@ -358,6 +369,78 @@ for (const viewport of [{ width: 390, height: 844 }, { width: 430, height: 900 }
     })
   })
 }
+
+test.describe('Diary Event list scrolling', () => {
+  test.use({ hasTouch: true })
+
+  test('removes the page countdown strip while keeping list countdowns and touch scrolling', async ({ page }) => {
+    await page.setViewportSize({ width: 390, height: 844 })
+    await page.goto('/diary')
+    await unlockDiary(page)
+
+    const startDate = await page.evaluate(() => {
+      const date = new Date(Date.now() + 24 * 60 * 60 * 1000)
+      const year = date.getFullYear()
+      const month = String(date.getMonth() + 1).padStart(2, '0')
+      const day = String(date.getDate()).padStart(2, '0')
+      return `${year}-${month}-${day}`
+    })
+    const items = Array.from({ length: 24 }, (_, index) => ({
+      id: `diary-scroll-event-${index}`,
+      title: `可滚动事件 ${index + 1}`,
+      description: '',
+      emoji: '🎯',
+      type: 'milestone' as const,
+      startDate,
+      endDate: startDate,
+      startTime: null,
+      endTime: null,
+      allDay: true,
+      recurrence: 'none' as const,
+      showCountdown: true,
+      isPrimary: false,
+      version: 1,
+      createdAt: index,
+      updatedAt: index,
+    }))
+    await page.route('**/api/diary/life/events/list*', route => route.fulfill({ json: { items, next: null } }))
+    await page.getByTestId('diary-event-list-toggle').click()
+
+    const pageCountdowns = page.locator('.countdowns')
+    await expect(pageCountdowns).toHaveCount(0)
+    const eventList = page.locator('.diary-event-list-dialog')
+    await expect(eventList).toBeVisible()
+    const scroller = eventList.locator('.diary-event-list-scroll')
+    await expect(scroller).toHaveCSS('overflow-y', 'auto')
+    await expect(scroller).toHaveCSS('scrollbar-width', 'none')
+    expect(await scroller.evaluate(node => getComputedStyle(node, '::-webkit-scrollbar').display)).toBe('none')
+    await expect.poll(() => scroller.evaluate(node => node.scrollHeight - node.clientHeight)).toBeGreaterThan(0)
+    await expect(eventList.locator('.diary-event-list-item').first().locator('.diary-event-list-countdown')).toBeVisible()
+    await expect(page.getByTestId('diary-life')).toHaveCSS('scrollbar-width', 'none')
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true)
+
+    const bounds = await scroller.boundingBox()
+    if (!bounds) throw new Error('Diary event list scroll container has no bounds')
+    const touchPoint = { x: bounds.x + Math.min(16, bounds.width / 4), y: bounds.y + bounds.height * 0.72 }
+    expect(await scroller.evaluate(node => getComputedStyle(node).touchAction)).not.toBe('none')
+    const browser = await page.context().newCDPSession(page)
+    try {
+      const points = [0, 1, 2, 3, 4, 5].map(step => ({
+        x: touchPoint.x,
+        y: touchPoint.y - step * Math.min(24, bounds.height / 16),
+        id: 1,
+      }))
+      await browser.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [points[0]] })
+      for (const point of points.slice(1)) await browser.send('Input.dispatchTouchEvent', { type: 'touchMove', touchPoints: [point] })
+      await browser.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] })
+      await expect.poll(() => scroller.evaluate(node => node.scrollTop)).toBeGreaterThan(0)
+    } finally {
+      await browser.detach()
+    }
+    await scroller.evaluate(node => { node.scrollTop = node.scrollHeight })
+    await expect(eventList.getByRole('button').last()).toBeInViewport({ ratio: 0.99 })
+  })
+})
 
 test('Diary NavBar icon controls share the standard size across viewport widths', async ({ page }) => {
   await page.goto('/diary')
@@ -966,7 +1049,9 @@ for (const viewport of [
 for (const viewport of [
   { width: 1800, height: 830 },
   { width: 1280, height: 800 },
+  { width: 1024, height: 768 },
   { width: 768, height: 1024 },
+  { width: 430, height: 844 },
   { width: 390, height: 844 },
   { width: 320, height: 568 },
 ]) {
@@ -1016,9 +1101,15 @@ for (const viewport of [
     const scroll = await page.getByTestId('diary-life').evaluate(node => ({
       horizontal: Math.max(node.scrollWidth - node.clientWidth, document.documentElement.scrollWidth - innerWidth),
       vertical: Math.max(node.scrollHeight - node.clientHeight, document.documentElement.scrollHeight - innerHeight),
+      scrollbarWidth: getComputedStyle(node).scrollbarWidth,
+      scrollbarDisplay: getComputedStyle(node, '::-webkit-scrollbar').display,
+      scrollbarGutter: getComputedStyle(node).scrollbarGutter,
     }))
     expect(scroll.horizontal).toBeLessThanOrEqual(0)
     expect(scroll.vertical).toBeLessThanOrEqual(1)
+    expect(scroll.scrollbarWidth).toBe('none')
+    expect(scroll.scrollbarDisplay).toBe('none')
+    expect(scroll.scrollbarGutter).toBe('auto')
     const monthBefore = await title.innerText()
     const rowHeight = (await dates.first().boundingBox())!.height
     await arrows.last().click()

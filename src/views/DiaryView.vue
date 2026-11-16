@@ -15,7 +15,7 @@ import DiaryActionMenu from '../components/diary/DiaryActionMenu.vue'
 import { createDiaryEntryId, createDiaryEventId, diaryLifeApi } from '../lib/diary-life-api'
 import { createDiaryAttachmentClientId, diaryAttachmentsApi } from '../lib/diary-attachments-api'
 import { DiaryAttachmentPreviewUrls } from '../lib/diaryAttachmentPreviewUrls'
-import { addDays, compareEvents, dayDistance, localToday, MAX_DIARY_IMAGE_GROUP_SIZE, nextOccurrence, occursOn, parseDay, parseEvent, type DiaryDay, type DiaryDaySummary, type DiaryEvent, type DayFields, type DiaryImageGroup, type EventFields } from '../../shared/diaryLife'
+import { addDays, compareEvents, localToday, MAX_DIARY_IMAGE_GROUP_SIZE, nextOccurrence, occursOn, parseDay, parseEvent, type DiaryDay, type DiaryDaySummary, type DiaryEvent, type DayFields, type DiaryImageGroup, type EventFields } from '../../shared/diaryLife'
 import { DIARY_ATTACHMENT_STAGE_HEARTBEAT_INTERVAL_MS, MAX_DIARY_ATTACHMENT_BYTES, MAX_DIARY_DAY_ATTACHMENTS, type DiaryAttachment } from '../../shared/diaryAttachments'
 import { NUVYN_BROWSER_STORAGE_KEYS, ownerScopedStorageKey, readStorageKey, writeStorageKey } from '../technicalNamespace'
 import DiaryLifeCalendar from '../components/diary/DiaryLifeCalendar.vue'
@@ -50,7 +50,6 @@ const month = ref(`${localToday().slice(0, 7)}-01`)
 const calendarRevision = ref(0)
 const days = ref<DiaryDaySummary[]>([])
 const events = ref<DiaryEvent[]>([])
-const upcoming = ref<DiaryEvent[]>([])
 const selected = ref<string | null>(null)
 const day = ref<DiaryDay | null>(null)
 const dayAttachments = ref<DiaryAttachment[]>([])
@@ -60,7 +59,7 @@ const draft = ref<DayFields>({ moodId: null, entries: [] })
 const dayMode = ref<'read' | 'edit'>('read')
 const eventDraft = ref<EventFields | null>(null)
 const editing = ref<DiaryEvent | null>(null)
-type EventReturnContext = { kind: 'event-list' } | { kind: 'day-list'; date: string } | { kind: 'calendar'; date: string }
+type EventReturnContext = { kind: 'event-list' } | { kind: 'day-list'; date: string }
 const eventDetail = ref<{ event: DiaryEvent; occurrenceDate: string } | null>(null)
 const eventDetailReturn = ref<EventReturnContext | null>(null)
 const eventEditorReturnDate = ref<string | null>(null)
@@ -74,7 +73,6 @@ const dayReadFailed = ref(false)
 const searchReveal = ref<{ entryId?: string; entryIndex?: number } | null>(null)
 const error = ref('')
 const formError = ref('')
-const allCountdowns = ref(false)
 const today = ref(localToday())
 const serverToday = ref<string | null>(null)
 const canWriteDay = computed(() => selected.value !== null && serverToday.value !== null && selected.value <= serverToday.value)
@@ -184,10 +182,6 @@ watch(mode, value => { if (appShell?.diaryViewMode) appShell.diaryViewMode.value
 
 const range = computed(() => ({ start: addDays(month.value, -7), end: Temporal.PlainDate.from(month.value).add({ months: 1, days: 7 }).toString() }))
 const selectedEvents = computed(() => events.value.filter(e => selected.value && occursOn(e, selected.value)).sort(compareEvents))
-const countdowns = computed(() => upcoming.value.filter(e => e.showCountdown).flatMap(event => {
-  const date = nextOccurrence(event, today.value)
-  return date ? [{ event, date, days: dayDistance(today.value, date) }] : []
-}).sort((a, b) => a.date.localeCompare(b.date) || a.event.id.localeCompare(b.event.id)))
 const markers = computed(() => {
   const result: Record<string, { source?: string; emoji?: string; count?: number; hasEntries?: boolean; hasAttachments?: boolean }> = {}
   if (mode.value === 'diary') {
@@ -213,16 +207,14 @@ function load(): Promise<void> {
   error.value = ''
   const promise = (async () => {
     try {
-      const [d, e, u] = await Promise.all([
+      const [d, e] = await Promise.all([
         diaryLifeApi.days(range.value.start, range.value.end, scope.signal),
         diaryLifeApi.events(range.value.start, range.value.end, scope.signal),
-        diaryLifeApi.countdowns(today.value, scope.signal),
       ])
       if (scope.signal.aborted) return
       days.value = d.days
       events.value = e
-      upcoming.value = u
-    } catch { if (!scope.signal.aborted) { days.value = []; events.value = []; upcoming.value = []; error.value = '加载失败，请重试。' } }
+    } catch { if (!scope.signal.aborted) { days.value = []; events.value = []; error.value = '加载失败，请重试。' } }
     finally {
       if (pendingCalendarLoad?.controller === scope) {
         pendingCalendarLoad = null
@@ -274,9 +266,7 @@ function clearPrivateData() {
   resetForm()
   days.value = []
   events.value = []
-  upcoming.value = []
   error.value = ''
-  allCountdowns.value = false
   eventListVisible.value = false
   eventListItems.value = []
   eventListNext.value = 0
@@ -801,15 +791,6 @@ async function removeEventFromDetail() {
   }
 }
 
-async function openCountdown(event: DiaryEvent, date: string) {
-  if (!(await canLeave()) || !access.isUnlocked.value) return
-  await discardPendingAttachments()
-  resetForm()
-  mode.value = 'events'
-  selected.value = date
-  eventDetailReturn.value = { kind: 'calendar', date }
-  eventDetail.value = { event, occurrenceDate: date }
-}
 onBeforeRouteLeave(async () => {
   if (!await canLeave()) return false
   await discardPendingAttachments()
@@ -847,10 +828,6 @@ onBeforeUnmount(() => {
         <div v-if="error" class="diary-life-error" role="alert">{{ error }} <NButton text @click="load">重试</NButton></div>
         <DiaryLifeCalendar :markers="markers" :today="today" :selected-date="selected" :month="month" :revision="calendarRevision" @select="open" @month="month = $event" />
       </div>
-      <section v-if="mode === 'events' && countdowns.length" class="countdowns" aria-label="倒数日">
-        <button v-for="item in (allCountdowns ? countdowns : countdowns.slice(0, 3))" :key="item.event.id" type="button" @click="openCountdown(item.event, item.date)"><span><img v-if="eventEmojiSource(item.event.emoji)" :src="eventEmojiSource(item.event.emoji)" class="event-emoji" alt=""><template v-else>{{ item.event.emoji }}</template> {{ item.event.title }}</span><small>{{ item.days === 0 ? '就是今天' : `还有 ${item.days} 天` }}</small></button>
-        <NButton v-if="countdowns.length > 3" text @click="allCountdowns = !allCountdowns">{{ allCountdowns ? '收起' : '查看全部' }}</NButton>
-      </section>
       <DiaryDayDialog
         v-if="selected !== null && mode === 'diary' && !eventDraft"
         :show="selected !== null && mode === 'diary' && !eventDraft"
@@ -969,19 +946,17 @@ onBeforeUnmount(() => {
   padding: 8px 20px clamp(16px, 3dvh, 32px);
   overflow: auto;
   color: var(--text);
-  scrollbar-gutter: stable both-edges;
+  scrollbar-width: none;
 }
+.diary-life::-webkit-scrollbar { display: none; width: 0; height: 0; }
 .diary-life-calendar-stage {
-  /* Countdown cards continue below the calendar in the same scroll area. */
   position: relative;
   display: flex;
   flex-direction: column;
   min-height: 100%;
 }
 .diary-life-error { margin-top: 8px; padding: 8px 0; }
-.countdowns { display: flex; gap: 16px; flex-wrap: wrap; padding: 12px 0; }
-.countdowns button, .day-events > button { text-align: left; background: transparent; color: inherit; border: 0; font: inherit; cursor: pointer; display: flex; flex-direction: column; gap: 6px; padding: 8px; }
-.countdowns small { color: var(--text-muted, #6b7280); }
+.day-events > button { text-align: left; background: transparent; color: inherit; border: 0; font: inherit; cursor: pointer; display: flex; flex-direction: column; gap: 6px; padding: 8px; }
 .day-events { display: flex; flex-direction: column; gap: 12px; }
 .day-events > button { align-items: flex-start; padding: 12px 4px; border-bottom: 1px solid var(--border, #d9dce5); }
 .day-events > button:hover, .day-events > button:focus-visible { outline: none; background: color-mix(in srgb, var(--text) 4%, transparent); }
