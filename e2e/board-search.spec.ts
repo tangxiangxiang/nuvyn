@@ -26,12 +26,23 @@ function savedTextScene(text: string, elementId: string) {
 }
 
 async function searchFor(page: import('@playwright/test').Page, query: string) {
-  await page.keyboard.press('Control+p')
+  const searchButton = page.locator('.nav-search')
+  await expect(searchButton).toBeVisible()
+  await searchButton.click()
   const dialog = page.getByRole('dialog', { name: /全局搜索|Global search/ })
   await expect(dialog).toBeVisible()
   await dialog.getByRole('textbox', { name: /搜索全部内容|Search all content/ }).fill(query)
   return { dialog, results: page.getByRole('option') }
 }
+
+test('Ctrl/Cmd+P opens global search from Board after the app shell is ready', async ({ page }) => {
+  await page.goto('/board')
+  const searchButton = page.locator('.nav-search')
+  await expect(searchButton).toBeVisible()
+  await searchButton.focus()
+  await page.keyboard.press(process.platform === 'darwin' ? 'Meta+p' : 'Control+p')
+  await expect(page.getByRole('dialog', { name: /全局搜索|Global search/ })).toBeVisible()
+})
 
 test('Board global search finds saved text, opens the canvas, and tracks saved revisions', async ({ page, request }) => {
   const title = `B9 E2E body search ${Date.now()}`

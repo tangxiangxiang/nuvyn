@@ -3,11 +3,16 @@ import { test, expect } from './fixtures/auth'
 import { chooseDiaryAction, chooseDiaryDayAction, openEmptyDiaryDay, saveDiaryDay, unlockDiary } from './helpers/diary-life'
 
 const scrollTestImage = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAAAAAA6fptVAAAACklEQVR4nGNgAAAAAgABSK+kcQAAAABJRU5ErkJggg==', 'base64')
+const diaryLifeFixtureBaseYear = 1000 + Math.floor(Math.random() * 700)
+
+function diaryLifeFixtureYear(testInfo: { repeatEachIndex: number; retry: number; project: { retries: number } }) {
+  return diaryLifeFixtureBaseYear + testInfo.repeatEachIndex * (testInfo.project.retries + 1) + testInfo.retry
+}
 
 test.beforeEach(async ({ page }, testInfo) => {
-  // The specs share a server database. Reserve January for Diary life and
-  // start each repeat in a fresh year, with Today on a dedicated fixture date.
-  await page.clock.setFixedTime(new Date(2024 + testInfo.repeatEachIndex, 0, 10, 12))
+  // The specs share a server database. Use a run-specific historical year so
+  // a new run avoids stale fixtures, with disjoint years for retries/repeats.
+  await page.clock.setFixedTime(new Date(diaryLifeFixtureYear(testInfo), 0, 10, 12))
 })
 
 function dateNumberOffset(cell: Locator) {
@@ -28,11 +33,12 @@ async function expectDiaryContentUnclipped(scroller: Locator, content: Locator) 
   }).toBe(true)
 }
 
-async function expectDiaryTextareaExpanded(textarea: Locator) {
-  await expect.poll(() => textarea.evaluate(node => ({
-    wraps: node.clientHeight > parseFloat(getComputedStyle(node).lineHeight) * 2,
-    textOverflow: node.scrollHeight - node.clientHeight,
-  }))).toEqual({ wraps: true, textOverflow: 0 })
+async function expectDiaryTextareaAutoSized(textarea: Locator, expectedValue?: string) {
+  await expect.poll(() => textarea.evaluate(node => node.scrollHeight - node.clientHeight)).toBeLessThanOrEqual(1)
+  await expect.poll(() => textarea.evaluate(node => (
+    Math.abs(parseFloat(node.style.height) - node.scrollHeight)
+  ))).toBeLessThanOrEqual(1)
+  if (expectedValue !== undefined) await expect(textarea).toHaveValue(expectedValue)
 }
 
 async function expectDiaryScrollbarsHidden(dialog: Locator, scroller: Locator) {
@@ -80,15 +86,31 @@ async function expectDiaryCanScrollToEnd(page: Page, dialog: Locator, lastEntry:
   if (touch) {
     const bounds = await scroller.boundingBox()
     if (!bounds) throw new Error('Diary scroll container has no bounds')
+    const touchPoint = { x: bounds.x + 8, y: bounds.y + bounds.height * 0.72 }
+    const hit = await page.evaluate(({ x, y }) => {
+      const container = document.querySelector('.diary-day-dialog-card .n-card__content-scrollbar > .n-scrollbar-container')
+      const target = document.elementFromPoint(x, y)
+      return {
+        insideScroller: Boolean(container && target && container.contains(target)),
+        overflowY: container ? getComputedStyle(container).overflowY : '',
+        touchAction: container ? getComputedStyle(container).touchAction : '',
+      }
+    }, touchPoint)
+    expect(hit.insideScroller).toBe(true)
+    expect(hit.overflowY).toMatch(/^(auto|scroll)$/)
+    expect(hit.touchAction).not.toBe('none')
     const browser = await page.context().newCDPSession(page)
     try {
-      await browser.send('Input.synthesizeScrollGesture', {
-        x: bounds.x + bounds.width / 2,
-        y: bounds.y + bounds.height * 0.75,
-        yDistance: -Math.min(150, bounds.height / 2),
-        gestureSourceType: 'touch',
-        preventFling: true,
-      })
+      const points = [0, 1, 2, 3, 4, 5].map(step => ({
+        x: touchPoint.x,
+        y: touchPoint.y - step * Math.min(24, bounds.height / 16),
+        id: 1,
+      }))
+      await browser.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [points[0]] })
+      for (const point of points.slice(1)) {
+        await browser.send('Input.dispatchTouchEvent', { type: 'touchMove', touchPoints: [point] })
+      }
+      await browser.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] })
       await expect.poll(() => scroller.evaluate(node => node.scrollTop)).toBeGreaterThan(0)
     } finally {
       await browser.detach()
@@ -106,7 +128,7 @@ async function expectDiaryCanScrollToEnd(page: Page, dialog: Locator, lastEntry:
   await expectDiaryScrollbarsHidden(dialog, scroller)
 }
 
-for (const [index, viewport] of [{ width: 390, height: 844 }, { width: 768, height: 1024 }, { width: 1280, height: 800 }].entries()) {
+for (const viewport of [{ width: 390, height: 844 }, { width: 430, height: 900 }, { width: 768, height: 1024 }, { width: 1280, height: 800 }]) {
   test.describe(`Diary at ${viewport.width}`, () => {
     test.use({ hasTouch: viewport.width <= 768 })
 
@@ -120,7 +142,7 @@ for (const [index, viewport] of [{ width: 390, height: 844 }, { width: 768, heig
       const calendar = page.locator('.diary-life-calendar')
       await expect(calendar).toBeVisible()
       expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true)
-      const dayOfMonth = 15 + index
+      const dayOfMonth = viewport.width === 390 ? 15 : viewport.width === 430 ? 30 : viewport.width === 768 ? 16 : 17
       const cell = calendar.locator(`[data-date$="-01-${dayOfMonth}"]`)
       await openEmptyDiaryDay(page, cell, async () => {
         await cell.focus()
@@ -211,7 +233,7 @@ for (const [index, viewport] of [{ width: 390, height: 844 }, { width: 768, heig
       const cancelEdit = dialog.getByRole('button', { name: '取消', exact: true })
       await expect(cancelEdit).toHaveCSS('opacity', '1')
       await expect(cancelEdit.locator('svg')).toHaveCount(1)
-      await expect(dialog).toHaveCSS('width', viewport.width === 390 ? '390px' : '640px')
+      await expect(dialog).toHaveCSS('width', viewport.width <= 600 ? `${viewport.width}px` : '640px')
       await page.screenshot({ path: testInfo.outputPath(`diary-day-edit-${viewport.width}.png`) })
       await page.getByTestId('diary-cancel-edit').click()
       await expect(reopenedInput).toBeHidden()
@@ -377,7 +399,7 @@ test('clears the date highlight on Escape after opening with a pointer', async (
 })
 
 test('uses the server day boundary and enables editing after midnight without reopening', async ({ page }, testInfo) => {
-  const year = 2024 + testInfo.repeatEachIndex
+  const year = diaryLifeFixtureYear(testInfo)
   const date = `${year}-01-28`
   await page.clock.install({ time: new Date(year, 0, 29, 12) })
   await page.goto('/diary')
@@ -557,10 +579,21 @@ for (const [index, viewport] of [
       const longText = '这是一条很长的日记内容用于验证窄屏自动换行'.repeat(5)
       const first = page.getByRole('textbox', { name: '第 1 条日记', exact: true })
       await first.fill(longText)
+      await expectDiaryTextareaAutoSized(first, longText)
       await first.press('End')
+      const caretAfterEnd = await first.evaluate(node => (node as HTMLTextAreaElement).selectionStart)
+      expect(caretAfterEnd).toBeGreaterThanOrEqual(0)
+      expect(caretAfterEnd).toBeLessThanOrEqual(longText.length)
       await first.press('Enter')
       const second = page.getByRole('textbox', { name: '第 2 条日记', exact: true })
-      await second.fill('保留这一条')
+      const firstPart = await first.inputValue()
+      const secondPart = await second.inputValue()
+      expect(firstPart).toBe(longText.slice(0, caretAfterEnd))
+      expect(secondPart).toBe(longText.slice(caretAfterEnd))
+      expect(firstPart + secondPart).toBe(longText)
+      const retainedSecond = `${secondPart}保留这一条`
+      await second.fill(retainedSecond)
+      await expectDiaryTextareaAutoSized(second, retainedSecond)
 
       const dialog = page.getByTestId('diary-day-dialog')
       const layout = await dialog.evaluate(node => {
@@ -599,7 +632,7 @@ for (const [index, viewport] of [
       const scroller = dialog.locator('.n-card__content-scrollbar .n-scrollbar-container')
       expect(await scroller.evaluate(node => node.scrollWidth - node.clientWidth)).toBeLessThanOrEqual(1)
       await expectDiaryScrollbarsHidden(dialog, scroller)
-      await expectDiaryTextareaExpanded(first)
+      await expectDiaryTextareaAutoSized(first, firstPart)
       await expectDiaryContentUnclipped(scroller, first)
       await expectDiaryContentUnclipped(scroller, second)
       const lastMenu = editor.getByRole('button', { name: '第 2 条日记的操作', exact: true })
@@ -639,11 +672,11 @@ for (const [index, viewport] of [
         await chooseDiaryAction(page, firstMenu, '删除此条', viewport.width <= 768)
       }
       const remaining = page.getByRole('textbox', { name: '第 1 条日记', exact: true })
-      await expect(remaining).toHaveValue('保留这一条')
+      await expect(remaining).toHaveValue(retainedSecond)
       await expect(remaining).toBeFocused()
       await saveDiaryDay(page, viewport.width <= 768)
       await expect(page.getByTestId('diary-bullet-reader')).toContainText('保留这一条')
-      await expectDiaryContentUnclipped(scroller, dialog.getByText('保留这一条', { exact: true }))
+      await expectDiaryContentUnclipped(scroller, dialog.getByText(retainedSecond, { exact: true }))
       await expectDiaryScrollbarsHidden(dialog, scroller)
       await page.getByRole('button', { name: '关闭日记' }).click()
       await expect(cell.locator('.life-marker')).toBeVisible()
@@ -675,7 +708,7 @@ for (const [index, viewport] of [
       for (let number = 1; number < entryCount; number++) {
         const entry = editor.getByRole('textbox', { name: `第 ${number} 条日记`, exact: true })
         await entry.fill(`${number} ${sentence.repeat(number === 1 ? 32 : 9)}`)
-        await expectDiaryTextareaExpanded(entry)
+        await expectDiaryTextareaAutoSized(entry, `${number} ${sentence.repeat(number === 1 ? 32 : 9)}`)
         await entry.press('Enter')
       }
 
