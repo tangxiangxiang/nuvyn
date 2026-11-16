@@ -8,6 +8,7 @@ import { useConfirm } from '../../composables/useConfirm'
 import { useI18n } from '../../composables/useI18n'
 import { getFallbackVaultFileChanges } from '../../composables/vault/context/fileChanges'
 import { useOptionalVaultContext } from '../../composables/vault/context/useVaultContext'
+import { workspaceDisplayNames } from '../../lib/workspace'
 import {
   cleanDocumentFrontmatter,
   getFrontmatterCleanupPreview,
@@ -58,14 +59,14 @@ const CATEGORIES = {
     { id: 'ai-profiles', label: 'settings.ai_profiles' },
     { id: 'ai-speech', label: 'settings.ai_speech' },
   ] },
-  note: { label: 'settings.category_note', icon: FileText, sections: [
+  note: { workspaceName: 'note', icon: FileText, sections: [
     { id: 'editor', label: 'settings.editor' },
     { id: 'tags', label: 'settings.tags' },
   ] },
-  diary: { label: 'settings.category_diary', icon: Book, sections: [
+  diary: { workspaceName: 'diary', icon: Book, sections: [
     { id: 'diary-mood-icons', label: 'settings.diary_mood_icons' },
   ] },
-  ledger: { label: 'settings.category_ledger', icon: Wallet, sections: [
+  ledger: { workspaceName: 'ledger', icon: Wallet, sections: [
     { id: 'ledger-categories', label: 'settings.ledger_categories' },
     { id: 'ledger-account-icons', label: 'settings.ledger_account_icons' },
   ] },
@@ -76,12 +77,19 @@ const CATEGORIES = {
 } as const
 
 type CategoryId = keyof typeof CATEGORIES
+const categoryIds = Object.keys(CATEGORIES) as CategoryId[]
 type SectionId = (typeof CATEGORIES)[CategoryId]['sections'][number]['id']
 
 const activeCategory = ref<CategoryId>('ai')
 const rememberedSections = ref<Partial<Record<CategoryId, SectionId>>>({})
 const sections = computed(() => CATEGORIES[activeCategory.value].sections)
 const active = computed(() => rememberedSections.value[activeCategory.value] ?? sections.value[0].id)
+function categoryLabel(id: CategoryId): string {
+  const category = CATEGORIES[id]
+  return 'workspaceName' in category
+    ? workspaceDisplayNames[category.workspaceName]
+    : t(category.label)
+}
 const closeButton = ref<InstanceType<typeof NButton> | null>(null)
 const detailRef = ref<HTMLElement | null>(null)
 let leaving = false
@@ -293,7 +301,7 @@ onBeforeUnmount(() => {
                 @click="selectCategory(id)"
               >
                 <NIcon class="settings-nav-icon" aria-hidden="true"><component :is="category.icon" /></NIcon>
-                <span>{{ t(category.label) }}</span>
+                <span>{{ categoryLabel(id) }}</span>
               </NButton>
             </div>
             <select
@@ -302,7 +310,7 @@ onBeforeUnmount(() => {
               :value="activeCategory"
               @change="onCategoryChange"
             >
-              <option v-for="(category, id) in CATEGORIES" :key="id" :value="id">{{ t(category.label) }}</option>
+              <option v-for="id in categoryIds" :key="id" :value="id">{{ categoryLabel(id) }}</option>
             </select>
           </nav>
 
@@ -310,7 +318,7 @@ onBeforeUnmount(() => {
             <nav
               v-if="active !== 'storage-attachments' && sections.length > 1"
               class="settings-subnav"
-              :aria-label="t(CATEGORIES[activeCategory].label)"
+              :aria-label="categoryLabel(activeCategory)"
             >
               <NButton
                 v-for="section in sections"

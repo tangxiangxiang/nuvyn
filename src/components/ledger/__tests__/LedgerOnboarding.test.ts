@@ -114,7 +114,7 @@ describe('Ledger initialization and first-account onboarding', () => {
     expect(wrapper.find('[data-testid="ledger-settings-form"]').exists()).toBe(true)
     expect(naiveSelectValue(settingsForm, '基础货币')).toBe('CNY')
     expect(wrapper.find('[data-testid="ledger-account-form"]').exists()).toBe(false)
-    expect(wrapper.text()).toContain('先设置你的 Ledger')
+    expect(wrapper.text()).toContain('先设置你的账本')
     expect(wrapper.text()).not.toContain('基础货币决定金额的表达方式')
   })
 
@@ -224,8 +224,8 @@ describe('Ledger initialization and first-account onboarding', () => {
     await flushPromises()
 
     const firstAccount = wrapper.get('[data-testid="ledger-account-form"]')
-    expect(firstAccount.find('button').text()).toContain('修改 Ledger 设置')
-    await firstAccount.findAll('button').find((button) => button.text() === '修改 Ledger 设置')!.trigger('click')
+    expect(firstAccount.find('button').text()).toContain('修改账本设置')
+    await firstAccount.findAll('button').find((button) => button.text() === '修改账本设置')!.trigger('click')
 
     const editSettingsForm = wrapper.get('[data-testid="ledger-settings-form"]')
     await setNaiveSelect(editSettingsForm, '基础货币', 'JPY')

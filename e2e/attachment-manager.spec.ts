@@ -134,7 +134,7 @@ test('Attachment Manager lists real sources, filters, refreshes, and preserves t
     await expect(settings.getByText(new RegExp(`(?:未命名图片|Unnamed image) · ${assetId.slice(0, 8)}`), { exact: true })).toBeVisible()
     expect(assetPreviewRequests).toBe(0)
     await expect(settings.getByRole('button', { name: /删除|Delete/ })).toHaveCount(0)
-    await expect(settings.getByRole('button', { name: /上传图片到 Note 附件库|Upload image to Note library/ })).toBeVisible()
+    await expect(settings.getByRole('button', { name: /上传图片到笔记附件库|Upload image to Note library/ })).toBeVisible()
 
     await settings.locator('.attachment-resource-row').filter({ hasText: initialFileName }).click()
     await expect(settings.locator('.attachment-detail-panel')).toContainText(`inbox/${initialFileName}`)

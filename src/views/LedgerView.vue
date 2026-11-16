@@ -16,6 +16,7 @@ import type { LedgerTransactionDto } from '../../shared/ledgerProtocol'
 import { ledgerWorkspaceReadErrorMessage } from '../features/ledger/ledgerErrors'
 import { useLedgerStore, type LedgerOverviewRefreshResult } from '../features/ledger/ledgerStore'
 import { parseLedgerRouteDate } from '../features/ledger/periodNavigation'
+import { workspaceDisplayNames } from '../lib/workspace'
 
 const auth = useAuth()
 // The view is also mounted without a Router in focused component tests. The
@@ -215,13 +216,13 @@ function closeTransactionDetail(): void {
       :top="pullIndicatorTop"
     />
     <div v-if="bootstrapping" class="ledger-loading-state" data-testid="ledger-loading" role="status" aria-live="polite">
-      <NSpin size="medium" description="正在加载 Ledger…" />
+      <NSpin size="medium" :description="`正在加载${workspaceDisplayNames.ledger}…`" />
     </div>
 
     <LedgerPendingCreateGate v-else-if="store.recoveryGateVisible.value" @resolved="onRecoveryResolved" />
 
-    <section v-else-if="store.workspaceState.value === 'RECOVERABLE_ERROR'" class="ledger-error-state" data-testid="ledger-bootstrap-error" role="alert" aria-label="Ledger 暂时无法打开">
-      <NResult status="error" title="Ledger 暂时无法打开" :description="ledgerWorkspaceReadErrorMessage(store.workspaceError.value)">
+    <section v-else-if="store.workspaceState.value === 'RECOVERABLE_ERROR'" class="ledger-error-state" data-testid="ledger-bootstrap-error" role="alert" :aria-label="`${workspaceDisplayNames.ledger} 暂时无法打开`">
+      <NResult status="error" :title="`${workspaceDisplayNames.ledger} 暂时无法打开`" :description="ledgerWorkspaceReadErrorMessage(store.workspaceError.value)">
         <template #footer><NButton class="ledger-primary-button" attr-type="button" type="primary" size="small" :bordered="false" @click="retry">重新加载</NButton></template>
       </NResult>
     </section>

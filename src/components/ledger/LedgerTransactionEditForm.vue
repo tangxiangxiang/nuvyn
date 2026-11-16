@@ -203,7 +203,7 @@ function validateFinancialFields(): {
 } | null {
   const settings = store.settings.value
   if (!settings) {
-    error.value = 'Ledger 设置尚未加载完成。'
+    error.value = '账本设置尚未加载完成。'
     return null
   }
   let amountMinor: number

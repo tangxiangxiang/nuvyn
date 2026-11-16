@@ -8,9 +8,11 @@ import { browserTimezone } from '../../features/ledger/time'
 import { ledgerErrorMessage, ledgerFieldError } from '../../features/ledger/ledgerErrors'
 import { useLedgerStore } from '../../features/ledger/ledgerStore'
 import { ledgerSelectNodeProps } from '../../features/ledger/naiveControls'
+import { workspaceDisplayNames } from '../../lib/workspace'
 import LedgerPendingCreateRecovery from './LedgerPendingCreateRecovery.vue'
 
 const store = useLedgerStore()
+const ledgerName = workspaceDisplayNames.ledger
 const emit = defineEmits<{ saved: [] }>()
 
 const baseCurrency = ref('CNY')
@@ -74,11 +76,11 @@ function validate(): boolean {
   submitted.value = true
   formError.value = ''
   if (!baseCurrency.value) {
-    formError.value = '请选择 Ledger 的基础货币。'
+    formError.value = `请选择${ledgerName}的基础货币。`
     return false
   }
   if (!timezone.value.trim()) {
-    formError.value = '请选择或输入 Ledger 时区。'
+    formError.value = `请选择或输入${ledgerName}时区。`
     return false
   }
   return true
@@ -103,7 +105,7 @@ async function submit(): Promise<void> {
     }
     emit('saved')
   } catch (error) {
-    formError.value = ledgerErrorMessage(error, 'Ledger 设置没有保存，请检查后重试。')
+    formError.value = ledgerErrorMessage(error, `${ledgerName}设置没有保存，请检查后重试。`)
   } finally {
     saving.value = false
   }
@@ -117,7 +119,7 @@ async function retryPendingSettings(): Promise<void> {
     await store.retryPendingCreate()
     emit('saved')
   } catch (error) {
-    formError.value = ledgerErrorMessage(error, 'Ledger 设置仍未确认，请稍后重试。')
+    formError.value = ledgerErrorMessage(error, `${ledgerName}设置仍未确认，请稍后重试。`)
   } finally {
     saving.value = false
   }
@@ -132,12 +134,12 @@ async function retryPendingSettings(): Promise<void> {
     @submit.prevent="submit"
   >
     <div>
-      <p class="ledger-eyebrow">{{ isEditing ? 'Ledger 设置' : '开始使用 Ledger' }}</p>
-      <h2>{{ isEditing ? '确认 Ledger 设置' : '先设置你的 Ledger' }}</h2>
+      <p class="ledger-eyebrow">{{ isEditing ? `${ledgerName}设置` : `开始使用${ledgerName}` }}</p>
+      <h2>{{ isEditing ? `确认${ledgerName}设置` : `先设置你的${ledgerName}` }}</h2>
     </div>
 
     <NAlert v-if="isLocked" class="ledger-info" type="info" :show-icon="false" role="status">
-      Ledger 已经创建过账户，基础货币和时区已锁定。请返回账户流程继续。
+      {{ ledgerName }}已经创建过账户，基础货币和时区已锁定。请返回账户流程继续。
     </NAlert>
 
     <LedgerPendingCreateRecovery
@@ -168,7 +170,7 @@ async function retryPendingSettings(): Promise<void> {
         <small v-if="fieldError('baseCurrency')" id="ledger-base-currency-error" class="ledger-field-error">{{ fieldError('baseCurrency') }}</small>
       </NFormItem>
 
-      <NFormItem class="ledger-form-field" label="Ledger 时区" :show-feedback="false" required>
+      <NFormItem class="ledger-form-field" :label="`${ledgerName}时区`" :show-feedback="false" required>
         <NAutoComplete
           v-model:value="timezone"
           class="ledger-form-control"

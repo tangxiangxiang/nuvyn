@@ -16,6 +16,7 @@ import { formatLedgerDate, formatLedgerDateTime, formatLedgerPeriodPickerLabel, 
 import { ledgerSelectNodeProps } from '../../features/ledger/naiveControls'
 import { calendarDateFromNaivePickerTimestamp } from '../../features/ledger/naiveTemporal'
 import { useLedgerStore } from '../../features/ledger/ledgerStore'
+import { workspaceDisplayNames } from '../../lib/workspace'
 import LedgerCashflowTrend from './LedgerCashflowTrend.vue'
 import LedgerDatePicker from './LedgerDatePicker.vue'
 import LedgerAnimatedMoney from './LedgerAnimatedMoney.vue'
@@ -596,7 +597,7 @@ function animatedMoneyParts(minor: number, currency: string, key: MetricKey): { 
   <section class="ledger-dashboard" data-testid="ledger-dashboard" :aria-busy="refreshing ? 'true' : undefined">
     <header class="ledger-dashboard-header">
       <div>
-        <p class="ledger-eyebrow">Ledger</p>
+        <p class="ledger-eyebrow">{{ workspaceDisplayNames.ledger }}</p>
         <h1>财务概览</h1>
         <p v-if="store.settings.value">{{ store.settings.value.baseCurrency }} · {{ store.settings.value.timezone }}</p>
       </div>

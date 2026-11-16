@@ -82,8 +82,8 @@ test('Board V1 permanently deletes an editor Board without ghost metadata', asyn
     await waitForServerRevision(request, boardId, 1)
     await waitForBoardSaved(page)
 
-    await openEditorMenuItem(page, /删除 Board|Delete board/)
-    const dialog = page.getByRole('dialog', { name: /删除.*Board|Delete.*Board/ }).last()
+    await openEditorMenuItem(page, /删除白板|Delete board/)
+    const dialog = page.getByRole('dialog', { name: /删除.*白板|Delete.*Board/ }).last()
     await expect(dialog).toBeVisible()
     await dialog.getByRole('button', { name: /删除|Delete/ }).click()
     await expect(page).toHaveURL(/\/board$/)

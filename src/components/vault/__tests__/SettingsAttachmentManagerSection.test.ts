@@ -184,7 +184,7 @@ describe('SettingsAttachmentManagerSection', () => {
     expect(document.body.textContent).toContain('引用待确认')
     expect(document.body.querySelectorAll('.attachment-resource-row')).toHaveLength(2)
     expect(Array.from(document.body.querySelectorAll('button')).some((button) => /删除/.test(button.textContent ?? ''))).toBe(false)
-    expect(Array.from(document.body.querySelectorAll('button')).some((button) => /上传图片到 Note 附件库/.test(button.textContent ?? ''))).toBe(true)
+    expect(Array.from(document.body.querySelectorAll('button')).some((button) => /上传图片到笔记附件库/.test(button.textContent ?? ''))).toBe(true)
 
     const row = Array.from(document.body.querySelectorAll<HTMLButtonElement>('.attachment-resource-row'))
       .find((button) => button.textContent?.includes('diagram.png'))!

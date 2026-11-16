@@ -6,9 +6,11 @@ import LedgerInitializationForm from './LedgerInitializationForm.vue'
 import LedgerPendingCreateRecovery from './LedgerPendingCreateRecovery.vue'
 import { ledgerErrorMessage } from '../../features/ledger/ledgerErrors'
 import { useLedgerStore } from '../../features/ledger/ledgerStore'
+import { workspaceDisplayNames } from '../../lib/workspace'
 
 const props = defineProps<{ initialStep: 'settings' | 'account' }>()
 const store = useLedgerStore()
+const ledgerName = workspaceDisplayNames.ledger
 const step = ref(props.initialStep)
 const recoveryError = ref('')
 const currentStep = computed(() => step.value === 'settings' ? 1 : 2)
@@ -54,8 +56,8 @@ async function retryRecovery(): Promise<void> {
   >
     <div class="ledger-onboarding-heading">
       <div>
-        <p class="ledger-eyebrow">Ledger 首次使用</p>
-        <h1 id="ledger-onboarding-title">把 Ledger 设置成你的账本</h1>
+        <p class="ledger-eyebrow">{{ ledgerName }}首次使用</p>
+        <h1 id="ledger-onboarding-title">把{ledgerName}设置好，开始记账</h1>
       </div>
     </div>
 
@@ -63,7 +65,7 @@ async function retryRecovery(): Promise<void> {
       class="ledger-onboarding-steps"
       :current="currentStep"
       size="small"
-      aria-label="Ledger 设置步骤"
+      :aria-label="`${ledgerName} 设置步骤`"
     >
       <NStep title="基础设置" />
       <NStep title="添加账户" />

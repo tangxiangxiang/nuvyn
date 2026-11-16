@@ -12,7 +12,7 @@ const emit = defineEmits<{ retry: [] }>()
 
 function operationLabel(operation: LedgerPendingCreateIntent['operation']): string {
   switch (operation) {
-    case 'settings': return 'Ledger 设置'
+    case 'settings': return '账本设置'
     case 'account': return '账户'
     case 'category': return '分类'
     case 'transaction': return '交易'

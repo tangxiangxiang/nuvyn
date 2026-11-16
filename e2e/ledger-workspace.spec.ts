@@ -6,7 +6,7 @@ test('canonical Ledger renders inside the shared Nuvyn App Shell', async ({ page
   await expect(page.getByTestId('ledger-page')).toBeVisible()
   await expect(page.locator('.navbar')).toHaveCount(1)
   await expect(page.locator('.scope-chips')).toBeVisible()
-  await expect(page.locator('.scope-chip').filter({ hasText: 'ledger' })).toHaveAttribute('aria-pressed', 'true')
+  await expect(page.locator('.scope-chip').filter({ hasText: '账本' })).toHaveAttribute('aria-pressed', 'true')
   await expect(page.locator('body')).toHaveClass(/ledger-mode/)
   await expect(page.locator('html')).toHaveClass(/ledger-mode/)
   await expect(page.locator('body')).not.toHaveClass(/bills-mode/)
@@ -36,13 +36,13 @@ test('legacy Bills URLs redirect to the canonical Ledger routes', async ({ page 
 
 test('Ledger scope switches back to the shared Vault body', async ({ page }) => {
   await page.goto('/ledger')
-  await page.locator('.scope-chip').filter({ hasText: 'note' }).click()
+  await page.locator('.scope-chip').filter({ hasText: '笔记' }).click()
 
   await expect(page).toHaveURL(/\/vault(?:[/?#]|$)/)
   await expect(page.locator('body')).not.toHaveClass(/ledger-mode/)
   await expect(page.locator('html')).not.toHaveClass(/ledger-mode/)
   await expect(page.locator('.navbar')).toHaveCount(1)
-  await expect(page.locator('.scope-chip').filter({ hasText: 'note' })).toHaveAttribute('aria-pressed', 'true')
+  await expect(page.locator('.scope-chip').filter({ hasText: '笔记' })).toHaveAttribute('aria-pressed', 'true')
 })
 
 test('Ledger keeps the shared theme readable', async ({ page }) => {
@@ -60,9 +60,9 @@ test('shared workspace navbar hides the Board entry at phone width', async ({ pa
   await page.setViewportSize({ width: 320, height: 700 })
 
   await expect(page.locator('.workspace-board-link')).toHaveCount(0)
-  await expect(page.locator('.scope-chip').filter({ hasText: 'note' })).toHaveCount(0)
-  await expect(page.locator('.scope-chip').filter({ hasText: 'diary' })).toHaveCount(1)
-  await expect(page.locator('.scope-chip').filter({ hasText: 'ledger' })).toHaveCount(1)
+  await expect(page.locator('.scope-chip').filter({ hasText: '笔记' })).toHaveCount(0)
+  await expect(page.locator('.scope-chip').filter({ hasText: '日程' })).toHaveCount(1)
+  await expect(page.locator('.scope-chip').filter({ hasText: '账本' })).toHaveCount(1)
 
   const metrics = await page.evaluate(() => {
     const navbar = document.querySelector<HTMLElement>('.navbar')

@@ -278,7 +278,7 @@ function validate(): { amountMinor: number; occurredAtMs: number; feeMinor: numb
   submitted.value = true
   formError.value = ''
   if (!settings.value) {
-    return validationFailure('Ledger 设置尚未加载完成。')
+    return validationFailure('账本设置尚未加载完成。')
   }
   if (!amount.value.trim()) {
     return validationFailure('请输入金额。')

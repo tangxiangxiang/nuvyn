@@ -54,7 +54,7 @@ test('Board folders create a scoped home, move canvases, and preserve them on de
     await expect(page.locator(`[data-board-id="${folderBoardId}"]`)).toHaveCount(0)
     const rootCard = page.locator(`[data-board-id="${rootBoardId}"]`)
     await expect(rootCard).toBeVisible()
-    await rootCard.getByRole('button', { name: /Board 操作|Board actions/ }).click()
+    await rootCard.getByRole('button', { name: /白板操作|Board actions/ }).click()
     await page.getByText(/^移动到文件夹$|^Move to folder$/, { exact: true }).last().click()
 
     const moveDialog = page.getByRole('dialog').last()

@@ -134,7 +134,7 @@ export function shouldKeepPendingCreate(error: unknown): boolean {
 }
 
 /** User-facing copy stays specific enough to offer a useful recovery action. */
-export function ledgerErrorMessage(error: unknown, fallback = 'Ledger 操作暂时无法完成。'): string {
+export function ledgerErrorMessage(error: unknown, fallback = '账本操作暂时无法完成。'): string {
   const normalized = normalizeLedgerError(error)
   switch (normalized.code) {
     case 'ledger-validation-failed':
@@ -149,7 +149,7 @@ export function ledgerErrorMessage(error: unknown, fallback = 'Ledger 操作暂�
     case 'ledger-fractional-precision-exceeded':
       return '请检查输入内容后再保存。'
     case 'ledger-not-found':
-      return '找不到这项 Ledger 数据，页面可能已经发生变化。'
+      return '找不到这项账本数据，页面可能已经发生变化。'
     case 'ledger-archived-account':
       return '相关账户已归档，请先恢复账户。'
     case 'ledger-archived-category':
@@ -173,21 +173,21 @@ export function ledgerErrorMessage(error: unknown, fallback = 'Ledger 操作暂�
     case 'ledger-settings-already-initialized':
     case 'ledger-base-currency-locked':
     case 'ledger-timezone-locked':
-      return 'Ledger 设置已经锁定，不能再修改。'
+      return '账本设置已经锁定，不能再修改。'
     case 'ledger-write-busy':
-      return 'Ledger 暂时繁忙，本次操作没有保存。请稍后重新提交。'
+      return '账本暂时繁忙，本次操作没有保存。请稍后重新提交。'
     case 'auth-session-required':
       return '登录状态已失效，请重新登录。'
     case 'ledger-internal-error':
-      return 'Ledger 暂时不可用，请稍后再试。'
+      return '账本暂时不可用，请稍后再试。'
     case 'ledger-malformed-response':
-      return 'Ledger 返回了无法识别的数据，请稍后再试。'
+      return '账本返回了无法识别的数据，请稍后再试。'
     case 'ledger-network-error':
       return '网络连接中断，尚未确认本次操作是否保存。'
     case 'ledger-recovery-storage-unavailable':
       return '当前浏览器无法建立安全的记账恢复状态，因此这次操作没有提交。请确认当前标签页允许使用会话存储后重试。'
     case 'ledger-recovery-blocked':
-      return '发现无法验证的未完成 Ledger 操作。为避免重复记账，已暂停新的提交。'
+      return '发现无法验证的未完成账本操作。为避免重复记账，已暂停新的提交。'
     default:
       return fallback
   }
@@ -201,7 +201,7 @@ export function ledgerErrorMessage(error: unknown, fallback = 'Ledger 操作暂�
 export function ledgerWorkspaceReadErrorMessage(error: unknown): string {
   const normalized = normalizeLedgerError(error)
   if (normalized.code === 'auth-session-required') return ledgerErrorMessage(normalized)
-  return 'Ledger 数据暂时无法加载，请稍后重试。'
+  return '账本数据暂时无法加载，请稍后重试。'
 }
 
 export function ledgerFieldError(error: unknown, field: string): string | null {

@@ -354,7 +354,7 @@ describe('Ledger account detail lifecycle', () => {
 
     expect(confirm).toHaveBeenCalledWith(
       '永久删除“招商银行”？',
-      '此操作无法撤销。该账户没有历史交易，删除后将从 Ledger 中永久移除。',
+      '此操作无法撤销。该账户没有历史交易，删除后将从账本中永久移除。',
       { confirmLabel: '永久删除', cancelLabel: '取消', destructive: true },
     )
     expect(api.deleteLedgerAccount).toHaveBeenCalledWith('bank-1', 3)

@@ -594,7 +594,7 @@ test.describe('phone read aloud', () => {
       await actions.getByRole('button', { name: /朗读所选内容|Read selection aloud/ }).tap()
       await expect(player).toContainText(/正在朗读|Reading aloud/)
       expect(mock.syntheses.map(({ text }) => text)).toEqual(['Read this only.', 'Read this only.'])
-      await page.locator('.scope-chip').filter({ hasText: 'ledger' }).tap()
+      await page.locator('.scope-chip').filter({ hasText: '账本' }).tap()
       await expect(page).toHaveURL(/\/ledger/)
       await expect(player).toHaveCount(0)
       await expect(menu).toHaveCount(0)

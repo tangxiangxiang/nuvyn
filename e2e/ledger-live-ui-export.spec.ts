@@ -15,7 +15,7 @@ async function openDashboard(page: Page): Promise<void> {
 }
 
 async function hoverLedgerNav(page: Page): Promise<void> {
-  await page.locator('.scope-chip').filter({ hasText: 'ledger' }).hover()
+  await page.locator('.scope-chip').filter({ hasText: '账本' }).hover()
 }
 
 test('active Ledger nav hover + E downloads complete active facts without changing UI, even at a narrow fine-pointer width', async ({ page, request }) => {
@@ -59,9 +59,9 @@ test('active Ledger nav hover + E downloads complete active facts without changi
   await openDashboard(page)
   expect(await page.evaluate(() => matchMedia('(hover: hover) and (pointer: fine)').matches)).toBe(true)
   const eyebrow = page.locator('.ledger-eyebrow')
-  await expect(eyebrow).toHaveText('Ledger')
+  await expect(eyebrow).toHaveText('账本')
   await expect(eyebrow.locator('span')).toHaveCount(0)
-  const chip = page.locator('.scope-chip').filter({ hasText: 'ledger' })
+  const chip = page.locator('.scope-chip').filter({ hasText: '账本' })
   await expect(chip).toHaveAttribute('aria-pressed', 'true')
 
   let downloadCount = 0
@@ -111,7 +111,7 @@ test('active Ledger nav hover + E downloads complete active facts without changi
     const style = getComputedStyle(element)
     return { className: element.className, title: element.getAttribute('title'), cursor: style.cursor, padding: style.padding, font: style.font, border: style.border, color: style.color }
   })).toEqual(appearance)
-  await expect(eyebrow).toHaveText('Ledger')
+  await expect(eyebrow).toHaveText('账本')
   await expect(page.getByTestId('ledger-record-button')).toBeVisible()
 
   await page.mouse.move(0, 0)
@@ -189,9 +189,9 @@ test('leaving Ledger invalidates a pending export even if Ledger is reopened bef
     await hoverLedgerNav(page)
     await page.keyboard.press('e')
     await readStarted
-    await page.locator('.scope-chip').filter({ hasText: 'note' }).click()
+    await page.locator('.scope-chip').filter({ hasText: '笔记' }).click()
     await expect(page.locator('.vault')).toBeVisible()
-    await page.locator('.scope-chip').filter({ hasText: 'ledger' }).click()
+    await page.locator('.scope-chip').filter({ hasText: '账本' }).click()
     await expect(page.getByTestId('ledger-dashboard')).toBeVisible()
     release()
     await page.waitForLoadState('networkidle')
@@ -219,13 +219,13 @@ test.describe('touch pointer', () => {
     page.on('request', (request) => {
       if (new URL(request.url()).pathname === '/api/ledger/transactions') transactionReads += 1
     })
-    const target = page.locator('.scope-chip').filter({ hasText: 'ledger' })
+    const target = page.locator('.scope-chip').filter({ hasText: '账本' })
     await target.dispatchEvent('mouseenter')
     await target.dispatchEvent('touchstart')
     await page.keyboard.press('e')
     expect(downloadCount).toBe(0)
     expect(transactionReads).toBe(0)
-    await expect(page.locator('.ledger-eyebrow')).toHaveText('Ledger')
+    await expect(page.locator('.ledger-eyebrow')).toHaveText('账本')
     await expect(page.getByTestId('ledger-record-button')).toBeVisible()
   })
 })

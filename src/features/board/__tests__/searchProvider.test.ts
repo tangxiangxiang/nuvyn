@@ -18,7 +18,7 @@ describe('Board search provider', () => {
     const section = await provider(' 死锁 ')
 
     expect(search).toHaveBeenCalledWith('死锁')
-    expect(section).toMatchObject({ id: 'boards', label: 'Boards' })
+    expect(section).toMatchObject({ id: 'boards', label: '白板' })
     expect(section.results).toEqual([
       {
         id: 'board:exact', type: 'board', title: '死锁', score: 0,
@@ -39,7 +39,7 @@ describe('Board search provider', () => {
     const search = vi.fn(async () => ({ items: [] }))
     const provider = createBoardSearchProvider(search)
 
-    await expect(provider(' \n ')).resolves.toMatchObject({ id: 'boards', results: [] })
+    await expect(provider(' \n ')).resolves.toMatchObject({ id: 'boards', label: '白板', results: [] })
     expect(search).not.toHaveBeenCalled()
   })
 

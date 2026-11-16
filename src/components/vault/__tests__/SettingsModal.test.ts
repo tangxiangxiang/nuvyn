@@ -267,25 +267,25 @@ describe('SettingsModal', () => {
     const wrapper = mountSettings()
     await flushPromises()
     const labels = (selector: string) => Array.from(document.body.querySelectorAll(selector), el => el.textContent?.trim())
-    expect(labels('.settings-category-list button')).toEqual(['AI', 'Note', 'Diary', 'Ledger', '数据与维护'])
+    expect(labels('.settings-category-list button')).toEqual(['AI', '笔记', '日程', '账本', '数据与维护'])
     expect(labels('.settings-subnav button')).toEqual(['模型配置', '智能朗读'])
 
     for (const [category, pages] of [
-      ['Diary', []],
-      ['Ledger', ['交易分类', '账户图标']],
+      ['日程', []],
+      ['账本', ['交易分类', '账户图标']],
       ['数据与维护', ['文档元数据', '存储与附件']],
-      ['Note', ['编辑器', '标签']],
+      ['笔记', ['编辑器', '标签']],
     ] as const) {
       findButton(category).click()
       await flushPromises()
       expect(labels('.settings-subnav button')).toEqual(pages)
-      if (category === 'Diary') expect(document.body.querySelector('.settings-section h3')?.textContent).toContain('表情图标')
+      if (category === '日程') expect(document.body.querySelector('.settings-section h3')?.textContent).toContain('表情图标')
     }
     findButton('标签').click()
     await flushPromises()
-    findButton('Diary').click()
+    findButton('日程').click()
     await flushPromises()
-    findButton('Note').click()
+    findButton('笔记').click()
     await flushPromises()
     expect(labels('.settings-subnav [aria-current]')).toEqual(['标签'])
 
@@ -293,7 +293,7 @@ describe('SettingsModal', () => {
     await wrapper.setProps({ open: true })
     await flushPromises()
     expect(labels('.settings-nav [aria-current]')).toEqual(['AI'])
-    findButton('Note').click()
+    findButton('笔记').click()
     await flushPromises()
     expect(labels('.settings-subnav [aria-current]')).toEqual(['编辑器'])
   })
@@ -303,13 +303,13 @@ describe('SettingsModal', () => {
     await flushPromises()
     inputValue(fieldControl<HTMLInputElement>('API Key', 'input'), 'sk-unsaved')
     confirm.mockResolvedValueOnce(false)
-    findButton('Note').click()
-    findButton('Ledger').click()
+    findButton('笔记').click()
+    findButton('账本').click()
     await flushPromises()
     expect(confirm).toHaveBeenCalledTimes(1)
     expect(fieldControl<HTMLInputElement>('API Key', 'input').value).toBe('sk-unsaved')
 
-    findButton('Note').click()
+    findButton('笔记').click()
     await flushPromises()
     expect(confirm).toHaveBeenCalledTimes(2)
     expect(document.body.querySelector('.settings-subnav [aria-current]')?.textContent?.trim()).toBe('编辑器')
@@ -400,7 +400,7 @@ describe('SettingsModal', () => {
     expect(voice.props('value')).toBe('female-yujie')
     expect(document.body.querySelector('[role="alert"]')).toBeTruthy()
     confirm.mockResolvedValueOnce(false)
-    findButton('Note').click()
+    findButton('笔记').click()
     await flushPromises()
     expect(document.body.querySelector('.settings-speech-card')).toBeTruthy()
     findButton('保存').click()
@@ -409,7 +409,7 @@ describe('SettingsModal', () => {
       profileId: 'anthropic-profile', privacyConsent: false, voiceId: 'female-yujie',
     }, expect.any(AbortSignal))
     const confirmations = confirm.mock.calls.length
-    findButton('Note').click()
+    findButton('笔记').click()
     await flushPromises()
     expect(confirm.mock.calls).toHaveLength(confirmations)
     expect(activateAiProfile).not.toHaveBeenCalled()
@@ -675,7 +675,7 @@ describe('SettingsModal', () => {
     const wrapper = mountSettings({ withTags: true })
     await flushPromises()
 
-    findButton('Note').click()
+    findButton('笔记').click()
     await flushPromises()
     expect(document.body.querySelector('[aria-current="page"]')?.textContent?.trim()).toBe('编辑器')
     expect(document.body.textContent).toContain('此设备上的 Monaco 偏好设置')
@@ -689,7 +689,7 @@ describe('SettingsModal', () => {
     expect(document.body.textContent).toContain('迁移状态')
     expect(document.body.textContent).toContain('3 已验证')
 
-    findButton('Note').click()
+    findButton('笔记').click()
     await flushPromises()
     findButton('标签').click()
     await flushPromises()
@@ -727,7 +727,7 @@ describe('SettingsModal', () => {
   it('preserves Naive number bounds and exact numeric/boolean editor preference types', async () => {
     const wrapper = mountSettings()
     await flushPromises()
-    findButton('Note').click()
+    findButton('笔记').click()
     await flushPromises()
 
     const numberInputs = wrapper.findAllComponents(NInputNumber)
@@ -797,12 +797,12 @@ describe('SettingsModal', () => {
     wrappers.push(wrapper)
     await flushPromises()
 
-    findButton('Note').click()
+    findButton('笔记').click()
     await flushPromises()
     findButton('标签').click()
     await flushPromises()
     findButton('编辑器').click()
-    findButton('Ledger').click()
+    findButton('账本').click()
     await flushPromises()
     expect(document.body.querySelector('[aria-current="page"]')?.textContent?.trim()).toBe('标签')
 

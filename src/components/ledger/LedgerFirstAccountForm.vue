@@ -92,7 +92,7 @@ function validate(): number | null {
     return null
   }
   if (!currency.value) {
-    formError.value = '请先完成 Ledger 基础设置。'
+    formError.value = '请先完成账本基础设置。'
     return null
   }
   if (!/^\d{4}-\d{2}-\d{2}$/.test(openingDate.value)) {
@@ -266,7 +266,7 @@ async function retryPendingAccount(): Promise<void> {
 
     <div class="ledger-form-actions">
       <NButton v-if="props.cancelable" class="ledger-secondary-button" attr-type="button" size="small" :bordered="false" :disabled="saving" @click="emit('cancel')">取消</NButton>
-      <NButton v-if="props.firstAccount && !settings?.hasCreatedAccount" class="ledger-secondary-button" attr-type="button" size="small" :bordered="false" :disabled="saving" @click="emit('edit-settings')">修改 Ledger 设置</NButton>
+      <NButton v-if="props.firstAccount && !settings?.hasCreatedAccount" class="ledger-secondary-button" attr-type="button" size="small" :bordered="false" :disabled="saving" @click="emit('edit-settings')">修改账本设置</NButton>
       <NButton class="ledger-primary-button" attr-type="submit" type="primary" size="small" :bordered="false" :disabled="saving">
         {{ saving ? '保存中…' : (props.firstAccount ? '继续' : '创建') }}
       </NButton>

@@ -1,5 +1,6 @@
 import type { BoardSearchItem, BoardSearchMatch } from '../../../shared/boardSearchProtocol'
 import type { SearchProvider, SearchResult, SearchResultSection } from '../../lib/searchResults'
+import { workspaceDisplayNames } from '../../lib/workspace'
 import { searchBoardContent } from './api'
 
 export interface BoardSearchPayload {
@@ -30,10 +31,10 @@ function boardResult(item: BoardSearchItem): SearchResult<BoardSearchPayload> {
 
 export function createBoardSearchProvider(search: BoardSearchRequest = searchBoardContent): SearchProvider {
   return async (query) => {
-    if (!query.trim()) return { id: 'boards', label: 'Boards', results: [] }
+    if (!query.trim()) return { id: 'boards', label: workspaceDisplayNames.board, results: [] }
     const response = await search(query.trim())
     const results = response.items.map(boardResult)
-    const section: SearchResultSection = { id: 'boards', label: 'Boards', results }
+    const section: SearchResultSection = { id: 'boards', label: workspaceDisplayNames.board, results }
     return section
   }
 }

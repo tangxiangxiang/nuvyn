@@ -250,9 +250,9 @@ describe('NavBar — scope chips', () => {
 
     expect(wrapper.findAll('.scope-chip')[0].attributes('aria-pressed')).toBe('true')
     expect(wrapper.findAll('.scope-chip-label').map((chip) => chip.text())).toEqual([
-      'note',
-      'diary',
-      'ledger',
+      '笔记',
+      '日程',
+      '账本',
     ])
   })
 
@@ -305,7 +305,7 @@ describe('NavBar — scope chips', () => {
     await chips[1].trigger('click')
 
     expect(chips[1].attributes('aria-pressed')).toBe('true')
-    expect(chips[1].attributes('aria-label')).toBe('Current scope: diary')
+    expect(chips[1].attributes('aria-label')).toBe('Current scope: 日程')
   })
 
   it('uses the ledger scope chip as the canonical Ledger entry', async () => {
@@ -328,7 +328,7 @@ describe('NavBar — scope chips', () => {
       },
     })
 
-    expect(wrapper.findAll('.scope-chip')[2].text()).toContain('ledger')
+    expect(wrapper.findAll('.scope-chip')[2].text()).toContain('账本')
     await wrapper.findAll('.scope-chip')[2].trigger('click')
     await new Promise((resolve) => setTimeout(resolve, 0))
 
@@ -409,7 +409,7 @@ describe('NavBar — scope chips', () => {
     expect(wrapper.find('.navbar').classes()).toContain('is-workspace')
     expect(wrapper.find('.workspace-board-link').classes()).toContain('active')
     expect(wrapper.find('.workspace-board-link').attributes('aria-current')).toBe('page')
-    expect(wrapper.find('.workspace-board-link-label').text()).toBe('board')
+    expect(wrapper.find('.workspace-board-link-label').text()).toBe('白板')
     expect(wrapper.find('.scope-chips').exists()).toBe(true)
     expect(wrapper.findAll('.scope-chip')).toHaveLength(3)
     expect(wrapper.findAll('.scope-chip.active')).toHaveLength(0)
@@ -1338,11 +1338,11 @@ describe('NavBar — workspace mobile availability', () => {
     const { wrapper } = mountNavBar()
     const assertAllWorkspaces = () => {
       expect(wrapper.findAll('.scope-chip-label').map((label) => label.text())).toEqual([
-        'note', 'diary', 'ledger',
+        '笔记', '日程', '账本',
       ])
       expect(wrapper.find('.workspace-board-link').exists()).toBe(true)
       expect(wrapper.findAll('.scope-chip[aria-pressed="true"]')).toHaveLength(1)
-      expect(wrapper.find('.scope-chip[aria-pressed="true"] .scope-chip-label').text()).toBe('note')
+      expect(wrapper.find('.scope-chip[aria-pressed="true"] .scope-chip-label').text()).toBe('笔记')
     }
     assertAllWorkspaces()
     media.resize(false)

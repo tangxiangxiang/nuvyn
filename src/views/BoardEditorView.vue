@@ -28,6 +28,7 @@ import {
   type ExcalidrawRuntimeScene,
 } from '../features/board/engine/types'
 import { useI18n } from '../composables/useI18n'
+import { workspaceDisplayNames } from '../lib/workspace'
 import { useTheme } from '../composables/useTheme'
 import { useToast } from '../composables/useToast'
 import { useConfirm } from '../composables/useConfirm'
@@ -129,7 +130,7 @@ const boardId = computed(() => {
   const value = route.params.boardId
   return Array.isArray(value) ? value[0] ?? '' : value ?? ''
 })
-const boardTitle = computed(() => aggregate.value?.metadata.title ?? errorMetadata.value?.title ?? t('board.title'))
+const boardTitle = computed(() => aggregate.value?.metadata.title ?? errorMetadata.value?.title ?? workspaceDisplayNames.board)
 const favorite = computed(() => Boolean(session.value && isFavorite(session.value.boardId)))
 const excalidrawLangCode = computed(() => locale.value.startsWith('zh') ? 'zh-CN' as const : 'en' as const)
 const errorTitle = computed(() => {

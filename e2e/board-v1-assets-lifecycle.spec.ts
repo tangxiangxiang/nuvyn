@@ -187,7 +187,7 @@ test('Board V1 persists image assets and exports the restored runtime', async ({
     const theme = page.locator('.theme-toggle')
     if (await page.locator('html').getAttribute('data-theme') !== 'dark') await theme.click()
     await expect(page.locator('html')).toHaveAttribute('data-theme', 'dark')
-    await boardCard(page, boardId).getByRole('button', { name: /打开 Board|Open Board/ }).click()
+    await boardCard(page, boardId).getByRole('button', { name: /打开白板|Open Board/ }).click()
     await waitForEditorReady(page)
     await expect(page.locator('[data-board-excalidraw-root] .excalidraw.theme--dark')).toBeVisible()
 

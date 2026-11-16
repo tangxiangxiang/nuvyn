@@ -7,6 +7,14 @@ export type ChromeStyle = 'workspace' | 'immersive'
 export type WorkspaceNavigationKey = ScopeKey | 'board'
 export type WorkspaceNavigationViewport = 'desktop' | 'mobile'
 
+/** Stable Chinese names used by the visible workspace navigation. */
+export const workspaceDisplayNames = {
+  note: '笔记',
+  diary: '日程',
+  ledger: '账本',
+  board: '白板',
+} as const satisfies Record<WorkspaceNavigationKey, string>
+
 /**
  * Navigation availability is deliberately separate from route/runtime
  * availability: every workspace remains directly addressable on mobile.

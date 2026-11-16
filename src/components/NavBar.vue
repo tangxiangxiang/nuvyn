@@ -34,6 +34,7 @@ import { isNuvynShortcutBlocked } from '../lib/keyboard'
 import { isDiaryShortcutBlocked, isDiaryTextEntryContext } from '../views/diaryShortcutChord'
 import {
   isWorkspaceNavigationAvailable,
+  workspaceDisplayNames,
   workspaceMobileNavigationQuery,
   type ChromeStyle,
   type WorkspaceKind,
@@ -119,9 +120,9 @@ const themeTitle = computed<string>(() => {
 
 const scopeChips = computed(() => {
   const chips = [
-    { scope: 'note', label: 'note', icon: Notes },
-    { scope: 'diary', label: 'diary', icon: props.diaryUnlocked ? Calendar : Lock },
-    { scope: 'ledger', label: 'ledger', icon: Wallet },
+    { scope: 'note', label: workspaceDisplayNames.note, icon: Notes },
+    { scope: 'diary', label: workspaceDisplayNames.diary, icon: props.diaryUnlocked ? Calendar : Lock },
+    { scope: 'ledger', label: workspaceDisplayNames.ledger, icon: Wallet },
   ] as const
   return chips.filter((chip) => (
     isWorkspaceNavigationAvailable(chip.scope, workspaceNavigationViewport.value)
@@ -973,11 +974,11 @@ onBeforeUnmount(() => {
           quaternary
           :bordered="false"
           :aria-current="isBoard ? 'page' : undefined"
-          :aria-label="t('nav.board')"
+          :aria-label="workspaceDisplayNames.board"
           @click="router.push({ name: 'board' })"
         >
           <NIcon class="workspace-board-link-icon" aria-hidden="true"><Box /></NIcon>
-          <span class="workspace-board-link-label">{{ t('nav.board') }}</span>
+          <span class="workspace-board-link-label">{{ workspaceDisplayNames.board }}</span>
         </NButton>
       </div>
       <div class="nav-spacer" />

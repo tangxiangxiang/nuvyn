@@ -291,7 +291,7 @@ describe('Ledger live dashboard', () => {
     const add = vi.spyOn(window, 'addEventListener')
     try {
       const eyebrow = wrapper.get('.ledger-eyebrow')
-      expect(eyebrow.text()).toBe('Ledger')
+      expect(eyebrow.text()).toBe('账本')
       expect(eyebrow.findAll('span')).toHaveLength(0)
       expect(eyebrow.attributes()).not.toHaveProperty('title')
       expect(eyebrow.attributes()).not.toHaveProperty('tabindex')
@@ -904,7 +904,7 @@ describe('Ledger live dashboard', () => {
     await flushPromises()
 
     expect(wrapper.get('.ledger-inline-error').text()).toContain('这段期间的数据暂时无法加载。')
-    expect(wrapper.get('.ledger-inline-error').text()).not.toContain('Ledger 暂时不可用')
+    expect(wrapper.get('.ledger-inline-error').text()).not.toContain('账本暂时不可用')
     expect(wrapper.get('.ledger-inline-error').text()).toContain('重试')
     expect(wrapper.find('[data-testid="ledger-period-analysis-loading"]').exists()).toBe(false)
     await vi.waitFor(() => {
@@ -969,8 +969,8 @@ describe('Ledger live dashboard', () => {
     const inlineError = wrapper.get('.ledger-inline-error')
     expect(inlineError.text()).toContain('这段期间的数据暂时无法加载。')
     expect(inlineError.text()).toContain('重试')
-    expect(wrapper.text()).not.toContain('Ledger 暂时不可用')
-    expect(wrapper.text()).not.toContain('Ledger 暂时无法打开')
+    expect(wrapper.text()).not.toContain('账本暂时不可用')
+    expect(wrapper.text()).not.toContain('账本 暂时无法打开')
     expect(wrapper.find('[data-testid="ledger-period-analysis-loading"]').exists()).toBe(false)
     await vi.waitFor(() => {
       expect(wrapper.get('[data-testid="ledger-total-assets"]').text()).toContain('9,962')
@@ -993,7 +993,7 @@ describe('Ledger live dashboard', () => {
     // Accounts are a current-state dependency. Presenting this as a period-only
     // failure would leave a stale Current Snapshot with only a period retry.
     expect(wrapper.find('[data-testid="ledger-bootstrap-error"]').exists()).toBe(true)
-    expect(wrapper.text()).toContain('Ledger 暂时无法打开')
+    expect(wrapper.text()).toContain('账本 暂时无法打开')
     expect(wrapper.get('[data-testid="ledger-bootstrap-error"] button').text()).toContain('重新加载')
     expect(wrapper.find('[data-testid="ledger-dashboard"]').exists()).toBe(false)
     expect(wrapper.find('.ledger-inline-error').exists()).toBe(false)

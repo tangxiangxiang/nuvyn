@@ -171,7 +171,7 @@ describe('CommandPalette Chinese copy', () => {
       },
     }
     const provider = vi.fn(async (query: string): Promise<SearchResultSection> => ({
-      id: 'boards', label: 'Boards', results: query ? [hit] : [],
+      id: 'boards', label: '白板', results: query ? [hit] : [],
     })) as SearchProvider
     const wrapper = mount(CommandPalette, { props: { providers: [provider], allowCreate: false } })
     ;(wrapper.vm as unknown as { show: () => void }).show()

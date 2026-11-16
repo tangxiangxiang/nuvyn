@@ -141,7 +141,7 @@ describe('FileTree prompt rename', () => {
     await flushPromises()
 
     expect(patchSpy).not.toHaveBeenCalled()
-    expect(dialogStubs.toast.error).toHaveBeenCalledWith('普通文件不能移动到 Diary 目录；Diary 只能通过日期命令创建。')
+    expect(dialogStubs.toast.error).toHaveBeenCalledWith('普通文件不能移动到日记目录；日记只能通过日期命令创建。')
     w.unmount()
   })
 })

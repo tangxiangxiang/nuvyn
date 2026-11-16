@@ -69,8 +69,8 @@ describe('NavBar hidden Ledger analysis gesture', () => {
         },
       },
     })
-    const chip = wrapper.findAll('.scope-chip').find((item) => item.text().includes('ledger'))!
-    const otherChip = wrapper.findAll('.scope-chip').find((item) => item.text().includes('diary'))!
+    const chip = wrapper.findAll('.scope-chip').find((item) => item.text().includes('账本'))!
+    const otherChip = wrapper.findAll('.scope-chip').find((item) => item.text().includes('日程'))!
     return { command, otherCommand, chip, otherChip, router, calendarVisible, commandRef }
   }
 

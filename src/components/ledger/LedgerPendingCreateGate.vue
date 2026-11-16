@@ -24,7 +24,7 @@ async function retry(): Promise<void> {
       : operation === 'category'
         ? '分类已确认保存'
         : operation === 'settings'
-          ? 'Ledger 设置已确认保存'
+          ? '账本设置已确认保存'
           : '交易已确认保存')
     emit('resolved', operation)
     store.dismissRecoveryGate()
@@ -45,8 +45,8 @@ async function retry(): Promise<void> {
     />
     <section v-else-if="blocked" class="ledger-recovery-blocked" data-testid="ledger-recovery-blocked" role="alert" aria-labelledby="ledger-recovery-blocked-title">
       <p class="ledger-eyebrow">需要处理</p>
-      <h1 id="ledger-recovery-blocked-title">无法验证未完成的 Ledger 操作</h1>
-      <p>为避免重复记账，Ledger 已暂停新的提交。当前恢复记录无法安全验证；请保留此标签页并联系管理员处理。</p>
+      <h1 id="ledger-recovery-blocked-title">无法验证未完成的账本操作</h1>
+      <p>为避免重复记账，账本已暂停新的提交。当前恢复记录无法安全验证；请保留此标签页并联系管理员处理。</p>
       <p v-if="store.recoveryBlockedReason.value" class="ledger-recovery-reason">{{ store.recoveryBlockedReason.value }}</p>
     </section>
   </section>

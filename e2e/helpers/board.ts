@@ -226,7 +226,7 @@ export async function waitForBoardSaved(page: Page, timeout = 15_000): Promise<v
 
 export async function createBoardThroughUi(page: Page): Promise<string> {
   await expect(page.getByTestId('board-home')).toBeVisible()
-  const createButton = page.getByRole('button', { name: /新建 Board|New Board|创建第一个 Board|Create your first board/ }).first()
+  const createButton = page.getByRole('button', { name: /新建画布|New Board|创建第一张画布|Create your first canvas/ }).first()
   await expect(createButton).toBeVisible()
   await createButton.click()
   await expect(page).toHaveURL(/\/board\/[^/]+$/)
@@ -314,13 +314,13 @@ export async function goBackToBoardHome(page: Page): Promise<void> {
 export async function renameBoardThroughUi(page: Page, boardId: string, title: string): Promise<void> {
   const card = boardCard(page, boardId)
   await expect(card).toBeVisible()
-  await card.getByRole('button', { name: /Board 操作|Board actions/ }).click()
+  await card.getByRole('button', { name: /白板操作|Board actions/ }).click()
   const renameOption = page.getByText(/^(重命名|Rename)$/, { exact: true }).last()
   await expect(renameOption).toBeVisible()
   await renameOption.click()
   const dialog = page.getByRole('dialog').last()
   await expect(dialog).toBeVisible()
-  await dialog.getByRole('textbox', { name: /Board 名称|Board title/ }).fill(title)
+  await dialog.getByRole('textbox', { name: /白板名称|Board title/ }).fill(title)
   await page.getByTestId('board-rename-submit').click()
   await expect(dialog).toBeHidden()
   await expect(boardCard(page, boardId).getByTestId('board-card-title')).toHaveText(title)

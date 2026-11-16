@@ -46,6 +46,7 @@ import PagePullRefreshIndicator from '../components/PagePullRefreshIndicator.vue
 import { ledgerSelectNodeProps } from '../features/ledger/naiveControls'
 import LedgerDatePicker from '../components/ledger/LedgerDatePicker.vue'
 import LedgerAnimatedMoney from '../components/ledger/LedgerAnimatedMoney.vue'
+import { workspaceDisplayNames } from '../lib/workspace'
 import { ledgerAccountSelectOptions, renderLedgerAccountLabel, renderLedgerCategoryLabel } from '../components/ledger/ledgerSelectRenderers'
 
 const store = useLedgerStore()
@@ -775,7 +776,7 @@ const visibleTransactionColumns = computed(() => {
     />
     <header class="ledger-transactions-header">
       <div>
-        <p class="ledger-eyebrow">Ledger</p>
+        <p class="ledger-eyebrow">{{ workspaceDisplayNames.ledger }}</p>
         <h1>交易记录</h1>
         <p>查看所有收入、支出和账户间转账。</p>
       </div>
@@ -857,7 +858,7 @@ const visibleTransactionColumns = computed(() => {
         <template #footer><NButton class="ledger-primary-button" attr-type="button" type="primary" size="small" :bordered="false" data-testid="ledger-transactions-retry-bootstrap" @click="bootstrapHistory">重新加载</NButton></template>
       </NResult>
     </section>
-    <NEmpty v-else-if="!store.hasUnresolvedCreate.value && workspaceState === 'UNINITIALIZED'" class="ledger-transactions-state ledger-empty-state" data-testid="ledger-transactions-needs-settings" :show-icon="false" description="请先完成 Ledger 初始化">
+    <NEmpty v-else-if="!store.hasUnresolvedCreate.value && workspaceState === 'UNINITIALIZED'" class="ledger-transactions-state ledger-empty-state" data-testid="ledger-transactions-needs-settings" :show-icon="false" description="请先完成账本初始化">
       <template #extra><div class="ledger-state-extra">设置基础货币、时区并创建账户后，交易记录才会出现在这里。</div></template>
     </NEmpty>
     <NCard v-else-if="!store.hasUnresolvedCreate.value && historyAvailable" class="ledger-transaction-history" :bordered="false" size="small" aria-label="交易记录列表">

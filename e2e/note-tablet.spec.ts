@@ -68,7 +68,7 @@ for (const [width, height] of [[320, 740], [390, 844], [430, 932], [600, 900], [
     const f = await seed(request)
     try {
       await read(page, f.paths[0]!)
-      const note = page.locator('.scope-chip').filter({ hasText: 'note' })
+      const note = page.locator('.scope-chip').filter({ hasText: '笔记' })
       await expect(note).toHaveCount(1)
       await expect(page.locator('.workspace-board-link')).toHaveCount(1)
       if (width! < 1200) {
@@ -78,7 +78,7 @@ for (const [width, height] of [[320, 740], [390, 844], [430, 932], [600, 900], [
           // Keep tablet navbar labels and chip geometry exactly as before.
           await expect(note).toHaveCSS('height', '28px')
           await expect(page.locator('.navbar .brand-wordmark')).toBeVisible()
-          for (const name of ['note', 'diary', 'ledger']) {
+          for (const name of ['笔记', '日程', '账本']) {
             await expect(page.locator('.navbar .scope-chip-label').filter({ hasText: name })).toBeVisible()
           }
           await expect(page.locator('.navbar .workspace-board-link-label')).toBeVisible()

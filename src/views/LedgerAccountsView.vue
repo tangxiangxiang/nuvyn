@@ -10,6 +10,7 @@ import LedgerAccountIcon from '../components/ledger/LedgerAccountIcon.vue'
 import { ledgerAccountTypeOptionsForNature } from '../features/ledger/accountPresentation'
 import { ledgerWorkspaceReadErrorMessage } from '../features/ledger/ledgerErrors'
 import { useLedgerStore } from '../features/ledger/ledgerStore'
+import { workspaceDisplayNames } from '../lib/workspace'
 
 const store = useLedgerStore()
 const createOpen = ref(false)
@@ -99,7 +100,7 @@ function onAccountSaved(): void {
     />
     <header class="ledger-page-header">
       <div>
-        <p class="ledger-eyebrow">Ledger</p>
+        <p class="ledger-eyebrow">{{ workspaceDisplayNames.ledger }}</p>
         <h1>账户</h1>
         <p>查看余额、维护账户，或恢复已归档账户。</p>
       </div>
@@ -116,11 +117,11 @@ function onAccountSaved(): void {
         <template #footer><NButton class="ledger-primary-button" attr-type="button" type="primary" size="small" :bordered="false" @click="store.bootstrap">重新加载</NButton></template>
       </NResult>
     </section>
-    <NEmpty v-else-if="!store.settings.value" class="ledger-state-panel ledger-empty-state" data-testid="ledger-accounts-needs-settings" :show-icon="false" description="请先设置 Ledger">
+    <NEmpty v-else-if="!store.settings.value" class="ledger-state-panel ledger-empty-state" data-testid="ledger-accounts-needs-settings" :show-icon="false" description="请先设置账本">
       <template #extra>
         <div class="ledger-state-extra">
           <p>完成基础货币和时区设置后，才能管理账户。</p>
-          <RouterLink class="ledger-primary-button" :to="{ name: 'ledger' }">去设置 Ledger</RouterLink>
+          <RouterLink class="ledger-primary-button" :to="{ name: 'ledger' }">去设置账本</RouterLink>
         </div>
       </template>
     </NEmpty>
