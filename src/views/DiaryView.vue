@@ -1,7 +1,8 @@
 <script setup lang="ts">
 import { computed, inject, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { onBeforeRouteLeave } from 'vue-router'
-import { NButton, NModal } from 'naive-ui'
+import { NButton, NIcon, NModal } from 'naive-ui'
+import { X } from '@vicons/tabler'
 import { Temporal } from '@js-temporal/polyfill'
 import { DiaryAccessContextKey } from '../composables/diary/diaryAccessContext'
 import { AppShellContextKey } from '../composables/appShellContext'
@@ -10,6 +11,7 @@ import { useDiaryMoodIconPreferences } from '../composables/diary/useDiaryMoodIc
 import { useAuth } from '../composables/useAuth'
 import { useConfirm } from '../composables/useConfirm'
 import { useToast } from '../composables/useToast'
+import DiaryActionMenu from '../components/diary/DiaryActionMenu.vue'
 import { createDiaryEntryId, createDiaryEventId, diaryLifeApi } from '../lib/diary-life-api'
 import { createDiaryAttachmentClientId, diaryAttachmentsApi } from '../lib/diary-attachments-api'
 import { DiaryAttachmentPreviewUrls } from '../lib/diaryAttachmentPreviewUrls'
@@ -18,6 +20,7 @@ import { DIARY_ATTACHMENT_STAGE_HEARTBEAT_INTERVAL_MS, MAX_DIARY_ATTACHMENT_BYTE
 import { NUVYN_BROWSER_STORAGE_KEYS, ownerScopedStorageKey, readStorageKey, writeStorageKey } from '../technicalNamespace'
 import DiaryLifeCalendar from '../components/diary/DiaryLifeCalendar.vue'
 import DiaryDayDialog from '../components/diary/DiaryDayDialog.vue'
+import DiaryEventDetail from '../components/diary/DiaryEventDetail.vue'
 import DiaryEventForm from '../components/diary/DiaryEventForm.vue'
 import DiaryEventListDialog from '../components/diary/DiaryEventListDialog.vue'
 import { eventEmojiSource } from '../features/diary/eventEmoji'
@@ -56,6 +59,10 @@ const draft = ref<DayFields>({ moodId: null, entries: [] })
 const dayMode = ref<'read' | 'edit'>('read')
 const eventDraft = ref<EventFields | null>(null)
 const editing = ref<DiaryEvent | null>(null)
+type EventReturnContext = { kind: 'event-list' } | { kind: 'day-list'; date: string } | { kind: 'calendar'; date: string }
+const eventDetail = ref<{ event: DiaryEvent; occurrenceDate: string } | null>(null)
+const eventDetailReturn = ref<EventReturnContext | null>(null)
+const eventEditorReturnDate = ref<string | null>(null)
 const newId = ref('')
 const initial = ref('')
 const busy = ref(false)
@@ -77,6 +84,10 @@ const eventListLoaded = ref(false)
 const eventListLoading = ref(false)
 const eventListLoadingMore = ref(false)
 const eventListError = ref('')
+const eventDetailActions = [{ key: 'delete', label: '删除事件' }]
+const eventSurfaceVisible = computed(() => access.isUnlocked.value && (
+  eventListVisible.value || eventDetail.value !== null || eventDraft.value !== null || (mode.value === 'events' && selected.value !== null)
+))
 
 function stopAttachmentSession() {
   if (attachmentLeaseTimer) clearInterval(attachmentLeaseTimer)
@@ -158,8 +169,8 @@ const attachmentPreviewUrls = new DiaryAttachmentPreviewUrls()
 let eventListRequest: AbortController | null = null
 let timer: ReturnType<typeof setInterval> | undefined
 const dirty = computed(() => {
-  if (selected.value === null || loadingDay.value || dayReadFailed.value) return false
   if (eventDraft.value) return JSON.stringify(eventDraft.value) !== initial.value
+  if (selected.value === null || loadingDay.value || dayReadFailed.value) return false
   if (mode.value !== 'diary' || dayMode.value !== 'edit') return false
   return JSON.stringify({ fields: draft.value, attachments: draftAttachments.value.map(item => item.id) }) !== initial.value
 })
@@ -231,6 +242,10 @@ function resetForm() {
   serverToday.value = null
   eventDraft.value = null
   editing.value = null
+  eventDetail.value = null
+  eventDetailReturn.value = null
+  eventEditorReturnDate.value = null
+  eventListVisible.value = false
   day.value = null
   dayAttachments.value = []
   draftAttachments.value = []
@@ -301,6 +316,7 @@ async function openEventList() {
   if (!(await canLeave()) || !access.isUnlocked.value) return
   await discardPendingAttachments()
   resetForm()
+  mode.value = 'events'
   eventListVisible.value = true
   if (!eventListLoaded.value) void loadEventList(true)
 }
@@ -331,10 +347,62 @@ const diaryViewToggleCommand = () => { void toggle() }
 const diaryEventListCommand = () => { void openEventList() }
 
 function selectEventFromList(event: DiaryEvent) {
+  mode.value = 'events'
   eventListVisible.value = false
-  resetForm()
   selected.value = event.startDate
-  edit(event)
+  eventDetailReturn.value = { kind: 'event-list' }
+  eventDetail.value = { event, occurrenceDate: nextOccurrence(event, today.value) ?? event.startDate }
+  formError.value = ''
+}
+
+function selectEventFromDay(event: DiaryEvent) {
+  const date = selected.value
+  if (!date) return
+  eventDetailReturn.value = { kind: 'day-list', date }
+  eventDetail.value = { event, occurrenceDate: date }
+  formError.value = ''
+}
+
+function restoreEventContext() {
+  const context = eventDetailReturn.value
+  eventDetailReturn.value = null
+  eventDetail.value = null
+  eventDraft.value = null
+  editing.value = null
+  eventEditorReturnDate.value = null
+  formError.value = ''
+
+  if (context?.kind === 'event-list') {
+    selected.value = null
+    eventListVisible.value = true
+    if (!eventListLoaded.value) void loadEventList(true)
+  } else if (context?.kind === 'day-list') {
+    selected.value = context.date
+    eventListVisible.value = false
+  } else {
+    selected.value = null
+    eventListVisible.value = false
+  }
+}
+
+async function closeEventSurface() {
+  if (busy.value || attachmentBusy.value) return
+  if (eventDraft.value) {
+    await cancelEventEdit()
+    return
+  }
+  if (eventDetail.value) {
+    restoreEventContext()
+    return
+  }
+  if (eventListVisible.value) {
+    eventListVisible.value = false
+    return
+  }
+  if (await canLeave()) {
+    await discardPendingAttachments()
+    resetForm()
+  }
 }
 
 const stopTeardown = subscribeDiaryTeardown(clearPrivateData)
@@ -502,6 +570,7 @@ async function open(date: string, options: { skipLeaveCheck?: boolean; searchRes
   detailRequest?.abort()
   const scope = new AbortController(); detailRequest = scope
   selected.value = date; eventDraft.value = null; editing.value = null; formError.value = ''; initial.value = 'null'
+  eventDetail.value = null; eventDetailReturn.value = null; eventEditorReturnDate.value = null; eventListVisible.value = false
   serverToday.value = null
   day.value = null; dayAttachments.value = []; draftAttachments.value = []; draft.value = { moodId: null, entries: [] }; dayMode.value = 'read'; dayReadFailed.value = false
   if (mode.value !== 'diary') return true
@@ -583,11 +652,44 @@ async function toggle() {
   resetForm()
   mode.value = mode.value === 'diary' ? 'events' : 'diary'
 }
-function edit(event?: DiaryEvent) {
-  editing.value = event ?? null
-  newId.value = event?.id ?? createDiaryEventId()
-  eventDraft.value = event ? { ...event } : { title: '', description: '', emoji: '🎯', type: 'milestone', startDate: selected.value!, endDate: selected.value!, startTime: null, endTime: null, allDay: true, recurrence: 'none', showCountdown: false, isPrimary: false }
+function createEvent() {
+  const date = selected.value
+  if (!date) return
+  eventDetail.value = null
+  eventDetailReturn.value = null
+  eventEditorReturnDate.value = date
+  editing.value = null
+  newId.value = createDiaryEventId()
+  eventDraft.value = { title: '', description: '', emoji: '🎯', type: 'milestone', startDate: date, endDate: date, startTime: null, endTime: null, allDay: true, recurrence: 'none', showCountdown: false, isPrimary: false }
   initial.value = JSON.stringify(eventDraft.value)
+}
+
+function startEventEdit() {
+  const event = eventDetail.value?.event
+  if (!event || busy.value) return
+  editing.value = event
+  eventEditorReturnDate.value = null
+  newId.value = event.id
+  eventDraft.value = { ...event }
+  initial.value = JSON.stringify(eventDraft.value)
+  formError.value = ''
+}
+
+async function cancelEventEdit() {
+  if (!eventDraft.value || busy.value) return
+  if (dirty.value && !await confirm('放弃未保存的修改？')) return
+  eventDraft.value = null
+  editing.value = null
+  formError.value = ''
+  if (eventDetail.value) return
+  const returnDate = eventEditorReturnDate.value
+  eventEditorReturnDate.value = null
+  if (returnDate) selected.value = returnDate
+  else resetForm()
+}
+
+function selectEventAction(action: string) {
+  if (action === 'delete' && eventDetail.value) void removeEventFromDetail()
 }
 async function save() {
   if (busy.value || attachmentBusy.value || loadingDay.value || dayReadFailed.value || !selected.value) return
@@ -635,12 +737,25 @@ async function save() {
     } else {
       const fields = parseEvent(eventDraft.value)
       if (!fields) { formError.value = '请检查标题、日期和时间范围。'; return }
-      await diaryLifeApi.saveEvent(newId.value, fields, editing.value?.version ?? 0)
+      const result = await diaryLifeApi.saveEvent(newId.value, fields, editing.value?.version ?? 0)
+      if (!isDiarySessionGenerationCurrent(generation) || !access.isUnlocked.value) return
+      const previousOccurrence = eventDetail.value?.occurrenceDate
+      eventDraft.value = null
+      editing.value = null
+      eventEditorReturnDate.value = null
+      eventDetail.value = {
+        event: result.event,
+        occurrenceDate: previousOccurrence && occursOn(result.event, previousOccurrence)
+          ? previousOccurrence
+          : nextOccurrence(result.event, today.value) ?? result.event.startDate,
+      }
+      if (!eventDetailReturn.value) eventDetailReturn.value = { kind: 'day-list', date: result.event.startDate }
+      initial.value = ''
+      formError.value = ''
+      await load()
+      invalidateEventList()
+      return
     }
-    if (!isDiarySessionGenerationCurrent(generation) || !access.isUnlocked.value) return
-    resetForm()
-    await load()
-    invalidateEventList()
   } catch (e) { if (isDiarySessionGenerationCurrent(generation)) formError.value = (e as Error).message }
   finally { busy.value = false }
 }
@@ -664,8 +779,35 @@ async function remove() {
     busy.value = false
   }
 }
+
+async function removeEventFromDetail() {
+  const event = eventDetail.value?.event
+  if (!event || busy.value) return
+  const generation = captureDiarySessionGeneration()
+  busy.value = true
+  formError.value = ''
+  try {
+    if (!await confirm('删除这条事件？') || !isDiarySessionGenerationCurrent(generation)) return
+    await diaryLifeApi.deleteEvent(event.id, event.version)
+    if (!isDiarySessionGenerationCurrent(generation) || !access.isUnlocked.value) return
+    await load()
+    invalidateEventList()
+    restoreEventContext()
+  } catch (error) {
+    if (isDiarySessionGenerationCurrent(generation)) formError.value = (error as Error).message
+  } finally {
+    busy.value = false
+  }
+}
+
 async function openCountdown(event: DiaryEvent, date: string) {
-  if (await open(date)) edit(event)
+  if (!(await canLeave()) || !access.isUnlocked.value) return
+  await discardPendingAttachments()
+  resetForm()
+  mode.value = 'events'
+  selected.value = date
+  eventDetailReturn.value = { kind: 'calendar', date }
+  eventDetail.value = { event, occurrenceDate: date }
 }
 onBeforeRouteLeave(async () => {
   if (!await canLeave()) return false
@@ -736,25 +878,82 @@ onBeforeUnmount(() => {
         @remove-attachment="removeDayAttachment"
         @move-attachment="moveDayImage"
       />
-      <NModal v-if="selected !== null && (mode === 'events' || eventDraft)" :show="selected !== null && (mode === 'events' || eventDraft !== null)" preset="card" :title="selected ?? ''" class="diary-life-dialog" :mask-closable="!busy" :close-on-esc="!busy" :closable="!busy" @update:show="!$event && close()">
-        <p v-if="formError" role="alert">{{ formError }}</p>
-        <template v-if="mode === 'events' || eventDraft">
-          <DiaryEventForm v-if="eventDraft" v-model="eventDraft" />
-          <div v-else class="day-events"><button v-for="event in selectedEvents" :key="event.id" type="button" @click="edit(event)"><strong><img v-if="eventEmojiSource(event.emoji)" :src="eventEmojiSource(event.emoji)" class="event-emoji" alt=""><template v-else>{{ event.emoji }}</template> {{ event.title }}</strong><span v-if="event.description">{{ event.description }}</span></button><p v-if="!selectedEvents.length">还没有事件</p><NButton @click="edit()">新增事件</NButton></div>
+      <NModal
+        v-if="eventSurfaceVisible"
+        :show="eventSurfaceVisible"
+        preset="card"
+        class="diary-life-dialog"
+        :class="{ 'diary-event-list-dialog': eventListVisible, 'diary-event-detail-dialog': Boolean(eventDetail && !eventDraft) }"
+        :mask-closable="!busy && !attachmentBusy"
+        :close-on-esc="!busy && !attachmentBusy"
+        :closable="false"
+        @update:show="visible => !visible && closeEventSurface()"
+      >
+        <template #header>
+          <div v-if="eventDetail && !eventDraft" class="diary-event-modal-title">
+            <img v-if="eventEmojiSource(eventDetail.event.emoji)" :src="eventEmojiSource(eventDetail.event.emoji)" alt="">
+            <span v-else aria-hidden="true">{{ eventDetail.event.emoji }}</span>
+            <strong>{{ eventDetail.event.title }}</strong>
+          </div>
+          <span v-else-if="eventDraft">{{ editing ? '编辑事件' : '新增事件' }}</span>
+          <span v-else-if="eventListVisible">人生事件</span>
+          <span v-else>{{ selected }}</span>
         </template>
-        <template #footer><div class="life-actions"><NButton v-if="editing" text type="error" :disabled="busy" @click="remove">删除</NButton><span /><NButton :disabled="busy" @click="close">取消</NButton><NButton v-if="eventDraft" type="primary" :loading="busy" @click="save">保存</NButton></div></template>
+        <template #header-extra>
+          <div class="diary-event-header-actions">
+            <template v-if="eventDetail && !eventDraft">
+              <DiaryActionMenu label="更多事件操作" :options="eventDetailActions" :disabled="busy" @select="selectEventAction" />
+              <NButton text class="diary-event-edit-button" :disabled="busy" @click="startEventEdit">编辑</NButton>
+            </template>
+            <NButton quaternary class="diary-event-close-button" :disabled="busy || attachmentBusy" :aria-label="eventDraft ? '关闭事件编辑' : eventDetail ? '关闭事件详情' : eventListVisible ? '关闭事件列表' : '关闭当天事件'" @click="closeEventSurface">
+              <NIcon aria-hidden="true" :size="18"><X /></NIcon>
+            </NButton>
+          </div>
+        </template>
+
+        <DiaryEventListDialog
+          v-if="eventListVisible"
+          :items="eventListItems"
+          :today="today"
+          :loading="eventListLoading"
+          :loading-more="eventListLoadingMore"
+          :has-more="eventListNext !== null"
+          :error="eventListError"
+          @retry="loadEventList(true)"
+          @load-more="loadEventList()"
+          @select="selectEventFromList"
+        />
+        <DiaryEventDetail
+          v-else-if="eventDetail && !eventDraft"
+          :event="eventDetail.event"
+          :today="today"
+          :occurrence-date="eventDetail.occurrenceDate"
+          :error="formError"
+        />
+        <div v-else-if="eventDraft" class="diary-event-form-content">
+          <p v-if="formError" class="diary-event-form-error" role="alert">{{ formError }}</p>
+          <DiaryEventForm v-model="eventDraft" />
+        </div>
+        <div v-else class="day-events">
+          <button v-for="event in selectedEvents" :key="event.id" type="button" :aria-label="event.title" @click="selectEventFromDay(event)">
+            <strong>
+              <img v-if="eventEmojiSource(event.emoji)" :src="eventEmojiSource(event.emoji)" class="event-emoji" alt="">
+              <template v-else>{{ event.emoji }} </template>{{ event.title }}
+            </strong>
+            <span>{{ event.startDate === event.endDate ? event.startDate : `${event.startDate} – ${event.endDate}` }} · {{ event.type === 'schedule' ? '重要日程' : event.type === 'anniversary' ? '纪念日' : '人生时刻' }}</span>
+          </button>
+          <p v-if="!selectedEvents.length">还没有事件</p>
+          <NButton class="diary-event-create" @click="createEvent">新增事件</NButton>
+        </div>
+
+        <template v-if="eventDraft" #footer>
+          <div class="life-actions">
+            <span />
+            <NButton :disabled="busy" @click="cancelEventEdit">取消</NButton>
+            <NButton type="primary" :loading="busy" @click="save">保存</NButton>
+          </div>
+        </template>
       </NModal>
-      <DiaryEventListDialog
-        v-model:show="eventListVisible"
-        :items="eventListItems"
-        :loading="eventListLoading"
-        :loading-more="eventListLoadingMore"
-        :has-more="eventListNext !== null"
-        :error="eventListError"
-        @retry="loadEventList(true)"
-        @load-more="loadEventList()"
-        @select="selectEventFromList"
-      />
     </template>
     <NButton v-else v-show="!accessContext?.dialogOpen.value" class="unlock-diary" @click="accessContext?.requestAccess()">解锁日记</NButton>
   </main>
@@ -781,14 +980,35 @@ onBeforeUnmount(() => {
 .diary-life-error { margin-top: 8px; padding: 8px 0; }
 .countdowns { display: flex; gap: 16px; flex-wrap: wrap; padding: 12px 0; }
 .countdowns button, .day-events > button { text-align: left; background: transparent; color: inherit; border: 0; font: inherit; cursor: pointer; display: flex; flex-direction: column; gap: 6px; padding: 8px; }
-.countdowns small, .day-events span { opacity: .65; }
+.countdowns small { color: var(--text-muted, #6b7280); }
 .day-events { display: flex; flex-direction: column; gap: 12px; }
+.day-events > button { align-items: flex-start; padding: 12px 4px; border-bottom: 1px solid var(--border, #d9dce5); }
+.day-events > button:hover, .day-events > button:focus-visible { outline: none; background: color-mix(in srgb, var(--text) 4%, transparent); }
+.day-events > button strong { max-width: 100%; overflow-wrap: anywhere; font-size: 16px; font-weight: 600; }
+.day-events > button span { color: var(--text-muted, #6b7280); font-size: 13px; }
+.diary-event-create { align-self: flex-start; margin-top: 4px; }
+.diary-event-form-error { margin: 0 0 14px; color: var(--danger, #dc2626); }
 .life-actions { display: flex; align-items: center; gap: 12px; }.life-actions > span { flex: 1; }
 .event-emoji { width: 20px; height: 20px; vertical-align: middle; margin-inline-end: 4px; }
+.diary-event-modal-title { display: flex; min-width: 0; align-items: center; gap: 8px; }
+.diary-event-modal-title img { width: 24px; height: 24px; flex: none; object-fit: contain; }
+.diary-event-modal-title > span { flex: none; font-size: 22px; }
+.diary-event-modal-title strong { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.diary-event-header-actions { display: flex; align-items: center; gap: 4px; }
 .unlock-diary { display: block; margin: 20vh auto; }
 @media (max-width: 600px) { .diary-life { padding-inline: 8px; } }
 </style>
 <style>
-.diary-life-dialog.n-card { width: min(520px, calc(100vw - 32px)); max-height: calc(100dvh - 32px); overflow: auto; }
+.diary-life-dialog.n-card { width: min(640px, calc(100vw - 32px)); max-height: calc(100dvh - 32px); overflow: auto; scrollbar-width: none; }
+.diary-life-dialog.n-card::-webkit-scrollbar { display: none; }
+.diary-event-detail-dialog.n-card { width: min(620px, calc(100vw - 32px)); }
+.diary-event-list-dialog.n-card { width: min(620px, calc(100vw - 32px)); }
+.diary-event-detail-dialog .diary-event-edit-button { opacity: 1; }
+@media (hover: hover) and (pointer: fine) and (not (any-pointer: coarse)) {
+  .diary-event-detail-dialog .diary-event-edit-button { opacity: 0; transition: opacity 150ms ease; }
+  .diary-event-detail-dialog:hover .diary-event-edit-button,
+  .diary-event-detail-dialog:focus-within .diary-event-edit-button { opacity: 1; }
+}
+@media (prefers-reduced-motion: reduce) { .diary-event-detail-dialog .diary-event-edit-button { transition: none; } }
 @media (max-width: 600px) { .diary-life-dialog.n-card { position: fixed; bottom: 0; left: 0; width: 100%; max-height: 90dvh; margin: 0; border-radius: 18px 18px 0 0; padding-bottom: env(safe-area-inset-bottom); } }
 </style>
