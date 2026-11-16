@@ -20,13 +20,15 @@ async function row(page: Page, path: string) {
 async function fixture(request: APIRequestContext) {
   const id = randomUUID().slice(0, 8)
   const paths = Object.fromEntries(['a', 'b', 'c', 'd'].map((name) => [name, `inbox/preview-${name}-${id}`])) as Record<'a' | 'b' | 'c' | 'd', string>
+  const bodyQuery = `cobaltneedle${id}`
   const bodies = {
     a: `# Alpha\n\n[[${paths.b}#preview-section|Wiki target]]\n\n[Relative target](./preview-b-${id}.md#preview-section)`,
     b: `# Beta\n\n${'Paragraph\n\n'.repeat(25)}## Preview section\n\nTARGET CONTENT`,
-    c: '# Gamma\n\nOriginal C', d: '# Delta\n\nOriginal D',
+    c: '# Gamma\n\nOriginal C',
+    d: `# Delta\n\n${'A sentence with ordinary note content. '.repeat(40)}\n\nThe indexed body contains ${bodyQuery} after the introductory paragraphs.`,
   }
   for (const name of ['a', 'b', 'c', 'd'] as const) await createDoc(request, paths[name], bodies[name], [])
-  return { paths, bodies, async cleanup() { for (const path of Object.values(paths)) await request.delete(`/api/posts/${path}`) } }
+  return { paths, bodies, bodyQuery, async cleanup() { for (const path of Object.values(paths)) await request.delete(`/api/posts/${path}`) } }
 }
 
 async function append(page: Page, text: string) {
@@ -120,12 +122,62 @@ test('global search previews documents and refresh retains the route document', 
     await gotoVaultReady(page)
     await (await row(page, f.paths.a)).click()
     await page.keyboard.press('Control+p')
+    await expect(page.locator('.palette-empty')).toContainText(/输入关键词开始搜索|Start typing to search/)
+    await expect(page.getByRole('option')).toHaveCount(0)
     await page.locator('.palette-input input').fill(f.paths.b.split('/').at(-1)!)
-    await page.getByRole('option').filter({ hasText: f.paths.b }).click()
+    await page.getByRole('option').filter({ hasText: f.paths.b.split('/').at(-1)! }).click()
     await expect(tab(page, f.paths.b)).toHaveAttribute('data-tab-mode', 'preview')
     await expect(tab(page, f.paths.a)).toHaveCount(0)
     await page.reload()
     await expect(tab(page, f.paths.b)).toHaveAttribute('data-tab-mode', 'pinned')
+  } finally { await f.cleanup() }
+})
+
+test('Note body search shows a one-line excerpt and clearing returns to the empty state', async ({ page, request }) => {
+  const f = await fixture(request)
+  try {
+    await gotoVaultReady(page)
+    await page.locator('.nav-search').click()
+    await expect(page.locator('.palette-empty')).toContainText(/输入关键词开始搜索|Start typing to search/)
+    await expect(page.getByRole('option')).toHaveCount(0)
+
+    const input = page.locator('.palette-input input')
+    await input.fill(f.bodyQuery)
+    const result = page.getByRole('option').filter({ hasText: f.bodyQuery })
+    await expect(result).toBeVisible()
+    await expect(result.locator('.palette-badge')).toContainText(/正文|Content/)
+    await expect(result.locator('.palette-snippet .palette-note-highlight')).toHaveText(f.bodyQuery)
+    await expect(result.locator('.palette-note-snippet')).toHaveCSS('white-space', 'nowrap')
+    const excerpt = (await result.locator('.palette-note-snippet').innerText()).trim()
+    expect(excerpt).not.toMatch(/^…|…$/)
+    await expect(result.locator('.palette-path, .palette-parent, .palette-note-path-tooltip-content')).toHaveCount(0)
+
+    await input.press('ArrowDown')
+    await expect(input).toHaveAttribute('aria-activedescendant', await result.getAttribute('id') ?? '')
+    await expect(result.locator('.palette-path, .palette-parent, .palette-note-path-tooltip-content')).toHaveCount(0)
+
+    await input.fill('')
+    await expect(page.locator('.palette-empty')).toContainText(/输入关键词开始搜索|Start typing to search/)
+    await input.fill(f.bodyQuery)
+    await expect(result).toBeVisible()
+    await result.hover()
+    await expect(result.locator('.palette-path, .palette-parent, .palette-note-path-tooltip-content')).toHaveCount(0)
+
+    for (const width of [320, 390, 768, 1280]) {
+      await page.setViewportSize({ width, height: 800 })
+      const layout = await page.locator('.palette').evaluate((element) => ({
+        width: element.clientWidth,
+        scrollWidth: element.scrollWidth,
+        viewportWidth: window.innerWidth,
+        right: element.getBoundingClientRect().right,
+      }))
+      expect(layout.scrollWidth).toBeLessThanOrEqual(layout.width)
+      expect(layout.right).toBeLessThanOrEqual(layout.viewportWidth + 1)
+    }
+
+    await input.fill('')
+    await expect(page.locator('.palette-empty')).toContainText(/输入关键词开始搜索|Start typing to search/)
+    await expect(page.getByRole('option')).toHaveCount(0)
   } finally { await f.cleanup() }
 })
 

@@ -323,9 +323,9 @@ export interface DraftRecoveryInventory {
 }
 
 /** Managed-Diary recovery rows are intentionally hidden from the ordinary
- * Note recovery surface.  D8.4's Settings bridge may inspect these rows as
- * structural/action input, while keeping their body content in the browser's
- * short-lived memory until an explicit import or typed discard. */
+ * Note recovery surface. Diary-specific recovery actions may inspect these
+ * rows while keeping body content in short-lived browser memory until an
+ * explicit import or confirmed discard. */
 export interface ManagedDiaryRecoveryInventory {
   primary: UnsavedDraft[]
   conflicts: DraftConflictRecord[]
@@ -428,14 +428,13 @@ export interface DraftStore {
   getDraft(vaultId: string, documentId: string): Promise<UnsavedDraft | null>
   listDrafts(vaultId: string): Promise<UnsavedDraft[]>
   inspectVaultRecovery(vaultId: string): Promise<DraftRecoveryInventoryOutcome>
-  /** D8.4-only bridge; unlike inspectVaultRecovery this includes managed
-   * Diary rows, but it never writes or sends their content to the server. */
+  /** Includes managed Diary rows without writing or sending their content. */
   inspectManagedDiaryRecovery?(vaultId: string): Promise<DraftRecoveryInventoryOutcome>
   deleteDraft(vaultId: string, documentId: string): Promise<DraftDeleteOutcome>
   deleteDraftIfUnchanged(
     expected: UnsavedDraft,
   ): Promise<DraftConditionalDeleteOutcome>
-  /** Conditional deletion for a D8.4-reviewed managed Diary draft. */
+  /** Conditional deletion for an explicitly reviewed managed Diary draft. */
   deleteManagedDraftIfUnchanged?(expected: UnsavedDraft): Promise<DraftConditionalDeleteOutcome>
   moveDraft(
     vaultId: string,
@@ -508,7 +507,7 @@ export interface DraftStore {
   deleteConflictDraftIfUnchanged(
     expected: DraftConflictRecord,
   ): Promise<DraftConditionalDeleteOutcome>
-  /** Conditional deletion for a D8.4-reviewed managed Diary conflict row. */
+  /** Conditional deletion for an explicitly reviewed managed Diary conflict row. */
   deleteManagedConflictDraftIfUnchanged?(expected: DraftConflictRecord): Promise<DraftConditionalDeleteOutcome>
   clearVaultConflictDrafts(vaultId: string): Promise<boolean>
 }

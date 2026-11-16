@@ -1,6 +1,5 @@
 import { authFetch, diaryAuthFetch } from './auth-session'
 import { authFetchForPath, authFetchForPaths } from './diary-request'
-import type { DiaryDate } from '../../shared/diaryProtocol'
 import type { DiaryMoodIconConfig, DiaryMoodId } from '../../shared/diaryMood'
 
 export interface PostSummary {
@@ -20,13 +19,6 @@ export interface PostSummary {
   size: number
   mtime: number
   updatedReferences?: Array<{ path: string; raw: string; mtime: number }>
-}
-
-export interface DiaryDateCreateResult {
-  date: DiaryDate
-  path: string
-  created: boolean
-  post: PostSummary
 }
 
 export interface SavePostResult {
@@ -302,18 +294,6 @@ export async function exportDocumentFrontmatter(
 export async function createPost(input: { path: string; title?: string }): Promise<PostSummary> {
   return jsonOrThrow<PostSummary>(await authFetchForPath(input.path, '/api/posts', {
     method: 'POST', headers: { 'content-type': 'application/json' },
-    body: JSON.stringify(input),
-  }))
-}
-
-/** Create one exact Diary date through the D2 domain command. */
-export async function createDiaryDate(input: {
-  date: DiaryDate
-  timeZone: string
-}): Promise<DiaryDateCreateResult> {
-  return jsonOrThrow<DiaryDateCreateResult>(await diaryAuthFetch('/api/diary/dates', {
-    method: 'POST',
-    headers: { 'content-type': 'application/json' },
     body: JSON.stringify(input),
   }))
 }

@@ -1,6 +1,6 @@
 import type { Database } from 'better-sqlite3'
 import type { DiaryBodyOperation } from './diaryAccess/service.js'
-import { parseDay, parseEvent, type DiaryDay, type DiaryEvent, type DayFields, type EventFields } from '../shared/diaryLife.js'
+import { parseDay, parseEvent, type DiaryDay, type DiaryEvent, type DiarySearchItem, type DiarySearchPage, type DayFields, type EventFields } from '../shared/diaryLife.js'
 import { isDiaryAttachmentMimeType, MAX_DIARY_DAY_ATTACHMENTS } from '../shared/diaryAttachments.js'
 import { DiaryAttachmentError, listDiaryDayAttachments } from './diaryAttachments/service.js'
 
@@ -33,6 +33,52 @@ export function diaryLifeStore(db: Database, owner: number, operation: DiaryBody
         hasAttachments: (db.prepare(`SELECT 1 AS found FROM diary_day_attachments
           WHERE owner_user_id = ? AND day_date = ? AND status = 'attached' LIMIT 1`).get(owner, row.date) !== undefined),
       }))
+    },
+    async searchDays(query: string, limit: number, cursor: string | null, signal?: AbortSignal): Promise<DiarySearchPage> {
+      operation.assertCurrent()
+      if (signal?.aborted) return { items: [], nextCursor: null }
+      const normalizedQuery = query.toLowerCase()
+      const exactDate = /^\d{4}-\d{2}-\d{2}$/.test(query) ? query : null
+      const statement = db.prepare(`SELECT date, encrypted_fields, version FROM diary_days WHERE owner_user_id = ? ${cursor ? 'AND date < ?' : ''} ORDER BY date DESC`)
+      const rows = (cursor ? statement.iterate(owner, cursor) : statement.iterate(owner)) as Iterable<{ date: string; encrypted_fields: Buffer; version: number }>
+      const items: DiarySearchItem[] = []
+      let scanned = 0
+      let lastReturnedDate: string | null = null
+      for (const row of rows) {
+        operation.assertCurrent()
+        if (signal?.aborted) return { items: [], nextCursor: null }
+        const fields = parseDay(crypto!.decrypt(row.encrypted_fields, identity('day', row.date, row.version)))
+        if (!fields) throw new Error('Invalid Diary day')
+        const entryIndex = fields.entries.findIndex(entry => entry.toLowerCase().includes(normalizedQuery))
+        if (entryIndex >= 0) {
+          const text = fields.entries[entryIndex]!.replace(/\s+/g, ' ').trim()
+          const matchAt = text.toLowerCase().indexOf(normalizedQuery)
+          const contextBefore = Math.min(56, Math.max(0, 160 - normalizedQuery.length))
+          const start = Math.max(0, matchAt - contextBefore)
+          const end = Math.min(text.length, Math.max(start + 160, matchAt + normalizedQuery.length))
+          const snippet = `${start > 0 ? '…' : ''}${text.slice(start, end)}${end < text.length ? '…' : ''}`
+          items.push({
+            date: row.date,
+            ...(fields.entryIds?.[entryIndex] ? { entryId: fields.entryIds[entryIndex] } : { entryIndex }),
+            snippet,
+            match: 'entry',
+          })
+        } else if (exactDate && row.date === exactDate) {
+          items.push({ date: row.date, snippet: '', match: 'date' })
+        }
+        scanned += 1
+        if (items.length > limit) {
+          items.pop()
+          lastReturnedDate = items.at(-1)?.date ?? null
+          break
+        }
+        if (scanned % 100 === 0) {
+          await new Promise<void>(resolve => setImmediate(resolve))
+          operation.assertCurrent()
+          if (signal?.aborted) return { items: [], nextCursor: null }
+        }
+      }
+      return { items, nextCursor: lastReturnedDate }
     },
     dayAttachments(date: string) {
       return listDiaryDayAttachments(db, owner, date, operation)

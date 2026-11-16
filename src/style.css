@@ -5902,6 +5902,7 @@ body:has(.ledger-detail-sheet-card) .n-modal-mask {
 .palette-input input { font-size: 1rem; }
 .palette-list { list-style: none; margin: 0; padding: 0; max-height: 50vh; overflow-y: auto; }
 .palette-item {
+  position: relative;
   padding: 8px 16px;
   cursor: pointer;
   border-left: 3px solid transparent;
@@ -5913,6 +5914,13 @@ body:has(.ledger-detail-sheet-card) .n-modal-mask {
 .palette-row { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
 .palette-title { font-size: 0.9rem; color: var(--text-h); }
 .palette-snippet { font-size: 0.78rem; color: var(--text-muted); margin-top: 2px; }
+.palette-note-row { min-width: 0; }
+.palette-note-title { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.palette-note-snippet { min-width: 0; width: 100%; box-sizing: border-box; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.palette-snippet mark { color: var(--text-h); background: color-mix(in srgb, var(--accent) 16%, transparent); border-radius: 2px; }
+.palette-note-highlight { color: var(--text-h); background: transparent; font-weight: 600; }
+.palette-search-error, .palette-search-status { padding: 8px 16px; color: var(--text-muted); font-size: 0.78rem; }
+.palette-search-error button { margin-left: 6px; border: 0; padding: 0; background: transparent; color: var(--accent); font: inherit; cursor: pointer; }
 .palette-path { font-size: 0.72rem; font-family: var(--mono); color: var(--text-muted); margin-top: 2px; }
 .palette-badge {
   font-size: 0.7rem;

@@ -91,8 +91,8 @@ export interface UnsavedDraftPersistence {
   invalidateOwner(owner: DraftOwner): void
   invalidate(vaultId: string, documentId: string): void
   /** Synchronously fence and clear all in-memory managed-Diary draft state.
-   *  Existing durable records are intentionally left untouched for the
-   *  explicit D8.4 cleanup/migration owner. */
+   *  Existing durable records remain available to an explicit Diary-aware
+   *  recovery or discard action. */
   clearSensitiveState(): void
   dispose(): Promise<void>
 }
@@ -2409,7 +2409,7 @@ export function createUnsavedDraftPersistence(
       clearTimer(entry)
       entry.latestSnapshot = null
       entry.latestSnapshotNeedsWrite = false
-      // Do not delete a legacy managed record; D8.4 owns explicit discard.
+      // Preserve the durable row; only a Diary-aware action may discard it.
       requestInactiveEntryRelease(entry)
       return false
     }

@@ -6,12 +6,20 @@ export interface DiaryImageGroup { entryId: string | null; attachmentIds: string
 export interface DayFields {
   moodId: string | null
   entries: string[]
-  /** Stable identities are added when a legacy day enters edit mode. */
+  /** Older days may omit stable entry identities; editing assigns them. */
   entryIds?: string[]
-  /** Omitted groups are legacy/unassigned images and are rendered at the end. */
+  /** Older or ungrouped images are rendered at the end of the day. */
   imageGroups?: DiaryImageGroup[]
 }
 export interface DiaryDaySummary { date: string; moodId: string | null; hasEntries: boolean; hasAttachments: boolean; version: number }
+export interface DiarySearchItem {
+  date: string
+  entryId?: string
+  entryIndex?: number
+  snippet: string
+  match: 'entry' | 'date'
+}
+export interface DiarySearchPage { items: DiarySearchItem[]; nextCursor: string | null }
 export interface EventFields {
   title: string
   description: string

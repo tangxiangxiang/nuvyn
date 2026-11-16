@@ -26,6 +26,14 @@ describe('Search Everywhere document provider', () => {
   beforeEach(() => dispose())
   afterEach(() => { vi.unstubAllGlobals(); vi.restoreAllMocks(); dispose() })
 
+  it('does not load document metadata or return recommendations for an empty query', async () => {
+    const loadPosts = vi.fn(() => [makePost('inbox/redis', 'Redis')])
+    const provider = createDocumentSearchProvider(loadPosts)
+
+    await expect(provider('')).resolves.toMatchObject({ id: 'files', results: [] })
+    expect(loadPosts).not.toHaveBeenCalled()
+  })
+
   it('finds title, path, summary, and body-only matches with snippets', async () => {
     const posts = [makePost('inbox/redis-notes', 'Redis Notes', 'cache reference')]
     vi.stubGlobal('fetch', vi.fn(async () => ({ ok: true, json: async () => ({ content: 'distributed transaction isolation guarantees' }) })))
@@ -150,7 +158,7 @@ describe('Search Everywhere document provider', () => {
   it('composes future providers as independent sections', async () => {
     const posts = [makePost('inbox/redis', 'Redis')]
     const future: SearchProvider = () => ({ id: 'commands', label: 'Commands', results: [{ id: 'command:open', type: 'command', title: 'Open', score: 1, payload: {} }] })
-    const sections = await searchEverywhere('', [createDocumentSearchProvider(() => posts), future])
+    const sections = await searchEverywhere('redis', [createDocumentSearchProvider(() => posts), future])
     expect(sections.map((section) => section.id)).toEqual(['files', 'commands'])
   })
 
@@ -158,9 +166,16 @@ describe('Search Everywhere document provider', () => {
     const posts = [makePost('inbox/redis', 'Redis')]
     const failing: SearchProvider = async () => { throw new Error('board unavailable') }
 
-    const sections = await searchEverywhere('', [createDocumentSearchProvider(() => posts), failing])
+    const sections = await searchEverywhere('redis', [createDocumentSearchProvider(() => posts), failing])
 
     expect(sections.map((section) => section.id)).toEqual(['files'])
+  })
+
+  it('does not call any provider for an empty query', async () => {
+    const provider = vi.fn(() => ({ id: 'commands', label: 'Commands', results: [] }))
+
+    await expect(searchEverywhere('  ', [provider])).resolves.toEqual([])
+    expect(provider).not.toHaveBeenCalled()
   })
 
   it('prevents an older async query from replacing newer results', async () => {

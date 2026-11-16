@@ -1,5 +1,5 @@
 import { diaryAuthFetch } from './auth-session'
-import type { DiaryDay, DiaryDaySummary, DiaryEvent, DayFields, EventFields } from '../../shared/diaryLife'
+import type { DiaryDay, DiaryDaySummary, DiaryEvent, DiarySearchPage, DayFields, EventFields } from '../../shared/diaryLife'
 import type { DiaryAttachment } from '../../shared/diaryAttachments'
 
 function createDiaryId(): string {
@@ -41,6 +41,7 @@ export const diaryLifeApi = {
   days: (start: string, end: string, signal?: AbortSignal) => request<{ days: DiaryDaySummary[] }>(`/days?start=${start}&end=${end}`, 'GET', undefined, signal),
   dayPolicy: (signal: AbortSignal) => request<{ today: string }>('/day-policy', 'GET', undefined, signal),
   day: (date: string, signal?: AbortSignal) => request<{ day: DiaryDay | null; version: number; attachments: DiaryAttachment[]; today: string }>(`/days/${date}`, 'GET', undefined, signal),
+  search: (query: string, limit = 20, cursor: string | null = null, signal?: AbortSignal) => request<DiarySearchPage>('/search', 'POST', { query, limit, cursor }, signal),
   saveDay: (date: string, fields: DayFields, expectedVersion: number, attachments?: string[]) => request<{ day: DiaryDay; version: number; attachments: DiaryAttachment[] }>(`/days/${date}`, 'PUT', { ...fields, expectedVersion, ...(attachments === undefined ? {} : { attachments }) }),
   deleteDay: (date: string, expectedVersion: number) => request(`/days/${date}`, 'DELETE', { expectedVersion }),
   async events(start: string, end: string, signal?: AbortSignal): Promise<DiaryEvent[]> {

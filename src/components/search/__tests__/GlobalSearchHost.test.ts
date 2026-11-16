@@ -1,32 +1,74 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { flushPromises, mount } from '@vue/test-utils'
-import { createMemoryHistory, createRouter } from 'vue-router'
+import { createMemoryHistory, createRouter, type Router } from 'vue-router'
 import GlobalSearchHost from '../GlobalSearchHost.vue'
 import { boardMetadataSource } from '../../../features/board/metadataSource'
 import { documentSearchSource } from '../../../lib/documentSearchSource'
 import { clearSearchReveal, requestSearchReveal, searchRevealIntent } from '../../../composables/useSearchReveal'
+import { clearDiarySearchOpen, diarySearchOpenIntent } from '../../../composables/diary/useDiarySearchNavigation'
 import type { BoardMetadata } from '../../../../shared/boardProtocol'
 
 const api = vi.hoisted(() => ({ listBoards: vi.fn(), listPosts: vi.fn() }))
+const diarySearch = vi.hoisted(() => vi.fn())
+const diarySessionState = vi.hoisted(() => ({ unlocked: true, accessRef: null as null | { value: boolean }, teardown: null as null | (() => void) }))
 vi.mock('../../../features/board/api', () => api)
 vi.mock('../../../lib/api', () => ({ listPosts: api.listPosts }))
+vi.mock('../../../lib/diary-life-api', () => ({ diaryLifeApi: { search: diarySearch } }))
+vi.mock('../../../composables/diary/useDiaryAccessSession', async () => {
+  const { ref } = await import('vue')
+  const isUnlocked = ref(diarySessionState.unlocked)
+  diarySessionState.accessRef = isUnlocked
+  return {
+    useDiaryAccessSession: () => ({ isUnlocked }),
+    subscribeDiaryTeardown: (listener: () => void) => {
+      diarySessionState.teardown = listener
+      return () => { diarySessionState.teardown = null }
+    },
+  }
+})
 
 function board(id: string, title: string): BoardMetadata {
   return { id, title, thumbnailAssetId: null, folderId: null, createdAt: 1, updatedAt: 1, lastOpenedAt: null }
 }
 
+const mountedHosts = new Set<ReturnType<typeof mount>>()
+function mountHost(router: Router) {
+  const wrapper = mount(GlobalSearchHost, { global: { plugins: [router] } })
+  mountedHosts.add(wrapper)
+  return wrapper
+}
+function unmountHost(wrapper: ReturnType<typeof mount>) {
+  mountedHosts.delete(wrapper)
+  wrapper.unmount()
+}
+async function flushSearchDebounce() {
+  await flushPromises()
+  await vi.advanceTimersByTimeAsync(250)
+  await flushPromises()
+}
+
 describe('App-level GlobalSearchHost', () => {
   beforeEach(() => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
     vi.clearAllMocks()
     boardMetadataSource.invalidate()
     documentSearchSource.invalidate()
+    clearDiarySearchOpen()
+    diarySearch.mockReset()
+    diarySessionState.unlocked = true
+    if (diarySessionState.accessRef) diarySessionState.accessRef.value = true
   })
 
   afterEach(() => {
+    mountedHosts.forEach(wrapper => wrapper.unmount())
+    mountedHosts.clear()
     boardMetadataSource.invalidate()
     documentSearchSource.invalidate()
     clearSearchReveal()
+    clearDiarySearchOpen()
+    vi.unstubAllGlobals()
+    vi.useRealTimers()
     document.body.innerHTML = ''
   })
 
@@ -47,23 +89,24 @@ describe('App-level GlobalSearchHost', () => {
     await router.push('/board')
     await router.isReady()
     requestSearchReveal({ path: 'inbox/old', text: 'old body query' })
-    const wrapper = mount(GlobalSearchHost, { global: { plugins: [router] } })
+    const wrapper = mountHost(router)
 
     ;(wrapper.vm as unknown as { show: () => void }).show()
     await flushPromises()
     const input = document.body.querySelector<HTMLInputElement>('.palette-input input')!
     input.value = 'atlas'
     input.dispatchEvent(new Event('input', { bubbles: true }))
-    await flushPromises()
+    await flushSearchDebounce()
 
-    expect(document.body.querySelector('[role="option"]')?.textContent).toContain('Project Atlas')
-    ;(document.body.querySelector('[role="option"]') as HTMLElement).click()
+    const result = document.body.querySelector<HTMLElement>('[role="option"]')
+    expect(result?.textContent).toContain('Project Atlas')
+    result?.click()
     await flushPromises()
 
     expect(router.currentRoute.value.name).toBe('board-editor')
     expect(router.currentRoute.value.params.boardId).toBe('atlas')
     expect(searchRevealIntent.value).toBeNull()
-    wrapper.unmount()
+    unmountHost(wrapper)
   })
 
   it('creates a transient reveal intent before navigating a body result', async () => {
@@ -92,22 +135,23 @@ describe('App-level GlobalSearchHost', () => {
     })
     await router.push('/vault')
     await router.isReady()
-    const wrapper = mount(GlobalSearchHost, { global: { plugins: [router] } })
+    const wrapper = mountHost(router)
 
     ;(wrapper.vm as unknown as { show: () => void }).show()
     await flushPromises()
     const input = document.body.querySelector<HTMLInputElement>('.palette-input input')!
     input.value = 'transaction isolation'
     input.dispatchEvent(new Event('input', { bubbles: true }))
+    await flushSearchDebounce()
     await vi.waitFor(() => expect(document.body.querySelector('.palette-snippet')?.textContent).toContain('Transaction isolation'))
     expect(document.body.querySelector('[role="option"]')?.textContent).toContain('Engineering Guide')
-    ;(document.body.querySelector('[role="option"]') as HTMLElement).click()
+    document.body.querySelector<HTMLElement>('[role="option"]')?.click()
     await flushPromises()
 
     expect(intentAtNavigation).toMatchObject({ path: 'inbox/engineering-guide', text: 'transaction isolation' })
     expect(router.currentRoute.value.name).toBe('vault-doc')
     expect(searchRevealIntent.value).toEqual(intentAtNavigation)
-    wrapper.unmount()
+    unmountHost(wrapper)
   })
 
   it('clears a stale reveal before navigating a metadata result', async () => {
@@ -133,21 +177,23 @@ describe('App-level GlobalSearchHost', () => {
     await router.push('/vault')
     await router.isReady()
     requestSearchReveal({ path: 'inbox/old', text: 'stale query' })
-    const wrapper = mount(GlobalSearchHost, { global: { plugins: [router] } })
+    const wrapper = mountHost(router)
 
     ;(wrapper.vm as unknown as { show: () => void }).show()
     await flushPromises()
     const input = document.body.querySelector<HTMLInputElement>('.palette-input input')!
     input.value = 'Redis'
     input.dispatchEvent(new Event('input', { bubbles: true }))
-    await flushPromises()
-    ;(document.body.querySelector('[role="option"]') as HTMLElement).click()
+    await flushSearchDebounce()
+    const result = document.body.querySelector<HTMLElement>('[role="option"]')
+    expect(result?.textContent).toContain('Redis Guide')
+    result?.click()
     await flushPromises()
 
     expect(intentAtNavigation).toBeNull()
     expect(router.currentRoute.value.name).toBe('vault-doc')
     expect(searchRevealIntent.value).toBeNull()
-    wrapper.unmount()
+    unmountHost(wrapper)
   })
 
   it('loads Document results on the Vault workspace route', async () => {
@@ -166,20 +212,20 @@ describe('App-level GlobalSearchHost', () => {
     })
     await router.push('/vault')
     await router.isReady()
-    const wrapper = mount(GlobalSearchHost, { global: { plugins: [router] } })
+    const wrapper = mountHost(router)
 
     ;(wrapper.vm as unknown as { show: () => void }).show()
     await flushPromises()
     const input = document.body.querySelector<HTMLInputElement>('.palette-input input')!
     input.value = 'atlas'
     input.dispatchEvent(new Event('input', { bubbles: true }))
-    await flushPromises()
+    await flushSearchDebounce()
 
     expect(document.body.querySelectorAll('[role="option"]')).toHaveLength(1)
     expect(document.body.querySelector('[role="option"]')?.textContent).toContain('Project Atlas')
     expect(api.listBoards).not.toHaveBeenCalled()
     expect(api.listPosts).toHaveBeenCalledOnce()
-    wrapper.unmount()
+    unmountHost(wrapper)
   })
 
   it('does not mix Document results into the Board workspace', async () => {
@@ -198,18 +244,19 @@ describe('App-level GlobalSearchHost', () => {
     })
     await router.push('/board')
     await router.isReady()
-    const wrapper = mount(GlobalSearchHost, { global: { plugins: [router] } })
+    const wrapper = mountHost(router)
 
     ;(wrapper.vm as unknown as { show: () => void }).show()
     await flushPromises()
     const input = document.body.querySelector<HTMLInputElement>('.palette-input input')!
     input.value = 'atlas'
     input.dispatchEvent(new Event('input', { bubbles: true }))
-    await flushPromises()
+    await flushSearchDebounce()
+    expect(document.body.querySelector('.palette-empty')?.textContent).toContain('No matching results')
 
     expect(document.body.querySelector('[role="option"]')).toBeNull()
     expect(api.listPosts).not.toHaveBeenCalled()
-    wrapper.unmount()
+    unmountHost(wrapper)
   })
 
   it('does not open the global search on Ledger workspace', async () => {
@@ -224,12 +271,68 @@ describe('App-level GlobalSearchHost', () => {
     })
     await router.push('/ledger')
     await router.isReady()
-    const wrapper = mount(GlobalSearchHost, { global: { plugins: [router] } })
+    const wrapper = mountHost(router)
 
     ;(wrapper.vm as unknown as { show: () => void }).show()
     await flushPromises()
 
     expect(document.body.querySelector('.palette')).toBeNull()
-    wrapper.unmount()
+    unmountHost(wrapper)
+  })
+
+  it('searches Diary only while unlocked and opens a result through a transient navigation intent', async () => {
+    diarySearch.mockResolvedValue({
+      items: [{ date: '2025-08-12', entryId: 'entry-uuid', snippet: '回忆到南瓜饼', match: 'entry' }],
+      nextCursor: null,
+    })
+    const router = createRouter({
+      history: createMemoryHistory(),
+      routes: [{ path: '/diary', name: 'diary', component: { template: '<div />' }, meta: { workspace: true, workspaceKind: 'diary', chromeStyle: 'workspace' } }],
+    })
+    await router.push('/diary')
+    await router.isReady()
+    const wrapper = mountHost(router)
+    ;(wrapper.vm as unknown as { show: () => void }).show()
+    await flushPromises()
+    const input = document.body.querySelector<HTMLInputElement>('.palette-input input')!
+    input.value = '南瓜饼'
+    input.dispatchEvent(new Event('input', { bubbles: true }))
+    await flushSearchDebounce()
+
+    expect(api.listBoards).not.toHaveBeenCalled()
+    expect(api.listPosts).not.toHaveBeenCalled()
+    expect(diarySearch).toHaveBeenCalledWith('南瓜饼', 20, null, expect.any(AbortSignal))
+    expect(document.body.querySelector('.palette-item')?.textContent).toContain('回忆到南瓜饼')
+    document.body.querySelector<HTMLElement>('[role="option"]')?.click()
+    await flushPromises()
+
+    expect(diarySearchOpenIntent.value).toMatchObject({ date: '2025-08-12', entryId: 'entry-uuid' })
+    expect(document.body.querySelector('.palette')).toBeNull()
+    unmountHost(wrapper)
+  })
+
+  it('clears private Diary results immediately when the access session locks', async () => {
+    diarySearch.mockResolvedValue({ items: [{ date: '2026-11-15', snippet: 'private diary snippet', match: 'entry', entryIndex: 0 }], nextCursor: null })
+    const router = createRouter({
+      history: createMemoryHistory(),
+      routes: [{ path: '/diary', name: 'diary', component: { template: '<div />' }, meta: { workspace: true, workspaceKind: 'diary', chromeStyle: 'workspace' } }],
+    })
+    await router.push('/diary')
+    await router.isReady()
+    const wrapper = mountHost(router)
+    ;(wrapper.vm as unknown as { show: () => void }).show()
+    await flushPromises()
+    const input = document.body.querySelector<HTMLInputElement>('.palette-input input')!
+    input.value = 'private'
+    input.dispatchEvent(new Event('input', { bubbles: true }))
+    await flushSearchDebounce()
+    expect(document.body.querySelector('.palette-item')?.textContent).toContain('private diary snippet')
+
+    diarySessionState.accessRef!.value = false
+    await flushPromises()
+    expect(document.body.querySelector('.palette')).toBeNull()
+    expect(document.body.textContent).not.toContain('private diary snippet')
+    expect(diarySearchOpenIntent.value).toBeNull()
+    unmountHost(wrapper)
   })
 })

@@ -10,12 +10,17 @@ import { isNuvynShortcutBlocked } from '../../lib/keyboard'
 import { workspaceKindForPath, type WorkspaceKind } from '../../lib/workspace'
 import { clearSearchReveal, requestSearchReveal } from '../../composables/useSearchReveal'
 import { clearLinkNavigation } from '../../composables/useLinkNavigation'
+import { subscribeDiaryTeardown, useDiaryAccessSession } from '../../composables/diary/useDiaryAccessSession'
+import { clearDiarySearchOpen, requestDiarySearchOpen } from '../../composables/diary/useDiarySearchNavigation'
+import { createDiarySearchProvider, type DiarySearchPayload } from '../../features/diary/diarySearchProvider'
 
 const router = useRouter()
 const route = useRoute()
 const paletteRef = ref<InstanceType<typeof CommandPalette> | null>(null)
+const diaryAccess = useDiaryAccessSession()
 const documentProvider = createDocumentSearchProvider(documentSearchSource)
 const boardProvider = createBoardSearchProvider(boardMetadataSource)
+const diaryProvider = createDiarySearchProvider()
 const workspaceKind = computed<WorkspaceKind>(() => (
   route.meta.workspaceKind !== undefined
     ? route.meta.workspaceKind
@@ -24,6 +29,7 @@ const workspaceKind = computed<WorkspaceKind>(() => (
 const providers = computed(() => {
   if (workspaceKind.value === 'board') return [boardProvider]
   if (workspaceKind.value === 'vault') return [documentProvider]
+  if (workspaceKind.value === 'diary' && diaryAccess.isUnlocked.value) return [diaryProvider]
   return []
 })
 const canOpen = computed(() => (
@@ -45,7 +51,40 @@ watch(canOpen, (allowed) => {
   if (!allowed) hide()
 })
 
+watch([workspaceKind, diaryAccess.isUnlocked], ([kind, unlocked], [previousKind]) => {
+  if (kind !== 'diary' || !unlocked) {
+    diaryProvider.clear?.()
+    if (kind === 'diary' || previousKind === 'diary') {
+      clearDiarySearchOpen()
+      hide()
+    }
+  }
+}, { flush: 'sync' })
+
+const stopDiaryTeardown = subscribeDiaryTeardown(() => {
+  diaryProvider.clear?.()
+  if (workspaceKind.value === 'diary') {
+    clearDiarySearchOpen()
+    hide()
+  }
+})
+
 function commit(result: SearchResult): void {
+  if (result.type === 'diary-day') {
+    const payload = result.payload as Partial<DiarySearchPayload>
+    if (!diaryAccess.isUnlocked.value || workspaceKind.value !== 'diary' || typeof payload.date !== 'string') {
+      clearDiarySearchOpen()
+      return
+    }
+    clearLinkNavigation()
+    clearSearchReveal()
+    requestDiarySearchOpen({
+      date: payload.date,
+      ...(typeof payload.entryId === 'string' ? { entryId: payload.entryId } : {}),
+      ...(typeof payload.entryIndex === 'number' ? { entryIndex: payload.entryIndex } : {}),
+    })
+    return
+  }
   if (result.type === 'file') {
     const payload = result.payload as { path?: unknown; match?: unknown; bodyQuery?: unknown }
     const path = payload.path
@@ -83,7 +122,11 @@ watch([boardMetadataSource.snapshot, documentSearchSource.snapshot], () => {
 }, { deep: false })
 
 onMounted(() => document.addEventListener('keydown', onKeydown))
-onBeforeUnmount(() => document.removeEventListener('keydown', onKeydown))
+onBeforeUnmount(() => {
+  document.removeEventListener('keydown', onKeydown)
+  stopDiaryTeardown()
+  diaryProvider.clear?.()
+})
 
 defineExpose({ show, hide })
 </script>

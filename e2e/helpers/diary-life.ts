@@ -22,6 +22,7 @@ export async function unlockDiary(page: Page) {
   const confirmation = page.locator('#diary-access-confirm')
   if (await confirmation.count()) await confirmation.fill('e2e-diary-access-password-strong-123')
   await page.locator('.diary-access-dialog').getByRole('button', { name: /Set up and unlock|Unlock|设置并解锁|解锁/, exact: true }).click()
+  await expect(calendar).toBeVisible()
 }
 
 export async function chooseDiaryAction(page: Page, trigger: Locator, action: string | RegExp, touch = false) {

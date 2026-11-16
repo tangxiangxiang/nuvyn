@@ -8,6 +8,7 @@ Nuvyn runtime authority.
 
 ## Collections
 
+- [`diary/`](diary/README.md) — completed Diary planning and implementation lineage, grouped by phase.
 - [`plans/`](plans/) — dated implementation plans.
 - [`specs/`](specs/) — dated designs and feature specifications.
 - [`implementation-records/`](implementation-records/) — point-in-time implementation and audit records.

@@ -95,6 +95,24 @@ describe('search', () => {
     expect(lateHits[0].match).toBe('body')
   })
 
+  it('builds a compact Markdown-aware snippet around the exact body match', async () => {
+    const bodyPost = makePost('inbox/snippet', 'Snippet')
+    const query = '相似词'
+    vi.stubGlobal('fetch', fakeFetchOk(`# Heading\n\n${'无关内容 '.repeat(20)}\n\n这里有**相似词**，后面还有说明。`))
+    buildIndex([bodyPost])
+    await primeBody([bodyPost])
+
+    const hit = search(query)[0]
+    expect(hit.match).toBe('body')
+    expect(hit.snippet).toContain(query)
+    expect(hit.snippet).toContain('这里有')
+    expect(hit.snippet).not.toContain('Heading')
+    expect((hit.snippet ?? '').length).toBeLessThan(60)
+    expect(hit.snippet).not.toContain('**')
+    expect(hit.snippet).not.toContain('\n')
+    expect(hit.snippet).not.toMatch(/^…|…$/)
+  })
+
   it('limits concurrent body priming requests to six', async () => {
     const posts = Array.from({ length: 8 }, (_, index) => makePost(`inbox/concurrency-${index}`, `Note ${index}`, index + 1))
     const pending: Array<(response: unknown) => void> = []

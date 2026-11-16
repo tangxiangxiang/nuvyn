@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref, watch } from 'vue'
+import { computed, nextTick, ref, watch } from 'vue'
 import { NButton, NCard, NIcon, NModal, NSpin } from 'naive-ui'
 import { ArrowBackUp, MoodSmile, Pencil, X } from '@vicons/tabler'
 import type { DayFields, DiaryDay } from '../../../shared/diaryLife'
@@ -25,6 +25,8 @@ const props = defineProps<{
   error?: string
   attachmentBusy?: boolean
   attachmentError?: string
+  revealEntryId?: string
+  revealEntryIndex?: number
 }>()
 const emit = defineEmits<{
   edit: []
@@ -67,6 +69,22 @@ const placementOptions = computed(() => props.draft.entries.flatMap((_, index) =
   return id ? [{ id, line: index + 1 }] : []
 }))
 const pdfAttachments = computed(() => props.attachments.filter(item => item.mimeType === 'application/pdf'))
+async function revealSearchEntry() {
+  if (!props.show || props.loading || props.readFailed || (!props.revealEntryId && props.revealEntryIndex === undefined)) return
+  await nextTick()
+  const dialog = document.querySelector<HTMLElement>('[data-testid="diary-day-dialog"]')
+  if (!dialog) return
+  const entries = [...dialog.querySelectorAll<HTMLElement>('[data-entry-id]')]
+  const target = props.revealEntryId
+    ? entries.find(entry => entry.dataset.entryId === props.revealEntryId)
+    : entries[props.revealEntryIndex!]
+  target?.scrollIntoView?.({ block: 'nearest' })
+}
+watch(
+  () => [props.show, props.loading, props.readFailed, props.date, props.revealEntryId, props.revealEntryIndex],
+  () => { void revealSearchEntry() },
+  { flush: 'post' },
+)
 const endImageGroups = computed(() => {
   const mapped = new Set((props.draft.imageGroups ?? []).flatMap(group => group.attachmentIds))
   const groups = (props.draft.imageGroups ?? [])
@@ -75,8 +93,8 @@ const endImageGroups = computed(() => {
       .map(id => props.attachments.find(item => item.id === id))
       .filter((item): item is typeof props.attachments[number] => Boolean(item && item.mimeType !== 'application/pdf')))
     .filter(group => group.length)
-  const legacy = props.attachments.filter(item => item.mimeType !== 'application/pdf' && !mapped.has(item.id))
-  for (let offset = 0; offset < legacy.length; offset += 9) groups.push(legacy.slice(offset, offset + 9))
+  const unassignedImages = props.attachments.filter(item => item.mimeType !== 'application/pdf' && !mapped.has(item.id))
+  for (let offset = 0; offset < unassignedImages.length; offset += 9) groups.push(unassignedImages.slice(offset, offset + 9))
   return groups
 })
 

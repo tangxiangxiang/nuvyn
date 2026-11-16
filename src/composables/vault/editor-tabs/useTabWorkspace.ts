@@ -54,7 +54,7 @@ export function useTabWorkspace(options: {
   const { t } = useI18n()
   const router = useRouter()
   const tree = ref<TreeNode[]>([])
-  // Tree state is shared by FileTree and the D3.2 Diary projection. Keep
+  // Tree state is shared by FileTree and its consumers. Keep
   // loading/error separate from the data so a failed refresh is never
   // represented as an empty calendar.
   const treeLoading = ref(true)

@@ -132,9 +132,9 @@ async function listMarkdownFiles(rootDir: string): Promise<Array<{ path: string;
       if (entry.isDirectory()) await walk(abs, rel)
       else if (entry.isFile() && entry.name.endsWith('.md')) {
         const logicalPath = rel.slice(0, -3)
-        // Managed Diary files are encrypted envelopes. D8.3 migration must
-        // classify them structurally and skip the raw read/backup entirely;
-        // legacy rows remain untouched for D8.4 cleanup/migration.
+        // Managed Diary files are encrypted envelopes. Skip raw reads and
+        // backups here; existing migration rows remain untouched because this
+        // generic scan cannot inspect or rewrite their private payloads.
         if (!isManagedDiaryPath(logicalPath)) files.push({ path: logicalPath, abs })
       }
     }
@@ -243,8 +243,8 @@ export async function migrateVaultMetadata(
 
   const stale = db.prepare("SELECT path FROM metadata_migrations WHERE status != 'orphaned'").all() as Array<{ path: string }>
   for (const row of stale) {
-    // D8.4 owns legacy managed-Diary migration/cleanup. Never rewrite a
-    // managed row into an orphan tombstone as a side effect of this scan.
+    // Managed Diary rows have a separate encrypted lifecycle. Keep them out
+    // of the generic metadata orphan/tombstone pass.
     if (isManagedDiaryPath(row.path)) continue
     if (livePaths.has(row.path)) continue
     await withDocumentWriteLock(row.path, async () => {

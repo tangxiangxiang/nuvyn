@@ -273,7 +273,7 @@ postRoutes.post('/api/posts', async (c) => {
   const bodyAccess = requireDiaryBodyAccess(c, documentPath)
   if (bodyAccess) return bodyAccess
   if (classifyDiaryPath(documentPath) === 'managed') {
-    return bad(c, 'use the canonical Diary date route to create managed Diary documents', 422, 'diary-create-route-required')
+    return bad(c, 'create managed Diary days through the Diary day API', 422, 'diary-create-route-required')
   }
   try { validateDocumentMutation({ operation: 'create', destinationPath: body.path }) }
   catch (error) { return bad(c, (error as Error).message, 422) }

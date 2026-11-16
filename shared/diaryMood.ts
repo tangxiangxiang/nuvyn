@@ -1,5 +1,5 @@
 /**
- * The single product registry for D7 Mood Diary.
+ * The single product registry for Diary mood choices.
  *
  * This module is deliberately framework-independent so the server, future
  * picker, and tests all consume the same stable IDs, labels, grid order, and

@@ -90,7 +90,92 @@ describe('Diary database API', () => {
     const response = await request('GET', '/days/2026-11-15', undefined, false)
     expect(response.status).toBe(423)
     expect(response.headers.get('cache-control')).toBe('no-store')
+    const privateSearch = await request('POST', '/search', { query: '私密内容' }, false)
+    expect(privateSearch.status).toBe(423)
+    expect(privateSearch.headers.get('cache-control')).toBe('no-store')
     expect((await request('GET', '/events/list', undefined, false)).status).toBe(423)
+  })
+  it('searches only unlocked encrypted Diary entries and returns one hit per day', async () => {
+    const firstDate = '2026-11-15'
+    const firstEntries = ['早餐做了南瓜饼', '晚上又吃了南瓜饼']
+    const firstIds = [randomUUID(), randomUUID()]
+    expect((await request('PUT', `/days/${firstDate}`, { moodId: null, entries: firstEntries, entryIds: firstIds, expectedVersion: 0 })).status).toBe(200)
+    expect((await request('PUT', '/days/2026-11-14', { moodId: null, entries: ['nUvYn confidential phrase 2026-11-15'], expectedVersion: 0 })).status).toBe(200)
+    expect((await request('PUT', '/days/2026-11-10', { moodId: 'happy', entries: [], expectedVersion: 0 })).status).toBe(200)
+    expect((await request('PUT', `/events/${randomUUID()}`, { ...event, title: '南瓜饼' })).status).toBe(200)
+
+    const chinese = await (await request('POST', '/search', { query: '南瓜饼' })).json()
+    expect(chinese).toMatchObject({ nextCursor: null, items: [{ date: firstDate, entryId: firstIds[0], snippet: '早餐做了南瓜饼', match: 'entry' }] })
+    expect(chinese.items).toHaveLength(1)
+    const english = await (await request('POST', '/search', { query: 'NUVYN CONFIDENTIAL' })).json()
+    expect(english.items).toMatchObject([{ date: '2026-11-14', snippet: 'nUvYn confidential phrase 2026-11-15', match: 'entry' }])
+    const dateHits = (await (await request('POST', '/search', { query: '2026-11-15' })).json()).items
+    expect(dateHits).toMatchObject([{ date: firstDate, match: 'date' }, { date: '2026-11-14', match: 'entry' }])
+    expect((await (await request('POST', '/search', { query: '2026-11-10' })).json()).items).toMatchObject([{ date: '2026-11-10', match: 'date' }])
+    expect((await (await request('POST', '/search', { query: '2026-11-13' })).json()).items).toEqual([])
+
+    const encrypted = db.prepare('SELECT encrypted_fields FROM diary_days WHERE date = ?').get(firstDate) as { encrypted_fields: Buffer }
+    expect(encrypted.encrypted_fields.toString()).not.toContain(firstEntries[0])
+  })
+  it('paginates Diary search by descending date without skipping older matches', async () => {
+    const dates = Array.from({ length: 23 }, (_, index) => Temporal.PlainDate.from('2026-11-15').subtract({ days: index }).toString())
+    for (const date of dates) {
+      const saved = await request('PUT', `/days/${date}`, { moodId: null, entries: ['shared page marker'], expectedVersion: 0 })
+      expect(saved.status).toBe(200)
+    }
+    const first = await (await request('POST', '/search', { query: 'shared page marker', limit: 20 })).json()
+    expect(first.items).toHaveLength(20)
+    expect(first.items.map((item: { date: string }) => item.date)).toEqual([...dates].slice(0, 20))
+    expect(first.nextCursor).toBe(dates[19])
+    const second = await (await request('POST', '/search', { query: 'shared page marker', limit: 20, cursor: first.nextCursor })).json()
+    expect(second.items.map((item: { date: string }) => item.date)).toEqual(dates.slice(20))
+    expect(second.nextCursor).toBeNull()
+  })
+  it('scopes Diary search to the authenticated owner and validates the query', async () => {
+    expect((await request('POST', '/search', { query: '   ' })).status).toBe(400)
+    expect((await request('POST', '/search', { query: 'x'.repeat(121) })).status).toBe(400)
+    expect((await request('POST', '/search', { query: 'valid', limit: 21 })).status).toBe(400)
+    expect((await request('POST', '/search', { query: 'valid', cursor: '2026-02-30' })).status).toBe(400)
+    expect((await request('PUT', '/days/2026-11-15', { moodId: null, entries: ['owner-only marker'], expectedVersion: 0 })).status).toBe(200)
+
+    await auth.runtime.diaryAccess.withBodyOperation(auth.session.id, capability, async operation => {
+      const otherOwner = diaryLifeStore(db, auth.userId + 1, operation)
+      expect(await otherOwner.searchDays('owner-only marker', 20, null)).toEqual({ items: [], nextCursor: null })
+    })
+  })
+  it('limits search requests per unlocked session and resets the window', async () => {
+    for (let index = 0; index < 8; index += 1) {
+      expect((await request('POST', '/search', { query: 'missing' })).status).toBe(200)
+    }
+    expect((await request('POST', '/search', { query: 'missing' })).status).toBe(429)
+    vi.setSystemTime(new Date('2026-11-16T08:00:01Z'))
+    expect((await request('POST', '/search', { query: 'missing' })).status).toBe(200)
+  })
+  it('scans a large encrypted history without returning or persisting body text outside results', async () => {
+    const total = 1_200
+    const newest = Temporal.PlainDate.from('2026-11-15')
+    const insert = db.prepare('INSERT INTO diary_days VALUES (?, ?, ?, ?, ?, ?)')
+    await auth.runtime.diaryAccess.withBodyOperation(auth.session.id, capability, async operation => {
+      for (let index = 0; index < total; index += 1) {
+        const date = newest.subtract({ days: index }).toString()
+        const entries = [index === total - 1 ? 'oldest private history needle' : `private history row ${index}`]
+        const encrypted = operation.life!.encrypt({ moodId: null, entries }, JSON.stringify([auth.userId, 'day', date, 1]))
+        insert.run(auth.userId, date, encrypted, 1, 1, 1)
+      }
+    })
+    const result = await (await request('POST', '/search', { query: 'oldest private history needle' })).json()
+    expect(result.items).toMatchObject([{ date: newest.subtract({ days: total - 1 }).toString(), snippet: 'oldest private history needle' }])
+    const stored = db.prepare('SELECT encrypted_fields FROM diary_days ORDER BY date ASC LIMIT 1').get() as { encrypted_fields: Buffer }
+    expect(stored.encrypted_fields.toString()).not.toContain('oldest private history needle')
+
+    const controller = new AbortController()
+    const aborted = await auth.runtime.diaryAccess.withBodyOperation(auth.session.id, capability, async operation => {
+      const search = diaryLifeStore(db, auth.userId, operation).searchDays('oldest private history needle', 20, null, controller.signal)
+      await new Promise<void>(resolve => setImmediate(resolve))
+      controller.abort()
+      return search
+    })
+    expect(aborted).toEqual({ items: [], nextCursor: null })
   })
   it('repairs a version 43 database missing Diary deletion receipts', async () => {
     db.exec('DROP TABLE diary_day_attachments; DROP TABLE diary_deleted_records; UPDATE schema_version SET version = 43')

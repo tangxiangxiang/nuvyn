@@ -93,9 +93,9 @@ export async function previewFrontmatterCleanup(
 ): Promise<FrontmatterCleanupPreview> {
   const preview: FrontmatterCleanupPreview = { candidates: [], blocked: [] }
   for (const record of listMetadataMigrationRecords(db)) {
-    // Managed Diary rows may contain legacy private backups. Keep them
-    // classified for D8.4, but never open the encrypted envelope or expose
-    // the backup through this generic archive surface.
+    // Managed Diary rows may contain private backups. Never open their
+    // encrypted envelopes or expose those backups through this generic
+    // archive surface.
     if (isManagedDiaryPath(record.path)) continue
     if (record.status === 'orphaned') continue
     let raw: string

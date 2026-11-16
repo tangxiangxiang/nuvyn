@@ -19,6 +19,7 @@ function boardResult(board: BoardMetadata): SearchResult<BoardSearchPayload> {
 
 export function createBoardSearchProvider(source: BoardMetadataSource = boardMetadataSource): SearchProvider {
   return async (query) => {
+    if (!query.trim()) return { id: 'boards', label: 'Boards', results: [] }
     await source.ensureLoaded()
     const normalizedQuery = query.trim().toLocaleLowerCase()
     const results = source.getSnapshot()

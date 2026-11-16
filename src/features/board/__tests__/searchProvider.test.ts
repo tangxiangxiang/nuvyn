@@ -26,7 +26,8 @@ describe('Board search provider', () => {
       payload: { boardId: 'one' },
     })
 
-    await provider('')
+    const empty = await provider('')
+    expect(empty.results).toEqual([])
     expect(fetchBoards).toHaveBeenCalledOnce()
   })
 })

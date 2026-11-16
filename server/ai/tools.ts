@@ -72,7 +72,7 @@ import { recoveryMarkerName } from '../technicalNamespace.js'
 export type ToolContext = {
   signal: AbortSignal
   db?: DatabaseT
-  /** Server-side D8.1 gate for tools that can read or mutate Diary bodies. */
+  /** Server-side access check for tools that can read or mutate Diary bodies. */
   diaryBodyAccess?: (path: string) => boolean
   /**
    * Edit-10.4: the safety policy derived ONCE per runChat from the

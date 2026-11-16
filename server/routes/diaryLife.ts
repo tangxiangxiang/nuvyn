@@ -3,6 +3,7 @@ import type { Database } from 'better-sqlite3'
 import { bodyLimit } from 'hono/body-limit'
 import { civilDate, dayDistance, parseDay, parseEvent, occursOn, nextOccurrence } from '../../shared/diaryLife.js'
 import { withDiaryBodyOperation } from '../diaryAccess/guard.js'
+import { DiaryAccessServiceError } from '../diaryAccess/service.js'
 import { diaryLifeStore, DiaryConflict } from '../diaryLife.js'
 import { diaryToday } from '../diaryDate.js'
 import { DiaryAttachmentError } from '../diaryAttachments/service.js'
@@ -26,6 +27,7 @@ async function guarded(c: Context<Env>, run: (store: Store, db: Database) => Pro
       return result
     }) ?? c.json({ code: 'diary-locked' }, 423)
   } catch (error) {
+    if (error instanceof DiaryAccessServiceError) return c.json({ code: 'diary-locked' }, 423)
     if (error instanceof DiaryConflict) return c.json({ code: 'diary-conflict' }, 409)
     if (error instanceof DiaryAttachmentError) return c.json({ code: `diary-attachment-${error.code}` }, error.status)
     return c.json({ code: 'diary-unavailable' }, 503)
@@ -34,6 +36,42 @@ async function guarded(c: Context<Env>, run: (store: Store, db: Database) => Pro
 const version = (v: unknown): v is number => Number.isSafeInteger(v) && (v as number) >= 0 && (v as number) < Number.MAX_SAFE_INTEGER
 const idValid = (id: string) => /^[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/.test(id)
 routes.get('/day-policy', c => guarded(c, () => c.json({ today: diaryToday() })))
+const diarySearchRequests = new WeakMap<Database, Map<number, { startedAt: number; count: number }>>()
+function allowDiarySearch(db: Database, sessionId: number): boolean {
+  const now = Date.now()
+  let requests = diarySearchRequests.get(db)
+  if (!requests) {
+    requests = new Map()
+    diarySearchRequests.set(db, requests)
+  }
+  for (const [key, window] of requests) if (now - window.startedAt >= 1000) requests.delete(key)
+  const current = requests.get(sessionId)
+  if (!current || now - current.startedAt >= 1000) {
+    if (requests.size >= 1024) {
+      const oldest = [...requests].sort((a, b) => a[1].startedAt - b[1].startedAt)[0]?.[0]
+      if (oldest !== undefined) requests.delete(oldest)
+    }
+    requests.set(sessionId, { startedAt: now, count: 1 })
+    return true
+  }
+  if (current.count >= 8) return false
+  current.count += 1
+  return true
+}
+routes.post('/search', async c => {
+  const sessionId = c.get('authSessionId')
+  if (typeof sessionId !== 'number') return c.json({ code: 'auth-session-required' }, 401)
+  return guarded(c, async (store, db) => {
+    if (!allowDiarySearch(db, sessionId)) return c.json({ code: 'diary-search-rate-limited' }, 429)
+    const body = await c.req.json().catch(() => null)
+    const query = typeof body?.query === 'string' ? body.query.trim() : ''
+    const limit = body?.limit ?? 20
+    const cursor = body?.cursor ?? null
+    if (!query || query.length > 120 || !Number.isSafeInteger(limit) || limit < 1 || limit > 20
+      || (cursor !== null && !civilDate(cursor))) return c.json({ code: 'invalid-diary-search' }, 400)
+    return c.json(await store.searchDays(query, limit, cursor, c.req.raw.signal))
+  })
+})
 routes.get('/days', c => guarded(c, store => {
   const { start, end } = c.req.query()
   if (!civilDate(start) || !civilDate(end) || end < start || dayDistance(start, end) > 62) return c.json({ code: 'invalid-diary-range' }, 400)

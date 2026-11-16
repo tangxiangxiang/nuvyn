@@ -65,8 +65,8 @@ function runMetadataMigration() {
 }
 
 metadataRoutes.get('/api/metadata/migration', (c) => {
-  // Legacy managed-Diary migration rows may still exist for D8.4, but their
-  // private backup/error payloads are not part of this generic projection.
+  // Managed Diary migration rows have private backup/error payloads; omit
+  // them from this generic projection.
   const records = listMetadataMigrationRecords(metadataDb())
     .filter((record) => classifyDiaryPath(record.path) !== 'managed')
   const counts = records.reduce<Record<string, number>>((acc, record) => {

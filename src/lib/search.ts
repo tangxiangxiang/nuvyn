@@ -166,13 +166,55 @@ export async function primeBody(posts: PostSummary[]): Promise<boolean> {
   return succeeded && capturedEpoch === searchEpoch && capturedGeneration === indexGeneration
 }
 
-/** 简单 snippet:命中关键字前后各取 40 字符 */
+function snippetText(body: string): string {
+  return body
+    .replace(/^```[^\n]*\r?\n?/gm, ' ')
+    .replace(/^\s{0,3}#{1,6}\s+/gm, '')
+    .replace(/^\s{0,3}>\s?/gm, '')
+    .replace(/^\s*(?:[-*+]|\d+[.)])\s+/gm, '')
+    .replace(/!\[([^\]]*)\]\([^)]*\)/g, '$1')
+    .replace(/\[([^\]]+)\]\([^)]*\)/g, '$1')
+    .replace(/<\/?[A-Za-z][^>]*>/g, ' ')
+    .replace(/`+/g, '')
+    .replace(/[*_~|]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+}
+
+/** Return a compact plain-text excerpt around the exact query when available. */
 function snippet(body: string, q: string): string {
-  const i = body.toLowerCase().indexOf(q.toLowerCase())
-  if (i < 0) return body.slice(0, 80)
-  const start = Math.max(0, i - 40)
-  const end = Math.min(body.length, i + q.length + 40)
-  return (start > 0 ? '…' : '') + body.slice(start, end) + (end < body.length ? '…' : '')
+  const text = snippetText(body)
+  if (!text) return ''
+
+  const normalizedQuery = q.trim().replace(/\s+/g, ' ')
+  if (!normalizedQuery) return text.slice(0, 56)
+
+  const lowerText = text.toLocaleLowerCase()
+  const lowerQuery = normalizedQuery.toLocaleLowerCase()
+  let matchStart = lowerText.indexOf(lowerQuery)
+  let matchLength = normalizedQuery.length
+
+  // MiniSearch can return a fuzzy summary match. Use an exact query token to
+  // find useful context when the whole query is not present; the renderer
+  // independently avoids highlighting this non-exact fallback.
+  if (matchStart < 0) {
+    for (const token of normalizedQuery.split(' ').filter(Boolean)) {
+      const tokenStart = lowerText.indexOf(token.toLocaleLowerCase())
+      if (tokenStart >= 0 && (matchStart < 0 || tokenStart < matchStart)) {
+        matchStart = tokenStart
+        matchLength = token.length
+      }
+    }
+  }
+
+  if (matchStart < 0) {
+    const end = Math.min(text.length, 56)
+    return text.slice(0, end)
+  }
+
+  const start = Math.max(0, matchStart - 18)
+  const end = Math.min(text.length, matchStart + matchLength + 18)
+  return text.slice(start, end)
 }
 
 export function search(query: string, limit = 12): SearchHit[] {

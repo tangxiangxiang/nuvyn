@@ -15,7 +15,6 @@ import { migrateVaultMetadata } from './metadataMigration.ts'
 import { initializeTagIdentityAndHealth } from './tagIdentityMigration.ts'
 import { initializeTagUndoFoundationHealth } from './tagUndoHealth.ts'
 import { recoverInterruptedOperations } from './crashRecovery.ts'
-import { cleanupLegacyDiary } from './diaryLegacyCleanup.ts'
 import { reconcileHistoryMetadata } from './history/metadataRevisions.ts'
 import { AttachmentTrash } from './attachments/trash.ts'
 import { withVaultMutation } from './vaultMutation.ts'
@@ -55,7 +54,6 @@ export function serverPlugin(): Plugin {
         // generic History metadata journals fail closed before any request
         // can observe an unproven cross-store state.
         await reconcileHistoryMetadata(getDb(), CONTENT_DIR)
-        await cleanupLegacyDiary(getDb(), CONTENT_DIR)
         const report = await migrateVaultMetadata(getDb(), CONTENT_DIR)
         console.log(`[nuvyn] metadata migration: ${JSON.stringify(report)}`)
         const tagIdentityHealth = await initializeTagIdentityAndHealth(getDb(), CONTENT_DIR, report)

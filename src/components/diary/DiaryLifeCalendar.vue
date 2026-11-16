@@ -2,15 +2,27 @@
 import { computed } from 'vue'
 import { NCalendar } from 'naive-ui'
 import { useI18n } from '../../composables/useI18n'
+import { diaryCalendarMonthFromFields, diaryDateFromCalendarFields, naiveCalendarValueForMonth } from './diaryCalendarAdapter'
 
-defineProps<{ today: string; selectedDate: string | null; markers: Record<string, { source?: string; emoji?: string; count?: number; hasEntries?: boolean; hasAttachments?: boolean }> }>()
+const props = defineProps<{ today: string; selectedDate: string | null; month: string; revision: number; markers: Record<string, { source?: string; emoji?: string; count?: number; hasEntries?: boolean; hasAttachments?: boolean }> }>()
 const emit = defineEmits<{ select: [date: string]; month: [date: string] }>()
 const { locale } = useI18n()
 // Match the firstDayOfWeek of the zhCN and enUS locales in NuvynUiRoot.
 const weekdays = computed(() => locale.value === 'zh'
   ? ['周一', '周二', '周三', '周四', '周五', '周六', '周日']
   : ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'])
-const dateFor = (year: number, month: number, date: number) => `${String(year).padStart(4, '0')}-${String(month).padStart(2, '0')}-${String(date).padStart(2, '0')}`
+const dateFor = (year: number, month: number, date: number) => diaryDateFromCalendarFields({ year, month, date }) ?? ''
+const initialMonthTimestamp = computed(() => {
+  const [year, month] = props.month.split('-').map(Number)
+  return naiveCalendarValueForMonth({ year: year!, month: month! }) ?? Date.now()
+})
+
+function onPanelChange(value: { year: number; month: number }) {
+  const month = diaryCalendarMonthFromFields(value)
+  if (!month) return
+  const firstDay = dateFor(month.year, month.month, 1)
+  if (firstDay) emit('month', firstDay)
+}
 
 function selectDate(date: string, event: MouseEvent) {
   // Escape can turn focus left by a pointer click into a visible focus ring.
@@ -22,7 +34,7 @@ function selectDate(date: string, event: MouseEvent) {
 </script>
 
 <template>
-  <NCalendar class="diary-life-calendar" @panel-change="({ year, month }) => emit('month', dateFor(year, month, 1))">
+  <NCalendar :key="props.revision" class="diary-life-calendar" :default-value="initialMonthTimestamp" @panel-change="onPanelChange">
     <template #header="{ year, month }">
       <strong class="life-month">{{ dateFor(year, month, 1).slice(0, 7) }}</strong>
       <div class="life-weekdays">

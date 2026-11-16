@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, inject, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { computed, inject, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { onBeforeRouteLeave } from 'vue-router'
 import { NButton, NModal } from 'naive-ui'
 import { Temporal } from '@js-temporal/polyfill'
@@ -21,6 +21,7 @@ import DiaryDayDialog from '../components/diary/DiaryDayDialog.vue'
 import DiaryEventForm from '../components/diary/DiaryEventForm.vue'
 import DiaryEventListDialog from '../components/diary/DiaryEventListDialog.vue'
 import { eventEmojiSource } from '../features/diary/eventEmoji'
+import { clearDiarySearchOpen, consumeDiarySearchOpen, diarySearchOpenIntent, type DiarySearchOpenIntent } from '../composables/diary/useDiarySearchNavigation'
 
 const access = useDiaryAccessSession()
 const accessContext = inject(DiaryAccessContextKey, null)
@@ -42,6 +43,7 @@ async function confirm(message: string) {
 }
 const mode = ref<'diary' | 'events'>('diary')
 const month = ref(`${localToday().slice(0, 7)}-01`)
+const calendarRevision = ref(0)
 const days = ref<DiaryDaySummary[]>([])
 const events = ref<DiaryEvent[]>([])
 const upcoming = ref<DiaryEvent[]>([])
@@ -61,6 +63,7 @@ const loadingDay = ref(false)
 const attachmentBusy = ref(false)
 const attachmentError = ref('')
 const dayReadFailed = ref(false)
+const searchReveal = ref<{ entryId?: string; entryIndex?: number } | null>(null)
 const error = ref('')
 const formError = ref('')
 const allCountdowns = ref(false)
@@ -144,7 +147,9 @@ function onDiaryVisibilityChange() {
   }
 }
 let request: AbortController | null = null
+let pendingCalendarLoad: { key: string; controller: AbortController; promise: Promise<void> } | null = null
 let detailRequest: AbortController | null = null
+let searchNavigationSequence = 0
 let attachmentUploadRequest: AbortController | null = null
 let attachmentLeaseRequest: AbortController | null = null
 let attachmentLeaseTimer: ReturnType<typeof setInterval> | undefined
@@ -186,23 +191,35 @@ const markers = computed(() => {
   }
   return result
 })
-async function load() {
+function load(): Promise<void> {
+  if (!access.isUnlocked.value) return Promise.resolve()
+  const key = `${range.value.start}:${range.value.end}:${today.value}:${access.epoch.value ?? ''}`
+  if (pendingCalendarLoad?.key === key) return pendingCalendarLoad.promise
   request?.abort()
   const scope = new AbortController()
   request = scope
   error.value = ''
-  if (!access.isUnlocked.value) return
-  try {
-    const [d, e, u] = await Promise.all([
-      diaryLifeApi.days(range.value.start, range.value.end, scope.signal),
-      diaryLifeApi.events(range.value.start, range.value.end, scope.signal),
-      diaryLifeApi.countdowns(today.value, scope.signal),
-    ])
-    if (scope.signal.aborted) return
-    days.value = d.days
-    events.value = e
-    upcoming.value = u
-  } catch { if (!scope.signal.aborted) { days.value = []; events.value = []; upcoming.value = []; error.value = '加载失败，请重试。' } }
+  const promise = (async () => {
+    try {
+      const [d, e, u] = await Promise.all([
+        diaryLifeApi.days(range.value.start, range.value.end, scope.signal),
+        diaryLifeApi.events(range.value.start, range.value.end, scope.signal),
+        diaryLifeApi.countdowns(today.value, scope.signal),
+      ])
+      if (scope.signal.aborted) return
+      days.value = d.days
+      events.value = e
+      upcoming.value = u
+    } catch { if (!scope.signal.aborted) { days.value = []; events.value = []; upcoming.value = []; error.value = '加载失败，请重试。' } }
+    finally {
+      if (pendingCalendarLoad?.controller === scope) {
+        pendingCalendarLoad = null
+        request = null
+      }
+    }
+  })()
+  pendingCalendarLoad = { key, controller: scope, promise }
+  return promise
 }
 function resetForm() {
   detailRequest?.abort()
@@ -224,12 +241,17 @@ function resetForm() {
   dayVersion.value = 0
   loadingDay.value = false
   dayReadFailed.value = false
+  searchReveal.value = null
   initial.value = ''
   formError.value = ''
 }
 
 function clearPrivateData() {
+  clearDiarySearchOpen()
+  searchNavigationSequence += 1
   request?.abort()
+  pendingCalendarLoad = null
+  request = null
   eventListRequest?.abort()
   clearShellCommands()
   cancelConfirmation?.()
@@ -474,8 +496,8 @@ function moveDayImage(id: string, entryId: string | null) {
   const validEntryId = entryId && draft.value.entryIds?.includes(entryId) ? entryId : null
   draft.value = { ...draft.value, imageGroups: assignImage(draft.value.imageGroups, id, validEntryId) }
 }
-async function open(date: string) {
-  if (!(await canLeave()) || !access.isUnlocked.value) return false
+async function open(date: string, options: { skipLeaveCheck?: boolean; searchResult?: boolean } = {}) {
+  if ((!options.skipLeaveCheck && !(await canLeave())) || !access.isUnlocked.value) return false
   await discardPendingAttachments()
   detailRequest?.abort()
   const scope = new AbortController(); detailRequest = scope
@@ -488,19 +510,63 @@ async function open(date: string) {
     const result = await diaryLifeApi.day(date, scope.signal)
     if (scope.signal.aborted) return
     serverToday.value = result.today
+    if (options.searchResult && !result.day) {
+      toast.error('这条日记已不存在。')
+      resetForm()
+      return false
+    }
     day.value = result.day
     dayAttachments.value = result.attachments
     draftAttachments.value = result.attachments.map(item => ({ ...item }))
     dayVersion.value = result.version
     draft.value = result.day ? copyDayFields(result.day) : { moodId: null, entries: [] }
-    if (!result.day && canWriteDay.value) {
+    if (!result.day && canWriteDay.value && !options.searchResult) {
       dayMode.value = 'edit'
       startAttachmentSession()
     }
     initial.value = JSON.stringify({ fields: draft.value, attachments: draftAttachments.value.map(item => item.id) })
   } catch { if (!scope.signal.aborted) { dayReadFailed.value = true; formError.value = '读取失败，请关闭后重试。' } }
   finally { if (!scope.signal.aborted) loadingDay.value = false }
+  return true
 }
+
+async function openDiarySearchIntent(intent: DiarySearchOpenIntent) {
+  const sequence = ++searchNavigationSequence
+  const isCurrent = () => searchNavigationSequence === sequence && diarySearchOpenIntent.value?.id === intent.id
+  if (!access.isUnlocked.value) {
+    consumeDiarySearchOpen(intent.id)
+    return
+  }
+  if (!(await canLeave())) {
+    consumeDiarySearchOpen(intent.id)
+    return
+  }
+  if (!isCurrent() || !access.isUnlocked.value) return
+  await discardPendingAttachments()
+  if (!isCurrent() || !access.isUnlocked.value) return
+  resetForm()
+  mode.value = 'diary'
+  const targetMonth = `${intent.date.slice(0, 7)}-01`
+  if (month.value !== targetMonth) {
+    month.value = targetMonth
+    calendarRevision.value += 1
+  }
+  await nextTick()
+  if (!isCurrent() || !access.isUnlocked.value) return
+  await load()
+  if (!isCurrent() || !access.isUnlocked.value) return
+  searchReveal.value = {
+    ...(intent.entryId ? { entryId: intent.entryId } : {}),
+    ...(!intent.entryId && intent.entryIndex !== undefined ? { entryIndex: intent.entryIndex } : {}),
+  }
+  const opened = await open(intent.date, { skipLeaveCheck: true, searchResult: true })
+  if (!opened && selected.value === intent.date) resetForm()
+  consumeDiarySearchOpen(intent.id)
+}
+
+watch(diarySearchOpenIntent, intent => {
+  if (intent) void openDiarySearchIntent(intent)
+})
 async function refreshDayPolicy() {
   const signal = detailRequest?.signal
   if (!signal || signal.aborted || !selected.value || !serverToday.value || loadingDay.value || !access.isUnlocked.value) return
@@ -619,6 +685,8 @@ onMounted(() => {
   }, 30000)
 })
 onBeforeUnmount(() => {
+  clearDiarySearchOpen()
+  searchNavigationSequence += 1
   stopTeardown()
   clearPrivateData()
   clearInterval(timer)
@@ -634,7 +702,7 @@ onBeforeUnmount(() => {
     <template v-if="access.isUnlocked.value">
       <div class="diary-life-calendar-stage">
         <div v-if="error" class="diary-life-error" role="alert">{{ error }} <NButton text @click="load">重试</NButton></div>
-        <DiaryLifeCalendar :markers="markers" :today="today" :selected-date="selected" @select="open" @month="month = $event" />
+        <DiaryLifeCalendar :markers="markers" :today="today" :selected-date="selected" :month="month" :revision="calendarRevision" @select="open" @month="month = $event" />
       </div>
       <section v-if="mode === 'events' && countdowns.length" class="countdowns" aria-label="倒数日">
         <button v-for="item in (allCountdowns ? countdowns : countdowns.slice(0, 3))" :key="item.event.id" type="button" @click="openCountdown(item.event, item.date)"><span><img v-if="eventEmojiSource(item.event.emoji)" :src="eventEmojiSource(item.event.emoji)" class="event-emoji" alt=""><template v-else>{{ item.event.emoji }}</template> {{ item.event.title }}</span><small>{{ item.days === 0 ? '就是今天' : `还有 ${item.days} 天` }}</small></button>
@@ -651,6 +719,8 @@ onBeforeUnmount(() => {
         :future-date="serverToday !== null && !canWriteDay"
         :loading="loadingDay"
         :read-failed="dayReadFailed"
+        :reveal-entry-id="searchReveal?.entryId"
+        :reveal-entry-index="searchReveal?.entryIndex"
         :busy="busy"
         :error="formError"
         :attachment-busy="attachmentBusy"
