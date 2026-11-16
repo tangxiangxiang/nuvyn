@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import { addDays, dayDistance, nextOccurrence, type DiaryEvent } from '../../../shared/diaryLife'
+import { formatLunarRule } from '../../../shared/lunarCalendar'
 
 const props = defineProps<{
   event: DiaryEvent
@@ -15,8 +16,8 @@ const typeLabels: Record<DiaryEvent['type'], string> = {
   schedule: '重要日程',
 }
 
-const nextDate = computed(() => props.event.showCountdown ? nextOccurrence(props.event, props.today) : null)
-const countdownDays = computed(() => nextDate.value ? dayDistance(props.today, nextDate.value) : null)
+const nextDate = computed(() => nextOccurrence(props.event, props.today))
+const countdownDays = computed(() => props.event.showCountdown && nextDate.value ? dayDistance(props.today, nextDate.value) : null)
 const displayedStartDate = computed(() => props.event.recurrence === 'yearly' ? props.occurrenceDate : props.event.startDate)
 const displayedEndDate = computed(() => {
   if (props.event.recurrence !== 'yearly') return props.event.endDate
@@ -28,9 +29,20 @@ function formatDate(date: string): string {
   return `${year}年${month}月${day}日`
 }
 
-const dateLabel = computed(() => displayedStartDate.value === displayedEndDate.value
-  ? formatDate(displayedStartDate.value)
-  : `${formatDate(displayedStartDate.value)} – ${formatDate(displayedEndDate.value)}`)
+const lunarRule = computed(() => props.event.dateRule?.calendar === 'chinese' ? props.event.dateRule : null)
+const dateLabel = computed(() => lunarRule.value
+  ? formatLunarRule(lunarRule.value)
+  : displayedStartDate.value === displayedEndDate.value
+    ? formatDate(displayedStartDate.value)
+    : `${formatDate(displayedStartDate.value)} – ${formatDate(displayedEndDate.value)}`)
+const lunarPolicyLabel = computed(() => {
+  const rule = lunarRule.value
+  if (!rule) return ''
+  const details = []
+  if (rule.isLeapMonth) details.push(rule.leapMonthPolicy === 'regular-month' ? '无闰月时按普通月' : '仅在闰月年份发生')
+  if (rule.lunarDay === 30) details.push(rule.shortMonthPolicy === 'last-day' ? '小月时按最后一天' : '小月时跳过')
+  return details.join(' · ')
+})
 const timeLabel = computed(() => {
   if (props.event.allDay) return '全天'
   if (!props.event.startTime && !props.event.endTime) return ''
@@ -45,13 +57,21 @@ const timeLabel = computed(() => {
     <section v-if="nextDate && countdownDays !== null" class="diary-event-detail-countdown" aria-label="距离下一次发生">
       <strong>{{ countdownDays === 0 ? '就是今天' : countdownDays }}</strong>
       <span v-if="countdownDays > 0">天后</span>
-      <small>下一次 · {{ formatDate(nextDate) }}</small>
+      <small>下一次 · {{ formatDate(nextDate) }}<template v-if="lunarRule">（公历）</template></small>
     </section>
 
     <dl class="diary-event-detail-facts">
       <div>
         <dt>日期</dt>
         <dd>{{ dateLabel }}</dd>
+      </div>
+      <div v-if="lunarRule && (!event.showCountdown || !nextDate)">
+        <dt>下一次</dt>
+        <dd>{{ nextDate ? `${formatDate(nextDate)}（公历）` : '支持范围内暂无下一次日期' }}</dd>
+      </div>
+      <div v-if="lunarPolicyLabel">
+        <dt>日期规则</dt>
+        <dd>{{ lunarPolicyLabel }}</dd>
       </div>
       <div v-if="timeLabel">
         <dt>时间</dt>

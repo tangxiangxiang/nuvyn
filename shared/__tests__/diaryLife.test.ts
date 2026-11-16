@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { civilDate, dayDistance, nextOccurrence, occursOn, parseDay, parseEvent, type EventFields } from '../diaryLife'
+import { civilDate, dayDistance, nextOccurrence, occurrenceInYear, occursOn, parseDay, parseEvent, type EventFields } from '../diaryLife'
 
 const event: EventFields = { title: '生日', description: '', emoji: '🎂', type: 'anniversary', startDate: '2024-02-29', endDate: '2024-02-29', startTime: null, endTime: null, allDay: true, recurrence: 'yearly', showCountdown: true, isPrimary: false }
 describe('Diary natural days', () => {
@@ -64,5 +64,32 @@ describe('Diary natural days', () => {
     expect(parseEvent({ ...event, allDay: false, startTime: '25:00' })).toBeNull()
     expect(parseEvent({ ...event, allDay: false, startTime: '13:00', endTime: '12:00' })).toBeNull()
     expect(parseEvent({ ...event, allDay: false, endDate: '2024-03-01', startTime: '13:00', endTime: '12:00' })).not.toBeNull()
+  })
+  it('defaults legacy events to Gregorian and calculates validated lunar yearly occurrences', () => {
+    expect(parseEvent(event)?.dateRule).toEqual({ calendar: 'gregory' })
+    const lunarRule = {
+      calendar: 'chinese' as const,
+      lunarMonth: 5,
+      lunarDay: 19,
+      isLeapMonth: false,
+      leapMonthPolicy: 'regular-month' as const,
+      shortMonthPolicy: 'last-day' as const,
+    }
+    const lunarEvent: EventFields = {
+      ...event,
+      startDate: '2026-11-16',
+      endDate: '2026-11-16',
+      dateRule: lunarRule,
+    }
+    expect(parseEvent(lunarEvent)).toMatchObject({ dateRule: lunarRule })
+    expect(occurrenceInYear(lunarEvent, 2027)).toBe('2027-06-23')
+    expect(nextOccurrence(lunarEvent, '2026-11-16')).toBe('2027-06-23')
+    expect(occursOn(lunarEvent, '2027-06-23')).toBe(true)
+    expect(occursOn(lunarEvent, '2027-06-22')).toBe(false)
+    expect(parseEvent({ ...lunarEvent, recurrence: 'none' })).toBeNull()
+    expect(parseEvent({ ...lunarEvent, allDay: false })).toBeNull()
+    expect(parseEvent({ ...lunarEvent, endDate: '2026-11-17' })).toBeNull()
+    expect(parseEvent({ ...lunarEvent, dateRule: { ...lunarRule, lunarDay: 31 } })).toBeNull()
+    expect(parseEvent({ ...lunarEvent, startDate: '2101-01-01', endDate: '2101-01-01' })).toBeNull()
   })
 })

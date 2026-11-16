@@ -1,14 +1,75 @@
 <script setup lang="ts">
+import { computed, ref } from 'vue'
 import { NInput, NSelect, NCheckbox } from 'naive-ui'
+import { lunarDayLabel, lunarMonthLabel, nextLunarOccurrence, solarToLunar, type ChineseEventDateRule, type EventDateRule } from '../../../shared/lunarCalendar'
 import type { EventFields } from '../../../shared/diaryLife'
 import { EVENT_EMOJI } from '../../features/diary/eventEmoji'
 
 const value = defineModel<EventFields>({ required: true })
+const props = defineProps<{ today: string }>()
+const calendarError = ref('')
+const dateRule = computed<EventDateRule>(() => value.value.dateRule ?? { calendar: 'gregory' })
+const chineseRule = computed(() => dateRule.value.calendar === 'chinese' ? dateRule.value : null)
+const canUseLunar = computed(() => value.value.recurrence === 'yearly' && value.value.allDay
+  && value.value.startDate === value.value.endDate && solarToLunar(value.value.startDate) !== null)
+const lunarMonthOptions = Array.from({ length: 12 }, (_, index) => ({ value: index + 1, label: lunarMonthLabel(index + 1) }))
+const lunarDayOptions = Array.from({ length: 30 }, (_, index) => ({ value: index + 1, label: lunarDayLabel(index + 1) }))
+const lunarPreviewDate = computed(() => {
+  if (!chineseRule.value) return null
+  const fromDate = props.today > value.value.startDate ? props.today : value.value.startDate
+  return nextLunarOccurrence(chineseRule.value, fromDate)
+})
 const types = [
   { label: '人生时刻', value: 'milestone' },
   { label: '纪念日', value: 'anniversary' },
   { label: '重要日程', value: 'schedule' },
 ]
+
+function setCalendar(calendar: 'gregory' | 'chinese') {
+  calendarError.value = ''
+  if (calendar === dateRule.value.calendar) return
+  if (calendar === 'chinese') {
+    if (!canUseLunar.value) {
+      calendarError.value = '农历重复仅支持全天、单日且每年重复的事件。'
+      return
+    }
+    const lunarDate = solarToLunar(value.value.startDate)
+    if (!lunarDate) {
+      calendarError.value = '农历日期仅支持 1901—2100 年的公历日期。'
+      return
+    }
+    value.value.dateRule = {
+      calendar: 'chinese',
+      lunarMonth: lunarDate.month,
+      lunarDay: lunarDate.day,
+      isLeapMonth: lunarDate.isLeapMonth,
+      leapMonthPolicy: 'regular-month',
+      shortMonthPolicy: 'last-day',
+    }
+    return
+  }
+
+  const rule = chineseRule.value
+  if (!rule) return
+  const convertedDate = nextLunarOccurrence(rule, value.value.startDate)
+  if (!convertedDate) {
+    calendarError.value = '当前农历规则在支持范围内没有可转换的公历日期。'
+    return
+  }
+  value.value.startDate = convertedDate
+  value.value.endDate = convertedDate
+  value.value.dateRule = { calendar: 'gregory' }
+}
+
+function updateChineseRule(updates: Partial<ChineseEventDateRule>) {
+  if (!chineseRule.value) return
+  value.value.dateRule = { ...chineseRule.value, ...updates }
+}
+
+function formatGregorianDate(date: string): string {
+  const [year, month, day] = date.split('-').map(Number)
+  return `${year}年${month}月${day}日`
+}
 </script>
 
 <template>
@@ -30,11 +91,63 @@ const types = [
         <NInput v-model:value="value.title" :input-props="{ 'aria-label': '事件标题' }" placeholder="值得记住的事" :maxlength="160" />
       </label>
       <NSelect v-model:value="value.type" :options="types" aria-label="事件类型" />
-      <div class="event-dates">
-        <label class="event-field"><span>开始日期</span><input v-model="value.startDate" type="date" required aria-label="开始日期"></label>
-        <label class="event-field"><span>结束日期</span><input v-model="value.endDate" type="date" required aria-label="结束日期"></label>
+      <div class="event-date-calendar-toggle" role="group" aria-label="日期类型">
+        <button type="button" :aria-pressed="dateRule.calendar === 'gregory'" @click="setCalendar('gregory')">公历</button>
+        <button type="button" :aria-pressed="dateRule.calendar === 'chinese'" :disabled="dateRule.calendar !== 'chinese' && !canUseLunar" @click="setCalendar('chinese')">农历</button>
       </div>
-      <NCheckbox v-model:checked="value.allDay">全天</NCheckbox>
+      <p v-if="dateRule.calendar === 'gregory' && !canUseLunar" class="event-date-help">农历重复仅支持全天、单日且每年重复的事件。</p>
+      <p v-if="calendarError" class="event-date-error" role="alert">{{ calendarError }}</p>
+
+      <template v-if="dateRule.calendar === 'gregory'">
+        <div class="event-dates">
+          <label class="event-field"><span>开始日期</span><input v-model="value.startDate" type="date" required aria-label="开始日期"></label>
+          <label class="event-field"><span>结束日期</span><input v-model="value.endDate" type="date" required aria-label="结束日期"></label>
+        </div>
+      </template>
+      <template v-else-if="chineseRule">
+        <div class="event-dates">
+          <label class="event-field">
+            <span>农历月份</span>
+            <select aria-label="农历月份" :value="chineseRule.lunarMonth" @change="updateChineseRule({ lunarMonth: Number(($event.target as HTMLSelectElement).value) })">
+              <option v-for="option in lunarMonthOptions" :key="option.value" :value="option.value">{{ option.label }}</option>
+            </select>
+          </label>
+          <label class="event-field">
+            <span>农历日期</span>
+            <select aria-label="农历日期" :value="chineseRule.lunarDay" @change="updateChineseRule({ lunarDay: Number(($event.target as HTMLSelectElement).value) })">
+              <option v-for="option in lunarDayOptions" :key="option.value" :value="option.value">{{ option.label }}</option>
+            </select>
+          </label>
+        </div>
+        <label class="event-field">
+          <span>月份类型</span>
+          <select aria-label="月份类型" :value="chineseRule.isLeapMonth ? 'leap' : 'regular'" @change="updateChineseRule({ isLeapMonth: ($event.target as HTMLSelectElement).value === 'leap' })">
+            <option value="regular">普通{{ lunarMonthLabel(chineseRule.lunarMonth) }}</option>
+            <option value="leap">闰{{ lunarMonthLabel(chineseRule.lunarMonth) }}</option>
+          </select>
+        </label>
+        <label v-if="chineseRule.isLeapMonth" class="event-field">
+          <span>目标年份没有闰月时</span>
+          <select aria-label="缺少闰月时" :value="chineseRule.leapMonthPolicy" @change="updateChineseRule({ leapMonthPolicy: ($event.target as HTMLSelectElement).value as ChineseEventDateRule['leapMonthPolicy'] })">
+            <option value="regular-month">按普通{{ lunarMonthLabel(chineseRule.lunarMonth) }}</option>
+            <option value="leap-only">跳过该年，只在闰月出现</option>
+          </select>
+        </label>
+        <label v-if="chineseRule.lunarDay === 30" class="event-field">
+          <span>目标月份只有二十九天时</span>
+          <select aria-label="小月处理方式" :value="chineseRule.shortMonthPolicy" @change="updateChineseRule({ shortMonthPolicy: ($event.target as HTMLSelectElement).value as ChineseEventDateRule['shortMonthPolicy'] })">
+            <option value="last-day">按当月最后一天</option>
+            <option value="skip">跳过该年</option>
+          </select>
+        </label>
+        <p class="event-date-preview" aria-live="polite">
+          <template v-if="lunarPreviewDate">下一次：{{ formatGregorianDate(lunarPreviewDate) }}（公历）</template>
+          <template v-else>支持范围内暂无下一次日期</template>
+        </p>
+        <p class="event-date-help">农历日期支持 1901—2100 年；此规则仅用于全天、单日、每年重复事件。</p>
+      </template>
+
+      <NCheckbox v-model:checked="value.allDay" :disabled="dateRule.calendar === 'chinese'">全天</NCheckbox>
       <div v-if="!value.allDay" class="event-dates">
         <label class="event-field"><span>开始时间</span><input :value="value.startTime ?? ''" type="time" aria-label="开始时间" @input="value.startTime = ($event.target as HTMLInputElement).value || null"></label>
         <label class="event-field"><span>结束时间</span><input :value="value.endTime ?? ''" type="time" aria-label="结束时间" @input="value.endTime = ($event.target as HTMLInputElement).value || null"></label>
@@ -44,7 +157,7 @@ const types = [
     <section class="event-form-section" aria-labelledby="event-display-heading">
       <h2 id="event-display-heading">重复与展示</h2>
       <div class="event-checkboxes">
-        <NCheckbox :checked="value.recurrence === 'yearly'" @update:checked="value.recurrence = $event ? 'yearly' : 'none'">每年重复</NCheckbox>
+        <NCheckbox :checked="value.recurrence === 'yearly'" :disabled="dateRule.calendar === 'chinese'" @update:checked="value.recurrence = $event ? 'yearly' : 'none'">每年重复</NCheckbox>
         <NCheckbox v-model:checked="value.showCountdown">显示倒数日</NCheckbox>
         <NCheckbox v-model:checked="value.isPrimary">优先显示此事件</NCheckbox>
       </div>
@@ -75,6 +188,16 @@ const types = [
 .event-field small { margin-inline-start: 4px; font-size: inherit; }
 .event-dates { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
 .event-field input { box-sizing: border-box; width: 100%; min-width: 0; min-height: 36px; padding: 6px 8px; background: transparent; color: inherit; border: 1px solid var(--border, #8886); border-radius: 6px; font: inherit; }
+.event-field select { box-sizing: border-box; width: 100%; min-width: 0; min-height: 36px; padding: 6px 8px; background: var(--bg-soft, var(--bg, #fff)); color: inherit; border: 1px solid var(--border, #8886); border-radius: 6px; font: inherit; }
+:global(:root[data-theme='dark']) .event-field select { color-scheme: dark; }
+:global(:root[data-theme='light']) .event-field select { color-scheme: light; }
+.event-date-calendar-toggle { display: inline-flex; align-self: flex-start; padding: 3px; border: 1px solid var(--border, #8886); border-radius: 8px; gap: 3px; }
+.event-date-calendar-toggle button { min-height: 34px; padding: 5px 12px; border: 0; border-radius: 6px; background: transparent; color: var(--text-muted, #6b7280); font: inherit; cursor: pointer; }
+.event-date-calendar-toggle button[aria-pressed="true"] { background: color-mix(in srgb, var(--accent, #6366f1) 12%, transparent); color: var(--accent, #6366f1); }
+.event-date-calendar-toggle button:disabled { opacity: .45; cursor: not-allowed; }
+.event-date-calendar-toggle button:focus-visible { outline: 2px solid var(--accent, #6366f1); outline-offset: 1px; }
+.event-date-help,.event-date-preview,.event-date-error { margin: -4px 0 0; color: var(--text-muted, #6b7280); font-size: 13px; line-height: 1.5; }
+.event-date-error { color: var(--danger, #dc2626); }
 .event-checkboxes { display: flex; flex-direction: column; align-items: flex-start; gap: 12px; }
 @media (max-width: 390px) { .event-dates { gap: 8px; } }
 </style>

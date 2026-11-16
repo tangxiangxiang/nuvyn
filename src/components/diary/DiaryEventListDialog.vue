@@ -2,6 +2,7 @@
 import { computed } from 'vue'
 import { NButton, NEmpty, NSpin } from 'naive-ui'
 import { dayDistance, nextOccurrence, type DiaryEvent } from '../../../shared/diaryLife'
+import { formatLunarRule } from '../../../shared/lunarCalendar'
 import { eventEmojiSource } from '../../features/diary/eventEmoji'
 
 const props = withDefaults(defineProps<{
@@ -31,6 +32,7 @@ const typeLabels: Record<DiaryEvent['type'], string> = {
 }
 
 function formatDate(event: DiaryEvent): string {
+  if (event.dateRule?.calendar === 'chinese') return formatLunarRule(event.dateRule)
   if (event.recurrence === 'yearly') {
     const [, month, day] = event.startDate.split('-')
     return `${Number(month)} 月 ${Number(day)} 日`
@@ -41,6 +43,7 @@ function formatDate(event: DiaryEvent): string {
 }
 
 function secondaryLabel(event: DiaryEvent): string {
+  if (event.dateRule?.calendar === 'chinese') return `${formatLunarRule(event.dateRule)} · 每年`
   if (event.recurrence === 'yearly') return `每年重复 · ${formatDate(event)}`
   return `${formatDate(event)} · ${typeLabels[event.type]}`
 }

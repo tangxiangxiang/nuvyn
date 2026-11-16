@@ -1,6 +1,7 @@
 import { Temporal } from '@js-temporal/polyfill'
 import { isMoodId, isDiaryCustomMoodId } from './diaryMood.js'
 import { MAX_DIARY_DAY_ATTACHMENTS } from './diaryAttachments.js'
+import { lunarOccurrenceInYear, MAX_LUNAR_SOLAR_DATE, MIN_LUNAR_SOLAR_DATE, nextLunarOccurrence, solarToLunar, type EventDateRule } from './lunarCalendar.js'
 
 export interface DiaryImageGroup { entryId: string | null; attachmentIds: string[] }
 export interface DayFields {
@@ -30,6 +31,8 @@ export interface EventFields {
   startTime: string | null
   endTime: string | null
   allDay: boolean
+  /** Missing on historical encrypted records means the original Gregorian calendar. */
+  dateRule?: EventDateRule
   recurrence: 'none' | 'yearly'
   showCountdown: boolean
   isPrimary: boolean
@@ -117,7 +120,9 @@ export function parseDay(value: unknown): DayFields | null {
 }
 export function parseEvent(value: unknown): EventFields | null {
   if (!value || typeof value !== 'object') return null
-  const v = value as EventFields
+  const v = value as EventFields & { dateRule?: unknown }
+  const dateRule = parseEventDateRule(v.dateRule)
+  if (!dateRule) return null
   if (typeof v.title !== 'string' || !v.title.trim() || v.title.length > 160
     || typeof v.description !== 'string' || v.description.length > 4000
     || typeof v.emoji !== 'string' || !v.emoji || v.emoji.length > 100
@@ -132,33 +137,63 @@ export function parseEvent(value: unknown): EventFields | null {
   if (!time(v.startTime) || !time(v.endTime)) return null
   if (!v.allDay && v.endTime !== null && v.startTime === null) return null
   if (!v.allDay && v.startDate === v.endDate && v.startTime && v.endTime && v.endTime <= v.startTime) return null
+  if (dateRule.calendar === 'chinese' && (v.recurrence !== 'yearly' || !v.allDay
+    || v.startDate !== v.endDate || v.startTime !== null || v.endTime !== null
+    || v.startDate < MIN_LUNAR_SOLAR_DATE || v.startDate > MAX_LUNAR_SOLAR_DATE || !solarToLunar(v.startDate))) return null
   return { title: v.title.trim(), description: v.description.trim(), emoji: v.emoji, type: v.type,
     startDate: v.startDate, endDate: v.endDate, startTime: v.allDay ? null : v.startTime,
-    endTime: v.allDay ? null : v.endTime, allDay: v.allDay, recurrence: v.recurrence,
+    endTime: v.allDay ? null : v.endTime, allDay: v.allDay, dateRule, recurrence: v.recurrence,
     showCountdown: v.showCountdown, isPrimary: v.isPrimary }
+}
+
+function parseEventDateRule(value: unknown): EventDateRule | null {
+  if (value === undefined) return { calendar: 'gregory' }
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null
+  const rule = value as Record<string, unknown>
+  if (rule.calendar === 'gregory') return { calendar: 'gregory' }
+  if (rule.calendar !== 'chinese'
+    || !Number.isInteger(rule.lunarMonth) || (rule.lunarMonth as number) < 1 || (rule.lunarMonth as number) > 12
+    || !Number.isInteger(rule.lunarDay) || (rule.lunarDay as number) < 1 || (rule.lunarDay as number) > 30
+    || typeof rule.isLeapMonth !== 'boolean'
+    || !['regular-month', 'leap-only'].includes(rule.leapMonthPolicy as string)
+    || !['last-day', 'skip'].includes(rule.shortMonthPolicy as string)) return null
+  return {
+    calendar: 'chinese',
+    lunarMonth: rule.lunarMonth as number,
+    lunarDay: rule.lunarDay as number,
+    isLeapMonth: rule.isLeapMonth,
+    leapMonthPolicy: rule.leapMonthPolicy as 'regular-month' | 'leap-only',
+    shortMonthPolicy: rule.shortMonthPolicy as 'last-day' | 'skip',
+  }
 }
 // Annual Feb 29 occurrences fall on Feb 28 in non-leap years. Durations use
 // natural days, so DST changes never shorten or lengthen an occurrence.
-export function occurrenceInYear(event: EventFields, year: number): string {
+export function occurrenceInYear(event: EventFields, year: number): string | null {
+  if (event.dateRule?.calendar === 'chinese') return lunarOccurrenceInYear(event.dateRule, year)
   return Temporal.PlainDate.from(event.startDate).with({ year }, { overflow: 'constrain' }).toString()
 }
 export function occursOn(event: EventFields, date: string): boolean {
   if (date < event.startDate) return false
   if (event.recurrence === 'none') return date <= event.endDate && date >= event.startDate
+  if (event.dateRule?.calendar === 'chinese') return nextOccurrence(event, date) === date
   const year = Temporal.PlainDate.from(date).year
   const duration = dayDistance(event.startDate, event.endDate)
   return [year - 1, year].some((y) => {
     const start = occurrenceInYear(event, y)
+    if (!start) return false
     return start >= event.startDate && start <= date && date <= addDays(start, duration)
   })
 }
 export function nextOccurrence(event: EventFields, today: string): string | null {
   if (event.recurrence === 'none') return event.startDate >= today ? event.startDate : null
+  if (event.dateRule?.calendar === 'chinese') {
+    return nextLunarOccurrence(event.dateRule, today < event.startDate ? event.startDate : today)
+  }
   let year = Math.max(Temporal.PlainDate.from(today).year, Temporal.PlainDate.from(event.startDate).year)
-  let next = occurrenceInYear(event, year)
+  let next = occurrenceInYear(event, year)!
   if (next < today) {
     if (year >= 9999) return null
-    next = occurrenceInYear(event, ++year)
+    next = occurrenceInYear(event, ++year)!
   }
   return next
 }

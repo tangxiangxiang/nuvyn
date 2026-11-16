@@ -20,12 +20,13 @@ const event: EventFields = {
   isPrimary: false,
 }
 
-function mountEventForm() {
-  const fields = reactive({ ...event })
+function mountEventForm(initialFields: EventFields = event, today = '2026-11-16') {
+  const fields = reactive({ ...initialFields })
   const Host = defineComponent({
     setup() {
       return () => h(DiaryEventForm, {
         modelValue: fields,
+        today,
         'onUpdate:modelValue': (value: EventFields) => Object.assign(fields, value),
       })
     },
@@ -61,6 +62,47 @@ describe('DiaryEventForm', () => {
     await wrapper.findAll('.n-checkbox')[1]!.trigger('click')
     expect(fields.recurrence).toBe('yearly')
     await nextTick()
+    wrapper.unmount()
+  })
+
+  it('converts a supported annual Gregorian date to a lunar rule and back without changing other fields', async () => {
+    const { wrapper, fields } = mountEventForm({
+      ...event,
+      startDate: '2026-07-03',
+      endDate: '2026-07-03',
+      recurrence: 'yearly',
+    })
+    await wrapper.get('.event-date-calendar-toggle button[aria-pressed="false"]:not(:disabled)').trigger('click')
+    await nextTick()
+
+    expect(fields.dateRule).toEqual({
+      calendar: 'chinese',
+      lunarMonth: 5,
+      lunarDay: 19,
+      isLeapMonth: false,
+      leapMonthPolicy: 'regular-month',
+      shortMonthPolicy: 'last-day',
+    })
+    expect(fields.startDate).toBe('2026-07-03')
+    expect(wrapper.text()).toContain('下一次：2027年6月23日（公历）')
+
+    await wrapper.get('select[aria-label="农历日期"]').setValue('20')
+    expect(fields.dateRule).toMatchObject({ calendar: 'chinese', lunarDay: 20 })
+    await wrapper.get('.event-date-calendar-toggle button[aria-pressed="false"]').trigger('click')
+    await nextTick()
+    expect(fields.dateRule).toEqual({ calendar: 'gregory' })
+    expect(fields.startDate).toBe('2026-07-04')
+    expect(fields.endDate).toBe('2026-07-04')
+    expect(fields.title).toBe(event.title)
+    expect(fields.description).toBe(event.description)
+    expect(fields.showCountdown).toBe(event.showCountdown)
+    wrapper.unmount()
+  })
+
+  it('keeps lunar selection unavailable for event combinations the recurrence engine does not support', () => {
+    const { wrapper } = mountEventForm()
+    expect(wrapper.get('.event-date-calendar-toggle button[aria-pressed="false"]:disabled').text()).toBe('农历')
+    expect(wrapper.text()).toContain('农历重复仅支持全天、单日且每年重复的事件。')
     wrapper.unmount()
   })
 })

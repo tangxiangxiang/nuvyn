@@ -51,6 +51,7 @@
     "hono": "^4.12.23",
     "html2pdf.js": "^0.14.0",
     "katex": "^0.16.47",
+    "lunar-typescript": "1.8.7",
     "markdown-it": "^14.1.0",
     "markdown-it-anchor": "^9.2.0",
     "markdown-it-deflist": "^3.0.1",

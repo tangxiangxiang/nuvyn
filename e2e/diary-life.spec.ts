@@ -417,6 +417,99 @@ test('Diary NavBar icon controls share the standard size across viewport widths'
   }
 })
 
+test('lunar Events preserve their rule across details, countdowns, editing and calendar dates', async ({ page }, testInfo) => {
+  await page.clock.setFixedTime(new Date('2026-11-16T12:00:00+08:00'))
+  await page.setViewportSize({ width: 1280, height: 900 })
+  await page.goto('/diary')
+  await unlockDiary(page)
+  if (await page.locator('html').getAttribute('data-theme') !== 'light') {
+    await page.locator('.theme-toggle').click()
+  }
+  await page.getByRole('button', { name: '切换到人生事件' }).click()
+  const calendar = page.locator('.diary-life-calendar')
+  const startCell = calendar.locator('[data-date="2026-11-16"]')
+  await startCell.click()
+  await page.getByRole('button', { name: '新增事件', exact: true }).click()
+
+  const title = `农历生日 ${testInfo.repeatEachIndex + 1}`
+  await page.getByRole('textbox', { name: '事件标题', exact: true }).fill(title)
+  await page.getByRole('checkbox', { name: '每年重复' }).click()
+  await page.getByRole('button', { name: '农历', exact: true }).click()
+  await page.getByLabel('农历月份').selectOption('5')
+  await page.getByLabel('农历日期').selectOption('19')
+  await page.getByRole('checkbox', { name: '显示倒数日' }).click()
+
+  for (const width of [390, 430, 768, 1280]) {
+    await page.setViewportSize({ width, height: width < 600 ? 844 : 900 })
+    await expect(page.getByLabel('农历月份')).toBeVisible()
+    const modal = page.locator('.diary-life-dialog')
+    const bounds = await modal.boundingBox()
+    expect(bounds).not.toBeNull()
+    expect(bounds!.x).toBeGreaterThanOrEqual(0)
+    expect(bounds!.x + bounds!.width).toBeLessThanOrEqual(width + 1)
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true)
+  }
+  const lunarMonth = page.getByLabel('农历月份')
+  await expect(lunarMonth).toHaveCSS('color-scheme', 'light')
+  const createResponsePromise = page.waitForResponse(response => response.request().method() === 'PUT'
+    && new URL(response.url()).pathname.startsWith('/api/diary/life/events/'))
+  await page.getByRole('button', { name: '保存', exact: true }).click()
+  const createdEvent = await (await createResponsePromise).json() as { event: { dateRule?: { calendar: string; lunarMonth: number; lunarDay: number } } }
+  expect(createdEvent.event.dateRule).toMatchObject({ calendar: 'chinese', lunarMonth: 5, lunarDay: 19 })
+
+  const detail = page.getByTestId('diary-event-detail')
+  await expect(detail).toBeVisible()
+  await expect(detail.getByText('农历五月十九', { exact: true })).toBeVisible()
+  await expect(detail.getByText('2027年6月23日（公历）', { exact: false })).toBeVisible()
+  const detailCountdown = await detail.locator('.diary-event-detail-countdown strong').innerText()
+  expect(detailCountdown).toMatch(/^\d+$/)
+
+  await page.getByRole('button', { name: '关闭事件详情' }).click()
+  await page.getByRole('button', { name: '关闭当天事件' }).click()
+  await page.getByTestId('diary-event-list-toggle').click()
+  const eventList = page.locator('.diary-event-list-dialog')
+  const listedEvent = eventList.getByRole('button').filter({ hasText: title })
+  await expect(listedEvent.locator('.diary-event-list-meta')).toHaveText('农历五月十九 · 每年')
+  await expect(listedEvent.locator('.diary-event-list-countdown strong')).toHaveText(detailCountdown)
+  await listedEvent.click()
+  await expect(detail.getByText('农历五月十九', { exact: true })).toBeVisible()
+
+  await page.getByRole('button', { name: '编辑', exact: true }).click()
+  await page.getByLabel('农历日期').selectOption('20')
+  await page.getByRole('button', { name: '取消', exact: true }).click()
+  const discard = page.getByRole('dialog', { name: '放弃未保存的修改？' })
+  await discard.getByRole('button', { name: /^(OK|Confirm|确认|确定)$/ }).click()
+  await expect(detail.getByText('农历五月十九', { exact: true })).toBeVisible()
+  await expect(detail.getByText('2027年6月23日（公历）', { exact: false })).toBeVisible()
+
+  await page.getByRole('button', { name: '编辑', exact: true }).click()
+  await page.getByLabel('农历日期').selectOption('20')
+  await page.getByRole('button', { name: '保存', exact: true }).click()
+  await expect(detail.getByText('农历五月二十', { exact: true })).toBeVisible()
+  await expect(detail.getByText('2027年6月24日（公历）', { exact: false })).toBeVisible()
+
+  await page.getByRole('button', { name: '关闭事件详情' }).click()
+  await expect(eventList).toBeVisible()
+  await page.getByRole('button', { name: '关闭事件列表' }).click()
+  await page.locator('.theme-toggle').click()
+  await expect(page.locator('html')).toHaveAttribute('data-theme', 'dark')
+  const nextMonth = calendar.locator('.n-calendar-header').getByRole('button').last()
+  for (let month = 0; month < 7; month++) await nextMonth.click()
+  await expect(calendar.locator('.life-month')).toHaveText('2027-06')
+  await expect(calendar.locator('[data-date="2027-06-23"] .life-marker')).toHaveCount(0)
+  const occurrenceCell = calendar.locator('[data-date="2027-06-24"]')
+  await expect(occurrenceCell.locator('.life-marker')).toBeVisible()
+  await occurrenceCell.click()
+  await page.getByRole('button', { name: title, exact: true }).click()
+  await page.getByRole('button', { name: '编辑', exact: true }).click()
+  await expect(page.getByLabel('农历月份')).toHaveCSS('color-scheme', 'dark')
+  await page.getByRole('button', { name: '取消', exact: true }).click()
+  await page.getByRole('button', { name: '更多事件操作' }).click()
+  await page.getByRole('menuitem', { name: '删除事件' }).click()
+  await page.getByRole('dialog', { name: '删除这条事件？' }).getByRole('button', { name: /^(OK|Confirm|确认|确定)$/ }).click()
+  await expect(occurrenceCell.locator('.life-marker')).toHaveCount(0)
+})
+
 test('text-only Diary days have a calendar marker and preserve bullet editing interactions', async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 })
   await page.goto('/diary')

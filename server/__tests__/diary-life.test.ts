@@ -263,6 +263,37 @@ describe('Diary database API', () => {
     expect((await request('PUT', `/events/${first}`, { ...event, title: '更新', expectedVersion: 1 })).status).toBe(200)
     expect((await request('DELETE', `/events/${first}`, { expectedVersion: 1 })).status).toBe(409)
   })
+  it('stores lunar rules through the encrypted event API and filters their real Gregorian occurrences', async () => {
+    const id = randomUUID()
+    const lunarEvent = {
+      ...event,
+      title: '农历生日',
+      startDate: '2026-11-16',
+      endDate: '2026-11-16',
+      dateRule: {
+        calendar: 'chinese',
+        lunarMonth: 5,
+        lunarDay: 19,
+        isLeapMonth: false,
+        leapMonthPolicy: 'regular-month',
+        shortMonthPolicy: 'last-day',
+      },
+    }
+    expect((await request('PUT', `/events/${id}`, lunarEvent)).status).toBe(200)
+    const detail = await request('GET', `/events/${id}`)
+    expect((await detail.json()).event).toMatchObject({
+      title: '农历生日',
+      startDate: '2026-11-16',
+      dateRule: lunarEvent.dateRule,
+    })
+
+    const occurrence = await request('GET', '/events?start=2027-06-23&end=2027-06-23&date=2027-06-23')
+    expect((await occurrence.json()).items.map((item: { id: string }) => item.id)).toContain(id)
+    const followingDay = await request('GET', '/events?start=2027-06-24&end=2027-06-24&date=2027-06-24')
+    expect((await followingDay.json()).items.map((item: { id: string }) => item.id)).not.toContain(id)
+    const countdowns = await request('GET', '/countdowns?today=2026-11-16')
+    expect((await countdowns.json()).items.map((item: { id: string }) => item.id)).toContain(id)
+  })
   it('authenticates encryption identity and tampering', () => {
     const crypto = diaryLifeCrypto(Buffer.alloc(32, 9), 'vault', () => {})
     const bytes = crypto.encrypt(event, 'owner:1')

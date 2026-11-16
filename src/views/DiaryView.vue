@@ -24,6 +24,7 @@ import DiaryEventDetail from '../components/diary/DiaryEventDetail.vue'
 import DiaryEventForm from '../components/diary/DiaryEventForm.vue'
 import DiaryEventListDialog from '../components/diary/DiaryEventListDialog.vue'
 import { eventEmojiSource } from '../features/diary/eventEmoji'
+import { formatLunarRule } from '../../shared/lunarCalendar'
 import { clearDiarySearchOpen, consumeDiarySearchOpen, diarySearchOpenIntent, type DiarySearchOpenIntent } from '../composables/diary/useDiarySearchNavigation'
 
 const access = useDiaryAccessSession()
@@ -660,7 +661,7 @@ function createEvent() {
   eventEditorReturnDate.value = date
   editing.value = null
   newId.value = createDiaryEventId()
-  eventDraft.value = { title: '', description: '', emoji: '🎯', type: 'milestone', startDate: date, endDate: date, startTime: null, endTime: null, allDay: true, recurrence: 'none', showCountdown: false, isPrimary: false }
+  eventDraft.value = { title: '', description: '', emoji: '🎯', type: 'milestone', startDate: date, endDate: date, startTime: null, endTime: null, allDay: true, dateRule: { calendar: 'gregory' }, recurrence: 'none', showCountdown: false, isPrimary: false }
   initial.value = JSON.stringify(eventDraft.value)
 }
 
@@ -932,7 +933,7 @@ onBeforeUnmount(() => {
         />
         <div v-else-if="eventDraft" class="diary-event-form-content">
           <p v-if="formError" class="diary-event-form-error" role="alert">{{ formError }}</p>
-          <DiaryEventForm v-model="eventDraft" />
+          <DiaryEventForm v-model="eventDraft" :today="today" />
         </div>
         <div v-else class="day-events">
           <button v-for="event in selectedEvents" :key="event.id" type="button" :aria-label="event.title" @click="selectEventFromDay(event)">
@@ -940,7 +941,7 @@ onBeforeUnmount(() => {
               <img v-if="eventEmojiSource(event.emoji)" :src="eventEmojiSource(event.emoji)" class="event-emoji" alt="">
               <template v-else>{{ event.emoji }} </template>{{ event.title }}
             </strong>
-            <span>{{ event.startDate === event.endDate ? event.startDate : `${event.startDate} – ${event.endDate}` }} · {{ event.type === 'schedule' ? '重要日程' : event.type === 'anniversary' ? '纪念日' : '人生时刻' }}</span>
+            <span>{{ event.dateRule?.calendar === 'chinese' ? formatLunarRule(event.dateRule) : event.startDate === event.endDate ? event.startDate : `${event.startDate} – ${event.endDate}` }} · {{ event.type === 'schedule' ? '重要日程' : event.type === 'anniversary' ? '纪念日' : '人生时刻' }}</span>
           </button>
           <p v-if="!selectedEvents.length">还没有事件</p>
           <NButton class="diary-event-create" @click="createEvent">新增事件</NButton>
