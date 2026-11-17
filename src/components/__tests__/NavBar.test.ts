@@ -286,7 +286,7 @@ describe('NavBar — scope chips', () => {
     })
     const toggle = wrapper.get('[data-testid="diary-view-toggle"]')
     expect(wrapper.findComponent(MoodSmile).exists()).toBe(true)
-    expect(toggle.attributes('aria-label')).toBe('切换到人生事件')
+    expect(toggle.attributes('aria-label')).toBe('切换到近期事项')
     expect(wrapper.find('[data-testid="diary-event-list-toggle"]').exists()).toBe(true)
     await toggle.trigger('click')
     expect(diaryViewToggleCommand).toHaveBeenCalledOnce()

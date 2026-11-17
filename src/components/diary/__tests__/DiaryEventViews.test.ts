@@ -33,7 +33,7 @@ const naiveStubs = {
 }
 
 describe('DiaryEventListDialog content', () => {
-  it('shows concise event details, countdowns, and keeps API order', () => {
+  it('shows concise event details, countdowns, and keeps API order', async () => {
     const first = makeEvent({ id: 'first', title: '较早显示', isPrimary: false })
     const second = makeEvent({ id: 'second', title: '优先事件', isPrimary: true, startDate: '2026-11-18', endDate: '2026-11-18', recurrence: 'none', type: 'milestone' })
     const wrapper = mount(DiaryEventListDialog, {
@@ -43,12 +43,13 @@ describe('DiaryEventListDialog content', () => {
 
     const rows = wrapper.findAll('.diary-event-list-item')
     expect(rows.map(row => row.attributes('aria-label'))).toEqual(['较早显示', '优先事件'])
-    expect(rows[0]!.text()).toContain('每年重复')
     expect(rows[0]!.text()).toContain('6 月 19 日')
     expect(rows[0]!.text()).toContain('较早显示')
     expect(rows[0]!.text()).not.toContain('周年')
     expect(rows[1]!.text()).toContain('3')
     expect(rows[1]!.text()).toContain('天后')
+    await rows[0]!.trigger('click')
+    expect(wrapper.emitted('select')).toEqual([[first]])
     wrapper.unmount()
   })
 

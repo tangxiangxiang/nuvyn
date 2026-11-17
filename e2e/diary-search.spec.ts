@@ -62,7 +62,7 @@ async function searchFor(page: import('@playwright/test').Page, query: string, d
 }
 
 test('Diary private search opens current and cross-year hits in reading mode and reveals the matching entry', async ({ page }) => {
-  await page.clock.setFixedTime(new Date('2024-06-10T12:00:00'))
+  await page.clock.install({ time: new Date('2024-06-10T12:00:00') })
   await page.setViewportSize({ width: 1280, height: 900 })
   await page.goto('/diary')
   await unlockDiary(page)
@@ -74,13 +74,13 @@ test('Diary private search opens current and cross-year hits in reading mode and
   await expect(currentDialog).toContainText('Current month memory: blue teacup')
   await expect(currentDialog.getByTestId('diary-bullet-reader')).toBeVisible()
   await expect(currentDialog.getByTestId('diary-bullet-editor')).toHaveCount(0)
-  await expect(page.locator('.life-month')).toHaveText(currentDate.slice(0, 7))
+  await expect(page.locator('.life-month-label')).toHaveText(currentDate.slice(0, 7))
   await page.getByRole('button', { name: '关闭日记' }).click()
 
   for (const width of [768, 390]) {
     await page.setViewportSize({ width, height: width === 390 ? 844 : 1024 })
     const dialog = await searchFor(page, 'search needle', longDate)
-    await expect(page.locator('.life-month')).toHaveText(longDate.slice(0, 7))
+    await expect(page.locator('.life-month-label')).toHaveText(longDate.slice(0, 7))
     await expect(page.locator(`.diary-life-calendar [data-date="${longDate}"]`)).toHaveAttribute('aria-pressed', 'true')
     await expect(dialog.getByTestId('diary-bullet-editor')).toHaveCount(0)
     const matchingEntry = dialog.locator(`[data-entry-id="${longEntryIds[74]}"]`)
@@ -96,7 +96,7 @@ test('Diary private search opens current and cross-year hits in reading mode and
 })
 
 test('Diary lock clears search results and locked search does not query private text', async ({ page }) => {
-  await page.clock.setFixedTime(new Date('2024-06-10T12:00:00'))
+  await page.clock.install({ time: new Date('2024-06-10T12:00:00') })
   await page.goto('/diary')
   await unlockDiary(page)
   const lockTestDate = '2024-06-09'
@@ -125,7 +125,7 @@ test('Diary lock clears search results and locked search does not query private 
 })
 
 test('Diary search preserves an unsaved draft when navigation is cancelled', async ({ page }) => {
-  await page.clock.setFixedTime(new Date('2024-06-10T12:00:00'))
+  await page.clock.install({ time: new Date('2024-06-10T12:00:00') })
   await page.setViewportSize({ width: 1280, height: 900 })
   await page.goto('/diary')
   await unlockDiary(page)
@@ -160,7 +160,7 @@ test('Diary search preserves an unsaved draft when navigation is cancelled', asy
 })
 
 test('Diary search opens the latest saved version after a result is updated', async ({ page }) => {
-  await page.clock.setFixedTime(new Date('2024-06-10T12:00:00'))
+  await page.clock.install({ time: new Date('2024-06-10T12:00:00') })
   await page.setViewportSize({ width: 1280, height: 900 })
   await page.goto('/diary')
   await unlockDiary(page)
@@ -178,7 +178,7 @@ test('Diary search opens the latest saved version after a result is updated', as
 })
 
 test('Diary search does not open an empty editor when a result is deleted', async ({ page }) => {
-  await page.clock.setFixedTime(new Date('2024-06-10T12:00:00'))
+  await page.clock.install({ time: new Date('2024-06-10T12:00:00') })
   await page.setViewportSize({ width: 1280, height: 900 })
   await page.goto('/diary')
   await unlockDiary(page)

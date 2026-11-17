@@ -4,7 +4,7 @@ import { chooseDiaryAction, chooseDiaryDayAction, openEmptyDiaryDay, saveDiaryDa
 
 test.beforeEach(async ({ page }, testInfo) => {
   // Keep attachment fixtures separate from the Diary life spec, including repeats.
-  await page.clock.setFixedTime(new Date(2024 + testInfo.repeatEachIndex, 2, 10, 12))
+  await page.clock.install({ time: new Date(2024 + testInfo.repeatEachIndex, 2, 10, 12) })
 })
 
 const png = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAAAAAA6fptVAAAACklEQVR4nGNgAAAAAgABSK+kcQAAAABJRU5ErkJggg==', 'base64')

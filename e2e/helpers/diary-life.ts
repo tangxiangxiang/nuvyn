@@ -1,13 +1,53 @@
-import type { Locator, Page } from '@playwright/test'
+import type { Locator, Page, Request, Response } from '@playwright/test'
 import { expect } from '../fixtures/auth'
 
 export async function openEmptyDiaryDay(page: Page, cell: Locator, open = () => cell.click()) {
   const date = await cell.getAttribute('data-date')
-  const [response] = await Promise.all([
-    page.waitForResponse(response => response.request().method() === 'GET'
-      && new URL(response.url()).pathname === `/api/diary/life/days/${date}`),
-    open(),
-  ])
+  if (!date) throw new Error('Cannot open Diary day: target calendar cell has no data-date')
+
+  const path = `/api/diary/life/days/${date}`
+  const observed: string[] = []
+  const matchesDayRequest = (url: string) => {
+    try { return new URL(url).pathname === path } catch { return false }
+  }
+  const onRequest = (request: Request) => {
+    if (matchesDayRequest(request.url())) observed.push(`${request.method()} ${path}`)
+  }
+  const onResponse = (response: Response) => {
+    if (matchesDayRequest(response.url())) observed.push(`response ${response.status()}`)
+  }
+  const onRequestFailed = (request: Request) => {
+    if (matchesDayRequest(request.url())) observed.push(`request failed: ${request.failure()?.errorText ?? 'unknown error'}`)
+  }
+  page.on('request', onRequest)
+  page.on('response', onResponse)
+  page.on('requestfailed', onRequestFailed)
+
+  let response: Response
+  try {
+    const [dayResponse] = await Promise.all([
+      page.waitForResponse(response => response.request().method() === 'GET' && matchesDayRequest(response.url()), { timeout: 10_000 }),
+      open(),
+    ])
+    response = dayResponse
+  } catch (error) {
+    const state = await page.evaluate(date => {
+      const cell = document.querySelector<HTMLElement>(`.diary-life-calendar [data-date="${date}"]`)
+      return {
+        month: document.querySelector('.life-month-label, .life-month')?.textContent?.trim() ?? null,
+        selected: cell?.getAttribute('aria-pressed') ?? null,
+        dayDialog: Boolean(document.querySelector('[data-testid="diary-day-dialog"]')),
+        editor: Boolean(document.querySelector('[data-testid="diary-bullet-editor"]')),
+        viewMode: document.querySelector<HTMLElement>('[data-testid="diary-view-toggle"]')?.getAttribute('aria-label') ?? null,
+      }
+    }, date)
+    throw new Error(`Failed to open Diary day ${date} (${path}); page state: ${JSON.stringify(state)}; matching requests: ${observed.join(', ') || 'none'}; cause: ${(error as Error).message}`)
+  } finally {
+    page.off('request', onRequest)
+    page.off('response', onResponse)
+    page.off('requestfailed', onRequestFailed)
+  }
+
   expect(response.ok(), `read Diary fixture for ${date}`).toBe(true)
   expect(await response.json(), `Diary fixture for ${date} must be empty`).toMatchObject({ day: null, attachments: [] })
   await expect(page.getByTestId('diary-bullet-editor')).toBeVisible()
