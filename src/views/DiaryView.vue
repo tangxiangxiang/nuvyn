@@ -21,6 +21,7 @@ import { NUVYN_BROWSER_STORAGE_KEYS, ownerScopedStorageKey, readStorageKey, writ
 import DiaryLifeCalendar from '../components/diary/DiaryLifeCalendar.vue'
 import DiaryDayDialog from '../components/diary/DiaryDayDialog.vue'
 import DiaryEventForm from '../components/diary/DiaryEventForm.vue'
+import DiaryEventReader from '../components/diary/DiaryEventReader.vue'
 import DiaryEventListDialog from '../components/diary/DiaryEventListDialog.vue'
 import { eventEmojiSource } from '../features/diary/eventEmoji'
 import { clearDiarySearchOpen, consumeDiarySearchOpen, diarySearchOpenIntent, type DiarySearchOpenIntent } from '../composables/diary/useDiarySearchNavigation'
@@ -55,12 +56,15 @@ const draftAttachments = ref<Array<DiaryAttachment & { pending?: boolean; localP
 const dayVersion = ref(0)
 const draft = ref<DayFields>({ moodId: null, entries: [] })
 const dayMode = ref<'read' | 'edit'>('read')
-const eventDraft = ref<EventFields | null>(null)
-const editing = ref<DiaryEvent | null>(null)
-type EventReturnContext = { kind: 'day-list'; date: string }
-const eventEditReturn = ref<EventReturnContext | null>(null)
-const eventEditorReturnDate = ref<string | null>(null)
-const newId = ref('')
+type EventReturnContext =
+  | { kind: 'day-list'; date: string }
+  | { kind: 'recent-list'; scrollTop: number }
+type EventSurface =
+  | { kind: 'day-list'; date: string }
+  | { kind: 'recent-list' }
+  | { kind: 'read'; event: DiaryEvent; occurrenceDate: string; returnTo: EventReturnContext }
+  | { kind: 'edit'; event: DiaryEvent | null; eventId: string; draft: EventFields; initial: string; occurrenceDate: string; returnTo: EventReturnContext }
+const eventSurface = ref<EventSurface | null>(null)
 const initial = ref('')
 const busy = ref(false)
 const loadingDay = ref(false)
@@ -73,7 +77,11 @@ const formError = ref('')
 const today = ref(localToday())
 const serverToday = ref<string | null>(null)
 const canWriteDay = computed(() => selected.value !== null && serverToday.value !== null && selected.value <= serverToday.value)
-const eventListVisible = ref(false)
+const eventListDialog = ref<InstanceType<typeof DiaryEventListDialog> | null>(null)
+const eventListVisible = computed(() => eventSurface.value?.kind === 'recent-list')
+const eventDraft = computed(() => eventSurface.value?.kind === 'edit' ? eventSurface.value.draft : null)
+const editing = computed(() => eventSurface.value?.kind === 'edit' ? eventSurface.value.event : null)
+const eventSurfaceVisible = computed(() => access.isUnlocked.value && eventSurface.value !== null)
 const eventListItems = ref<DiaryEvent[]>([])
 const eventListNext = ref<number | null>(0)
 const eventListLoaded = ref(false)
@@ -81,9 +89,6 @@ const eventListLoading = ref(false)
 const eventListLoadingMore = ref(false)
 const eventListError = ref('')
 const eventDayActions = [{ key: 'create', label: '新增事件' }]
-const eventSurfaceVisible = computed(() => access.isUnlocked.value && (
-  eventListVisible.value || eventDraft.value !== null || (mode.value === 'events' && selected.value !== null)
-))
 
 function stopAttachmentSession() {
   if (attachmentLeaseTimer) clearInterval(attachmentLeaseTimer)
@@ -164,16 +169,19 @@ const attachmentSessionId = ref<string | null>(null)
 const attachmentPreviewUrls = new DiaryAttachmentPreviewUrls()
 let eventListRequest: AbortController | null = null
 let timer: ReturnType<typeof setInterval> | undefined
+let disposed = false
 const dirty = computed(() => {
-  if (eventDraft.value) return JSON.stringify(eventDraft.value) !== initial.value
+  const surface = eventSurface.value
+  if (surface?.kind === 'edit') return JSON.stringify(surface.draft) !== surface.initial
   if (selected.value === null || loadingDay.value || dayReadFailed.value) return false
   if (mode.value !== 'diary' || dayMode.value !== 'edit') return false
   return JSON.stringify({ fields: draft.value, attachments: draftAttachments.value.map(item => item.id) }) !== initial.value
 })
 const storageKey = computed(() => auth.user.value ? ownerScopedStorageKey(NUVYN_BROWSER_STORAGE_KEYS.diaryLifeView, auth.user.value) : null)
-watch(storageKey, key => {
+watch(storageKey, (key, previousKey) => {
+  if (previousKey && key !== previousKey) clearPrivateData()
   mode.value = key && readStorageKey(key) === 'events' ? 'events' : 'diary'
-}, { immediate: true })
+}, { immediate: true, flush: 'sync' })
 watch(mode, value => { if (storageKey.value) writeStorageKey(storageKey.value, value) })
 watch(mode, value => { if (appShell?.diaryViewMode) appShell.diaryViewMode.value = value }, { immediate: true })
 
@@ -197,10 +205,10 @@ const markers = computed(() => {
   }
   return result
 })
-function load(): Promise<void> {
+function load(refresh = false): Promise<void> {
   if (!access.isUnlocked.value) return Promise.resolve()
   const key = `${range.value.start}:${range.value.end}:${today.value}:${access.epoch.value ?? ''}`
-  if (pendingCalendarLoad?.key === key) return pendingCalendarLoad.promise
+  if (!refresh && pendingCalendarLoad?.key === key) return pendingCalendarLoad.promise
   request?.abort()
   const scope = new AbortController()
   request = scope
@@ -233,11 +241,7 @@ function resetForm() {
   attachmentPreviewUrls.clear()
   selected.value = null
   serverToday.value = null
-  eventDraft.value = null
-  editing.value = null
-  eventEditReturn.value = null
-  eventEditorReturnDate.value = null
-  eventListVisible.value = false
+  eventSurface.value = null
   day.value = null
   dayAttachments.value = []
   draftAttachments.value = []
@@ -260,13 +264,14 @@ function clearPrivateData() {
   pendingCalendarLoad = null
   request = null
   eventListRequest?.abort()
+  eventListRequest = null
+  busy.value = false
   clearShellCommands()
   cancelConfirmation?.()
   resetForm()
   days.value = []
   events.value = []
   error.value = ''
-  eventListVisible.value = false
   eventListItems.value = []
   eventListNext.value = 0
   eventListLoaded.value = false
@@ -275,7 +280,7 @@ function clearPrivateData() {
   eventListError.value = ''
 }
 
-async function loadEventList(reset = false) {
+async function loadEventList(reset = false, minimumItems = 0) {
   if (!access.isUnlocked.value || eventListLoading.value || eventListLoadingMore.value) return
   const offset = reset ? 0 : eventListNext.value
   if (offset === null) return
@@ -286,10 +291,16 @@ async function loadEventList(reset = false) {
   else eventListLoadingMore.value = true
   eventListError.value = ''
   try {
-    const result = await diaryLifeApi.eventListPage(offset, scope.signal)
-    if (scope.signal.aborted || eventListRequest !== scope) return
-    eventListItems.value = reset ? result.items : [...eventListItems.value, ...result.items]
-    eventListNext.value = result.next
+    const items: DiaryEvent[] = []
+    let next: number | null = offset
+    do {
+      const result: Awaited<ReturnType<typeof diaryLifeApi.eventListPage>> = await diaryLifeApi.eventListPage(next, scope.signal)
+      if (scope.signal.aborted || eventListRequest !== scope) return
+      items.push(...result.items)
+      next = result.next
+    } while (next !== null && items.length < minimumItems)
+    eventListItems.value = reset ? items : [...eventListItems.value, ...items]
+    eventListNext.value = next
     eventListLoaded.value = true
   } catch {
     if (!scope.signal.aborted && eventListRequest === scope) eventListError.value = '加载失败，请重试。'
@@ -302,12 +313,20 @@ async function loadEventList(reset = false) {
   }
 }
 
+function capturePrivateOperation() {
+  const generation = captureDiarySessionGeneration()
+  const owner = storageKey.value
+  return () => !disposed && isDiarySessionGenerationCurrent(generation) && storageKey.value === owner && access.isUnlocked.value
+}
+
 async function openEventList() {
-  if (!(await canLeave()) || !access.isUnlocked.value) return
+  const isCurrent = capturePrivateOperation()
+  if (!(await canLeave()) || !isCurrent()) return
   await discardPendingAttachments()
+  if (!isCurrent()) return
   resetForm()
   mode.value = 'events'
-  eventListVisible.value = true
+  eventSurface.value = { kind: 'recent-list' }
   if (!eventListLoaded.value) void loadEventList(true)
 }
 
@@ -336,54 +355,98 @@ function clearShellCommands() {
 const diaryViewToggleCommand = () => { void toggle() }
 const diaryEventListCommand = () => { void openEventList() }
 
-function selectEventFromList(event: DiaryEvent) {
-  const date = nextOccurrence(event, today.value) ?? event.startDate
-  mode.value = 'events'
-  selected.value = null
-  eventListVisible.value = false
+function syncCalendarToDate(date: string) {
   const targetMonth = `${date.slice(0, 7)}-01`
-  if (month.value !== targetMonth) {
-    month.value = targetMonth
-    calendarRevision.value += 1
-  }
+  if (month.value === targetMonth) return
+  month.value = targetMonth
+  calendarRevision.value += 1
+}
+
+function eventNavigationDate(event: DiaryEvent): string {
+  if (occursOn(event, today.value)) return today.value
+  return nextOccurrence(event, today.value) ?? event.startDate
+}
+
+function selectEventFromList(event: DiaryEvent, scrollTop: number) {
+  if (eventSurface.value?.kind !== 'recent-list') return
+  const occurrenceDate = eventNavigationDate(event)
+  selected.value = null
+  syncCalendarToDate(occurrenceDate)
+  startEventRead(event, occurrenceDate, { kind: 'recent-list', scrollTop })
 }
 
 function selectEventFromDay(event: DiaryEvent) {
-  const date = selected.value
-  if (!date) return
-  startEventEdit(event, { kind: 'day-list', date })
+  const surface = eventSurface.value
+  if (surface?.kind !== 'day-list') return
+  startEventRead(event, surface.date, { kind: 'day-list', date: surface.date })
 }
 
-function restoreEventEditContext() {
-  const context = eventEditReturn.value
-  const returnDate = eventEditorReturnDate.value
-  eventEditReturn.value = null
-  eventDraft.value = null
-  editing.value = null
-  eventEditorReturnDate.value = null
-  initial.value = ''
+function restoreEventContext(context: EventReturnContext) {
   formError.value = ''
-
-  if (context?.kind === 'day-list') {
+  if (context.kind === 'day-list') {
     selected.value = context.date
-    eventListVisible.value = false
-  } else if (returnDate) {
-    selected.value = returnDate
-    eventListVisible.value = false
+    eventSurface.value = { kind: 'day-list', date: context.date }
   } else {
     selected.value = null
-    eventListVisible.value = false
+    eventSurface.value = { kind: 'recent-list' }
+    const isCurrent = capturePrivateOperation()
+    void nextTick(() => {
+      if (isCurrent() && eventSurface.value?.kind === 'recent-list') {
+        eventListDialog.value?.restoreScroll(context.scrollTop)
+      }
+    })
   }
+}
+
+function startEventRead(event: DiaryEvent, occurrenceDate: string, returnTo: EventReturnContext) {
+  if (busy.value || eventSurface.value?.kind === 'edit' || !access.isUnlocked.value) return
+  eventSurface.value = { kind: 'read', event, occurrenceDate, returnTo }
+}
+
+function startEventEditFromReader() {
+  const surface = eventSurface.value
+  if (surface?.kind !== 'read' || busy.value || !access.isUnlocked.value) return
+  const draft: EventFields = {
+    ...surface.event,
+    ...(surface.event.dateRule ? { dateRule: { ...surface.event.dateRule } } : {}),
+    ...(surface.event.birthday ? { birthday: { ...surface.event.birthday } } : {}),
+  }
+  eventSurface.value = {
+    kind: 'edit',
+    event: surface.event,
+    eventId: surface.event.id,
+    draft,
+    initial: JSON.stringify(draft),
+    occurrenceDate: surface.occurrenceDate,
+    returnTo: surface.returnTo,
+  }
+  formError.value = ''
+}
+
+async function refreshEventData(state: Extract<EventSurface, { kind: 'edit' }>, isCurrent: () => boolean) {
+  const refreshList = state.returnTo.kind === 'recent-list'
+  if (!refreshList) invalidateEventList()
+  await Promise.all([
+    load(true),
+    refreshList ? loadEventList(true, eventListItems.value.length) : undefined,
+  ])
+  return isCurrent() && eventSurface.value === state
 }
 
 async function closeEventSurface() {
   if (busy.value || attachmentBusy.value) return
-  if (eventDraft.value) {
+  const surface = eventSurface.value
+  if (!surface) return
+  if (surface.kind === 'edit') {
     await cancelEventEdit()
     return
   }
-  if (eventListVisible.value) {
-    eventListVisible.value = false
+  if (surface.kind === 'read') {
+    restoreEventContext(surface.returnTo)
+    return
+  }
+  if (surface.kind === 'recent-list') {
+    eventSurface.value = null
     return
   }
   if (await canLeave()) {
@@ -393,12 +456,12 @@ async function closeEventSurface() {
 }
 
 const stopTeardown = subscribeDiaryTeardown(clearPrivateData)
-watch([month, access.isUnlocked, access.epoch], () => {
-  if (access.isUnlocked.value) void load()
+watch([month, access.isUnlocked, access.epoch, storageKey], () => {
+  if (access.isUnlocked.value && storageKey.value) void load()
   else clearPrivateData()
 }, { immediate: true })
-watch(access.isUnlocked, unlocked => {
-  if (unlocked) registerShellCommands()
+watch([access.isUnlocked, storageKey], ([unlocked, owner]) => {
+  if (unlocked && owner) registerShellCommands()
   else clearShellCommands()
 }, { immediate: true })
 watch(eventListVisible, visible => {
@@ -552,12 +615,16 @@ function moveDayImage(id: string, entryId: string | null) {
   draft.value = { ...draft.value, imageGroups: assignImage(draft.value.imageGroups, id, validEntryId) }
 }
 async function open(date: string, options: { skipLeaveCheck?: boolean; searchResult?: boolean } = {}) {
-  if ((!options.skipLeaveCheck && !(await canLeave())) || !access.isUnlocked.value) return false
+  const isCurrent = capturePrivateOperation()
+  if ((!options.skipLeaveCheck && !(await canLeave())) || !isCurrent()) return false
   await discardPendingAttachments()
+  if (!isCurrent()) return false
   detailRequest?.abort()
   const scope = new AbortController(); detailRequest = scope
-  selected.value = date; eventDraft.value = null; editing.value = null; formError.value = ''; initial.value = 'null'
-  eventEditReturn.value = null; eventEditorReturnDate.value = null; eventListVisible.value = false
+  selected.value = date
+  eventSurface.value = mode.value === 'events' ? { kind: 'day-list', date } : null
+  formError.value = ''
+  initial.value = 'null'
   serverToday.value = null
   day.value = null; dayAttachments.value = []; draftAttachments.value = []; draft.value = { moodId: null, entries: [] }; dayMode.value = 'read'; dayReadFailed.value = false
   if (mode.value !== 'diary') return true
@@ -640,53 +707,63 @@ async function toggle() {
   mode.value = mode.value === 'diary' ? 'events' : 'diary'
 }
 function createEvent() {
-  const date = selected.value
-  if (!date) return
-  eventEditReturn.value = null
-  eventEditorReturnDate.value = date
-  editing.value = null
-  newId.value = createDiaryEventId()
-  eventDraft.value = { title: '', description: '', emoji: '🎯', type: 'milestone', startDate: date, endDate: date, startTime: null, endTime: null, allDay: true, dateRule: { calendar: 'gregory' }, recurrence: 'none', showCountdown: false, isPrimary: false }
-  initial.value = JSON.stringify(eventDraft.value)
+  const surface = eventSurface.value
+  const date = surface?.kind === 'day-list' ? surface.date : selected.value
+  if (!date || surface?.kind !== 'day-list' || !access.isUnlocked.value) return
+  const type = date >= today.value ? 'schedule' : 'milestone'
+  const draft: EventFields = { title: '', description: '', emoji: type === 'schedule' ? '💼' : '🎯', type, startDate: date, endDate: date, startTime: null, endTime: null, allDay: true, dateRule: { calendar: 'gregory' }, recurrence: 'none', showCountdown: false, isPrimary: false }
+  eventSurface.value = {
+    kind: 'edit',
+    event: null,
+    eventId: createDiaryEventId(),
+    draft,
+    initial: JSON.stringify(draft),
+    occurrenceDate: date,
+    returnTo: { kind: 'day-list', date },
+  }
 }
 
 function selectEventDayAction(action: string) {
   if (action === 'create' && !busy.value && !attachmentBusy.value) createEvent()
 }
 
-function startEventEdit(event: DiaryEvent, returnContext: EventReturnContext) {
-  if (busy.value) return
-  eventEditReturn.value = returnContext
-  editing.value = event
-  eventEditorReturnDate.value = null
-  newId.value = event.id
-  eventDraft.value = { ...event }
-  initial.value = JSON.stringify(eventDraft.value)
-  formError.value = ''
+function updateEventDraft(next: EventFields) {
+  const surface = eventSurface.value
+  if (surface?.kind === 'edit' && access.isUnlocked.value && !busy.value) {
+    eventSurface.value = { ...surface, draft: next }
+  }
 }
 
 async function cancelEventEdit() {
-  if (!eventDraft.value || busy.value) return
-  if (dirty.value && !await confirm('放弃未保存的修改？')) return
-  restoreEventEditContext()
+  const surface = eventSurface.value
+  if (surface?.kind !== 'edit' || busy.value) return
+  if (JSON.stringify(surface.draft) !== surface.initial && !await confirm('放弃未保存的修改？')) return
+  if (eventSurface.value !== surface || !access.isUnlocked.value) return
+  if (surface.event) {
+    eventSurface.value = { kind: 'read', event: surface.event, occurrenceDate: surface.occurrenceDate, returnTo: surface.returnTo }
+    formError.value = ''
+  } else {
+    restoreEventContext(surface.returnTo)
+  }
 }
 async function save() {
-  if (busy.value || attachmentBusy.value || loadingDay.value || dayReadFailed.value || !selected.value) return
-  if (!eventDraft.value && !canWriteDay.value) return
-  const generation = captureDiarySessionGeneration()
+  if (busy.value || attachmentBusy.value || !access.isUnlocked.value) return
+  const isCurrent = capturePrivateOperation()
   const date = selected.value
+  const editor = eventSurface.value?.kind === 'edit' ? eventSurface.value : null
   busy.value = true; formError.value = ''
   try {
-    if (!eventDraft.value) {
+    if (!editor) {
+      if (!date || loadingDay.value || dayReadFailed.value || !canWriteDay.value) return
       const fields = parseDay(draft.value)
       if (!fields) { formError.value = '日记最多 100 条，每条和全部文字均不能超过 4000 个字符。'; return }
       const attachmentIds = draftAttachments.value.map(item => item.id)
       if (!fields.moodId && !fields.entries.length && !attachmentIds.length) {
         if (day.value) {
           const version = dayVersion.value
-          if (!await confirm('删除当天记录？') || !isDiarySessionGenerationCurrent(generation)) return
+          if (!await confirm('删除当天记录？') || !isCurrent()) return
           await diaryLifeApi.deleteDay(date, version)
-          if (!isDiarySessionGenerationCurrent(generation) || !access.isUnlocked.value) return
+          if (!isCurrent()) return
           resetForm()
           await load()
           return
@@ -698,7 +775,7 @@ async function save() {
           && JSON.stringify(attachmentIds) === JSON.stringify(dayAttachments.value.map(item => item.id))
         if (!unchanged) {
           const result = await diaryLifeApi.saveDay(date, fields, dayVersion.value, attachmentIds)
-          if (!isDiarySessionGenerationCurrent(generation) || !access.isUnlocked.value) return
+          if (!isCurrent()) return
           day.value = result.day
           dayVersion.value = result.version
           dayAttachments.value = result.attachments
@@ -714,43 +791,52 @@ async function save() {
       await load()
       return
     } else {
-      const fields = parseEvent(eventDraft.value)
+      const fields = parseEvent(editor.draft)
       if (!fields) {
-        formError.value = eventDraft.value.type === 'birthday'
+        formError.value = editor.draft.type === 'birthday'
           ? '请检查姓名及出生农历年、月、日。'
           : '请检查标题、日期和时间范围。'
         return
       }
-      await diaryLifeApi.saveEvent(newId.value, fields, editing.value?.version ?? 0)
-      if (!isDiarySessionGenerationCurrent(generation) || !access.isUnlocked.value) return
-      restoreEventEditContext()
-      await load()
-      invalidateEventList()
+      const result = await diaryLifeApi.saveEvent(editor.eventId, fields, editor.event?.version ?? 0)
+      if (!isCurrent() || eventSurface.value !== editor) return
+      const occurrenceDate = eventNavigationDate(result.event)
+      syncCalendarToDate(occurrenceDate)
+      selected.value = editor.returnTo.kind === 'day-list' ? occurrenceDate : null
+      if (!await refreshEventData(editor, isCurrent)) return
+      eventSurface.value = { kind: 'read', event: result.event, occurrenceDate, returnTo: editor.returnTo }
       return
     }
-  } catch (e) { if (isDiarySessionGenerationCurrent(generation)) formError.value = (e as Error).message }
-  finally { busy.value = false }
+  } catch (e) { if (isCurrent()) formError.value = (e as Error).message }
+  finally { if (isCurrent()) busy.value = false }
 }
 async function remove() {
   const date = selected.value
-  const entry = eventDraft.value ? editing.value : day.value
-  if (busy.value || attachmentBusy.value || !date || !entry || (!eventDraft.value && !canWriteDay.value)) return
-  const removingEvent = 'id' in entry
-  const generation = captureDiarySessionGeneration()
+  const editor = eventSurface.value?.kind === 'edit' ? eventSurface.value : null
+  const event = editor?.event ?? null
+  const dayEntry = editor ? null : day.value
+  if (busy.value || attachmentBusy.value || !access.isUnlocked.value) return
+  if (!event && (!date || !dayEntry || !canWriteDay.value)) return
+  const isCurrent = capturePrivateOperation()
   busy.value = true
   try {
-    if (!await confirm(removingEvent ? '删除这条事件？' : '删除这条记录？') || !isDiarySessionGenerationCurrent(generation)) return
-    if (removingEvent) await diaryLifeApi.deleteEvent(entry.id, entry.version)
-    else await diaryLifeApi.deleteDay(date, entry.version)
-    if (!isDiarySessionGenerationCurrent(generation) || !access.isUnlocked.value) return
-    if (removingEvent) restoreEventEditContext()
-    else resetForm()
-    await load()
-    invalidateEventList()
+    if (!await confirm(event ? '删除这条事件？' : '删除这条记录？') || !isCurrent()) return
+    if (event) {
+      await diaryLifeApi.deleteEvent(event.id, event.version)
+      if (isCurrent() && editor && eventSurface.value === editor && await refreshEventData(editor, isCurrent)) {
+        restoreEventContext(editor.returnTo)
+      }
+    } else if (date && dayEntry) {
+      await diaryLifeApi.deleteDay(date, dayEntry.version)
+      if (!isCurrent()) return
+      resetForm()
+      await load()
+      if (isCurrent()) invalidateEventList()
+    }
   } catch (error) {
-    if (isDiarySessionGenerationCurrent(generation)) formError.value = (error as Error).message
+    if (isCurrent()) formError.value = (error as Error).message
   } finally {
-    busy.value = false
+    if (isCurrent()) busy.value = false
   }
 }
 
@@ -772,6 +858,7 @@ onMounted(() => {
   }, 30000)
 })
 onBeforeUnmount(() => {
+  disposed = true
   clearDiarySearchOpen()
   searchNavigationSequence += 1
   stopTeardown()
@@ -788,7 +875,7 @@ onBeforeUnmount(() => {
   <main class="diary-life" data-testid="diary-life">
     <template v-if="access.isUnlocked.value">
       <div class="diary-life-calendar-stage">
-        <div v-if="error" class="diary-life-error" role="alert">{{ error }} <NButton text @click="load">重试</NButton></div>
+        <div v-if="error" class="diary-life-error" role="alert">{{ error }} <NButton text @click="load()">重试</NButton></div>
         <DiaryLifeCalendar :markers="markers" :today="today" :selected-date="selected" :month="month" :revision="calendarRevision" @select="open" @month="month = $event" />
       </div>
       <DiaryDayDialog
@@ -824,29 +911,29 @@ onBeforeUnmount(() => {
         :show="eventSurfaceVisible"
         preset="card"
         class="diary-life-dialog"
-        :class="{ 'diary-event-list-dialog': eventListVisible, 'diary-event-edit-dialog': eventDraft !== null }"
+        :class="{ 'diary-event-list-dialog': eventListVisible, 'diary-event-edit-dialog': eventSurface?.kind === 'edit', 'diary-event-reader-dialog': eventSurface?.kind === 'read' }"
         :mask-closable="!busy && !attachmentBusy"
         :close-on-esc="!busy && !attachmentBusy"
         :auto-focus="false"
         :closable="false"
         @update:show="visible => !visible && closeEventSurface()"
       >
-        <template #header>
-          <span v-if="eventDraft">{{ editing ? '编辑事件' : '新增事件' }}</span>
-          <span v-else-if="eventListVisible">近期事项</span>
+        <template v-if="eventSurface?.kind !== 'read'" #header>
+          <span v-if="eventSurface?.kind === 'edit'">{{ eventSurface.event ? '编辑事件' : '新增事件' }}</span>
+          <span v-else-if="eventSurface?.kind === 'recent-list'">近期事项</span>
           <span v-else>{{ selected }}</span>
         </template>
-        <template #header-extra>
+        <template v-if="eventSurface?.kind !== 'read'" #header-extra>
           <div class="diary-event-header-actions">
             <DiaryActionMenu
-              v-if="selected !== null && !eventDraft && !eventListVisible"
+              v-if="eventSurface?.kind === 'day-list'"
               class="diary-event-more-menu"
               label="更多当天事件操作"
               :options="eventDayActions"
               :disabled="busy || attachmentBusy"
               @select="selectEventDayAction"
             />
-            <NButton quaternary class="diary-event-close-button" :disabled="busy || attachmentBusy" :aria-label="eventDraft ? '关闭事件编辑' : eventListVisible ? '关闭事件列表' : '关闭当天事件'" @click="closeEventSurface">
+            <NButton quaternary class="diary-event-close-button" :disabled="busy || attachmentBusy" :aria-label="eventSurface?.kind === 'edit' ? '关闭事件编辑' : eventSurface?.kind === 'recent-list' ? '关闭事件列表' : '关闭当天事件'" @click="closeEventSurface">
               <NIcon aria-hidden="true" :size="18"><X /></NIcon>
             </NButton>
           </div>
@@ -854,6 +941,7 @@ onBeforeUnmount(() => {
 
         <DiaryEventListDialog
           v-if="eventListVisible"
+          ref="eventListDialog"
           :items="eventListItems"
           :today="today"
           :loading="eventListLoading"
@@ -864,9 +952,23 @@ onBeforeUnmount(() => {
           @load-more="loadEventList()"
           @select="selectEventFromList"
         />
+        <DiaryEventReader
+          v-else-if="eventSurface?.kind === 'read'"
+          :event="eventSurface.event"
+          :occurrence-date="eventSurface.occurrenceDate"
+          :busy="busy"
+          @edit="startEventEditFromReader"
+          @close="closeEventSurface"
+        />
         <div v-else-if="eventDraft" class="diary-event-form-content">
           <p v-if="formError" class="diary-event-form-error" role="alert">{{ formError }}</p>
-          <DiaryEventForm v-model="eventDraft" :today="today" :is-editing="editing !== null" />
+          <DiaryEventForm
+            :model-value="eventDraft"
+            :today="today"
+            :is-editing="editing !== null"
+            :inert="busy"
+            @update:model-value="updateEventDraft"
+          />
         </div>
         <div v-else class="day-events">
           <button v-for="event in selectedEvents" :key="event.id" type="button" :aria-label="dayEventLabel(event)" @click="selectEventFromDay(event)">
@@ -879,7 +981,7 @@ onBeforeUnmount(() => {
           <p v-if="!selectedEvents.length">还没有事件</p>
         </div>
 
-        <template v-if="eventDraft" #footer>
+        <template v-if="eventSurface?.kind === 'edit'" #footer>
           <div class="life-actions">
             <NButton v-if="editing" quaternary type="error" :disabled="busy" @click="remove">删除事件</NButton>
             <span />

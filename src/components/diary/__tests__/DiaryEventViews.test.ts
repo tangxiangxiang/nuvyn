@@ -48,8 +48,12 @@ describe('DiaryEventListDialog content', () => {
     expect(rows[0]!.text()).not.toContain('周年')
     expect(rows[1]!.text()).toContain('3')
     expect(rows[1]!.text()).toContain('天后')
+    const scroller = wrapper.get('.diary-event-list-scroll').element
+    scroller.scrollTop = 120
     await rows[0]!.trigger('click')
-    expect(wrapper.emitted('select')).toEqual([[first]])
+    expect(wrapper.emitted('select')).toEqual([[first, 120]])
+    wrapper.vm.restoreScroll(80)
+    expect(scroller.scrollTop).toBe(80)
     wrapper.unmount()
   })
 

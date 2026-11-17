@@ -2,8 +2,8 @@
 import { describe, expect, it, vi } from 'vitest'
 import { mount, flushPromises, type VueWrapper } from '@vue/test-utils'
 import { defineComponent, h, nextTick, ref, type Ref } from 'vue'
-import { lunarToSolar, nextLunarOccurrence, type ChineseEventDateRule } from '../../../../shared/lunarCalendar'
-import { parseEvent, type EventFields } from '../../../../shared/diaryLife'
+import { lunarToSolar, nextLunarOccurrence, solarToLunar, type ChineseEventDateRule } from '../../../../shared/lunarCalendar'
+import { nextOccurrence, parseEvent, type EventFields } from '../../../../shared/diaryLife'
 import { useConfirm } from '../../../composables/useConfirm'
 import DiaryEventForm from '../DiaryEventForm.vue'
 
@@ -115,6 +115,41 @@ describe('DiaryEventForm', () => {
     await nextTick()
     expect(visibleControls(wrapper, 'input[type="time"]')).toHaveLength(2)
     expect((wrapper.get('input[aria-label="开始时间"]').element as HTMLInputElement).value).toBe('')
+    wrapper.unmount()
+  })
+
+  it('keeps schedule dates ordered and validates same-day times while allowing cross-day ranges', async () => {
+    const { wrapper, fields } = mountEventForm({
+      ...gregorianEvent,
+      type: 'schedule',
+      title: '家庭旅行',
+      endDate: '2026-07-05',
+      allDay: false,
+    })
+
+    await wrapper.get('input[aria-label="开始日期"]').setValue('2026-07-06')
+    expect(fields.value.startDate).toBe('2026-07-06')
+    expect(fields.value.endDate).toBe('2026-07-06')
+    expect(parseEvent(fields.value)).not.toBeNull()
+
+    await wrapper.get('input[aria-label="结束日期"]').setValue('2026-07-07')
+    await wrapper.get('input[aria-label="开始时间"]').setValue('23:00')
+    await wrapper.get('input[aria-label="结束时间"]').setValue('01:00')
+    expect(parseEvent(fields.value)).not.toBeNull()
+    expect(wrapper.find('[role="alert"]').exists()).toBe(false)
+
+    await wrapper.get('input[aria-label="结束日期"]').setValue('2026-07-06')
+    expect(wrapper.get('[role="alert"]').text()).toContain('同一天的结束时间必须晚于开始时间')
+    expect(wrapper.get('input[aria-label="结束时间"]').attributes('aria-invalid')).toBe('true')
+    expect(parseEvent(fields.value)).toBeNull()
+
+    await wrapper.get('input[aria-label="结束时间"]').setValue('23:00')
+    expect(wrapper.get('[role="alert"]').text()).toContain('同一天的结束时间必须晚于开始时间')
+    expect(parseEvent(fields.value)).toBeNull()
+
+    await wrapper.get('input[aria-label="结束时间"]').setValue('23:01')
+    expect(wrapper.find('[role="alert"]').exists()).toBe(false)
+    expect(parseEvent(fields.value)).not.toBeNull()
     wrapper.unmount()
   })
 
@@ -409,6 +444,103 @@ describe('DiaryEventForm', () => {
     expect(fields.value.showCountdown).toBe(false)
     expect(parseEvent(fields.value)).not.toBeNull()
     wrapper.unmount()
+  })
+
+  it.each([
+    { target: 'milestone', dateLabel: '发生日期' },
+    { target: 'schedule', dateLabel: '开始日期' },
+  ])('protects a lunar anniversary when switching to $target and uses the edited Gregorian date', async ({ target, dateLabel }) => {
+    const { birthday: _birth, ...annual } = birthdayEvent()
+    const initial: EventFields = {
+      ...annual,
+      type: 'anniversary',
+      title: '结婚纪念日',
+      startDate: '2026-01-01',
+      endDate: '2026-01-01',
+    }
+    const { wrapper, fields } = mountEventForm(initial, '2026-11-16', true)
+    const baseDate = nextOccurrence(initial, initial.startDate)
+    expect(baseDate).toBe('2026-11-15')
+    expect(wrapper.find('input[type="date"]').exists()).toBe(false)
+    const targetButton = wrapper.get(`[data-testid="event-type-${target}"]`)
+
+    await targetButton.trigger('click')
+    const request = await answerPendingConfirm(false)
+    expect(request.detail).toContain('农历重复规则')
+    expect(request.detail).toContain(baseDate)
+    expect(fields.value).toEqual(initial)
+
+    await targetButton.trigger('click')
+    await answerPendingConfirm(true)
+    expect(fields.value).toMatchObject({
+      type: target, startDate: baseDate, endDate: baseDate, dateRule: { calendar: 'gregory' }, recurrence: 'yearly',
+    })
+    const date = wrapper.get(`input[aria-label="${dateLabel}"]`)
+    expect((date.element as HTMLInputElement).value).toBe(baseDate)
+    await date.setValue('2026-11-14')
+    const saved = parseEvent(fields.value)
+    expect(saved).toMatchObject({ dateRule: { calendar: 'gregory' }, startDate: '2026-11-14', endDate: '2026-11-14' })
+    expect(saved && nextOccurrence(saved, '2027-01-01')).toBe('2027-11-14')
+    wrapper.unmount()
+  })
+
+  it('preserves the lunar rule and annual recurrence when removing birthday age information', async () => {
+    const initial = birthdayEvent()
+    const { wrapper, fields } = mountEventForm(initial, '2026-11-16', true)
+    const button = wrapper.get('[data-testid="event-type-anniversary"]')
+    await button.trigger('click')
+    const request = await answerPendingConfirm(true)
+    expect(request.detail).toContain('出生农历年和生日年龄信息')
+    expect(request.detail).not.toContain('农历年度规则')
+    expect(fields.value.birthday).toBeUndefined()
+    expect(fields.value).toMatchObject({
+      type: 'anniversary', startDate: initial.startDate, dateRule: initial.dateRule, recurrence: 'yearly',
+    })
+    expect(parseEvent(fields.value)).not.toBeNull()
+    wrapper.unmount()
+  })
+
+  it('derives the birth year and leap month from the actual civil date', async () => {
+    const birth = { year: 2023, month: 2, day: 1, isLeapMonth: true }
+    const date = lunarToSolar(birth)!
+    expect(solarToLunar(date)).toEqual(birth)
+    const { wrapper, fields } = mountEventForm({
+      ...gregorianEvent, title: '小明', startDate: date, endDate: date,
+    }, '2026-01-01', true)
+    await wrapper.get('[data-testid="event-type-birthday"]').trigger('click')
+    await answerPendingConfirm(true)
+    expect(fields.value).toMatchObject({
+      startDate: date,
+      birthday: { birthLunarYear: 2023 },
+      dateRule: { calendar: 'chinese', lunarMonth: 2, lunarDay: 1, isLeapMonth: true },
+    })
+    expect(wrapper.text()).toContain('小明3岁生日')
+    expect(parseEvent(fields.value)).not.toBeNull()
+    wrapper.unmount()
+  })
+
+  it('edits an existing lunar schedule through lunar controls until explicitly converted', async () => {
+    const { birthday: _birth, ...annual } = birthdayEvent()
+    const { wrapper, fields } = mountEventForm({ ...annual, type: 'schedule' }, '2026-11-16', true)
+    expect(wrapper.find('input[type="date"]').exists()).toBe(false)
+    await wrapper.get('select[aria-label="农历日期"]').setValue('8')
+    expect(fields.value.dateRule).toMatchObject({ calendar: 'chinese', lunarDay: 8 })
+    expect(parseEvent(fields.value)).not.toBeNull()
+    await wrapper.get('.event-date-section .event-date-calendar-toggle button[aria-pressed="false"]').trigger('click')
+    expect(fields.value.dateRule).toEqual({ calendar: 'gregory' })
+    expect(wrapper.find('input[aria-label="开始日期"]').exists()).toBe(true)
+    wrapper.unmount()
+  })
+
+  it('cancels an open type confirmation when the editor is torn down', async () => {
+    const initial = birthdayEvent()
+    const { wrapper, fields } = mountEventForm(initial)
+    await wrapper.get('[data-testid="event-type-milestone"]').trigger('click')
+    expect(useConfirm().queue.value).toHaveLength(1)
+    wrapper.unmount()
+    await flushPromises()
+    expect(useConfirm().queue.value).toHaveLength(0)
+    expect(fields.value).toEqual(initial)
   })
 
   it('requires confirmation before removing a birthday rule, and preserves all fields on cancel', async () => {

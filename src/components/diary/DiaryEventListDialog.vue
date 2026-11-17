@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, ref } from 'vue'
 import { NButton, NEmpty, NSpin } from 'naive-ui'
 import { dayDistance, displayEventTitle, nextOccurrence, type DiaryEvent } from '../../../shared/diaryLife'
 import { formatLunarRule } from '../../../shared/lunarCalendar'
@@ -22,8 +22,15 @@ const props = withDefaults(defineProps<{
 const emit = defineEmits<{
   retry: []
   'load-more': []
-  select: [event: DiaryEvent]
+  select: [event: DiaryEvent, scrollTop: number]
 }>()
+
+const scroller = ref<HTMLElement | null>(null)
+defineExpose({
+  restoreScroll(scrollTop: number) {
+    if (scroller.value) scroller.value.scrollTop = scrollTop
+  },
+})
 
 const typeLabels: Record<DiaryEvent['type'], string> = {
   milestone: '人生时刻',
@@ -73,14 +80,14 @@ const isEmpty = computed(() => !props.loading && !props.error && props.items.len
       <NButton text type="primary" @click="emit('retry')">重试</NButton>
     </div>
     <NEmpty v-else-if="isEmpty" description="还没有近期事项" />
-    <div v-else class="diary-event-list-scroll">
+    <div v-else ref="scroller" class="diary-event-list-scroll">
       <button
         v-for="event in items"
         :key="event.id"
         type="button"
         class="diary-event-list-item"
         :aria-label="eventTitle(event)"
-        @click="emit('select', event)"
+        @click="emit('select', event, scroller?.scrollTop ?? 0)"
       >
         <span class="diary-event-list-emoji" aria-hidden="true">
           <img v-if="eventEmojiSource(event.emoji)" :src="eventEmojiSource(event.emoji)" alt="">
