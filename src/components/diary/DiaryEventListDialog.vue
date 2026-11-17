@@ -22,13 +22,19 @@ const props = withDefaults(defineProps<{
 const emit = defineEmits<{
   retry: []
   'load-more': []
-  select: [event: DiaryEvent, scrollTop: number]
+  select: [event: DiaryEvent, scrollTop: number, keyboardActivated: boolean]
 }>()
 
 const scroller = ref<HTMLElement | null>(null)
 defineExpose({
   restoreScroll(scrollTop: number) {
     if (scroller.value) scroller.value.scrollTop = scrollTop
+  },
+  focusEvent(eventId: string) {
+    const eventButton = [...(scroller.value?.querySelectorAll<HTMLButtonElement>('[data-event-id]') ?? [])]
+      .find(button => button.dataset.eventId === eventId)
+    eventButton?.focus({ preventScroll: true })
+    return Boolean(eventButton)
   },
 })
 
@@ -86,8 +92,9 @@ const isEmpty = computed(() => !props.loading && !props.error && props.items.len
         :key="event.id"
         type="button"
         class="diary-event-list-item"
+        :data-event-id="event.id"
         :aria-label="eventTitle(event)"
-        @click="emit('select', event, scroller?.scrollTop ?? 0)"
+        @click="emit('select', event, scroller?.scrollTop ?? 0, $event.detail === 0)"
       >
         <span class="diary-event-list-emoji" aria-hidden="true">
           <img v-if="eventEmojiSource(event.emoji)" :src="eventEmojiSource(event.emoji)" alt="">

@@ -33,9 +33,10 @@ const naiveStubs = {
   NIcon: { template: '<span aria-hidden="true"><slot /></span>' },
 }
 
-function mountReader(event: DiaryEvent, occurrenceDate = event.startDate) {
+function mountReader(event: DiaryEvent, occurrenceDate = event.startDate, focusTarget?: 'container' | 'edit' | null) {
   return mount(DiaryEventReader, {
-    props: { event, occurrenceDate },
+    props: { event, occurrenceDate, focusTarget },
+    attachTo: document.body,
     global: { stubs: naiveStubs },
   })
 }
@@ -133,5 +134,15 @@ describe('DiaryEventReader', () => {
     expect(wrapper.emitted('close')).toHaveLength(1)
     expect(wrapper.props('event')).toEqual(event)
     wrapper.unmount()
+  })
+
+  it('places keyboard focus on the reader or its edit action when requested', () => {
+    const container = mountReader(makeEvent(), undefined, 'container')
+    expect(document.activeElement).toBe(container.get('[data-testid="diary-event-reader"]').element)
+    container.unmount()
+
+    const edit = mountReader(makeEvent(), undefined, 'edit')
+    expect(document.activeElement).toBe(edit.get('[data-testid="diary-event-reader-edit"]').element)
+    edit.unmount()
   })
 })

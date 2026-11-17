@@ -115,6 +115,50 @@ describe('DiaryEventForm', () => {
     await nextTick()
     expect(visibleControls(wrapper, 'input[type="time"]')).toHaveLength(2)
     expect((wrapper.get('input[aria-label="开始时间"]').element as HTMLInputElement).value).toBe('')
+    expect(wrapper.get('[aria-label="开始时间"]').attributes('required')).toBeDefined()
+    expect(wrapper.get('#event-start-time-error').text()).toBe('非全天日程请填写开始时间。')
+    expect(wrapper.get('[aria-label="开始时间"]').attributes('aria-invalid')).toBe('true')
+    await wrapper.get('[aria-label="开始时间"]').setValue('09:30')
+    expect(wrapper.find('[role="alert"]').exists()).toBe(false)
+    expect(parseEvent(fields.value)).not.toBeNull()
+    wrapper.unmount()
+  })
+
+  it('allows legacy non-all-day schedules with no time values to be edited and saved', async () => {
+    const { wrapper, fields } = mountEventForm({
+      ...gregorianEvent,
+      type: 'schedule',
+      title: '旧日程',
+      allDay: false,
+      startTime: null,
+      endTime: null,
+    }, '2026-11-16', true)
+
+    expect(wrapper.get('[aria-label="开始时间"]').attributes('required')).toBeUndefined()
+    expect(wrapper.get('[aria-label="开始时间"]').attributes('aria-invalid')).toBe('false')
+    expect(wrapper.find('[role="alert"]').exists()).toBe(false)
+    expect(parseEvent(fields.value)).not.toBeNull()
+    fields.value.title = '旧日程已修改'
+    await nextTick()
+    expect(parseEvent(fields.value)).toMatchObject({ title: '旧日程已修改', allDay: false, startTime: null, endTime: null })
+    wrapper.unmount()
+  })
+
+  it('keeps existing times in the draft and explains that saving as all-day clears them', async () => {
+    const { wrapper, fields } = mountEventForm({
+      ...gregorianEvent,
+      type: 'schedule',
+      title: '有时间的日程',
+      allDay: false,
+      startTime: '09:00',
+      endTime: '10:00',
+    }, '2026-11-16', true)
+
+    await wrapper.get('.event-date-section .n-checkbox').trigger('click')
+    expect(fields.value.allDay).toBe(true)
+    expect(fields.value.startTime).toBe('09:00')
+    expect(fields.value.endTime).toBe('10:00')
+    expect(wrapper.text()).toContain('保存为全天日程后会清除已有时间。')
     wrapper.unmount()
   })
 

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, nextTick, onMounted, ref, watch } from 'vue'
 import { NButton, NIcon } from 'naive-ui'
 import { Pencil, X } from '@vicons/tabler'
 import { addDays, dayDistance, displayEventTitle, occurrenceInYear, type DiaryEvent } from '../../../shared/diaryLife'
@@ -10,12 +10,29 @@ const props = defineProps<{
   event: DiaryEvent
   occurrenceDate: string
   busy?: boolean
+  focusTarget?: 'container' | 'edit' | null
 }>()
 
 const emit = defineEmits<{
-  edit: []
+  edit: [keyboardActivated: boolean]
   close: []
 }>()
+
+const reader = ref<HTMLElement | null>(null)
+
+function focus(target: 'container' | 'edit') {
+  const element = target === 'edit'
+    ? reader.value?.querySelector<HTMLButtonElement>('[data-testid="diary-event-reader-edit"]')
+    : reader.value
+  element?.focus({ preventScroll: true })
+}
+
+function focusRequestedTarget() {
+  if (props.focusTarget) focus(props.focusTarget)
+}
+
+watch(() => props.focusTarget, () => { void nextTick(focusRequestedTarget) }, { flush: 'post' })
+onMounted(focusRequestedTarget)
 
 function occurrenceStart(event: DiaryEvent, date: string): string {
   if (event.recurrence !== 'yearly') return event.startDate
@@ -67,7 +84,7 @@ const accessibleName = computed(() => title.value)
 </script>
 
 <template>
-  <article class="diary-event-reader" :aria-label="accessibleName" data-testid="diary-event-reader">
+  <article ref="reader" class="diary-event-reader" :aria-label="accessibleName" tabindex="-1" data-testid="diary-event-reader">
     <header class="diary-event-reader-header">
       <div class="diary-event-reader-heading">
         <span class="diary-event-reader-emoji" aria-hidden="true">
@@ -83,7 +100,7 @@ const accessibleName = computed(() => title.value)
           :disabled="busy"
           aria-label="编辑事件"
           data-testid="diary-event-reader-edit"
-          @click="emit('edit')"
+          @click="emit('edit', $event.detail === 0)"
         >
           <NIcon aria-hidden="true" :size="18"><Pencil /></NIcon>
           <span>编辑</span>

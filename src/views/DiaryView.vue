@@ -57,13 +57,14 @@ const dayVersion = ref(0)
 const draft = ref<DayFields>({ moodId: null, entries: [] })
 const dayMode = ref<'read' | 'edit'>('read')
 type EventReturnContext =
-  | { kind: 'day-list'; date: string }
-  | { kind: 'recent-list'; scrollTop: number }
+  | { kind: 'day-list'; date: string; eventId: string; restoreFocus: boolean }
+  | { kind: 'recent-list'; scrollTop: number; eventId: string; restoreFocus: boolean }
+type EventFocusTarget = 'container' | 'edit' | null
 type EventSurface =
   | { kind: 'day-list'; date: string }
   | { kind: 'recent-list' }
-  | { kind: 'read'; event: DiaryEvent; occurrenceDate: string; returnTo: EventReturnContext }
-  | { kind: 'edit'; event: DiaryEvent | null; eventId: string; draft: EventFields; initial: string; occurrenceDate: string; returnTo: EventReturnContext }
+  | { kind: 'read'; event: DiaryEvent; occurrenceDate: string; returnTo: EventReturnContext; focusTarget: EventFocusTarget }
+  | { kind: 'edit'; event: DiaryEvent | null; eventId: string; draft: EventFields; initial: string; occurrenceDate: string; returnTo: EventReturnContext; focusReturnToReader: boolean }
 const eventSurface = ref<EventSurface | null>(null)
 const initial = ref('')
 const busy = ref(false)
@@ -78,6 +79,7 @@ const today = ref(localToday())
 const serverToday = ref<string | null>(null)
 const canWriteDay = computed(() => selected.value !== null && serverToday.value !== null && selected.value <= serverToday.value)
 const eventListDialog = ref<InstanceType<typeof DiaryEventListDialog> | null>(null)
+const eventForm = ref<{ validate: () => boolean } | null>(null)
 const eventListVisible = computed(() => eventSurface.value?.kind === 'recent-list')
 const eventDraft = computed(() => eventSurface.value?.kind === 'edit' ? eventSurface.value.draft : null)
 const editing = computed(() => eventSurface.value?.kind === 'edit' ? eventSurface.value.event : null)
@@ -362,48 +364,69 @@ function syncCalendarToDate(date: string) {
   calendarRevision.value += 1
 }
 
-function eventNavigationDate(event: DiaryEvent): string {
-  if (occursOn(event, today.value)) return today.value
-  return nextOccurrence(event, today.value) ?? event.startDate
+function eventNavigationDate(event: DiaryEvent, fromDate = today.value): string {
+  if (occursOn(event, fromDate)) return fromDate
+  return nextOccurrence(event, fromDate) ?? event.startDate
 }
 
-function selectEventFromList(event: DiaryEvent, scrollTop: number) {
+function selectEventFromList(event: DiaryEvent, scrollTop: number, keyboardActivated = false) {
   if (eventSurface.value?.kind !== 'recent-list') return
   const occurrenceDate = eventNavigationDate(event)
   selected.value = null
   syncCalendarToDate(occurrenceDate)
-  startEventRead(event, occurrenceDate, { kind: 'recent-list', scrollTop })
+  startEventRead(event, occurrenceDate, { kind: 'recent-list', scrollTop, eventId: event.id, restoreFocus: keyboardActivated }, keyboardActivated ? 'container' : null)
 }
 
-function selectEventFromDay(event: DiaryEvent) {
+function selectEventFromDay(event: DiaryEvent, interaction?: MouseEvent) {
   const surface = eventSurface.value
   if (surface?.kind !== 'day-list') return
-  startEventRead(event, surface.date, { kind: 'day-list', date: surface.date })
+  const keyboardActivated = interaction?.detail === 0
+  startEventRead(
+    event,
+    surface.date,
+    { kind: 'day-list', date: surface.date, eventId: event.id, restoreFocus: keyboardActivated },
+    keyboardActivated ? 'container' : null,
+  )
+}
+
+function focusEventDialogFallback() {
+  document.querySelector<HTMLButtonElement>('.diary-life-dialog .diary-event-close-button')?.focus({ preventScroll: true })
 }
 
 function restoreEventContext(context: EventReturnContext) {
   formError.value = ''
   if (context.kind === 'day-list') {
+    syncCalendarToDate(context.date)
     selected.value = context.date
     eventSurface.value = { kind: 'day-list', date: context.date }
   } else {
     selected.value = null
     eventSurface.value = { kind: 'recent-list' }
-    const isCurrent = capturePrivateOperation()
-    void nextTick(() => {
-      if (isCurrent() && eventSurface.value?.kind === 'recent-list') {
-        eventListDialog.value?.restoreScroll(context.scrollTop)
-      }
-    })
   }
+
+  const isCurrent = capturePrivateOperation()
+  void nextTick(() => {
+    if (!isCurrent()) return
+    if (context.kind === 'recent-list') {
+      if (eventSurface.value?.kind !== 'recent-list') return
+      eventListDialog.value?.restoreScroll(context.scrollTop)
+      if (context.restoreFocus && !eventListDialog.value?.focusEvent(context.eventId)) focusEventDialogFallback()
+      return
+    }
+    if (eventSurface.value?.kind !== 'day-list' || !context.restoreFocus) return
+    const eventButton = [...document.querySelectorAll<HTMLButtonElement>('.diary-life-dialog .day-events [data-event-id]')]
+      .find(button => button.dataset.eventId === context.eventId)
+    if (eventButton) eventButton.focus({ preventScroll: true })
+    else focusEventDialogFallback()
+  })
 }
 
-function startEventRead(event: DiaryEvent, occurrenceDate: string, returnTo: EventReturnContext) {
+function startEventRead(event: DiaryEvent, occurrenceDate: string, returnTo: EventReturnContext, focusTarget: EventFocusTarget = null) {
   if (busy.value || eventSurface.value?.kind === 'edit' || !access.isUnlocked.value) return
-  eventSurface.value = { kind: 'read', event, occurrenceDate, returnTo }
+  eventSurface.value = { kind: 'read', event, occurrenceDate, returnTo, focusTarget }
 }
 
-function startEventEditFromReader() {
+function startEventEditFromReader(keyboardActivated = false) {
   const surface = eventSurface.value
   if (surface?.kind !== 'read' || busy.value || !access.isUnlocked.value) return
   const draft: EventFields = {
@@ -419,8 +442,16 @@ function startEventEditFromReader() {
     initial: JSON.stringify(draft),
     occurrenceDate: surface.occurrenceDate,
     returnTo: surface.returnTo,
+    focusReturnToReader: keyboardActivated || surface.focusTarget !== null,
   }
   formError.value = ''
+  if (keyboardActivated) {
+    const isCurrent = capturePrivateOperation()
+    void nextTick(() => {
+      if (!isCurrent() || eventSurface.value?.kind !== 'edit') return
+      document.querySelector<HTMLInputElement>('.diary-event-form-content input[aria-label="事件名称"], .diary-event-form-content input[aria-label="生日称呼"]')?.focus({ preventScroll: true })
+    })
+  }
 }
 
 async function refreshEventData(state: Extract<EventSurface, { kind: 'edit' }>, isCurrent: () => boolean) {
@@ -433,12 +464,12 @@ async function refreshEventData(state: Extract<EventSurface, { kind: 'edit' }>, 
   return isCurrent() && eventSurface.value === state
 }
 
-async function closeEventSurface() {
+async function closeEventSurface(interaction?: MouseEvent) {
   if (busy.value || attachmentBusy.value) return
   const surface = eventSurface.value
   if (!surface) return
   if (surface.kind === 'edit') {
-    await cancelEventEdit()
+    await cancelEventEdit(interaction)
     return
   }
   if (surface.kind === 'read') {
@@ -711,15 +742,17 @@ function createEvent() {
   const date = surface?.kind === 'day-list' ? surface.date : selected.value
   if (!date || surface?.kind !== 'day-list' || !access.isUnlocked.value) return
   const type = date >= today.value ? 'schedule' : 'milestone'
+  const eventId = createDiaryEventId()
   const draft: EventFields = { title: '', description: '', emoji: type === 'schedule' ? '💼' : '🎯', type, startDate: date, endDate: date, startTime: null, endTime: null, allDay: true, dateRule: { calendar: 'gregory' }, recurrence: 'none', showCountdown: false, isPrimary: false }
   eventSurface.value = {
     kind: 'edit',
     event: null,
-    eventId: createDiaryEventId(),
+    eventId,
     draft,
     initial: JSON.stringify(draft),
     occurrenceDate: date,
-    returnTo: { kind: 'day-list', date },
+    returnTo: { kind: 'day-list', date, eventId, restoreFocus: false },
+    focusReturnToReader: false,
   }
 }
 
@@ -734,19 +767,25 @@ function updateEventDraft(next: EventFields) {
   }
 }
 
-async function cancelEventEdit() {
+async function cancelEventEdit(interaction?: MouseEvent) {
   const surface = eventSurface.value
   if (surface?.kind !== 'edit' || busy.value) return
   if (JSON.stringify(surface.draft) !== surface.initial && !await confirm('放弃未保存的修改？')) return
   if (eventSurface.value !== surface || !access.isUnlocked.value) return
   if (surface.event) {
-    eventSurface.value = { kind: 'read', event: surface.event, occurrenceDate: surface.occurrenceDate, returnTo: surface.returnTo }
+    eventSurface.value = {
+      kind: 'read',
+      event: surface.event,
+      occurrenceDate: surface.occurrenceDate,
+      returnTo: surface.returnTo,
+      focusTarget: interaction?.detail === 0 || surface.focusReturnToReader ? 'edit' : null,
+    }
     formError.value = ''
   } else {
     restoreEventContext(surface.returnTo)
   }
 }
-async function save() {
+async function save(keyboardActivated = false) {
   if (busy.value || attachmentBusy.value || !access.isUnlocked.value) return
   const isCurrent = capturePrivateOperation()
   const date = selected.value
@@ -791,6 +830,7 @@ async function save() {
       await load()
       return
     } else {
+      if (!eventForm.value?.validate()) return
       const fields = parseEvent(editor.draft)
       if (!fields) {
         formError.value = editor.draft.type === 'birthday'
@@ -800,11 +840,21 @@ async function save() {
       }
       const result = await diaryLifeApi.saveEvent(editor.eventId, fields, editor.event?.version ?? 0)
       if (!isCurrent() || eventSurface.value !== editor) return
-      const occurrenceDate = eventNavigationDate(result.event)
+      const occurrenceDate = eventNavigationDate(result.event, editor.occurrenceDate)
+      const returnTo: EventReturnContext = editor.returnTo.kind === 'day-list'
+        ? { ...editor.returnTo, date: occurrenceDate, eventId: editor.eventId }
+        : { ...editor.returnTo, eventId: editor.eventId }
+      editor.returnTo = returnTo
       syncCalendarToDate(occurrenceDate)
       selected.value = editor.returnTo.kind === 'day-list' ? occurrenceDate : null
       if (!await refreshEventData(editor, isCurrent)) return
-      eventSurface.value = { kind: 'read', event: result.event, occurrenceDate, returnTo: editor.returnTo }
+      eventSurface.value = {
+        kind: 'read',
+        event: result.event,
+        occurrenceDate,
+        returnTo,
+        focusTarget: keyboardActivated || editor.focusReturnToReader ? 'container' : null,
+      }
       return
     }
   } catch (e) { if (isCurrent()) formError.value = (e as Error).message }
@@ -933,7 +983,7 @@ onBeforeUnmount(() => {
               :disabled="busy || attachmentBusy"
               @select="selectEventDayAction"
             />
-            <NButton quaternary class="diary-event-close-button" :disabled="busy || attachmentBusy" :aria-label="eventSurface?.kind === 'edit' ? '关闭事件编辑' : eventSurface?.kind === 'recent-list' ? '关闭事件列表' : '关闭当天事件'" @click="closeEventSurface">
+            <NButton quaternary class="diary-event-close-button" :disabled="busy || attachmentBusy" :aria-label="eventSurface?.kind === 'edit' ? '关闭事件编辑' : eventSurface?.kind === 'recent-list' ? '关闭事件列表' : '关闭当天事件'" @click="closeEventSurface($event)">
               <NIcon aria-hidden="true" :size="18"><X /></NIcon>
             </NButton>
           </div>
@@ -957,12 +1007,14 @@ onBeforeUnmount(() => {
           :event="eventSurface.event"
           :occurrence-date="eventSurface.occurrenceDate"
           :busy="busy"
+          :focus-target="eventSurface.focusTarget"
           @edit="startEventEditFromReader"
           @close="closeEventSurface"
         />
         <div v-else-if="eventDraft" class="diary-event-form-content">
           <p v-if="formError" class="diary-event-form-error" role="alert">{{ formError }}</p>
           <DiaryEventForm
+            ref="eventForm"
             :model-value="eventDraft"
             :today="today"
             :is-editing="editing !== null"
@@ -971,7 +1023,7 @@ onBeforeUnmount(() => {
           />
         </div>
         <div v-else class="day-events">
-          <button v-for="event in selectedEvents" :key="event.id" type="button" :aria-label="dayEventLabel(event)" @click="selectEventFromDay(event)">
+          <button v-for="event in selectedEvents" :key="event.id" type="button" :data-event-id="event.id" :aria-label="dayEventLabel(event)" @click="selectEventFromDay(event, $event)">
             <strong>
               <img v-if="eventEmojiSource(event.emoji)" :src="eventEmojiSource(event.emoji)" class="event-emoji" alt="">
               <span v-else class="day-event-emoji" aria-hidden="true">{{ event.emoji }}</span>
@@ -985,8 +1037,8 @@ onBeforeUnmount(() => {
           <div class="life-actions">
             <NButton v-if="editing" quaternary type="error" :disabled="busy" @click="remove">删除事件</NButton>
             <span />
-            <NButton :disabled="busy" @click="cancelEventEdit">取消</NButton>
-            <NButton type="primary" :loading="busy" @click="save">保存</NButton>
+            <NButton :disabled="busy" @click="cancelEventEdit($event)">取消</NButton>
+            <NButton type="primary" :loading="busy" @click="save($event.detail === 0)">保存</NButton>
           </div>
         </template>
       </NModal>

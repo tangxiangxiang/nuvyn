@@ -51,7 +51,7 @@ describe('DiaryEventListDialog content', () => {
     const scroller = wrapper.get('.diary-event-list-scroll').element
     scroller.scrollTop = 120
     await rows[0]!.trigger('click')
-    expect(wrapper.emitted('select')).toEqual([[first, 120]])
+    expect(wrapper.emitted('select')).toEqual([[first, 120, true]])
     wrapper.vm.restoreScroll(80)
     expect(scroller.scrollTop).toBe(80)
     wrapper.unmount()

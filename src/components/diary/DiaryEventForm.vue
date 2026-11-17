@@ -33,9 +33,14 @@ const canUseLunar = computed(() => value.value.recurrence === 'yearly' && value.
 const hasExtendedDateFields = computed(() => value.value.endDate !== value.value.startDate
   || !value.value.allDay || value.value.startTime !== null || value.value.endTime !== null)
 const dateRangeError = computed(() => value.value.endDate < value.value.startDate ? '结束日期不能早于开始日期。' : '')
-const timeRangeError = computed(() => {
+const startTimeError = computed(() => {
   if (!isSchedule.value || value.value.allDay) return ''
   if (value.value.startTime === null && value.value.endTime !== null) return '请先设置开始时间。'
+  if (value.value.startTime === null && !props.isEditing) return '非全天日程请填写开始时间。'
+  return ''
+})
+const endTimeError = computed(() => {
+  if (!isSchedule.value || value.value.allDay) return ''
   if (value.value.startDate === value.value.endDate && value.value.startTime && value.value.endTime
     && value.value.endTime <= value.value.startTime) return '同一天的结束时间必须晚于开始时间。'
   return ''
@@ -73,6 +78,10 @@ const birthdayPreview = computed(() => {
 const title = computed(() => isBirthday.value ? '生日' : isAnniversary.value ? '纪念日' : isMilestone.value ? '人生时刻' : '重要日程')
 const gregorianDateLabel = computed(() => isBirthday.value ? '出生日期' : isAnniversary.value ? '纪念日期' : isMilestone.value ? '发生日期' : '日期')
 const emojiSource = computed(() => eventEmojiSource(value.value.emoji))
+
+defineExpose({
+  validate: () => !dateRangeError.value && !startTimeError.value && !endTimeError.value,
+})
 
 function defaultLunarRule(lunarDate: NonNullable<ReturnType<typeof solarToLunar>>): ChineseEventDateRule {
   return {
@@ -341,8 +350,7 @@ function updateChineseRule(updates: Partial<ChineseEventDateRule>) {
     </div>
 
     <p v-if="calendarError" class="event-date-error" role="alert">{{ calendarError }}</p>
-    <p v-if="dateRangeError" class="event-date-error" role="alert">{{ dateRangeError }}</p>
-    <p v-if="timeRangeError" class="event-date-error" role="alert">{{ timeRangeError }}</p>
+    <p v-if="dateRangeError && !isSchedule" class="event-date-error" role="alert">{{ dateRangeError }}</p>
 
     <section class="event-date-section" :aria-label="title + '日期'">
       <h2>{{ isBirthday ? '出生日期（农历）' : isAnniversary ? '纪念日期' : isMilestone ? '发生日期' : '日程日期' }}</h2>
@@ -417,7 +425,8 @@ function updateChineseRule(updates: Partial<ChineseEventDateRule>) {
         </label>
         <label class="event-field">
           <span>结束日期</span>
-          <input v-model="value.endDate" :min="value.startDate" type="date" required aria-label="结束日期" :aria-invalid="Boolean(dateRangeError)">
+          <input v-model="value.endDate" :min="value.startDate" type="date" required aria-label="结束日期" :aria-invalid="Boolean(dateRangeError)" :aria-describedby="dateRangeError ? 'event-end-date-error' : undefined">
+          <small v-if="dateRangeError" id="event-end-date-error" class="event-date-error" role="alert">{{ dateRangeError }}</small>
         </label>
       </div>
 
@@ -437,14 +446,17 @@ function updateChineseRule(updates: Partial<ChineseEventDateRule>) {
 
       <NCheckbox v-if="isAnniversary" :checked="value.recurrence === 'yearly'" :disabled="dateRule.calendar === 'chinese'" @update:checked="value.recurrence = $event ? 'yearly' : 'none'">每年重复</NCheckbox>
       <NCheckbox v-if="isSchedule && !chineseRule" v-model:checked="value.allDay">全天</NCheckbox>
+      <p v-if="isSchedule && value.allDay && (value.startTime || value.endTime)" class="event-date-help">保存为全天日程后会清除已有时间。</p>
       <div v-if="isSchedule && !chineseRule && !value.allDay" class="event-dates">
         <label class="event-field">
           <span>开始时间</span>
-          <input :value="value.startTime ?? ''" type="time" aria-label="开始时间" :aria-invalid="Boolean(timeRangeError)" @input="value.startTime = ($event.target as HTMLInputElement).value || null">
+          <input :value="value.startTime ?? ''" type="time" aria-label="开始时间" :required="!isEditing" :aria-invalid="Boolean(startTimeError)" :aria-describedby="startTimeError ? 'event-start-time-error' : undefined" @input="value.startTime = ($event.target as HTMLInputElement).value || null">
+          <small v-if="startTimeError" id="event-start-time-error" class="event-date-error" role="alert">{{ startTimeError }}</small>
         </label>
         <label class="event-field">
           <span>结束时间</span>
-          <input :value="value.endTime ?? ''" type="time" aria-label="结束时间" :aria-invalid="Boolean(timeRangeError)" @input="value.endTime = ($event.target as HTMLInputElement).value || null">
+          <input :value="value.endTime ?? ''" type="time" aria-label="结束时间" :aria-invalid="Boolean(endTimeError)" :aria-describedby="endTimeError ? 'event-end-time-error' : undefined" @input="value.endTime = ($event.target as HTMLInputElement).value || null">
+          <small v-if="endTimeError" id="event-end-time-error" class="event-date-error" role="alert">{{ endTimeError }}</small>
         </label>
       </div>
 
