@@ -2,9 +2,11 @@ import { Hono, type Context } from 'hono'
 import type { Database } from 'better-sqlite3'
 import { bodyLimit } from 'hono/body-limit'
 import { civilDate, dayDistance, parseDay, parseEvent, occursOn, nextOccurrence } from '../../shared/diaryLife.js'
+import { parseTaskFields } from '../../shared/diaryTasks.js'
 import { withDiaryBodyOperation } from '../diaryAccess/guard.js'
 import { DiaryAccessServiceError } from '../diaryAccess/service.js'
 import { diaryLifeStore, DiaryConflict } from '../diaryLife.js'
+import { diaryTaskStore, DiaryTaskNotFound } from '../diaryTasks.js'
 import { diaryToday } from '../diaryDate.js'
 import { DiaryAttachmentError } from '../diaryAttachments/service.js'
 import { cleanupDiaryAttachmentStorage, DiaryAttachmentStorage, ensureDiaryAttachmentStorage } from '../diaryAttachments/storage.js'
@@ -16,19 +18,21 @@ const routes = new Hono<Env>()
 routes.use('*', async (c, next) => { c.header('Cache-Control', 'no-store'); await next() })
 routes.use('*', bodyLimit({ maxSize: 32768 }))
 type Store = ReturnType<typeof diaryLifeStore>
-async function guarded(c: Context<Env>, run: (store: Store, db: Database) => Promise<Response> | Response) {
+type TaskStore = ReturnType<typeof diaryTaskStore>
+async function guarded(c: Context<Env>, run: (store: Store, db: Database, tasks: TaskStore) => Promise<Response> | Response) {
   const owner = c.get('authUser')?.id
   if (!owner) return c.json({ code: 'auth-session-required' }, 401)
   try {
     return await withDiaryBodyOperation(c, async (op) => {
       const db = metadataDb()
-      const result = await run(diaryLifeStore(db, owner, op), db)
+      const result = await run(diaryLifeStore(db, owner, op), db, diaryTaskStore(db, owner, op))
       op.assertCurrent()
       return result
     }) ?? c.json({ code: 'diary-locked' }, 423)
   } catch (error) {
     if (error instanceof DiaryAccessServiceError) return c.json({ code: 'diary-locked' }, 423)
     if (error instanceof DiaryConflict) return c.json({ code: 'diary-conflict' }, 409)
+    if (error instanceof DiaryTaskNotFound) return c.json({ code: 'diary-not-found' }, 404)
     if (error instanceof DiaryAttachmentError) return c.json({ code: `diary-attachment-${error.code}` }, error.status)
     return c.json({ code: 'diary-unavailable' }, 503)
   }
@@ -129,6 +133,59 @@ routes.get('/countdowns', c => guarded(c, store => {
   const result = store.events(today, '9999-12-31', Number(offset))
   result.items = result.items.filter(event => event.showCountdown && nextOccurrence(event, today) !== null)
   return c.json(result)
+}))
+
+routes.get('/tasks/list', c => guarded(c, (_store, _db, tasks) => {
+  const offset = c.req.query('offset') ?? '0'
+  if (!/^\d{1,7}$/.test(offset)) return c.json({ code: 'invalid-diary-task-list-query' }, 400)
+  return c.json(tasks.listTasks(Number(offset)))
+}))
+routes.get('/tasks', c => guarded(c, (_store, _db, tasks) => {
+  const { start, end, offset = '0' } = c.req.query()
+  if (!civilDate(start) || !civilDate(end) || end < start || dayDistance(start, end) > 366
+    || !/^\d{1,7}$/.test(offset)) return c.json({ code: 'invalid-diary-task-range' }, 400)
+  return c.json(tasks.tasksInRange(start, end, Number(offset)))
+}))
+routes.get('/tasks/:id', c => guarded(c, (_store, _db, tasks) => {
+  const id = c.req.param('id')
+  if (!idValid(id)) return c.json({ code: 'invalid-diary-task-id' }, 400)
+  const task = tasks.getTask(id)
+  return task ? c.json({ task }) : c.json({ code: 'diary-not-found' }, 404)
+}))
+routes.put('/tasks/:id', c => guarded(c, async (_store, _db, tasks) => {
+  const id = c.req.param('id')
+  const body = await c.req.json().catch(() => null)
+  if (!idValid(id) || !body || typeof body !== 'object' || Array.isArray(body)
+    || Object.prototype.hasOwnProperty.call(body, 'completedAt')) return c.json({ code: 'invalid-diary-task' }, 400)
+  const fields = parseTaskFields(body)
+  if (!fields || !version(body.expectedVersion)) return c.json({ code: 'invalid-diary-task' }, 400)
+  return c.json({ task: tasks.putTask(id, fields, body.expectedVersion) })
+}))
+for (const action of ['complete', 'reopen'] as const) {
+  routes.post(`/tasks/:id/${action}`, c => guarded(c, async (_store, _db, tasks) => {
+    const id = c.req.param('id')
+    const body = await c.req.json().catch(() => null)
+    if (!idValid(id) || !body || typeof body !== 'object' || Array.isArray(body)
+      || Object.prototype.hasOwnProperty.call(body, 'completedAt')
+      || !version(body.expectedVersion) || body.expectedVersion < 1) {
+      return c.json({ code: 'invalid-diary-task-transition' }, 400)
+    }
+    const task = action === 'complete'
+      ? tasks.completeTask(id, body.expectedVersion)
+      : tasks.reopenTask(id, body.expectedVersion)
+    return c.json({ task })
+  }))
+}
+routes.delete('/tasks/:id', c => guarded(c, async (_store, _db, tasks) => {
+  const id = c.req.param('id')
+  const body = await c.req.json().catch(() => null)
+  if (!idValid(id) || !body || typeof body !== 'object' || Array.isArray(body)
+    || Object.prototype.hasOwnProperty.call(body, 'completedAt')
+    || !version(body.expectedVersion) || body.expectedVersion < 1) {
+    return c.json({ code: 'invalid-diary-task-delete' }, 400)
+  }
+  const versionAfterDelete = tasks.removeTask(id, body.expectedVersion)
+  return c.json({ ok: true, version: versionAfterDelete })
 }))
 routes.put('/events/:id', c => guarded(c, async store => {
   const id = c.req.param('id')
