@@ -82,7 +82,10 @@ const attachmentBusy = ref(false)
 const attachmentError = ref('')
 const dayReadFailed = ref(false)
 const searchReveal = ref<{ entryId?: string; entryIndex?: number } | null>(null)
-const error = ref('')
+const diaryCalendarError = ref('')
+const eventCalendarError = ref('')
+const calendarTaskError = ref('')
+const calendarEventLoading = ref(false)
 const formError = ref('')
 const today = ref(localToday())
 const serverToday = ref<string | null>(null)
@@ -105,6 +108,7 @@ const eventListError = ref('')
 const calendarTasks = ref<DiaryTask[]>([])
 const calendarTasksLoading = ref(false)
 const calendarTasksByDate = computed(() => groupTasksByDueDate(calendarTasks.value))
+const calendarError = computed(() => mode.value === 'diary' ? diaryCalendarError.value : eventCalendarError.value)
 const recentTaskItems = ref<DiaryTask[]>([])
 const recentTaskStatus = ref<DiaryTaskListStatus>('open')
 const recentTaskNext = ref<string | null>(null)
@@ -188,8 +192,19 @@ function onDiaryVisibilityChange() {
     void renewAttachmentSession()
   }
 }
-let request: AbortController | null = null
-let pendingCalendarLoad: { key: string; controller: AbortController; promise: Promise<void> } | null = null
+type CalendarLoadContext = {
+  start: string
+  end: string
+  mode: 'diary' | 'events'
+  owner: string
+  generation: number
+  key: string
+}
+type CalendarLoadRequest = { key: string; controller: AbortController; promise: Promise<void> }
+let calendarContextKey = ''
+let diaryCalendarRequest: CalendarLoadRequest | null = null
+let eventCalendarRequest: CalendarLoadRequest | null = null
+let calendarTaskRequest: CalendarLoadRequest | null = null
 let detailRequest: AbortController | null = null
 let searchNavigationSequence = 0
 let attachmentUploadRequest: AbortController | null = null
@@ -200,6 +215,7 @@ const attachmentPreviewUrls = new DiaryAttachmentPreviewUrls()
 let eventListRequest: AbortController | null = null
 let recentTaskRequest: AbortController | null = null
 let taskDetailRequest: AbortController | null = null
+let taskContextSequence = 0
 let timer: ReturnType<typeof setInterval> | undefined
 let disposed = false
 const dirty = computed(() => {
@@ -243,48 +259,157 @@ const markers = computed(() => {
   }
   return result
 })
-function load(refresh = false): Promise<void> {
-  if (!access.isUnlocked.value) return Promise.resolve()
+function getCalendarLoadContext(): CalendarLoadContext | null {
+  if (!access.isUnlocked.value || !storageKey.value) return null
   const dateRange = range.value
+  const generation = captureDiarySessionGeneration()
   const loadMode = mode.value
   const owner = storageKey.value
-  const generation = captureDiarySessionGeneration()
-  const isCurrent = () => !disposed && isDiarySessionGenerationCurrent(generation)
-    && storageKey.value === owner && mode.value === loadMode
-  const key = `${dateRange.start}:${dateRange.end}:${today.value}:${loadMode}:${access.epoch.value ?? ''}`
-  if (!refresh && pendingCalendarLoad?.key === key) return pendingCalendarLoad.promise
-  request?.abort()
-  const scope = new AbortController()
-  request = scope
-  error.value = ''
-  if (loadMode === 'events') {
-    calendarTasks.value = []
-    calendarTasksLoading.value = true
-  } else calendarTasksLoading.value = false
+  return {
+    start: dateRange.start,
+    end: dateRange.end,
+    mode: loadMode,
+    owner,
+    generation,
+    key: `${dateRange.start}:${dateRange.end}:${today.value}:${loadMode}:${owner}:${generation}:${access.epoch.value ?? ''}`,
+  }
+}
+
+function isCalendarContextCurrent(context: CalendarLoadContext): boolean {
+  const dateRange = range.value
+  return !disposed && access.isUnlocked.value
+    && isDiarySessionGenerationCurrent(context.generation)
+    && storageKey.value === context.owner
+    && mode.value === context.mode
+    && dateRange.start === context.start && dateRange.end === context.end
+    && calendarContextKey === context.key
+}
+
+function prepareCalendarContext(context: CalendarLoadContext) {
+  if (calendarContextKey === context.key) return
+  diaryCalendarRequest?.controller.abort()
+  eventCalendarRequest?.controller.abort()
+  calendarTaskRequest?.controller.abort()
+  diaryCalendarRequest = null
+  eventCalendarRequest = null
+  calendarTaskRequest = null
+  calendarContextKey = context.key
+  days.value = []
+  events.value = []
+  calendarTasks.value = []
+  diaryCalendarError.value = ''
+  eventCalendarError.value = ''
+  calendarTaskError.value = ''
+  calendarEventLoading.value = false
+  calendarTasksLoading.value = false
+}
+
+function loadCalendarDays(context: CalendarLoadContext, refresh = false): Promise<void> {
+  if (!refresh && diaryCalendarRequest?.key === context.key) return diaryCalendarRequest.promise
+  diaryCalendarRequest?.controller.abort()
+  const controller = new AbortController()
+  diaryCalendarError.value = ''
   const promise = (async () => {
     try {
-      const [d, e, tasks] = await Promise.all([
-        diaryLifeApi.days(dateRange.start, dateRange.end, scope.signal),
-        diaryLifeApi.events(dateRange.start, dateRange.end, scope.signal),
-        loadMode === 'events'
-          ? listDiaryTasksInRange(dateRange.start, dateRange.end, scope.signal)
-          : Promise.resolve([]),
-      ])
-      if (scope.signal.aborted || !isCurrent()) return
-      days.value = d.days
-      events.value = e
-      calendarTasks.value = loadMode === 'events' ? tasks : []
-    } catch { if (!scope.signal.aborted && isCurrent()) { days.value = []; events.value = []; calendarTasks.value = []; error.value = '加载失败，请重试。' } }
-    finally {
-      if (pendingCalendarLoad?.controller === scope) {
-        pendingCalendarLoad = null
-        request = null
+      const result = await diaryLifeApi.days(context.start, context.end, controller.signal)
+      if (controller.signal.aborted || diaryCalendarRequest?.controller !== controller || !isCalendarContextCurrent(context)) return
+      days.value = result.days
+    } catch {
+      if (!controller.signal.aborted && diaryCalendarRequest?.controller === controller && isCalendarContextCurrent(context)) {
+        diaryCalendarError.value = '加载失败，请重试。'
+      }
+    } finally {
+      if (diaryCalendarRequest?.controller === controller) diaryCalendarRequest = null
+    }
+  })()
+  diaryCalendarRequest = { key: context.key, controller, promise }
+  return promise
+}
+
+function loadCalendarEvents(context: CalendarLoadContext, refresh = false): Promise<void> {
+  if (!refresh && eventCalendarRequest?.key === context.key) return eventCalendarRequest.promise
+  eventCalendarRequest?.controller.abort()
+  const controller = new AbortController()
+  eventCalendarError.value = ''
+  calendarEventLoading.value = true
+  const promise = (async () => {
+    try {
+      const result = await diaryLifeApi.events(context.start, context.end, controller.signal)
+      if (controller.signal.aborted || eventCalendarRequest?.controller !== controller || !isCalendarContextCurrent(context)) return
+      events.value = result
+    } catch {
+      if (!controller.signal.aborted && eventCalendarRequest?.controller === controller && isCalendarContextCurrent(context)) {
+        eventCalendarError.value = '加载事件失败，请重试。'
+      }
+    } finally {
+      if (eventCalendarRequest?.controller === controller) {
+        eventCalendarRequest = null
+        calendarEventLoading.value = false
+      }
+    }
+  })()
+  eventCalendarRequest = { key: context.key, controller, promise }
+  return promise
+}
+
+function loadCalendarTasks(context: CalendarLoadContext, refresh = false): Promise<void> {
+  if (!refresh && calendarTaskRequest?.key === context.key) return calendarTaskRequest.promise
+  calendarTaskRequest?.controller.abort()
+  const controller = new AbortController()
+  calendarTaskError.value = ''
+  calendarTasksLoading.value = true
+  const promise = (async () => {
+    try {
+      const result = await listDiaryTasksInRange(context.start, context.end, controller.signal)
+      if (controller.signal.aborted || calendarTaskRequest?.controller !== controller || !isCalendarContextCurrent(context)) return
+      calendarTasks.value = result
+    } catch {
+      if (!controller.signal.aborted && calendarTaskRequest?.controller === controller && isCalendarContextCurrent(context)) {
+        calendarTaskError.value = '待办加载失败，请重试。'
+      }
+    } finally {
+      if (calendarTaskRequest?.controller === controller) {
+        calendarTaskRequest = null
         calendarTasksLoading.value = false
       }
     }
   })()
-  pendingCalendarLoad = { key, controller: scope, promise }
+  calendarTaskRequest = { key: context.key, controller, promise }
   return promise
+}
+
+function reloadCalendarEvents(): Promise<void> {
+  const context = getCalendarLoadContext()
+  if (!context || context.mode !== 'events') return Promise.resolve()
+  prepareCalendarContext(context)
+  return loadCalendarEvents(context, true)
+}
+
+function reloadCalendarTasks(): Promise<void> {
+  const context = getCalendarLoadContext()
+  if (!context || context.mode !== 'events') return Promise.resolve()
+  prepareCalendarContext(context)
+  return loadCalendarTasks(context, true)
+}
+
+function retryCalendarStage(): Promise<void> {
+  const context = getCalendarLoadContext()
+  if (!context) return Promise.resolve()
+  prepareCalendarContext(context)
+  return context.mode === 'diary'
+    ? loadCalendarDays(context, true)
+    : loadCalendarEvents(context, true)
+}
+
+function load(refresh = false): Promise<void> {
+  const context = getCalendarLoadContext()
+  if (!context) return Promise.resolve()
+  prepareCalendarContext(context)
+  if (context.mode === 'diary') return loadCalendarDays(context, refresh)
+  return Promise.all([
+    loadCalendarEvents(context, refresh),
+    loadCalendarTasks(context, refresh),
+  ]).then(() => undefined)
 }
 function resetForm() {
   detailRequest?.abort()
@@ -315,9 +440,14 @@ function resetForm() {
 function clearPrivateData() {
   clearDiarySearchOpen()
   searchNavigationSequence += 1
-  request?.abort()
-  pendingCalendarLoad = null
-  request = null
+  taskContextSequence += 1
+  diaryCalendarRequest?.controller.abort()
+  eventCalendarRequest?.controller.abort()
+  calendarTaskRequest?.controller.abort()
+  diaryCalendarRequest = null
+  eventCalendarRequest = null
+  calendarTaskRequest = null
+  calendarContextKey = ''
   eventListRequest?.abort()
   eventListRequest = null
   recentTaskRequest?.abort()
@@ -331,8 +461,11 @@ function clearPrivateData() {
   days.value = []
   events.value = []
   calendarTasks.value = []
+  diaryCalendarError.value = ''
+  eventCalendarError.value = ''
+  calendarTaskError.value = ''
+  calendarEventLoading.value = false
   calendarTasksLoading.value = false
-  error.value = ''
   eventListItems.value = []
   eventListNext.value = 0
   eventListLoaded.value = false
@@ -412,6 +545,7 @@ async function loadRecentTasks(reset = false, minimumItems = 0) {
       try {
         page = await diaryTasksApi.listTasks(cursor, scope.signal, currentStatus)
       } catch (cause) {
+        if (scope.signal.aborted || recentTaskRequest !== scope || !isCurrent() || currentStatus !== recentTaskStatus.value) return
         if (cause instanceof DiaryTaskListChangedError && cursor !== undefined && listChangeRetries < 2) {
           listChangeRetries += 1
           items.length = 0
@@ -599,13 +733,18 @@ function focusTaskContext(context: TaskReturnContext) {
 
 function restoreTaskContext(context: TaskReturnContext) {
   activateTaskContext(context)
+  const expectedSurface = eventSurface.value
+  const expectedMonth = month.value
+  const isCurrent = capturePrivateOperation()
+  const isContextCurrent = () => isCurrent()
+    && eventSurface.value === expectedSurface
+    && (context.kind === 'recent-list' || (selected.value === context.date && month.value === expectedMonth))
   if (context.kind === 'recent-list') {
     if (!eventListLoaded.value) void loadEventList(true)
     if (!recentTaskLoaded.value) void loadRecentTasks(true)
   }
-  const isCurrent = capturePrivateOperation()
   void nextTick(() => {
-    if (!isCurrent()) return
+    if (!isContextCurrent()) return
     if (context.kind === 'recent-list') eventListDialog.value?.restoreScroll(context.scrollTop)
     focusTaskContext(context)
   })
@@ -669,21 +808,32 @@ async function cancelTaskEdit(interaction?: MouseEvent) {
 
 function updateCalendarTask(task: DiaryTask | null, previousId?: string) {
   const removedId = previousId ?? task?.id
+  const existing = calendarTasks.value.find(item => item.id === removedId || item.id === task?.id)
+  if (task && existing && existing.version > task.version) return
   const without = calendarTasks.value.filter(item => item.id !== removedId)
   if (task?.dueDate && task.dueDate >= range.value.start && task.dueDate <= range.value.end) without.push(task)
   calendarTasks.value = without
 }
 
 async function refreshTaskContext(context: TaskReturnContext) {
+  const isCurrentSession = capturePrivateOperation()
+  if (!isCurrentSession()) return
+  const sequence = ++taskContextSequence
   const minimumItems = context.kind === 'recent-list' ? recentTaskItems.value.length : 0
   activateTaskContext(context)
+  const expectedSurface = eventSurface.value
+  const expectedMonth = month.value
+  const isCurrent = () => isCurrentSession()
+    && taskContextSequence === sequence
+    && eventSurface.value === expectedSurface
+    && (context.kind === 'recent-list' || (selected.value === context.date && month.value === expectedMonth))
   if (context.kind !== 'recent-list') invalidateRecentTasks()
   await Promise.all([
-    load(true),
+    reloadCalendarTasks(),
     context.kind === 'recent-list' ? loadRecentTasks(true, minimumItems) : Promise.resolve(),
     context.kind === 'recent-list' && !eventListLoaded.value ? loadEventList(true) : Promise.resolve(),
   ])
-  const isCurrent = capturePrivateOperation()
+  if (!isCurrent()) return
   await nextTick()
   if (!isCurrent()) return
   if (context.kind === 'recent-list') eventListDialog.value?.restoreScroll(context.scrollTop)
@@ -692,28 +842,30 @@ async function refreshTaskContext(context: TaskReturnContext) {
 
 async function toggleTask(task: DiaryTask, context: TaskReturnContext) {
   if (busyTaskIds.value.has(task.id) || !access.isUnlocked.value) return
-  const isCurrent = capturePrivateOperation()
+  if (!isTaskContextActive(context)) return
+  const isCurrentSession = capturePrivateOperation()
+  const expectedSurface = eventSurface.value
+  const isCurrentContext = () => isCurrentSession()
+    && eventSurface.value === expectedSurface
+    && isTaskContextActive(context)
   busyTaskIds.value = new Set(busyTaskIds.value).add(task.id)
   try {
     const result = task.completedAt === null
       ? await diaryTasksApi.completeTask(task.id, task.version)
       : await diaryTasksApi.reopenTask(task.id, task.version)
-    if (!isCurrent()) return
-    if (!isTaskContextActive(context)) {
-      updateCalendarTask(result.task)
-      return
-    }
+    if (!isCurrentSession()) return
     updateCalendarTask(result.task)
+    if (!isCurrentContext()) return
     if (context.kind === 'recent-list' && task.completedAt !== null) recentTaskStatus.value = 'open'
     await refreshTaskContext(context)
   } catch (cause) {
-    if (!isCurrent()) return
+    if (!isCurrentSession()) return
     if (cause instanceof DiaryTaskConflictError) toast.error('待办已在其他设备更新，列表已刷新。')
     else toast.error('待办更新失败，请重试。')
-    if (!isTaskContextActive(context)) return
+    if (!isCurrentContext()) return
     await refreshTaskContext(context)
   } finally {
-    if (isCurrent()) {
+    if (isCurrentSession()) {
       const next = new Set(busyTaskIds.value)
       next.delete(task.id)
       busyTaskIds.value = next
@@ -763,7 +915,7 @@ async function refreshEventData(state: Extract<EventSurface, { kind: 'edit' }>, 
   const refreshList = state.returnTo.kind === 'recent-list'
   if (!refreshList) invalidateEventList()
   await Promise.all([
-    load(true),
+    reloadCalendarEvents(),
     refreshList ? loadEventList(true, eventListItems.value.length) : undefined,
   ])
   return isCurrent() && eventSurface.value === state
@@ -1323,7 +1475,7 @@ onBeforeUnmount(() => {
   <main class="diary-life" data-testid="diary-life">
     <template v-if="access.isUnlocked.value">
       <div class="diary-life-calendar-stage">
-        <div v-if="error" class="diary-life-error" role="alert">{{ error }} <NButton text @click="load()">重试</NButton></div>
+        <div v-if="calendarError" class="diary-life-error" role="alert">{{ calendarError }} <NButton text @click="retryCalendarStage()">重试</NButton></div>
         <DiaryLifeCalendar :markers="markers" :today="today" :selected-date="selected" :month="month" :revision="calendarRevision" @select="open" @month="month = $event" />
       </div>
       <DiaryDayDialog
@@ -1456,15 +1608,14 @@ onBeforeUnmount(() => {
           />
         </div>
         <div v-else class="day-list-content">
-          <div v-if="error" class="diary-event-list-status" role="alert">
-            <span>{{ error }}</span>
-            <NButton text type="primary" @click="load(true)">重试</NButton>
-          </div>
-          <div v-else-if="calendarTasksLoading" class="diary-event-list-status" role="status"><NSpin size="small" /><span>正在加载…</span></div>
-          <template v-else>
-          <section v-if="selectedTasks.length" class="day-tasks">
+          <section v-if="selectedTasks.length || calendarTasksLoading || calendarTaskError" class="day-tasks">
             <h3>待办事项</h3>
-            <DiaryTaskRows
+            <div v-if="calendarTasksLoading && !selectedTasks.length" class="diary-event-list-status" role="status"><NSpin size="small" /><span>正在加载待办…</span></div>
+            <div v-if="calendarTaskError" class="diary-event-list-status" role="alert">
+              <span>{{ calendarTaskError }}</span>
+              <NButton text type="primary" @click="reloadCalendarTasks">重试</NButton>
+            </div>
+            <DiaryTaskRows v-if="selectedTasks.length"
               :items="selectedTasks"
               :today="today"
               :busy-ids="busyTaskIds"
@@ -1473,18 +1624,22 @@ onBeforeUnmount(() => {
               @edit="editTaskFromDay"
             />
           </section>
-          <section v-if="selectedEvents.length" class="day-events">
-            <h3 v-if="selectedTasks.length">事件</h3>
-          <button v-for="event in selectedEvents" :key="event.id" type="button" :data-event-id="event.id" :aria-label="dayEventLabel(event)" @click="selectEventFromDay(event, $event)">
-            <strong>
-              <img v-if="eventEmojiSource(event.emoji)" :src="eventEmojiSource(event.emoji)" class="event-emoji" alt="">
-              <span v-else class="day-event-emoji" aria-hidden="true">{{ event.emoji }}</span>
-              <span class="day-event-title-text">{{ displayEventTitle(event, selected) }}</span>
-            </strong>
-          </button>
+          <section v-if="selectedEvents.length || calendarEventLoading || eventCalendarError" class="day-events">
+            <h3 v-if="selectedTasks.length || calendarTasksLoading || calendarTaskError">事件</h3>
+            <div v-if="calendarEventLoading && !selectedEvents.length" class="diary-event-list-status" role="status"><NSpin size="small" /><span>正在加载事件…</span></div>
+            <div v-if="eventCalendarError" class="diary-event-list-status" role="alert">
+              <span>{{ eventCalendarError }}</span>
+              <NButton text type="primary" @click="reloadCalendarEvents">重试</NButton>
+            </div>
+            <button v-for="event in selectedEvents" :key="event.id" type="button" :data-event-id="event.id" :aria-label="dayEventLabel(event)" @click="selectEventFromDay(event, $event)">
+              <strong>
+                <img v-if="eventEmojiSource(event.emoji)" :src="eventEmojiSource(event.emoji)" class="event-emoji" alt="">
+                <span v-else class="day-event-emoji" aria-hidden="true">{{ event.emoji }}</span>
+                <span class="day-event-title-text">{{ displayEventTitle(event, selected) }}</span>
+              </strong>
+            </button>
           </section>
-          <p v-if="!selectedEvents.length && !selectedTasks.length" class="day-list-empty">还没有待办或事件</p>
-          </template>
+          <p v-if="!selectedEvents.length && !selectedTasks.length && !calendarTasksLoading && !calendarTaskError && !calendarEventLoading && !eventCalendarError" class="day-list-empty">还没有待办或事件</p>
         </div>
 
         <template v-if="eventSurface?.kind === 'task-edit'" #footer>
