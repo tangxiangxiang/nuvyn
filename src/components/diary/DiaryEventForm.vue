@@ -1,24 +1,40 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
-import { NInput, NSelect, NCheckbox } from 'naive-ui'
+import { NCheckbox, NInput, NPopover } from 'naive-ui'
 import { lunarDayLabel, lunarMonthLabel, lunarToSolar, nextLunarOccurrence, solarToLunar, type ChineseEventDateRule, type EventDateRule } from '../../../shared/lunarCalendar'
 import { birthdayPersonName, type EventFields } from '../../../shared/diaryLife'
-import { EVENT_EMOJI } from '../../features/diary/eventEmoji'
+import { useConfirm } from '../../composables/useConfirm'
+import { EVENT_EMOJI, eventEmojiSource } from '../../features/diary/eventEmoji'
 
 const value = defineModel<EventFields>({ required: true })
-const props = defineProps<{ today: string }>()
+const props = defineProps<{ today: string; isEditing?: boolean }>()
+const { confirm } = useConfirm()
 const calendarError = ref('')
+const emojiPickerOpen = ref(false)
+const typeSwitchPending = ref(false)
 const dateRule = computed<EventDateRule>(() => value.value.dateRule ?? { calendar: 'gregory' })
 const chineseRule = computed(() => dateRule.value.calendar === 'chinese' ? dateRule.value : null)
 const isBirthday = computed(() => value.value.type === 'birthday')
+const isAnniversary = computed(() => value.value.type === 'anniversary')
+const isMilestone = computed(() => value.value.type === 'milestone')
+const isSchedule = computed(() => value.value.type === 'schedule')
 const titleInput = computed({
   get: () => isBirthday.value ? birthdayPersonName(value.value.title) : value.value.title,
   set: (title: string) => { value.value.title = title },
 })
 const canUseLunar = computed(() => value.value.recurrence === 'yearly' && value.value.allDay
   && value.value.startDate === value.value.endDate && solarToLunar(value.value.startDate) !== null)
+const hasExtendedDateFields = computed(() => value.value.endDate !== value.value.startDate
+  || !value.value.allDay || value.value.startTime !== null || value.value.endTime !== null)
+const dateRangeError = computed(() => value.value.endDate < value.value.startDate ? '结束日期不能早于开始日期。' : '')
 const lunarMonthOptions = Array.from({ length: 12 }, (_, index) => ({ value: index + 1, label: lunarMonthLabel(index + 1) }))
 const lunarDayOptions = Array.from({ length: 30 }, (_, index) => ({ value: index + 1, label: lunarDayLabel(index + 1) }))
+const eventTypes: Array<{ value: EventFields['type']; label: string; icon: string; defaultEmoji: string }> = [
+  { value: 'birthday', label: '生日', icon: 'birthday', defaultEmoji: '🎂' },
+  { value: 'anniversary', label: '纪念日', icon: 'ring', defaultEmoji: '💍' },
+  { value: 'milestone', label: '人生时刻', icon: 'graduation', defaultEmoji: '🎯' },
+  { value: 'schedule', label: '重要日程', icon: 'work', defaultEmoji: '💼' },
+]
 const lunarPreviewDate = computed(() => {
   if (!chineseRule.value) return null
   const fromDate = props.today > value.value.startDate ? props.today : value.value.startDate
@@ -41,28 +57,12 @@ const birthdayPreview = computed(() => {
   const occurrence = date ? solarToLunar(date) : null
   return date && occurrence ? { date, age: occurrence.year - birthLunarYear! } : null
 })
-const types = [
-  { label: '人生时刻', value: 'milestone' },
-  { label: '纪念日', value: 'anniversary' },
-  { label: '生日', value: 'birthday' },
-  { label: '重要日程', value: 'schedule' },
-]
+const title = computed(() => isBirthday.value ? '生日' : isAnniversary.value ? '纪念日' : isMilestone.value ? '人生时刻' : '重要日程')
+const gregorianDateLabel = computed(() => isBirthday.value ? '出生日期' : isAnniversary.value ? '纪念日期' : isMilestone.value ? '发生日期' : '日期')
+const emojiSource = computed(() => eventEmojiSource(value.value.emoji))
 
-function setEventType(type: string | number | null) {
-  if (typeof type !== 'string' || !types.some(option => option.value === type)) return
-  const eventType = type as EventFields['type']
-  calendarError.value = ''
-  if (eventType !== 'birthday') {
-    value.value.type = eventType
-    delete value.value.birthday
-    return
-  }
-  const lunarDate = solarToLunar(value.value.startDate)
-  if (!lunarDate) {
-    calendarError.value = '生日日期仅支持 1901—2100 年的公历日期。'
-    return
-  }
-  const rule: ChineseEventDateRule = {
+function defaultLunarRule(lunarDate: NonNullable<ReturnType<typeof solarToLunar>>): ChineseEventDateRule {
+  return {
     calendar: 'chinese',
     lunarMonth: lunarDate.month,
     lunarDay: lunarDate.day,
@@ -70,28 +70,114 @@ function setEventType(type: string | number | null) {
     leapMonthPolicy: 'regular-month',
     shortMonthPolicy: 'last-day',
   }
-  const birthDate = lunarToSolar({
-    year: lunarDate.year,
-    month: lunarDate.month,
-    day: lunarDate.day,
-    isLeapMonth: lunarDate.isLeapMonth,
-  })
-  if (!birthDate) {
-    calendarError.value = '无法识别这一天的农历生日，请更换日期后重试。'
-    return
+}
+
+function formatGregorianDate(date: string): string {
+  const [year, month, day] = date.split('-').map(Number)
+  return year + '年' + month + '月' + day + '日'
+}
+
+function updateStartDate(date: string) {
+  const previousStart = value.value.startDate
+  value.value.startDate = date
+  if (value.value.endDate === previousStart) value.value.endDate = date
+}
+
+function typeSwitchLosses(target: EventFields['type']): string[] {
+  const losses: string[] = []
+  if (value.value.type === 'birthday' && target !== 'birthday' && value.value.birthday) {
+    losses.push('出生农历年和生日年龄信息')
+    if (target !== 'anniversary') losses.push('生日对应的农历年度规则')
   }
-  value.value.type = eventType
-  value.value.title = birthdayPersonName(value.value.title)
-  value.value.birthday = { birthLunarYear: 0 }
-  value.value.dateRule = rule
-  value.value.startDate = birthDate
-  value.value.endDate = birthDate
-  value.value.recurrence = 'yearly'
-  value.value.allDay = true
-  value.value.startTime = null
-  value.value.endTime = null
-  value.value.emoji = '🎂'
-  value.value.showCountdown = true
+  const collapsesToSingleDay = target === 'birthday' || target === 'anniversary'
+  if (collapsesToSingleDay && value.value.endDate !== value.value.startDate) losses.push('结束日期和持续天数')
+  if (collapsesToSingleDay && (!value.value.allDay || value.value.startTime !== null || value.value.endTime !== null)) {
+    losses.push('全天设置和开始、结束时间')
+  }
+  return losses
+}
+
+async function setEventType(rawType: string) {
+  if (typeSwitchPending.value || !eventTypes.some(option => option.value === rawType)) return
+  const targetType = rawType as EventFields['type']
+  const previous = value.value
+  if (targetType === previous.type) return
+
+  calendarError.value = ''
+  const losses = typeSwitchLosses(targetType)
+  if (targetType === 'birthday') {
+    const solarDate = solarToLunar(previous.startDate)
+    if (!solarDate) {
+      calendarError.value = '生日日期仅支持 1901—2100 年的公历日期。'
+      return
+    }
+  }
+
+  if (losses.length) {
+    typeSwitchPending.value = true
+    let accepted = false
+    try {
+      accepted = await confirm(
+        '切换事件类型？',
+        '继续后将清除：' + losses.join('、') + '。取消会保留当前表单内容。',
+      )
+    } finally {
+      typeSwitchPending.value = false
+    }
+    if (!accepted) return
+  }
+
+  const previousType = eventTypes.find(option => option.value === previous.type)!
+  const target = eventTypes.find(option => option.value === targetType)!
+  const next: EventFields = { ...previous, type: targetType }
+
+  if (targetType === 'birthday') {
+    const solarDate = solarToLunar(previous.startDate)!
+    const rule = previous.dateRule?.calendar === 'chinese' ? previous.dateRule : defaultLunarRule(solarDate)
+    const birthLunarYear = previous.birthday?.birthLunarYear ?? solarDate.year
+    const birthdayDate = lunarToSolar({
+      year: birthLunarYear,
+      month: rule.lunarMonth,
+      day: rule.lunarDay,
+      isLeapMonth: rule.isLeapMonth,
+    })
+    if (!birthdayDate) {
+      calendarError.value = '该年份没有对应的农历生日，请检查出生年份、月份或日期。'
+      return
+    }
+    next.title = birthdayPersonName(previous.title)
+    next.birthday = { birthLunarYear }
+    next.dateRule = rule
+    next.startDate = birthdayDate
+    next.endDate = birthdayDate
+    next.startTime = null
+    next.endTime = null
+    next.allDay = true
+    next.recurrence = 'yearly'
+  } else {
+    delete next.birthday
+    if (previous.type === 'birthday') {
+      next.title = birthdayPersonName(previous.title)
+      if (targetType !== 'anniversary') {
+        // A milestone or schedule uses the recorded civil date by default.
+        // Its former lunar recurrence remains editable in More options.
+        next.dateRule = { calendar: 'gregory' }
+        next.recurrence = 'none'
+      }
+    }
+    if (targetType === 'anniversary') {
+      next.endDate = next.startDate
+      next.startTime = null
+      next.endTime = null
+      next.allDay = true
+      if (next.dateRule?.calendar === 'chinese') next.recurrence = 'yearly'
+      else if (!props.isEditing) next.recurrence = 'yearly'
+    }
+  }
+
+  if (!props.isEditing && previous.emoji === previousType.defaultEmoji) next.emoji = target.defaultEmoji
+  if (!props.isEditing) next.showCountdown = targetType === 'birthday' || targetType === 'anniversary'
+  value.value = next
 }
 
 function syncBirthdayDate() {
@@ -151,14 +237,7 @@ function setCalendar(calendar: 'gregory' | 'chinese') {
       calendarError.value = '农历日期仅支持 1901—2100 年的公历日期。'
       return
     }
-    value.value.dateRule = {
-      calendar: 'chinese',
-      lunarMonth: lunarDate.month,
-      lunarDay: lunarDate.day,
-      isLeapMonth: lunarDate.isLeapMonth,
-      leapMonthPolicy: 'regular-month',
-      shortMonthPolicy: 'last-day',
-    }
+    value.value.dateRule = defaultLunarRule(lunarDate)
     return
   }
 
@@ -176,91 +255,195 @@ function setCalendar(calendar: 'gregory' | 'chinese') {
 
 function updateChineseRule(updates: Partial<ChineseEventDateRule>) {
   if (!chineseRule.value) return
-  value.value.dateRule = { ...chineseRule.value, ...updates }
-  if (isBirthday.value) syncBirthdayDate()
-}
-
-function formatGregorianDate(date: string): string {
-  const [year, month, day] = date.split('-').map(Number)
-  return `${year}年${month}月${day}日`
+  const updatedRule = { ...chineseRule.value, ...updates }
+  value.value.dateRule = updatedRule
+  if (isBirthday.value) {
+    syncBirthdayDate()
+  }
 }
 </script>
 
 <template>
-  <div class="event-fields">
-    <section class="event-form-section" aria-labelledby="event-basic-heading">
-      <h2 id="event-basic-heading">基础信息</h2>
-      <div class="event-emojis" role="group" aria-label="选择事件 Emoji">
-        <button
-          v-for="icon in EVENT_EMOJI"
-          :key="icon.asset"
-          type="button"
-          :aria-label="icon.name"
-          :aria-pressed="value.emoji === icon.glyph"
-          @click="value.emoji = icon.glyph"
-        ><img :src="`/emoji/event-${icon.asset}.svg`" alt=""></button>
-      </div>
-      <div class="event-identity-grid">
-        <label class="event-field">
-          <span>{{ isBirthday ? '称呼' : '事件标题' }}</span>
-          <NInput v-model:value="titleInput" :input-props="{ 'aria-label': isBirthday ? '生日称呼' : '事件标题' }" :placeholder="isBirthday ? '例如：爷爷' : '值得记住的事'" :maxlength="160" />
-        </label>
-        <div class="event-field">
-          <span>事件类型</span>
-          <NSelect :value="value.type" :options="types" aria-label="事件类型" @update:value="setEventType" />
+  <div class="event-fields" data-testid="diary-event-form">
+    <div class="event-type-picker" role="group" aria-label="事件类型">
+      <button
+        v-for="option in eventTypes"
+        :key="option.value"
+        type="button"
+        :data-testid="'event-type-' + option.value"
+        :aria-pressed="value.type === option.value"
+        :disabled="typeSwitchPending"
+        @click="setEventType(option.value)"
+      >
+        <img :src="'/emoji/event-' + option.icon + '.svg'" alt="">
+        <span>{{ option.label }}</span>
+      </button>
+    </div>
+
+    <div class="event-primary-row">
+      <NPopover v-model:show="emojiPickerOpen" trigger="click" placement="bottom-start" :show-arrow="false" raw>
+        <template #trigger>
+          <button
+            type="button"
+            class="event-emoji-trigger"
+            aria-label="选择事件 Emoji"
+            aria-haspopup="true"
+            :aria-expanded="emojiPickerOpen"
+          >
+            <img v-if="emojiSource" :src="emojiSource" alt="">
+            <span v-else aria-hidden="true">{{ value.emoji }}</span>
+          </button>
+        </template>
+        <div class="event-emoji-picker" role="group" aria-label="可选 Emoji">
+          <button
+            v-for="icon in EVENT_EMOJI"
+            :key="icon.asset"
+            type="button"
+            :aria-label="icon.name"
+            :aria-pressed="value.emoji === icon.glyph"
+            @click="value.emoji = icon.glyph; emojiPickerOpen = false"
+          >
+            <img :src="'/emoji/event-' + icon.asset + '.svg'" alt="">
+          </button>
         </div>
-      </div>
-      <template v-if="isBirthday && chineseRule">
-        <div class="event-dates">
-          <label class="event-field">
-            <span>出生农历年</span>
-            <input :value="value.birthday?.birthLunarYear ? value.birthday.birthLunarYear : ''" type="number" min="1901" max="2100" step="1" required aria-label="出生农历年" @input="updateBirthLunarYear(($event.target as HTMLInputElement).value)">
-          </label>
-          <label class="event-field">
-            <span>农历月份</span>
-            <select aria-label="农历月份" :value="chineseRule.lunarMonth" @change="updateChineseRule({ lunarMonth: Number(($event.target as HTMLSelectElement).value) })">
-              <option v-for="option in lunarMonthOptions" :key="option.value" :value="option.value" :disabled="!isValidBirthdayDate(chineseRule.lunarDay, chineseRule.isLeapMonth, option.value)">{{ option.label }}</option>
-            </select>
-          </label>
-        </div>
-        <div class="event-dates">
-          <label class="event-field">
-            <span>农历日期</span>
-            <select aria-label="农历日期" :value="chineseRule.lunarDay" @change="updateChineseRule({ lunarDay: Number(($event.target as HTMLSelectElement).value) })">
-              <option v-for="option in lunarDayOptions" :key="option.value" :value="option.value" :disabled="!isValidBirthdayDate(option.value)">{{ option.label }}</option>
-            </select>
-          </label>
-          <label class="event-field">
-            <span>出生月份</span>
-            <select aria-label="出生月份类型" :value="chineseRule.isLeapMonth ? 'leap' : 'regular'" @change="updateChineseRule({ isLeapMonth: ($event.target as HTMLSelectElement).value === 'leap' })">
-              <option value="regular">普通{{ lunarMonthLabel(chineseRule.lunarMonth) }}</option>
-              <option value="leap" :disabled="!isValidBirthdayDate(chineseRule.lunarDay, true)">闰{{ lunarMonthLabel(chineseRule.lunarMonth) }}</option>
-            </select>
-          </label>
-        </div>
-        <p v-if="birthdayPreview" class="event-date-preview" aria-live="polite">
-          自动标题：{{ birthdayPersonName(value.title) }}{{ birthdayPreview.age }}岁生日 · {{ formatGregorianDate(birthdayPreview.date) }}
-        </p>
-        <p v-else class="event-date-preview" aria-live="polite">填写有效的出生农历年和生日日期</p>
-        <p v-if="calendarError" class="event-date-error" role="alert">{{ calendarError }}</p>
-        <p class="event-date-help">保存一次即可；每年自动换算日期，并生成“称呼 + 年龄 + 生日”标题。</p>
-      </template>
-      <template v-else>
-      <div class="event-date-calendar-toggle" role="group" aria-label="日期类型">
+      </NPopover>
+      <label class="event-field event-title-field">
+        <span>{{ isBirthday ? '称呼' : '事件名称' }}</span>
+        <NInput
+          v-model:value="titleInput"
+          :input-props="{ 'aria-label': isBirthday ? '生日称呼' : '事件名称' }"
+          :placeholder="isBirthday ? '例如：爷爷' : '值得记住的事'"
+          :maxlength="160"
+        />
+      </label>
+    </div>
+
+    <p v-if="calendarError" class="event-date-error" role="alert">{{ calendarError }}</p>
+    <p v-if="dateRangeError" class="event-date-error" role="alert">{{ dateRangeError }}</p>
+
+    <section class="event-date-section" :aria-label="title + '日期'">
+      <h2>{{ isBirthday ? '出生日期（农历）' : isAnniversary ? '纪念日期' : isMilestone ? '发生日期' : '日程日期' }}</h2>
+
+      <div v-if="isAnniversary" class="event-date-calendar-toggle" role="group" aria-label="日期类型">
         <button type="button" :aria-pressed="dateRule.calendar === 'gregory'" @click="setCalendar('gregory')">公历</button>
         <button type="button" :aria-pressed="dateRule.calendar === 'chinese'" :disabled="dateRule.calendar !== 'chinese' && !canUseLunar" @click="setCalendar('chinese')">农历</button>
       </div>
-      <p v-if="dateRule.calendar === 'gregory' && !canUseLunar" class="event-date-help">农历重复仅支持全天、单日且每年重复的事件。</p>
-      <p v-if="calendarError" class="event-date-error" role="alert">{{ calendarError }}</p>
 
-      <template v-if="dateRule.calendar === 'gregory'">
-        <div class="event-dates">
-          <label class="event-field"><span>开始日期</span><input v-model="value.startDate" type="date" required aria-label="开始日期"></label>
-          <label class="event-field"><span>结束日期</span><input v-model="value.endDate" type="date" required aria-label="结束日期"></label>
+      <div v-if="isBirthday && chineseRule" class="event-dates event-birthday-dates">
+        <label class="event-field">
+          <span>出生农历年</span>
+          <input
+            :value="value.birthday?.birthLunarYear || ''"
+            type="number"
+            min="1901"
+            max="2100"
+            step="1"
+            required
+            aria-label="出生农历年"
+            placeholder="例如 1951"
+            @input="updateBirthLunarYear(($event.target as HTMLInputElement).value)"
+          >
+        </label>
+        <label class="event-field">
+          <span>农历月份</span>
+          <select aria-label="农历月份" :value="chineseRule.lunarMonth" @change="updateChineseRule({ lunarMonth: Number(($event.target as HTMLSelectElement).value) })">
+            <option v-for="option in lunarMonthOptions" :key="option.value" :value="option.value" :disabled="!isValidBirthdayDate(chineseRule.lunarDay, chineseRule.isLeapMonth, option.value)">{{ option.label }}</option>
+          </select>
+        </label>
+        <label class="event-field">
+          <span>农历日期</span>
+          <select aria-label="农历日期" :value="chineseRule.lunarDay" @change="updateChineseRule({ lunarDay: Number(($event.target as HTMLSelectElement).value) })">
+            <option v-for="option in lunarDayOptions" :key="option.value" :value="option.value" :disabled="!isValidBirthdayDate(option.value)">{{ option.label }}</option>
+          </select>
+        </label>
+        <label class="event-field">
+          <span>出生月份</span>
+          <select aria-label="出生月份类型" :value="chineseRule.isLeapMonth ? 'leap' : 'regular'" @change="updateChineseRule({ isLeapMonth: ($event.target as HTMLSelectElement).value === 'leap' })">
+            <option value="regular">普通{{ lunarMonthLabel(chineseRule.lunarMonth) }}</option>
+            <option value="leap" :disabled="!isValidBirthdayDate(chineseRule.lunarDay, true)">闰{{ lunarMonthLabel(chineseRule.lunarMonth) }}</option>
+          </select>
+        </label>
+      </div>
+
+      <div v-else-if="chineseRule && isAnniversary" class="event-dates">
+        <label class="event-field">
+          <span>农历月份</span>
+          <select aria-label="农历月份" :value="chineseRule.lunarMonth" @change="updateChineseRule({ lunarMonth: Number(($event.target as HTMLSelectElement).value) })">
+            <option v-for="option in lunarMonthOptions" :key="option.value" :value="option.value">{{ option.label }}</option>
+          </select>
+        </label>
+        <label class="event-field">
+          <span>农历日期</span>
+          <select aria-label="农历日期" :value="chineseRule.lunarDay" @change="updateChineseRule({ lunarDay: Number(($event.target as HTMLSelectElement).value) })">
+            <option v-for="option in lunarDayOptions" :key="option.value" :value="option.value">{{ option.label }}</option>
+          </select>
+        </label>
+      </div>
+
+      <div v-else-if="isSchedule" class="event-dates">
+        <label class="event-field">
+          <span>开始日期</span>
+          <input :value="value.startDate" type="date" required aria-label="开始日期" @input="value.startDate = ($event.target as HTMLInputElement).value">
+        </label>
+        <label class="event-field">
+          <span>结束日期</span>
+          <input v-model="value.endDate" :min="value.startDate" type="date" required aria-label="结束日期">
+        </label>
+      </div>
+
+      <label v-else-if="!isBirthday" class="event-field">
+        <span>{{ gregorianDateLabel }}</span>
+        <input :value="value.startDate" type="date" required :aria-label="gregorianDateLabel" @input="updateStartDate(($event.target as HTMLInputElement).value)">
+      </label>
+
+      <p v-if="isBirthday" class="event-date-preview" aria-live="polite">
+        <template v-if="birthdayPreview">下一次：{{ formatGregorianDate(birthdayPreview.date) }} · {{ birthdayPersonName(value.title) }}{{ birthdayPreview.age }}岁生日</template>
+        <template v-else>请输入有效的出生农历年、月份和日期</template>
+      </p>
+      <p v-else-if="chineseRule && isAnniversary" class="event-date-preview" aria-live="polite">
+        <template v-if="lunarPreviewDate">下一次：{{ formatGregorianDate(lunarPreviewDate) }}（公历）</template>
+        <template v-else>支持范围内暂无下一次日期</template>
+      </p>
+
+      <NCheckbox v-if="isAnniversary" :checked="value.recurrence === 'yearly'" :disabled="dateRule.calendar === 'chinese'" @update:checked="value.recurrence = $event ? 'yearly' : 'none'">每年重复</NCheckbox>
+      <NCheckbox v-if="isSchedule" v-model:checked="value.allDay">全天</NCheckbox>
+      <div v-if="isSchedule && !value.allDay" class="event-dates">
+        <label class="event-field">
+          <span>开始时间</span>
+          <input :value="value.startTime ?? ''" type="time" aria-label="开始时间" @input="value.startTime = ($event.target as HTMLInputElement).value || null">
+        </label>
+        <label class="event-field">
+          <span>结束时间</span>
+          <input :value="value.endTime ?? ''" type="time" aria-label="结束时间" @input="value.endTime = ($event.target as HTMLInputElement).value || null">
+        </label>
+      </div>
+
+      <p v-if="isAnniversary && dateRule.calendar === 'gregory' && !canUseLunar" class="event-date-help">农历纪念日仅支持全天、单日且每年重复的事件。</p>
+    </section>
+
+    <label class="event-field event-description-field">
+      <span>备注 <small>可选</small></span>
+      <NInput
+        v-model:value="value.description"
+        type="textarea"
+        :input-props="{ 'aria-label': '事件备注' }"
+        placeholder="记下这一刻"
+        :maxlength="4000"
+        :autosize="{ minRows: 2, maxRows: 5 }"
+      />
+    </label>
+
+    <details class="event-advanced">
+      <summary>
+        <span>更多选项</span>
+        <span class="event-advanced-chevron" aria-hidden="true"></span>
+      </summary>
+      <div class="event-advanced-content">
+        <div v-if="!isBirthday && !isAnniversary" class="event-date-calendar-toggle" role="group" aria-label="日期类型">
+          <button type="button" :aria-pressed="dateRule.calendar === 'gregory'" @click="setCalendar('gregory')">公历</button>
+          <button type="button" :aria-pressed="dateRule.calendar === 'chinese'" :disabled="dateRule.calendar !== 'chinese' && !canUseLunar" @click="setCalendar('chinese')">农历</button>
         </div>
-      </template>
-      <template v-else-if="chineseRule">
-        <div class="event-dates">
+        <div v-if="chineseRule && !isBirthday && !isAnniversary" class="event-dates">
           <label class="event-field">
             <span>农历月份</span>
             <select aria-label="农历月份" :value="chineseRule.lunarMonth" @change="updateChineseRule({ lunarMonth: Number(($event.target as HTMLSelectElement).value) })">
@@ -274,92 +457,200 @@ function formatGregorianDate(date: string): string {
             </select>
           </label>
         </div>
-        <label class="event-field">
-          <span>月份类型</span>
-          <select aria-label="月份类型" :value="chineseRule.isLeapMonth ? 'leap' : 'regular'" @change="updateChineseRule({ isLeapMonth: ($event.target as HTMLSelectElement).value === 'leap' })">
-            <option value="regular">普通{{ lunarMonthLabel(chineseRule.lunarMonth) }}</option>
-            <option value="leap">闰{{ lunarMonthLabel(chineseRule.lunarMonth) }}</option>
-          </select>
-        </label>
-        <label v-if="chineseRule.isLeapMonth" class="event-field">
-          <span>目标年份没有闰月时</span>
-          <select aria-label="缺少闰月时" :value="chineseRule.leapMonthPolicy" @change="updateChineseRule({ leapMonthPolicy: ($event.target as HTMLSelectElement).value as ChineseEventDateRule['leapMonthPolicy'] })">
-            <option value="regular-month">按普通{{ lunarMonthLabel(chineseRule.lunarMonth) }}</option>
-            <option value="leap-only">跳过该年，只在闰月出现</option>
-          </select>
-        </label>
-        <label v-if="chineseRule.lunarDay === 30" class="event-field">
-          <span>目标月份只有二十九天时</span>
-          <select aria-label="小月处理方式" :value="chineseRule.shortMonthPolicy" @change="updateChineseRule({ shortMonthPolicy: ($event.target as HTMLSelectElement).value as ChineseEventDateRule['shortMonthPolicy'] })">
-            <option value="last-day">按当月最后一天</option>
-            <option value="skip">跳过该年</option>
-          </select>
-        </label>
-        <p class="event-date-preview" aria-live="polite">
+        <p v-if="chineseRule && !isBirthday" class="event-date-preview" aria-live="polite">
           <template v-if="lunarPreviewDate">下一次：{{ formatGregorianDate(lunarPreviewDate) }}（公历）</template>
           <template v-else>支持范围内暂无下一次日期</template>
         </p>
-        <p class="event-date-help">农历日期支持 1901—2100 年；此规则仅用于全天、单日、每年重复事件。</p>
-      </template>
+        <p v-if="!isBirthday && dateRule.calendar === 'gregory' && !canUseLunar" class="event-date-help">农历重复仅支持全天、单日且每年重复的事件。</p>
 
-      <NCheckbox v-model:checked="value.allDay" :disabled="dateRule.calendar === 'chinese'">全天</NCheckbox>
-      <div v-if="!value.allDay" class="event-dates">
-        <label class="event-field"><span>开始时间</span><input :value="value.startTime ?? ''" type="time" aria-label="开始时间" @input="value.startTime = ($event.target as HTMLInputElement).value || null"></label>
-        <label class="event-field"><span>结束时间</span><input :value="value.endTime ?? ''" type="time" aria-label="结束时间" @input="value.endTime = ($event.target as HTMLInputElement).value || null"></label>
-      </div>
-      </template>
-    </section>
-
-    <section class="event-form-section" aria-labelledby="event-display-heading">
-      <h2 id="event-display-heading">重复与展示</h2>
-      <div class="event-checkboxes">
-        <NCheckbox v-if="!isBirthday" :checked="value.recurrence === 'yearly'" :disabled="dateRule.calendar === 'chinese'" @update:checked="value.recurrence = $event ? 'yearly' : 'none'">每年重复</NCheckbox>
-        <NCheckbox v-else :checked="true" disabled>按农历每年重复</NCheckbox>
+        <NCheckbox v-if="isMilestone || isSchedule" :checked="value.recurrence === 'yearly'" :disabled="dateRule.calendar === 'chinese'" @update:checked="value.recurrence = $event ? 'yearly' : 'none'">每年重复</NCheckbox>
         <NCheckbox v-model:checked="value.showCountdown">显示倒数日</NCheckbox>
         <NCheckbox v-model:checked="value.isPrimary">优先显示此事件</NCheckbox>
-      </div>
-    </section>
 
-    <section class="event-form-section" aria-labelledby="event-other-heading">
-      <h2 id="event-other-heading">其他</h2>
-      <label class="event-field">
-        <span>说明 <small>可选</small></span>
-        <NInput v-model:value="value.description" type="textarea" :input-props="{ 'aria-label': '事件描述' }" placeholder="记下这一刻" :maxlength="4000" :rows="3" />
-      </label>
-    </section>
+        <template v-if="!isBirthday && !isSchedule && hasExtendedDateFields">
+          <p class="event-date-help">保留此事件已有的持续日期和时间设置，可在这里继续编辑。</p>
+          <label v-if="value.endDate !== value.startDate" class="event-field">
+            <span>结束日期</span>
+            <input v-model="value.endDate" :min="value.startDate" type="date" required aria-label="结束日期">
+          </label>
+          <NCheckbox v-if="!isSchedule" v-model:checked="value.allDay">全天</NCheckbox>
+          <div v-if="!value.allDay" class="event-dates">
+            <label class="event-field">
+              <span>开始时间</span>
+              <input :value="value.startTime ?? ''" type="time" aria-label="开始时间" @input="value.startTime = ($event.target as HTMLInputElement).value || null">
+            </label>
+            <label class="event-field">
+              <span>结束时间</span>
+              <input :value="value.endTime ?? ''" type="time" aria-label="结束时间" @input="value.endTime = ($event.target as HTMLInputElement).value || null">
+            </label>
+          </div>
+        </template>
+
+        <template v-if="chineseRule?.isLeapMonth">
+          <label class="event-field">
+            <span>目标年份没有闰月时</span>
+            <select aria-label="缺少闰月时" :value="chineseRule.leapMonthPolicy" @change="updateChineseRule({ leapMonthPolicy: ($event.target as HTMLSelectElement).value as ChineseEventDateRule['leapMonthPolicy'] })">
+              <option value="regular-month">按普通{{ lunarMonthLabel(chineseRule.lunarMonth) }}</option>
+              <option value="leap-only">跳过该年，只在闰月出现</option>
+            </select>
+          </label>
+        </template>
+        <template v-if="chineseRule?.lunarDay === 30">
+          <label class="event-field">
+            <span>目标月份只有二十九天时</span>
+            <select aria-label="小月处理方式" :value="chineseRule.shortMonthPolicy" @change="updateChineseRule({ shortMonthPolicy: ($event.target as HTMLSelectElement).value as ChineseEventDateRule['shortMonthPolicy'] })">
+              <option value="last-day">按当月最后一天</option>
+              <option value="skip">跳过该年</option>
+            </select>
+          </label>
+        </template>
+      </div>
+    </details>
   </div>
 </template>
 
 <style scoped>
-.event-fields { display: flex; flex-direction: column; gap: 20px; min-width: 0; }
-.event-form-section { display: flex; flex-direction: column; gap: 12px; min-width: 0; }
-.event-form-section + .event-form-section { padding-top: 18px; border-top: 1px solid var(--border, #8883); }
-.event-form-section h2 { margin: 0; color: var(--text-muted, #6b7280); font-size: 14px; font-weight: 650; letter-spacing: .01em; }
-.event-emojis { display: flex; flex-wrap: wrap; gap: 6px; }
-.event-emojis button { border: 1px solid transparent; border-radius: 10px; width: 38px; height: 38px; display: grid; place-items: center; background: color-mix(in srgb, var(--text) 3%, transparent); cursor: pointer; }
-.event-emojis button:hover { background: color-mix(in srgb, var(--text) 5%, transparent); }
-.event-emojis button:focus-visible { outline: 2px solid var(--accent, #6366f1); outline-offset: 1px; }
-.event-emojis button[aria-pressed="true"] { border-color: var(--accent, #6366f1); background: color-mix(in srgb, var(--accent, #6366f1) 8%, transparent); }
-.event-emojis img { width: 26px; height: 26px; object-fit: contain; }
-.event-identity-grid { display: grid; grid-template-columns: minmax(0, 1fr) minmax(150px, .42fr); gap: 12px; align-items: end; }
-.event-field { display: flex; flex-direction: column; gap: 7px; min-width: 0; }
+.event-fields { display: flex; min-width: 0; flex-direction: column; gap: 20px; }
+.event-type-picker { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; }
+.event-type-picker button {
+  display: flex;
+  min-width: 0;
+  min-height: 42px;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  padding: 7px 9px;
+  border: 1px solid var(--border, #8885);
+  border-radius: 10px;
+  background: transparent;
+  color: var(--text-muted, #6b7280);
+  font: inherit;
+  font-size: 14px;
+  cursor: pointer;
+}
+.event-type-picker button:hover:not(:disabled) { background: color-mix(in srgb, var(--text) 4%, transparent); }
+.event-type-picker button[aria-pressed="true"] {
+  border-color: color-mix(in srgb, var(--accent, #6366f1) 55%, var(--border, #8885));
+  background: color-mix(in srgb, var(--accent, #6366f1) 6%, transparent);
+  color: var(--text);
+}
+.event-type-picker button:focus-visible,
+.event-emoji-trigger:focus-visible,
+.event-emoji-picker button:focus-visible {
+  outline: 2px solid var(--accent, #6366f1);
+  outline-offset: 2px;
+}
+.event-type-picker button:disabled { opacity: .55; cursor: wait; }
+.event-type-picker img { width: 21px; height: 21px; flex: none; object-fit: contain; }
+.event-primary-row { display: grid; grid-template-columns: 42px minmax(0, 1fr); gap: 12px; align-items: end; }
+.event-emoji-trigger {
+  display: grid;
+  width: 42px;
+  height: 42px;
+  place-items: center;
+  padding: 0;
+  border: 1px solid var(--border, #8885);
+  border-radius: 10px;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+}
+.event-emoji-trigger:hover { background: color-mix(in srgb, var(--text) 4%, transparent); }
+.event-emoji-trigger img { width: 27px; height: 27px; object-fit: contain; }
+.event-emoji-trigger > span { font-size: 24px; line-height: 1; }
+.event-emoji-picker {
+  display: grid;
+  grid-template-columns: repeat(3, 42px);
+  gap: 5px;
+  padding: 8px;
+  border: 1px solid var(--border, #8884);
+  border-radius: 12px;
+  background: var(--bg, #fff);
+  box-shadow: 0 12px 28px rgb(24 31 52 / 14%);
+}
+.event-emoji-picker button {
+  display: grid;
+  width: 42px;
+  height: 42px;
+  place-items: center;
+  padding: 0;
+  border: 1px solid transparent;
+  border-radius: 9px;
+  background: transparent;
+  cursor: pointer;
+}
+.event-emoji-picker button:hover { background: color-mix(in srgb, var(--text) 5%, transparent); }
+.event-emoji-picker button[aria-pressed="true"] { border-color: var(--accent, #6366f1); background: color-mix(in srgb, var(--accent, #6366f1) 8%, transparent); }
+.event-emoji-picker img { width: 26px; height: 26px; object-fit: contain; }
+.event-field { display: flex; min-width: 0; flex-direction: column; gap: 7px; }
 .event-field > span { color: var(--text-muted, #6b7280); font-size: 13px; }
 .event-field small { margin-inline-start: 4px; font-size: inherit; }
+.event-title-field { flex: 1; }
 .event-dates { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
-.event-field input { box-sizing: border-box; width: 100%; min-width: 0; min-height: 36px; padding: 6px 8px; background: transparent; color: inherit; border: 1px solid var(--border, #8886); border-radius: 6px; font: inherit; }
-.event-field select { box-sizing: border-box; width: 100%; min-width: 0; min-height: 36px; padding: 6px 8px; background: var(--bg-soft, var(--bg, #fff)); color: inherit; border: 1px solid var(--border, #8886); border-radius: 6px; font: inherit; }
-:global(:root[data-theme='dark']) .event-field select { color-scheme: dark; }
-:global(:root[data-theme='light']) .event-field select { color-scheme: light; }
-.event-date-calendar-toggle { display: inline-flex; align-self: flex-start; padding: 3px; border: 1px solid var(--border, #8886); border-radius: 8px; gap: 3px; }
-.event-date-calendar-toggle button { min-height: 34px; padding: 5px 12px; border: 0; border-radius: 6px; background: transparent; color: var(--text-muted, #6b7280); font: inherit; cursor: pointer; }
-.event-date-calendar-toggle button[aria-pressed="true"] { background: color-mix(in srgb, var(--accent, #6366f1) 12%, transparent); color: var(--accent, #6366f1); }
+.event-date-section { display: flex; min-width: 0; flex-direction: column; gap: 12px; }
+.event-date-section h2 { margin: 0; font-size: 14px; font-weight: 650; letter-spacing: .01em; color: var(--text-muted, #6b7280); }
+.event-date-calendar-toggle { display: inline-flex; align-self: flex-start; gap: 3px; padding: 3px; border: 1px solid var(--border, #8885); border-radius: 9px; }
+.event-date-calendar-toggle button { min-height: 32px; padding: 5px 12px; border: 0; border-radius: 6px; background: transparent; color: var(--text-muted, #6b7280); font: inherit; cursor: pointer; }
+.event-date-calendar-toggle button[aria-pressed="true"] { background: color-mix(in srgb, var(--accent, #6366f1) 10%, transparent); color: var(--accent, #6366f1); }
 .event-date-calendar-toggle button:disabled { opacity: .45; cursor: not-allowed; }
 .event-date-calendar-toggle button:focus-visible { outline: 2px solid var(--accent, #6366f1); outline-offset: 1px; }
-.event-date-help,.event-date-preview,.event-date-error { margin: -2px 0 0; color: var(--text-muted, #6b7280); font-size: 13px; line-height: 1.5; }
-.event-date-error { color: var(--danger, #dc2626); }
-.event-checkboxes { display: flex; flex-direction: row; flex-wrap: wrap; align-items: center; gap: 10px 18px; }
-@media (max-width: 520px) {
-  .event-identity-grid { grid-template-columns: minmax(0, 1fr); gap: 12px; }
+.event-field input,
+.event-field select {
+  box-sizing: border-box;
+  width: 100%;
+  min-width: 0;
+  min-height: 38px;
+  padding: 7px 9px;
+  border: 1px solid var(--border, #8885);
+  border-radius: 8px;
+  background: var(--bg-soft, var(--bg, #fff));
+  color: inherit;
+  font: inherit;
 }
-@media (max-width: 390px) { .event-dates { gap: 8px; } .event-fields { gap: 16px; } }
+:global(:root[data-theme='dark']) .event-field select { color-scheme: dark; }
+:global(:root[data-theme='light']) .event-field select { color-scheme: light; }
+.event-date-preview,
+.event-date-help,
+.event-date-error { margin: -2px 0 0; font-size: 13px; line-height: 1.5; }
+.event-date-preview,
+.event-date-help { color: var(--text-muted, #6b7280); }
+.event-date-error { color: var(--danger, #dc2626); }
+.event-description-field :deep(textarea) { line-height: 1.55; }
+.event-advanced { border-top: 1px solid var(--border, #8883); padding-top: 14px; }
+.event-advanced summary {
+  display: flex;
+  min-height: 32px;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  color: var(--text);
+  font-size: 14px;
+  font-weight: 550;
+  cursor: pointer;
+  list-style: none;
+}
+.event-advanced summary::-webkit-details-marker { display: none; }
+.event-advanced-chevron {
+  width: 8px;
+  height: 8px;
+  flex: none;
+  border-right: 1.5px solid currentColor;
+  border-bottom: 1.5px solid currentColor;
+  transform: rotate(45deg) translateY(-2px);
+  transition: transform 150ms ease;
+}
+.event-advanced[open] .event-advanced-chevron { transform: rotate(225deg) translateY(-2px); }
+.event-advanced-content { display: flex; min-width: 0; flex-direction: column; gap: 13px; padding-top: 14px; }
+@media (max-width: 700px) {
+  .event-type-picker { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+@media (max-width: 480px) {
+  .event-fields { gap: 17px; }
+  .event-dates { grid-template-columns: minmax(0, 1fr); gap: 12px; }
+  .event-primary-row { grid-template-columns: 38px minmax(0, 1fr); gap: 9px; }
+  .event-emoji-trigger { width: 38px; height: 38px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .event-advanced-chevron { transition: none; }
+}
 </style>

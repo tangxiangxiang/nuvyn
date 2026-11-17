@@ -866,7 +866,7 @@ onBeforeUnmount(() => {
         />
         <div v-else-if="eventDraft" class="diary-event-form-content">
           <p v-if="formError" class="diary-event-form-error" role="alert">{{ formError }}</p>
-          <DiaryEventForm v-model="eventDraft" :today="today" />
+          <DiaryEventForm v-model="eventDraft" :today="today" :is-editing="editing !== null" />
         </div>
         <div v-else class="day-events">
           <button v-for="event in selectedEvents" :key="event.id" type="button" :aria-label="dayEventLabel(event)" @click="selectEventFromDay(event)">
@@ -952,7 +952,7 @@ onBeforeUnmount(() => {
 .diary-event-edit-dialog.n-card {
   display: flex;
   flex-direction: column;
-  width: min(760px, calc(100vw - 32px));
+  width: min(700px, calc(100vw - 32px));
   max-height: calc(100dvh - 40px);
   overflow: hidden;
 }
@@ -962,8 +962,9 @@ onBeforeUnmount(() => {
   min-height: 0;
   overflow-y: auto;
   overscroll-behavior: contain;
-  scrollbar-width: thin;
+  scrollbar-width: none;
 }
+.diary-event-edit-dialog .n-card-content::-webkit-scrollbar { display: none; width: 0; height: 0; }
 .diary-event-edit-dialog .diary-event-form-content { min-width: 0; }
 .diary-event-edit-dialog .n-card__footer {
   border-top: 1px solid var(--border, #8883);
