@@ -2,31 +2,59 @@
 import { computed, ref } from 'vue'
 import { NButton, NEmpty, NSpin } from 'naive-ui'
 import { dayDistance, displayEventTitle, nextOccurrence, type DiaryEvent } from '../../../shared/diaryLife'
+import type { DiaryTask, DiaryTaskListStatus } from '../../../shared/diaryTasks'
 import { formatLunarRule } from '../../../shared/lunarCalendar'
 import { eventEmojiSource } from '../../features/diary/eventEmoji'
+import DiaryTaskRows from './DiaryTaskRows.vue'
 
 const props = withDefaults(defineProps<{
   items: DiaryEvent[]
+  tasks?: DiaryTask[]
+  taskStatus?: DiaryTaskListStatus
+  busyTaskIds?: Set<string>
   today: string
   loading?: boolean
   loadingMore?: boolean
   hasMore?: boolean
   error?: string
+  taskLoading?: boolean
+  taskLoadingMore?: boolean
+  taskHasMore?: boolean
+  taskError?: string
 }>(), {
+  tasks: () => [],
+  taskStatus: 'open',
+  busyTaskIds: () => new Set<string>(),
   loading: false,
   loadingMore: false,
   hasMore: false,
   error: '',
+  taskLoading: false,
+  taskLoadingMore: false,
+  taskHasMore: false,
+  taskError: '',
 })
 
 const emit = defineEmits<{
   retry: []
   'load-more': []
   select: [event: DiaryEvent, scrollTop: number, keyboardActivated: boolean]
+  'toggle-task': [task: DiaryTask]
+  'edit-task': [task: DiaryTask, scrollTop: number, keyboardActivated: boolean]
+  'load-more-tasks': []
+  'retry-tasks': []
+  'toggle-task-status': []
 }>()
 
 const scroller = ref<HTMLElement | null>(null)
+const taskLabel = computed(() => props.taskStatus === 'open' ? '待办事项' : '已完成')
+const isCompletelyEmpty = computed(() => !props.loading && !props.error && !props.taskLoading && !props.taskError
+  && props.items.length === 0 && props.tasks.length === 0)
+
 defineExpose({
+  getScrollTop() {
+    return scroller.value?.scrollTop ?? 0
+  },
   restoreScroll(scrollTop: number) {
     if (scroller.value) scroller.value.scrollTop = scrollTop
   },
@@ -35,6 +63,12 @@ defineExpose({
       .find(button => button.dataset.eventId === eventId)
     eventButton?.focus({ preventScroll: true })
     return Boolean(eventButton)
+  },
+  focusTask(taskId: string) {
+    const taskButton = [...(scroller.value?.querySelectorAll<HTMLButtonElement>('[data-task-id]') ?? [])]
+      .find(button => button.dataset.taskId === taskId)
+    taskButton?.focus({ preventScroll: true })
+    return Boolean(taskButton)
   },
 })
 
@@ -72,45 +106,89 @@ const countdowns = computed(() => new Map(props.items.map(event => {
   const date = occurrenceDates.value.get(event.id)
   return [event.id, date ? dayDistance(props.today, date) : null]
 })))
-const isEmpty = computed(() => !props.loading && !props.error && props.items.length === 0)
+
+function editTask(task: DiaryTask, keyboardActivated: boolean) {
+  emit('edit-task', task, scroller.value?.scrollTop ?? 0, keyboardActivated)
+}
 </script>
 
 <template>
   <div class="diary-event-list-content">
-    <div v-if="loading" class="diary-event-list-status" role="status">
+    <div v-if="loading && !items.length && !tasks.length && !taskError" class="diary-event-list-status" role="status">
       <NSpin size="small" />
       <span>正在加载…</span>
     </div>
-    <div v-else-if="error" class="diary-event-list-status" role="alert">
+    <div v-else-if="error && !items.length && !tasks.length && !taskError" class="diary-event-list-status" role="alert">
       <span>{{ error }}</span>
       <NButton text type="primary" @click="emit('retry')">重试</NButton>
     </div>
-    <NEmpty v-else-if="isEmpty" description="还没有近期事项" />
     <div v-else ref="scroller" class="diary-event-list-scroll">
-      <button
-        v-for="event in items"
-        :key="event.id"
-        type="button"
-        class="diary-event-list-item"
-        :data-event-id="event.id"
-        :aria-label="eventTitle(event)"
-        @click="emit('select', event, scroller?.scrollTop ?? 0, $event.detail === 0)"
-      >
-        <span class="diary-event-list-emoji" aria-hidden="true">
-          <img v-if="eventEmojiSource(event.emoji)" :src="eventEmojiSource(event.emoji)" alt="">
-          <span v-else>{{ event.emoji }}</span>
-        </span>
-        <span class="diary-event-list-copy">
-          <strong>{{ eventTitle(event) }}</strong>
-          <span class="diary-event-list-meta">{{ secondaryLabel(event) }}</span>
-        </span>
-        <span v-if="countdowns.get(event.id) !== null && countdowns.get(event.id) !== undefined" class="diary-event-list-countdown">
-          <strong>{{ countdowns.get(event.id) === 0 ? '今天' : countdowns.get(event.id) }}</strong>
-          <small>{{ countdowns.get(event.id) === 0 ? '就是今天' : '天后' }}</small>
-        </span>
-      </button>
-      <div v-if="hasMore" class="diary-event-list-more">
-        <NButton secondary :loading="loadingMore" @click="emit('load-more')">加载更多</NButton>
+      <section v-if="tasks.length || taskLoading || taskError" class="diary-task-list-section">
+        <header v-if="tasks.length" class="diary-list-section-header">
+          <h3>{{ taskLabel }}</h3>
+          <NButton text type="primary" :disabled="taskLoading || taskLoadingMore" @click="emit('toggle-task-status')">
+            {{ taskStatus === 'open' ? '查看已完成' : '返回待办' }}
+          </NButton>
+        </header>
+        <div v-if="taskLoading && !tasks.length" class="diary-event-list-status" role="status"><NSpin size="small" /><span>正在加载待办…</span></div>
+        <div v-else-if="taskError" class="diary-event-list-status" role="alert">
+          <span>{{ taskError }}</span>
+          <NButton text type="primary" @click="emit('retry-tasks')">重试</NButton>
+        </div>
+        <DiaryTaskRows v-else :items="tasks" :today="today" :busy-ids="busyTaskIds" @toggle="emit('toggle-task', $event)" @edit="editTask" />
+        <div v-if="taskHasMore" class="diary-event-list-more">
+          <NButton secondary :loading="taskLoadingMore" @click="emit('load-more-tasks')">加载更多待办</NButton>
+        </div>
+      </section>
+
+      <div v-if="tasks.length === 0 && !taskLoading && !taskError && taskStatus === 'open'" class="diary-task-list-toggle">
+        <NButton text type="primary" @click="emit('toggle-task-status')">查看已完成</NButton>
+      </div>
+      <div v-if="tasks.length === 0 && !taskLoading && !taskError && taskStatus === 'completed'" class="diary-task-list-toggle">
+        <NButton text type="primary" @click="emit('toggle-task-status')">返回待办</NButton>
+      </div>
+
+      <NEmpty v-if="isCompletelyEmpty" description="还没有近期事项" />
+
+      <section v-if="items.length || loading || error" class="diary-event-list-section">
+        <h3 v-if="tasks.length" class="diary-list-section-title">事件</h3>
+        <div v-if="loading && !items.length" class="diary-event-list-status" role="status"><NSpin size="small" /><span>正在加载事件…</span></div>
+        <div v-else-if="error" class="diary-event-list-status" role="alert">
+          <span>{{ error }}</span>
+          <NButton text type="primary" @click="emit('retry')">重试</NButton>
+        </div>
+        <button
+          v-for="event in items"
+          :key="event.id"
+          type="button"
+          class="diary-event-list-item"
+          :data-event-id="event.id"
+          :aria-label="eventTitle(event)"
+          @click="emit('select', event, scroller?.scrollTop ?? 0, $event.detail === 0)"
+        >
+          <span class="diary-event-list-emoji" aria-hidden="true">
+            <img v-if="eventEmojiSource(event.emoji)" :src="eventEmojiSource(event.emoji)" alt="">
+            <span v-else>{{ event.emoji }}</span>
+          </span>
+          <span class="diary-event-list-copy">
+            <strong>{{ eventTitle(event) }}</strong>
+            <span class="diary-event-list-meta">{{ secondaryLabel(event) }}</span>
+          </span>
+          <span v-if="countdowns.get(event.id) !== null && countdowns.get(event.id) !== undefined" class="diary-event-list-countdown">
+            <strong>{{ countdowns.get(event.id) === 0 ? '今天' : countdowns.get(event.id) }}</strong>
+            <small>{{ countdowns.get(event.id) === 0 ? '就是今天' : '天后' }}</small>
+          </span>
+        </button>
+        <div v-if="hasMore" class="diary-event-list-more">
+          <NButton secondary :loading="loadingMore" @click="emit('load-more')">加载更多事件</NButton>
+        </div>
+      </section>
+
+      <div v-if="!tasks.length && !taskLoading && !taskError && taskHasMore" class="diary-event-list-more">
+        <NButton secondary :loading="taskLoadingMore" @click="emit('load-more-tasks')">加载更多待办</NButton>
+      </div>
+      <div v-if="!items.length && !loading && !error && hasMore" class="diary-event-list-more">
+        <NButton secondary :loading="loadingMore" @click="emit('load-more')">加载更多事件</NButton>
       </div>
     </div>
   </div>
@@ -127,6 +205,13 @@ const isEmpty = computed(() => !props.loading && !props.error && props.items.len
   scrollbar-width: none;
 }
 .diary-event-list-scroll::-webkit-scrollbar { display: none; }
+.diary-list-section-header { display: flex; min-height: 36px; align-items: center; justify-content: space-between; gap: 8px; }
+.diary-list-section-header h3,
+.diary-list-section-title { margin: 0; font-size: 14px; font-weight: 600; }
+.diary-event-list-section { display: flex; flex-direction: column; gap: 10px; }
+.diary-list-section-title { padding-top: 4px; }
+.diary-task-list-section { display: flex; flex-direction: column; gap: 4px; }
+.diary-task-list-toggle { display: flex; justify-content: flex-end; min-height: 32px; }
 .diary-event-list-item {
   width: 100%;
   display: grid;
@@ -148,10 +233,7 @@ const isEmpty = computed(() => !props.loading && !props.error && props.items.len
   cursor: pointer;
 }
 .diary-event-list-item:hover,
-.diary-event-list-item:focus-visible {
-  outline: none;
-  background-color: color-mix(in srgb, var(--bg) 96%, var(--text) 4%);
-}
+.diary-event-list-item:focus-visible { outline: none; background-color: color-mix(in srgb, var(--bg) 96%, var(--text) 4%); }
 .diary-event-list-emoji { width: 32px; height: 32px; display: grid; place-items: center; font-size: 22px; }
 .diary-event-list-emoji img { width: 26px; height: 26px; object-fit: contain; }
 .diary-event-list-copy { min-width: 0; display: flex; flex-direction: column; gap: 4px; }

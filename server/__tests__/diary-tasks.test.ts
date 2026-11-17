@@ -178,6 +178,51 @@ describe('Diary task API', () => {
     expect(Number((db.prepare('SELECT revision FROM diary_task_list_revisions WHERE owner_user_id = ?').get(auth.userId) as { revision: number }).revision)).toBe(revisionBefore)
   })
 
+  it('filters completed state within revision-bound cursor pages without mixing statuses', async () => {
+    const total = 402
+    const ids: string[] = []
+    await auth.runtime.diaryAccess.withBodyOperation(auth.session.id, capability, operation => {
+      const store = diaryTaskStore(db, auth.userId, operation)
+      for (let index = 0; index < total; index += 1) {
+        const id = randomUUID()
+        ids.push(id)
+        store.putTask(id, { title: `Status ${index}`, description: '', dueDate: '2026-11-18', dueTime: null }, 0)
+        if (index % 2 === 1) store.completeTask(id, 1)
+      }
+    })
+
+    const openFirstResponse = await request('GET', '/tasks/list?status=open')
+    expect(openFirstResponse.status).toBe(200)
+    const openFirst = await openFirstResponse.json()
+    expect(openFirst.items).toHaveLength(200)
+    expect(openFirst.items.every((task: { completedAt: number | null }) => task.completedAt === null)).toBe(true)
+    const openCursor = openFirst.nextCursor as string
+    const openCursorPayload = JSON.parse(Buffer.from(openCursor.split('.')[0], 'base64url').toString())
+    expect(openCursorPayload.query).toEqual({ type: 'list', completed: false })
+    const openSecond = await (await request('GET', `/tasks/list?status=open&cursor=${encodeURIComponent(openCursor)}`)).json()
+    expect(openSecond.items).toHaveLength(1)
+    expect(openSecond.items[0].completedAt).toBeNull()
+    expect(openSecond.nextCursor).toBeNull()
+
+    const completedFirst = await (await request('GET', '/tasks/list?status=completed')).json()
+    expect(completedFirst.items).toHaveLength(200)
+    expect(completedFirst.items.every((task: { completedAt: number | null }) => task.completedAt !== null)).toBe(true)
+    const completedCursor = completedFirst.nextCursor as string
+    const completedCursorPayload = JSON.parse(Buffer.from(completedCursor.split('.')[0], 'base64url').toString())
+    expect(completedCursorPayload.query).toEqual({ type: 'list', completed: true })
+    const completedSecond = await (await request('GET', `/tasks/list?status=completed&cursor=${encodeURIComponent(completedCursor)}`)).json()
+    expect(completedSecond.items).toHaveLength(1)
+    expect(completedSecond.items[0].completedAt).not.toBeNull()
+    expect(completedSecond.nextCursor).toBeNull()
+
+    expect((await request('GET', `/tasks/list?status=completed&cursor=${encodeURIComponent(openCursor)}`)).status).toBe(400)
+    expect((await request('GET', '/tasks/list?status=unknown')).status).toBe(400)
+    expect((await request('POST', `/tasks/${ids[0]}/complete`, { expectedVersion: 1 })).status).toBe(200)
+    const staleCursor = await request('GET', `/tasks/list?status=open&cursor=${encodeURIComponent(openCursor)}`)
+    expect(staleCursor.status).toBe(409)
+    expect(await staleCursor.json()).toEqual({ code: 'diary-task-list-changed' })
+  })
+
   it('queries inclusive date-range boundaries across years and excludes undated tasks', async () => {
     const before = randomUUID()
     const start = randomUUID()

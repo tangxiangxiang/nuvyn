@@ -3,6 +3,22 @@ import { describe, expect, it } from 'vitest'
 import { mount } from '@vue/test-utils'
 import DiaryEventListDialog from '../DiaryEventListDialog.vue'
 import type { DiaryEvent } from '../../../../shared/diaryLife'
+import type { DiaryTask } from '../../../../shared/diaryTasks'
+
+function makeTask(overrides: Partial<DiaryTask> = {}): DiaryTask {
+  return {
+    id: 'task-1',
+    title: '给爷爷打电话',
+    description: '',
+    dueDate: '2026-11-18',
+    dueTime: null,
+    completedAt: null,
+    version: 1,
+    createdAt: 1,
+    updatedAt: 1,
+    ...overrides,
+  }
+}
 
 function makeEvent(overrides: Partial<DiaryEvent> = {}): DiaryEvent {
   return {
@@ -72,5 +88,63 @@ describe('DiaryEventListDialog content', () => {
     await wrapper.setProps({ today: '2026-11-18' })
     expect(wrapper.findAll('.diary-event-list-countdown')[0]!.text()).toContain('就是今天')
     wrapper.unmount()
+  })
+
+  it('shows tasks and events together while keeping task completion separate from event selection', async () => {
+    const event = makeEvent({ id: 'event-2', title: '爷爷75岁生日' })
+    const task = makeTask()
+    const wrapper = mount(DiaryEventListDialog, {
+      props: { items: [event], tasks: [task], today: '2026-11-16', taskStatus: 'open' },
+      global: { stubs: naiveStubs },
+    })
+
+    expect(wrapper.find('.diary-list-section-header h3').text()).toBe('待办事项')
+    expect(wrapper.find('.diary-event-list-section h3').text()).toBe('事件')
+    expect(wrapper.find('.diary-event-list-item').text()).toContain('爷爷75岁生日')
+    expect(wrapper.get('[role="checkbox"]').attributes('aria-checked')).toBe('false')
+    expect(wrapper.text()).toContain('11月18日')
+
+    await wrapper.get('[role="checkbox"]').trigger('click')
+    expect(wrapper.emitted('toggle-task')).toEqual([[task]])
+    expect(wrapper.emitted('edit-task')).toBeUndefined()
+    expect(wrapper.emitted('select')).toBeUndefined()
+
+    await wrapper.get('[data-task-id="task-1"]').trigger('click')
+    expect(wrapper.emitted('edit-task')?.[0]?.[0]).toEqual(task)
+    await wrapper.get('.diary-event-list-item').trigger('click')
+    expect(wrapper.emitted('select')?.[0]?.[0]).toEqual(event)
+    wrapper.unmount()
+  })
+
+  it('offers completed tasks separately and weakens completed task rows', async () => {
+    const task = makeTask({ completedAt: 100 })
+    const wrapper = mount(DiaryEventListDialog, {
+      props: { items: [], tasks: [task], today: '2026-11-16', taskStatus: 'completed' },
+      global: { stubs: naiveStubs },
+    })
+
+    expect(wrapper.get('.diary-task-row').classes()).toContain('is-completed')
+    expect(wrapper.get('.diary-list-section-header h3').text()).toBe('已完成')
+    await wrapper.get('.diary-list-section-header button').trigger('click')
+    expect(wrapper.emitted('toggle-task-status')).toHaveLength(1)
+    wrapper.unmount()
+  })
+
+  it('shows only populated sections and a unified empty state', () => {
+    const taskOnly = mount(DiaryEventListDialog, {
+      props: { items: [], tasks: [makeTask()], today: '2026-11-16' },
+      global: { stubs: naiveStubs },
+    })
+    expect(taskOnly.find('.diary-list-section-title').exists()).toBe(false)
+    expect(taskOnly.find('.diary-event-list-section').exists()).toBe(false)
+    taskOnly.unmount()
+
+    const empty = mount(DiaryEventListDialog, {
+      props: { items: [], tasks: [], today: '2026-11-16' },
+      global: { stubs: naiveStubs },
+    })
+    expect(empty.text()).toContain('还没有近期事项')
+    expect(empty.find('.diary-list-section-header').exists()).toBe(false)
+    empty.unmount()
   })
 })

@@ -139,11 +139,12 @@ routes.get('/countdowns', c => guarded(c, store => {
 
 routes.get('/tasks/list', c => guarded(c, (_store, _db, tasks) => {
   const query = c.req.query()
-  if (Object.keys(query).some(key => key !== 'cursor')
+  if (Object.keys(query).some(key => !['cursor', 'status'].includes(key))
+    || (query.status !== undefined && query.status !== 'open' && query.status !== 'completed')
     || (query.cursor !== undefined && (!query.cursor || query.cursor.length > 1024))) {
     return c.json({ code: 'invalid-diary-task-list-query' }, 400)
   }
-  return c.json(tasks.listTasks(query.cursor))
+  return c.json(tasks.listTasks(query.cursor, query.status === undefined ? undefined : query.status === 'completed'))
 }))
 routes.get('/tasks', c => guarded(c, (_store, _db, tasks) => {
   const query = c.req.query()

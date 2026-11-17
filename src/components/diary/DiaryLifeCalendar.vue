@@ -9,7 +9,7 @@ const LINE_WHEEL_MONTH_THRESHOLD = 6
 const WHEEL_GESTURE_GAP_MS = 120
 const WHEEL_TAIL_MAX_DELTA = 24
 const WHEEL_RESTART_MIN_INCREASE = 12
-const props = defineProps<{ today: string; selectedDate: string | null; month: string; revision: number; markers: Record<string, { source?: string; emoji?: string; count?: number; hasEntries?: boolean; hasAttachments?: boolean }> }>()
+const props = defineProps<{ today: string; selectedDate: string | null; month: string; revision: number; markers: Record<string, { source?: string; emoji?: string; count?: number; hasEntries?: boolean; hasAttachments?: boolean; hasTasks?: boolean }> }>()
 const emit = defineEmits<{ select: [date: string]; month: [date: string] }>()
 const { locale } = useI18n()
 // Match the firstDayOfWeek of the zhCN and enUS locales in NuvynUiRoot.
@@ -213,6 +213,7 @@ function selectDate(date: string, event: MouseEvent) {
           <span v-else-if="markers[dateFor(year, month, date)]?.emoji">{{ markers[dateFor(year, month, date)]?.emoji }}</span>
           <span v-else-if="markers[dateFor(year, month, date)]?.hasEntries || markers[dateFor(year, month, date)]?.hasAttachments" class="life-entry-marker" aria-label="有日记内容">•</span>
           <small v-if="(markers[dateFor(year, month, date)]?.count ?? 0) > 1">+{{ markers[dateFor(year, month, date)]!.count! - 1 }}</small>
+          <span v-if="markers[dateFor(year, month, date)]?.hasTasks" class="life-task-marker" aria-label="有未完成待办">•</span>
         </span>
       </button>
     </template>
@@ -478,6 +479,12 @@ function selectDate(date: string, event: MouseEvent) {
 .life-entry-marker {
   color: var(--accent);
   font-size: 22px;
+  line-height: 1;
+}
+
+.life-task-marker {
+  color: var(--primary, #6366f1);
+  font-size: 16px;
   line-height: 1;
 }
 

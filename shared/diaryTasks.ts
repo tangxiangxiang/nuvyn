@@ -20,6 +20,8 @@ export interface DiaryTaskPage {
   nextCursor: string | null
 }
 
+export type DiaryTaskListStatus = 'open' | 'completed'
+
 export const MAX_DIARY_TASK_TITLE_LENGTH = 160
 export const MAX_DIARY_TASK_DESCRIPTION_LENGTH = 4000
 

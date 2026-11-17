@@ -15,7 +15,7 @@ const MAX_REVISION = Number.MAX_SAFE_INTEGER
 const TASK_ID_PATTERN = /^[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/
 
 type TaskListQuery =
-  | { type: 'list' }
+  | { type: 'list'; completed?: boolean }
   | { type: 'range'; start: string; end: string }
 
 type TaskCursorPayload = {
@@ -97,7 +97,10 @@ export function diaryTaskStore(db: Database, owner: number, operation: DiaryBody
 
   function cursorMatchesQuery(value: unknown, query: TaskListQuery): boolean {
     if (query.type === 'list') {
-      return hasExactKeys(value, ['type']) && value.type === 'list'
+      if (query.completed === undefined) return hasExactKeys(value, ['type']) && value.type === 'list'
+      return hasExactKeys(value, ['type', 'completed'])
+        && value.type === 'list'
+        && value.completed === query.completed
     }
     return hasExactKeys(value, ['type', 'start', 'end'])
       && value.type === 'range'
@@ -163,20 +166,30 @@ export function diaryTaskStore(db: Database, owner: number, operation: DiaryBody
       const revision = listRevision()
       if (parsedCursor && parsedCursor.revision !== revision) throw new DiaryTaskListChanged()
 
+      if (query.type === 'list' && query.completed !== undefined) {
+        const matches: DiaryTask[] = []
+        let position: Pick<TaskCursorPayload, 'dueDate' | 'id'> | null = parsedCursor
+        let exhausted = false
+        while (matches.length <= PAGE_SIZE && !exhausted) {
+          const rows = listRowsAfter(position, PAGE_SIZE + 1)
+          if (!rows.length) break
+          for (const row of rows) {
+            const item = task(row)
+            position = { dueDate: row.due_date, id: row.id }
+            if ((item.completedAt !== null) === query.completed) matches.push(item)
+            if (matches.length > PAGE_SIZE) break
+          }
+          exhausted = rows.length < PAGE_SIZE + 1
+        }
+        const items = matches.slice(0, PAGE_SIZE)
+        const lastTask = items.at(-1)
+        if (matches.length <= PAGE_SIZE || !lastTask) return { items, nextCursor: null }
+        return { items, nextCursor: encodeCursor(revision, lastTask, query) }
+      }
+
       let rows: TaskRow[]
       if (query.type === 'list') {
-        if (parsedCursor === null) {
-          rows = db.prepare(`SELECT * FROM diary_tasks WHERE owner_user_id = ?
-            ORDER BY due_date IS NULL, due_date, id LIMIT ?`).all(owner, PAGE_SIZE + 1) as TaskRow[]
-        } else if (parsedCursor.dueDate === null) {
-          rows = db.prepare(`SELECT * FROM diary_tasks WHERE owner_user_id = ? AND due_date IS NULL AND id > ?
-            ORDER BY due_date IS NULL, due_date, id LIMIT ?`).all(owner, parsedCursor.id, PAGE_SIZE + 1) as TaskRow[]
-        } else {
-          rows = db.prepare(`SELECT * FROM diary_tasks WHERE owner_user_id = ?
-            AND (due_date IS NULL OR due_date > ? OR (due_date = ? AND id > ?))
-            ORDER BY due_date IS NULL, due_date, id LIMIT ?`)
-            .all(owner, parsedCursor.dueDate, parsedCursor.dueDate, parsedCursor.id, PAGE_SIZE + 1) as TaskRow[]
-        }
+        rows = listRowsAfter(parsedCursor, PAGE_SIZE + 1)
       } else if (parsedCursor === null) {
         rows = db.prepare(`SELECT * FROM diary_tasks WHERE owner_user_id = ? AND due_date BETWEEN ? AND ?
           ORDER BY due_date, id LIMIT ?`).all(owner, query.start, query.end, PAGE_SIZE + 1) as TaskRow[]
@@ -192,6 +205,21 @@ export function diaryTaskStore(db: Database, owner: number, operation: DiaryBody
       if (rows.length <= PAGE_SIZE || !lastTask) return { items, nextCursor: null }
       return { items, nextCursor: encodeCursor(revision, lastTask, query) }
     })()
+  }
+
+  function listRowsAfter(position: Pick<TaskCursorPayload, 'dueDate' | 'id'> | null, limit: number): TaskRow[] {
+    if (position === null) {
+      return db.prepare(`SELECT * FROM diary_tasks WHERE owner_user_id = ?
+        ORDER BY due_date IS NULL, due_date, id LIMIT ?`).all(owner, limit) as TaskRow[]
+    }
+    if (position.dueDate === null) {
+      return db.prepare(`SELECT * FROM diary_tasks WHERE owner_user_id = ? AND due_date IS NULL AND id > ?
+        ORDER BY due_date IS NULL, due_date, id LIMIT ?`).all(owner, position.id, limit) as TaskRow[]
+    }
+    return db.prepare(`SELECT * FROM diary_tasks WHERE owner_user_id = ?
+      AND (due_date IS NULL OR due_date > ? OR (due_date = ? AND id > ?))
+      ORDER BY due_date IS NULL, due_date, id LIMIT ?`)
+      .all(owner, position.dueDate, position.dueDate, position.id, limit) as TaskRow[]
   }
 
   function transition(id: string, expected: number, completed: boolean): DiaryTask {
@@ -231,8 +259,8 @@ export function diaryTaskStore(db: Database, owner: number, operation: DiaryBody
       const row = readTaskRow(id)
       return row ? task(row) : null
     },
-    listTasks(cursor?: string): DiaryTaskPage {
-      return listPage({ type: 'list' }, cursor)
+    listTasks(cursor?: string, completed?: boolean): DiaryTaskPage {
+      return listPage({ type: 'list', ...(completed === undefined ? {} : { completed }) }, cursor)
     },
     tasksInRange(start: string, end: string, cursor?: string): DiaryTaskPage {
       return listPage({ type: 'range', start, end }, cursor)

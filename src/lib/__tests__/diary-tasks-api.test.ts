@@ -34,6 +34,7 @@ describe('Diary task API client', () => {
     }))
     const controller = new AbortController()
     await diaryTasksApi.listTasks('list-cursor', controller.signal)
+    await diaryTasksApi.listTasks('filtered-cursor', controller.signal, 'completed')
     await diaryTasksApi.tasksInRange('2026-01-01', '2026-01-31', 'range-cursor', controller.signal)
     await diaryTasksApi.getTask('task-id', controller.signal)
     await diaryTasksApi.updateTask('task-id', { title: 'Task', description: '', dueDate: null, dueTime: null }, 1)
@@ -43,6 +44,7 @@ describe('Diary task API client', () => {
 
     expect(calls.map(call => `${call.init?.method ?? 'GET'} ${call.input}`)).toEqual([
       'GET /api/diary/life/tasks/list?cursor=list-cursor',
+      'GET /api/diary/life/tasks/list?status=completed&cursor=filtered-cursor',
       'GET /api/diary/life/tasks?start=2026-01-01&end=2026-01-31&cursor=range-cursor',
       'GET /api/diary/life/tasks/task-id',
       'PUT /api/diary/life/tasks/task-id',
@@ -53,6 +55,7 @@ describe('Diary task API client', () => {
     expect(calls[0]?.init?.signal).toBe(controller.signal)
     expect(calls[1]?.init?.signal).toBe(controller.signal)
     expect(calls[2]?.init?.signal).toBe(controller.signal)
+    expect(calls[3]?.init?.signal).toBe(controller.signal)
     expect(calls.every(call => call.init?.cache === 'no-store')).toBe(true)
   })
 

@@ -7,9 +7,9 @@ enableAutoUnmount(afterEach)
 beforeEach(() => vi.useFakeTimers())
 afterEach(() => vi.useRealTimers())
 
-function mountCalendar() {
+function mountCalendar(markers: Record<string, { source?: string; emoji?: string; count?: number; hasTasks?: boolean }> = {}) {
   const wrapper = mount(DiaryLifeCalendar, {
-    props: { today: '2026-11-16', selectedDate: null, month: '2026-11-01', revision: 0, markers: {} },
+    props: { today: '2026-11-16', selectedDate: null, month: '2026-11-01', revision: 0, markers },
   })
   const calendar = wrapper.get('.diary-life-calendar')
   let time = 0
@@ -25,7 +25,7 @@ function mountCalendar() {
     }
   }
 
-  return { wheel, months: () => wrapper.emitted('month')?.flat() ?? [] }
+  return { wrapper, wheel, months: () => wrapper.emitted('month')?.flat() ?? [] }
 }
 
 describe('Diary calendar wheel navigation', () => {
@@ -58,5 +58,20 @@ describe('Diary calendar wheel navigation', () => {
     expect(months()).toEqual([])
     wheel([3, 3, 3], 16, WheelEvent.DOM_DELTA_LINE)
     expect(months()).toEqual(['2026-12-01', '2027-01-01'])
+  })
+
+  it('keeps the event emoji and the unfinished task dot as separate calendar markers', () => {
+    const { wrapper } = mountCalendar({
+      '2026-11-18': { emoji: '🎂', count: 1, hasTasks: true },
+      '2026-11-19': { hasTasks: true },
+    })
+
+    const eventAndTask = wrapper.get('.life-date[data-date="2026-11-18"] .life-marker')
+    expect(eventAndTask.text()).toContain('🎂')
+    expect(eventAndTask.find('.life-task-marker').exists()).toBe(true)
+    const taskOnly = wrapper.get('.life-date[data-date="2026-11-19"] .life-marker')
+    expect(taskOnly.find('.life-task-marker').exists()).toBe(true)
+    expect(taskOnly.find('.life-entry-marker').exists()).toBe(false)
+    wrapper.unmount()
   })
 })

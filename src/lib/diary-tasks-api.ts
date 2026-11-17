@@ -1,5 +1,5 @@
 import { diaryAuthFetch } from './auth-session'
-import type { DiaryTask, DiaryTaskPage, TaskFields } from '../../shared/diaryTasks'
+import type { DiaryTask, DiaryTaskListStatus, DiaryTaskPage, TaskFields } from '../../shared/diaryTasks'
 export type { DiaryTaskPage } from '../../shared/diaryTasks'
 
 export class DiaryTaskApiError extends Error {
@@ -62,9 +62,11 @@ export const diaryTasksApi = {
   getTask(id: string, signal?: AbortSignal): Promise<{ task: DiaryTask }> {
     return request(`/tasks/${encodeURIComponent(id)}`, 'GET', undefined, signal)
   },
-  listTasks(cursor?: string, signal?: AbortSignal): Promise<DiaryTaskPage> {
-    const query = cursor === undefined ? '' : `?cursor=${encodeURIComponent(cursor)}`
-    return request(`/tasks/list${query}`, 'GET', undefined, signal)
+  listTasks(cursor?: string, signal?: AbortSignal, status?: DiaryTaskListStatus): Promise<DiaryTaskPage> {
+    const query = new URLSearchParams()
+    if (status) query.set('status', status)
+    if (cursor !== undefined) query.set('cursor', cursor)
+    return request(`/tasks/list${query.size ? `?${query}` : ''}`, 'GET', undefined, signal)
   },
   tasksInRange(start: string, end: string, cursor?: string, signal?: AbortSignal): Promise<DiaryTaskPage> {
     const query = new URLSearchParams({ start, end })
