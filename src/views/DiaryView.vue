@@ -824,7 +824,7 @@ onBeforeUnmount(() => {
         :show="eventSurfaceVisible"
         preset="card"
         class="diary-life-dialog"
-        :class="{ 'diary-event-list-dialog': eventListVisible }"
+        :class="{ 'diary-event-list-dialog': eventListVisible, 'diary-event-edit-dialog': eventDraft !== null }"
         :mask-closable="!busy && !attachmentBusy"
         :close-on-esc="!busy && !attachmentBusy"
         :auto-focus="false"
@@ -949,6 +949,26 @@ onBeforeUnmount(() => {
 .diary-life-dialog.n-card { width: min(640px, calc(100vw - 32px)); max-height: calc(100dvh - 32px); overflow: auto; scrollbar-width: none; }
 .diary-life-dialog.n-card::-webkit-scrollbar { display: none; }
 .diary-event-list-dialog.n-card { width: min(620px, calc(100vw - 32px)); }
+.diary-event-edit-dialog.n-card {
+  display: flex;
+  flex-direction: column;
+  width: min(760px, calc(100vw - 32px));
+  max-height: calc(100dvh - 40px);
+  overflow: hidden;
+}
+.diary-event-edit-dialog .n-card-header,
+.diary-event-edit-dialog .n-card__footer { flex: none; }
+.diary-event-edit-dialog .n-card-content {
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-width: thin;
+}
+.diary-event-edit-dialog .diary-event-form-content { min-width: 0; }
+.diary-event-edit-dialog .n-card__footer {
+  border-top: 1px solid var(--border, #8883);
+  background: var(--card-color, var(--bg));
+}
 .diary-life-dialog .diary-event-close-button.n-button {
   width: 40px;
   height: 40px;
@@ -972,5 +992,6 @@ onBeforeUnmount(() => {
 }
 @media (max-width: 600px) {
   .diary-life-dialog.n-card { position: fixed; bottom: 0; left: 0; width: 100%; max-height: 90dvh; margin: 0; border-radius: 18px 18px 0 0; padding-bottom: env(safe-area-inset-bottom); }
+  .diary-event-edit-dialog.n-card { max-height: 90dvh; }
 }
 </style>

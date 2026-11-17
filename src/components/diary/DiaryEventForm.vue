@@ -200,11 +200,16 @@ function formatGregorianDate(date: string): string {
           @click="value.emoji = icon.glyph"
         ><img :src="`/emoji/event-${icon.asset}.svg`" alt=""></button>
       </div>
-      <label class="event-field">
-        <span>{{ isBirthday ? '称呼' : '事件标题' }}</span>
-        <NInput v-model:value="titleInput" :input-props="{ 'aria-label': isBirthday ? '生日称呼' : '事件标题' }" :placeholder="isBirthday ? '例如：爷爷' : '值得记住的事'" :maxlength="160" />
-      </label>
-      <NSelect :value="value.type" :options="types" aria-label="事件类型" @update:value="setEventType" />
+      <div class="event-identity-grid">
+        <label class="event-field">
+          <span>{{ isBirthday ? '称呼' : '事件标题' }}</span>
+          <NInput v-model:value="titleInput" :input-props="{ 'aria-label': isBirthday ? '生日称呼' : '事件标题' }" :placeholder="isBirthday ? '例如：爷爷' : '值得记住的事'" :maxlength="160" />
+        </label>
+        <div class="event-field">
+          <span>事件类型</span>
+          <NSelect :value="value.type" :options="types" aria-label="事件类型" @update:value="setEventType" />
+        </div>
+      </div>
       <template v-if="isBirthday && chineseRule">
         <div class="event-dates">
           <label class="event-field">
@@ -326,15 +331,17 @@ function formatGregorianDate(date: string): string {
 </template>
 
 <style scoped>
-.event-fields { display: flex; flex-direction: column; gap: 24px; min-width: 0; }
-.event-form-section { display: flex; flex-direction: column; gap: 14px; min-width: 0; }
-.event-form-section h2 { margin: 0; color: var(--text-muted, #6b7280); font-size: 14px; font-weight: 600; }
-.event-emojis { display: flex; flex-wrap: wrap; gap: 4px; }
-.event-emojis button { border: 1px solid transparent; border-radius: 8px; width: 40px; height: 40px; display: grid; place-items: center; background: transparent; cursor: pointer; }
+.event-fields { display: flex; flex-direction: column; gap: 20px; min-width: 0; }
+.event-form-section { display: flex; flex-direction: column; gap: 12px; min-width: 0; }
+.event-form-section + .event-form-section { padding-top: 18px; border-top: 1px solid var(--border, #8883); }
+.event-form-section h2 { margin: 0; color: var(--text-muted, #6b7280); font-size: 14px; font-weight: 650; letter-spacing: .01em; }
+.event-emojis { display: flex; flex-wrap: wrap; gap: 6px; }
+.event-emojis button { border: 1px solid transparent; border-radius: 10px; width: 38px; height: 38px; display: grid; place-items: center; background: color-mix(in srgb, var(--text) 3%, transparent); cursor: pointer; }
 .event-emojis button:hover { background: color-mix(in srgb, var(--text) 5%, transparent); }
 .event-emojis button:focus-visible { outline: 2px solid var(--accent, #6366f1); outline-offset: 1px; }
 .event-emojis button[aria-pressed="true"] { border-color: var(--accent, #6366f1); background: color-mix(in srgb, var(--accent, #6366f1) 8%, transparent); }
-.event-emojis img { width: 28px; height: 28px; object-fit: contain; }
+.event-emojis img { width: 26px; height: 26px; object-fit: contain; }
+.event-identity-grid { display: grid; grid-template-columns: minmax(0, 1fr) minmax(150px, .42fr); gap: 12px; align-items: end; }
 .event-field { display: flex; flex-direction: column; gap: 7px; min-width: 0; }
 .event-field > span { color: var(--text-muted, #6b7280); font-size: 13px; }
 .event-field small { margin-inline-start: 4px; font-size: inherit; }
@@ -348,8 +355,11 @@ function formatGregorianDate(date: string): string {
 .event-date-calendar-toggle button[aria-pressed="true"] { background: color-mix(in srgb, var(--accent, #6366f1) 12%, transparent); color: var(--accent, #6366f1); }
 .event-date-calendar-toggle button:disabled { opacity: .45; cursor: not-allowed; }
 .event-date-calendar-toggle button:focus-visible { outline: 2px solid var(--accent, #6366f1); outline-offset: 1px; }
-.event-date-help,.event-date-preview,.event-date-error { margin: -4px 0 0; color: var(--text-muted, #6b7280); font-size: 13px; line-height: 1.5; }
+.event-date-help,.event-date-preview,.event-date-error { margin: -2px 0 0; color: var(--text-muted, #6b7280); font-size: 13px; line-height: 1.5; }
 .event-date-error { color: var(--danger, #dc2626); }
-.event-checkboxes { display: flex; flex-direction: column; align-items: flex-start; gap: 12px; }
-@media (max-width: 390px) { .event-dates { gap: 8px; } }
+.event-checkboxes { display: flex; flex-direction: row; flex-wrap: wrap; align-items: center; gap: 10px 18px; }
+@media (max-width: 520px) {
+  .event-identity-grid { grid-template-columns: minmax(0, 1fr); gap: 12px; }
+}
+@media (max-width: 390px) { .event-dates { gap: 8px; } .event-fields { gap: 16px; } }
 </style>
