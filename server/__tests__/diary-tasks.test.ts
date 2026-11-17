@@ -5,8 +5,9 @@ import path from 'node:path'
 import Database from 'better-sqlite3'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import app from '../index'
+import { createSession } from '../auth/session'
 import { closeAuthTestContext, createAuthenticatedTestContext, jsonRequest, unlockDiaryAccessForTesting, withAuthCookie, withDiaryCapability, type AuthenticatedTestContext } from './helpers/auth'
-import { diaryTaskStore } from '../diaryTasks'
+import { DiaryTaskCursorError, diaryTaskStore } from '../diaryTasks'
 import * as database from '../db'
 import { isTaskOverdue } from '../../shared/diaryTasks'
 import { lunarToSolar } from '../../shared/lunarCalendar'
@@ -17,6 +18,12 @@ let capability: string
 let tempRoot: string
 const base = '/api/diary/life'
 const accessPassword = 'diary-access-test-password'
+
+function deferred<T = void>() {
+  let resolve!: (value: T | PromiseLike<T>) => void
+  const promise = new Promise<T>((done) => { resolve = done })
+  return { promise, resolve }
+}
 
 function request(method: string, route: string, body?: unknown, unlocked = true) {
   const req = jsonRequest(`${base}${route}`, { method, body, origin: auth.runtime.config.publicOrigin })
@@ -117,7 +124,7 @@ describe('Diary task API', () => {
     expect((await reused.json()).task).toMatchObject({ title: 'Explicitly versioned reuse', version: 3 })
   })
 
-  it('lists dated and undated tasks with stable pagination and no repeated or missing rows', async () => {
+  it('lists dated and undated tasks with stable cursor pagination and no repeated or missing rows', async () => {
     const total = 203
     await auth.runtime.diaryAccess.withBodyOperation(auth.session.id, capability, operation => {
       const store = diaryTaskStore(db, auth.userId, operation)
@@ -130,12 +137,15 @@ describe('Diary task API', () => {
         }, 0)
       }
     })
-    const first = await (await request('GET', '/tasks/list?offset=0')).json()
+    const first = await (await request('GET', '/tasks/list')).json()
     expect(first.items).toHaveLength(200)
-    expect(first.next).toBe(200)
-    const second = await (await request('GET', `/tasks/list?offset=${first.next}`)).json()
+    expect(first.nextCursor).toEqual(expect.any(String))
+    const cursorPayload = JSON.parse(Buffer.from(first.nextCursor.split('.')[0], 'base64url').toString())
+    expect(cursorPayload).toMatchObject({ v: 1, owner: auth.userId, revision: total, query: { type: 'list' } })
+    expect(cursorPayload).toMatchObject({ id: first.items.at(-1).id, dueDate: first.items.at(-1).dueDate })
+    const second = await (await request('GET', `/tasks/list?cursor=${encodeURIComponent(first.nextCursor)}`)).json()
     expect(second.items).toHaveLength(3)
-    expect(second.next).toBeNull()
+    expect(second.nextCursor).toBeNull()
     const ids = [...first.items, ...second.items].map((task: { id: string }) => task.id)
     expect(new Set(ids).size).toBe(total)
     expect(ids).toEqual([...ids].sort((left, right) => {
@@ -145,7 +155,27 @@ describe('Diary task API', () => {
       const rightDate = rightTask.dueDate ?? '9999-12-31'
       return leftDate.localeCompare(rightDate) || left.localeCompare(right)
     }))
-    expect((await request('GET', '/tasks/list?offset=-1')).status).toBe(400)
+    expect((await request('GET', '/tasks/list?offset=0')).status).toBe(400)
+    expect((await request('GET', '/tasks/list?cursor=')).status).toBe(400)
+    expect((await request('GET', `/tasks/list?cursor=${'x'.repeat(1025)}`)).status).toBe(400)
+    const tampered = `${first.nextCursor.slice(0, -1)}${first.nextCursor.endsWith('A') ? 'B' : 'A'}`
+    expect((await request('GET', `/tasks/list?cursor=${tampered}`)).status).toBe(400)
+
+    const rangePath = '/tasks?start=2026-11-01&end=2026-11-17'
+    const rangeFirst = await (await request('GET', rangePath)).json()
+    expect(rangeFirst.items).toHaveLength(200)
+    expect(rangeFirst.nextCursor).toEqual(expect.any(String))
+    const rangeSecond = await (await request('GET', `${rangePath}&cursor=${encodeURIComponent(rangeFirst.nextCursor)}`)).json()
+    expect([...rangeFirst.items, ...rangeSecond.items].map((task: { id: string }) => task.id)).toHaveLength(total - 1)
+    expect((await request('GET', `/tasks?start=2026-11-02&end=2026-11-17&cursor=${encodeURIComponent(rangeFirst.nextCursor)}`)).status).toBe(400)
+    expect((await request('GET', `/tasks?start=2026-11-01&end=2026-11-17&offset=0`)).status).toBe(400)
+    expect((await request('GET', `/tasks?start=2026-11-01&end=2026-11-17&cursor=${encodeURIComponent(first.nextCursor)}`)).status).toBe(400)
+
+    const listRowsBefore = Number((db.prepare('SELECT COUNT(*) AS count FROM diary_tasks WHERE owner_user_id = ?').get(auth.userId) as { count: number }).count)
+    const revisionBefore = Number((db.prepare('SELECT revision FROM diary_task_list_revisions WHERE owner_user_id = ?').get(auth.userId) as { revision: number }).revision)
+    expect((await request('GET', '/tasks/list?cursor=not-a-cursor')).status).toBe(400)
+    expect(Number((db.prepare('SELECT COUNT(*) AS count FROM diary_tasks WHERE owner_user_id = ?').get(auth.userId) as { count: number }).count)).toBe(listRowsBefore)
+    expect(Number((db.prepare('SELECT revision FROM diary_task_list_revisions WHERE owner_user_id = ?').get(auth.userId) as { revision: number }).revision)).toBe(revisionBefore)
   })
 
   it('queries inclusive date-range boundaries across years and excludes undated tasks', async () => {
@@ -160,11 +190,95 @@ describe('Diary task API', () => {
     for (const [id, dueDate] of rows) {
       expect((await request('PUT', `/tasks/${id}`, { ...fields({ title: id, dueDate, dueTime: null }), expectedVersion: 0 })).status).toBe(200)
     }
-    const boundary = await request('GET', '/tasks?start=2025-12-31&end=2026-01-01&offset=0')
+    const boundary = await request('GET', '/tasks?start=2025-12-31&end=2026-01-01')
     expect(boundary.status).toBe(200)
     expect((await boundary.json()).items.map((task: { id: string }) => task.id)).toEqual([start, end])
     expect((await request('GET', '/tasks?start=2026-02-30&end=2026-03-01')).status).toBe(400)
     expect((await request('GET', '/tasks?start=2026-11-17&end=2026-11-16')).status).toBe(400)
+  })
+
+  it('invalidates cursors after every task mutation and isolates revisions by owner', async () => {
+    const ids = Array.from({ length: 201 }, () => randomUUID())
+    await auth.runtime.diaryAccess.withBodyOperation(auth.session.id, capability, operation => {
+      const store = diaryTaskStore(db, auth.userId, operation)
+      for (const [index, id] of ids.entries()) {
+        store.putTask(id, { title: `Revision ${index}`, description: '', dueDate: '2026-12-01', dueTime: null }, 0)
+      }
+    })
+    const readRevision = (owner = auth.userId) => Number((db.prepare(
+      'SELECT revision FROM diary_task_list_revisions WHERE owner_user_id = ?',
+    ).get(owner) as { revision: number } | undefined)?.revision ?? 0)
+    const firstPage = await (await request('GET', '/tasks/list')).json()
+    expect(firstPage.items).toHaveLength(200)
+    expect(firstPage.nextCursor).toEqual(expect.any(String))
+
+    const ownerB = Number(db.prepare(`INSERT INTO users (username, username_normalized, password_hash, disabled, created_at, updated_at)
+      VALUES (?, ?, ?, 0, ?, ?)`).run('task-revision-owner-b', 'task-revision-owner-b', 'test', Date.now(), Date.now()).lastInsertRowid)
+    await auth.runtime.diaryAccess.withBodyOperation(auth.session.id, capability, operation => {
+      diaryTaskStore(db, ownerB, operation).putTask(randomUUID(), {
+        title: 'Other owner task', description: '', dueDate: '2026-12-01', dueTime: null,
+      }, 0)
+    })
+    expect(readRevision(ownerB)).toBe(1)
+    expect(readRevision()).toBe(201)
+    await auth.runtime.diaryAccess.withBodyOperation(auth.session.id, capability, operation => {
+      expect(() => diaryTaskStore(db, ownerB, operation).listTasks(firstPage.nextCursor)).toThrow(DiaryTaskCursorError)
+    })
+    const pageTwoBeforeOwnerChange = await request('GET', `/tasks/list?cursor=${encodeURIComponent(firstPage.nextCursor)}`)
+    expect(pageTwoBeforeOwnerChange.status).toBe(200)
+
+    const expectCursorInvalidated = async (cursor: string) => {
+      const response = await request('GET', `/tasks/list?cursor=${encodeURIComponent(cursor)}`)
+      expect(response.status).toBe(409)
+      expect(await response.json()).toEqual({ code: 'diary-task-list-changed' })
+    }
+    let revision = readRevision()
+    const createdId = randomUUID()
+    expect((await request('PUT', `/tasks/${createdId}`, { ...fields(), expectedVersion: 0 })).status).toBe(200)
+    expect(readRevision()).toBe(revision + 1)
+    await expectCursorInvalidated(firstPage.nextCursor)
+
+    const secondPage = await (await request('GET', '/tasks/list')).json()
+    revision = readRevision()
+    expect((await request('DELETE', `/tasks/${ids[0]}`, { expectedVersion: 1 })).status).toBe(200)
+    expect(readRevision()).toBe(revision + 1)
+    await expectCursorInvalidated(secondPage.nextCursor)
+
+    const thirdPage = await (await request('GET', '/tasks/list')).json()
+    revision = readRevision()
+    expect((await request('PUT', `/tasks/${ids[1]}`, {
+      ...fields({ title: 'Moved to another due date', dueDate: '2027-01-01', dueTime: null }), expectedVersion: 1,
+    })).status).toBe(200)
+    expect(readRevision()).toBe(revision + 1)
+    await expectCursorInvalidated(thirdPage.nextCursor)
+
+    const fourthPage = await (await request('GET', '/tasks/list')).json()
+    revision = readRevision()
+    expect((await request('POST', `/tasks/${ids[2]}/complete`, { expectedVersion: 1 })).status).toBe(200)
+    expect(readRevision()).toBe(revision + 1)
+    await expectCursorInvalidated(fourthPage.nextCursor)
+
+    const fifthPage = await (await request('GET', '/tasks/list')).json()
+    revision = readRevision()
+    expect((await request('POST', `/tasks/${ids[2]}/reopen`, { expectedVersion: 2 })).status).toBe(200)
+    expect(readRevision()).toBe(revision + 1)
+    await expectCursorInvalidated(fifthPage.nextCursor)
+
+    const beforeCasFailure = readRevision()
+    expect((await request('PUT', `/tasks/${ids[2]}`, { ...fields(), expectedVersion: 1 })).status).toBe(409)
+    expect(readRevision()).toBe(beforeCasFailure)
+
+    db.prepare('UPDATE diary_task_list_revisions SET revision = ? WHERE owner_user_id = ?').run(Number.MAX_SAFE_INTEGER, auth.userId)
+    const beforeExhaustion = db.prepare('SELECT version, encrypted_fields FROM diary_tasks WHERE owner_user_id = ? AND id = ?')
+      .get(auth.userId, ids[2]) as { version: number; encrypted_fields: Buffer }
+    const exhausted = await request('PUT', `/tasks/${ids[2]}`, {
+      ...fields({ title: 'Revision exhausted' }), expectedVersion: 3,
+    })
+    expect(exhausted.status).toBe(503)
+    expect(db.prepare('SELECT version, encrypted_fields FROM diary_tasks WHERE owner_user_id = ? AND id = ?')
+      .get(auth.userId, ids[2])).toEqual(beforeExhaustion)
+    expect(readRevision()).toBe(Number.MAX_SAFE_INTEGER)
+    expect(readRevision(ownerB)).toBe(1)
   })
 
   it('calculates overdue by due date and ignores the due-time threshold', async () => {
@@ -233,18 +347,115 @@ describe('Diary task API', () => {
     expect((await request('GET', `/tasks/${first}`)).status).toBe(503)
   })
 
-  it('requires authentication and an unlocked Diary session, and never caches task responses', async () => {
-    const locked = await request('GET', '/tasks/list', undefined, false)
-    expect(locked.status).toBe(423)
-    expect(locked.headers.get('cache-control')).toBe('no-store')
+  it('requires authentication and an unlocked Diary session for every Todo API operation', async () => {
+    const id = randomUUID()
+    const lockedRequests: Array<[string, string, unknown?]> = [
+      ['GET', '/tasks/list'],
+      ['GET', '/tasks?start=2026-11-01&end=2026-11-30'],
+      ['GET', `/tasks/${id}`],
+      ['PUT', `/tasks/${id}`, { ...fields(), expectedVersion: 0 }],
+      ['POST', `/tasks/${id}/complete`, { expectedVersion: 1 }],
+      ['POST', `/tasks/${id}/reopen`, { expectedVersion: 2 }],
+      ['DELETE', `/tasks/${id}`, { expectedVersion: 1 }],
+    ]
+    for (const [method, route, body] of lockedRequests) {
+      const locked = await request(method, route, body, false)
+      expect(locked.status, `${method} ${route}`).toBe(423)
+      expect(locked.headers.get('cache-control')).toBe('no-store')
+    }
     const noAuth = await app.fetch(jsonRequest(`${base}/tasks/list`, { method: 'GET', origin: auth.runtime.config.publicOrigin }))
     expect(noAuth.status).toBe(401)
     expect(noAuth.headers.get('cache-control')).toBe('no-store')
-    await auth.runtime.diaryAccess.lock(auth.session.id)
-    expect((await request('GET', '/tasks/list')).status).toBe(423)
   })
 
-  it('preserves existing Diary rows and version tombstones when migration 47 is applied', async () => {
+  it('drains in-flight Todo writes before lock and logout invalidation, then rejects old capabilities', async () => {
+    const createBlockedWrite = (id: string, title: string) => {
+      const bodyReadStarted = deferred<void>()
+      const releaseBody = deferred<void>()
+      let pulled = false
+      const jsonBody = JSON.stringify({ ...fields({ title }), expectedVersion: 0 })
+      const stream = new ReadableStream<Uint8Array>({
+        async pull(controller) {
+          if (pulled) return
+          pulled = true
+          bodyReadStarted.resolve()
+          await releaseBody.promise
+          controller.enqueue(new TextEncoder().encode(jsonBody))
+          controller.close()
+        },
+      }, { highWaterMark: 0 })
+      const raw = new Request(`http://localhost${base}/tasks/${id}`, {
+        method: 'PUT',
+        headers: {
+          Origin: auth.runtime.config.publicOrigin,
+          'Content-Type': 'application/json',
+          'Content-Length': String(new TextEncoder().encode(jsonBody).length),
+        },
+        body: stream,
+        duplex: 'half',
+      } as RequestInit & { duplex: 'half' })
+      return {
+        response: app.fetch(withDiaryCapability(auth, raw, capability)),
+        bodyReadStarted: bodyReadStarted.promise,
+        releaseBody: () => releaseBody.resolve(),
+      }
+    }
+    const rowCount = () => Number((db.prepare(
+      'SELECT COUNT(*) AS count FROM diary_tasks WHERE owner_user_id = ?',
+    ).get(auth.userId) as { count: number }).count)
+    const revision = () => Number((db.prepare(
+      'SELECT revision FROM diary_task_list_revisions WHERE owner_user_id = ?',
+    ).get(auth.userId) as { revision: number } | undefined)?.revision ?? 0)
+
+    const firstId = randomUUID()
+    const firstWrite = createBlockedWrite(firstId, 'Write leased before lock')
+    await firstWrite.bodyReadStarted
+    let lockSettled = false
+    const lock = auth.runtime.diaryAccess.lock(auth.session.id).then((result) => {
+      lockSettled = true
+      return result
+    })
+    expect(lockSettled).toBe(false)
+    expect((await request('GET', '/tasks/list')).status).toBe(423)
+    expect(rowCount()).toBe(0)
+    firstWrite.releaseBody()
+    const firstResponse = await firstWrite.response
+    expect(firstResponse.status).toBe(200)
+    expect((await firstResponse.json()).task.title).toBe('Write leased before lock')
+    await expect(lock).resolves.toEqual({ state: 'LOCKED' })
+    expect(lockSettled).toBe(true)
+    expect(rowCount()).toBe(1)
+    expect(revision()).toBe(1)
+    const oldRead = await request('GET', `/tasks/${firstId}`)
+    expect(oldRead.status).toBe(423)
+    expect(await oldRead.json()).toEqual({ code: 'diary-locked' })
+    expect((await request('PUT', `/tasks/${randomUUID()}`, { ...fields(), expectedVersion: 0 })).status).toBe(423)
+    expect(rowCount()).toBe(1)
+
+    capability = (await auth.runtime.diaryAccess.unlock(auth.session.id, accessPassword)).capability
+    const secondId = randomUUID()
+    const secondWrite = createBlockedWrite(secondId, 'Write leased before logout')
+    await secondWrite.bodyReadStarted
+    let invalidationSettled = false
+    const invalidation = auth.runtime.diaryAccess.invalidateAuthSession(auth.session.id).then(() => {
+      invalidationSettled = true
+    })
+    expect(invalidationSettled).toBe(false)
+    expect((await request('GET', '/tasks/list')).status).toBe(423)
+    secondWrite.releaseBody()
+    const secondResponse = await secondWrite.response
+    expect(secondResponse.status).toBe(200)
+    expect((await secondResponse.json()).task.title).toBe('Write leased before logout')
+    await invalidation
+    expect(invalidationSettled).toBe(true)
+    expect(rowCount()).toBe(2)
+    expect(revision()).toBe(2)
+    expect((await request('GET', `/tasks/${secondId}`)).status).toBe(423)
+    expect((await request('DELETE', `/tasks/${firstId}`, { expectedVersion: 1 })).status).toBe(423)
+    expect(rowCount()).toBe(2)
+  })
+
+  it('preserves Diary rows and task migration tombstones when upgrading from version 46', async () => {
     const dayDate = '2026-11-15'
     const eventId = randomUUID()
     const taskId = randomUUID()
@@ -276,7 +487,7 @@ describe('Diary task API', () => {
       showCountdown: true, isPrimary: false, expectedVersion: 0,
     })).status).toBe(200)
 
-    db.exec('DROP TABLE diary_task_deleted_records; DROP TABLE diary_tasks; UPDATE schema_version SET version = 46')
+    db.exec('DROP TABLE diary_task_list_cursor_key; DROP TABLE diary_task_list_revisions; DROP TABLE diary_task_deleted_records; DROP TABLE diary_tasks; UPDATE schema_version SET version = 46')
     database.applyMigrations(db)
 
     expect((await (await request('GET', `/days/${dayDate}`)).json()).day.entries).toEqual(['Existing diary entry'])
@@ -290,6 +501,26 @@ describe('Diary task API', () => {
     })
     expect((await request('GET', `/tasks/${taskId}`)).status).toBe(404)
     expect(db.prepare("SELECT version FROM diary_deleted_records WHERE owner_user_id = ? AND kind = 'event' AND id = ?").get(auth.userId, eventId)).toMatchObject({ version: 2 })
-    expect(db.prepare("SELECT version FROM schema_version").get()).toMatchObject({ version: 47 })
+    expect(db.prepare("SELECT version FROM schema_version").get()).toMatchObject({ version: 48 })
+  })
+
+  it('adds the list revision foundation without changing existing Todo ciphertext or version', async () => {
+    const id = randomUUID()
+    const saved = await request('PUT', `/tasks/${id}`, { ...fields(), expectedVersion: 0 })
+    expect(saved.status).toBe(200)
+    const task = (await saved.json()).task
+    const before = db.prepare('SELECT owner_user_id, id, due_date, encrypted_fields, version FROM diary_tasks WHERE owner_user_id = ? AND id = ?')
+      .get(auth.userId, id) as { owner_user_id: number; id: string; due_date: string; encrypted_fields: Buffer; version: number }
+
+    db.exec('DROP TABLE diary_task_list_cursor_key; DROP TABLE diary_task_list_revisions; UPDATE schema_version SET version = 47')
+    database.applyMigrations(db)
+
+    const after = db.prepare('SELECT owner_user_id, id, due_date, encrypted_fields, version FROM diary_tasks WHERE owner_user_id = ? AND id = ?')
+      .get(auth.userId, id) as typeof before
+    expect(after).toEqual(before)
+    expect((await (await request('GET', `/tasks/${id}`)).json()).task).toEqual(task)
+    expect((await (await request('GET', '/tasks/list')).json()).items).toContainEqual(task)
+    expect(db.prepare('SELECT version FROM schema_version').get()).toMatchObject({ version: 48 })
+    expect((db.prepare('SELECT revision FROM diary_task_list_revisions WHERE owner_user_id = ?').get(auth.userId) as { revision: number }).revision).toBe(0)
   })
 })

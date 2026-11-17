@@ -15,6 +15,11 @@ export interface DiaryTask extends TaskFields {
   updatedAt: number
 }
 
+export interface DiaryTaskPage {
+  items: DiaryTask[]
+  nextCursor: string | null
+}
+
 export const MAX_DIARY_TASK_TITLE_LENGTH = 160
 export const MAX_DIARY_TASK_DESCRIPTION_LENGTH = 4000
 

@@ -1,5 +1,6 @@
 import { diaryAuthFetch } from './auth-session'
-import type { DiaryTask, TaskFields } from '../../shared/diaryTasks'
+import type { DiaryTask, DiaryTaskPage, TaskFields } from '../../shared/diaryTasks'
+export type { DiaryTaskPage } from '../../shared/diaryTasks'
 
 export class DiaryTaskApiError extends Error {
   readonly status: number
@@ -17,6 +18,13 @@ export class DiaryTaskConflictError extends DiaryTaskApiError {
   constructor() {
     super(409, 'diary-conflict', '任务已更新，请重新加载后再试。')
     this.name = 'DiaryTaskConflictError'
+  }
+}
+
+export class DiaryTaskListChangedError extends DiaryTaskApiError {
+  constructor() {
+    super(409, 'diary-task-list-changed', '任务列表已更新，请从第一页重新加载。')
+    this.name = 'DiaryTaskListChangedError'
   }
 }
 
@@ -40,15 +48,11 @@ async function request<T>(path: string, method = 'GET', body?: unknown, signal?:
   if (!response.ok) {
     const payload = await response.json().catch(() => null) as { code?: unknown } | null
     const code = typeof payload?.code === 'string' ? payload.code : null
+    if (response.status === 409 && code === 'diary-task-list-changed') throw new DiaryTaskListChangedError()
     if (response.status === 409) throw new DiaryTaskConflictError()
     throw new DiaryTaskApiError(response.status, code, '任务操作失败，请重试。')
   }
   return response.json() as Promise<T>
-}
-
-export interface DiaryTaskPage {
-  items: DiaryTask[]
-  next: number | null
 }
 
 export const diaryTasksApi = {
@@ -58,11 +62,13 @@ export const diaryTasksApi = {
   getTask(id: string, signal?: AbortSignal): Promise<{ task: DiaryTask }> {
     return request(`/tasks/${encodeURIComponent(id)}`, 'GET', undefined, signal)
   },
-  listTasks(offset = 0, signal?: AbortSignal): Promise<DiaryTaskPage> {
-    return request(`/tasks/list?offset=${offset}`, 'GET', undefined, signal)
+  listTasks(cursor?: string, signal?: AbortSignal): Promise<DiaryTaskPage> {
+    const query = cursor === undefined ? '' : `?cursor=${encodeURIComponent(cursor)}`
+    return request(`/tasks/list${query}`, 'GET', undefined, signal)
   },
-  tasksInRange(start: string, end: string, offset = 0, signal?: AbortSignal): Promise<DiaryTaskPage> {
-    const query = new URLSearchParams({ start, end, offset: String(offset) })
+  tasksInRange(start: string, end: string, cursor?: string, signal?: AbortSignal): Promise<DiaryTaskPage> {
+    const query = new URLSearchParams({ start, end })
+    if (cursor !== undefined) query.set('cursor', cursor)
     return request(`/tasks?${query}`, 'GET', undefined, signal)
   },
   updateTask(id: string, fields: TaskFields, expectedVersion: number): Promise<{ task: DiaryTask }> {

@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { DiaryTaskApiError, DiaryTaskConflictError, diaryTasksApi } from '../diary-tasks-api'
+import { DiaryTaskApiError, DiaryTaskConflictError, DiaryTaskListChangedError, diaryTasksApi } from '../diary-tasks-api'
 import { resetDiaryCapabilityForTesting, setDiaryCapability } from '../diary-capability'
 
 afterEach(() => {
@@ -30,11 +30,11 @@ describe('Diary task API client', () => {
     const calls: Array<{ input: string | URL | Request; init?: RequestInit }> = []
     vi.stubGlobal('fetch', vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
       calls.push({ input, init })
-      return Response.json({ items: [], next: null })
+      return Response.json({ items: [], nextCursor: null })
     }))
     const controller = new AbortController()
-    await diaryTasksApi.listTasks(200, controller.signal)
-    await diaryTasksApi.tasksInRange('2026-01-01', '2026-01-31', 20, controller.signal)
+    await diaryTasksApi.listTasks('list-cursor', controller.signal)
+    await diaryTasksApi.tasksInRange('2026-01-01', '2026-01-31', 'range-cursor', controller.signal)
     await diaryTasksApi.getTask('task-id', controller.signal)
     await diaryTasksApi.updateTask('task-id', { title: 'Task', description: '', dueDate: null, dueTime: null }, 1)
     await diaryTasksApi.completeTask('task-id', 2)
@@ -42,8 +42,8 @@ describe('Diary task API client', () => {
     await diaryTasksApi.deleteTask('task-id', 4)
 
     expect(calls.map(call => `${call.init?.method ?? 'GET'} ${call.input}`)).toEqual([
-      'GET /api/diary/life/tasks/list?offset=200',
-      'GET /api/diary/life/tasks?start=2026-01-01&end=2026-01-31&offset=20',
+      'GET /api/diary/life/tasks/list?cursor=list-cursor',
+      'GET /api/diary/life/tasks?start=2026-01-01&end=2026-01-31&cursor=range-cursor',
       'GET /api/diary/life/tasks/task-id',
       'PUT /api/diary/life/tasks/task-id',
       'POST /api/diary/life/tasks/task-id/complete',
@@ -59,9 +59,11 @@ describe('Diary task API client', () => {
   it('surfaces version conflicts separately from other API errors', async () => {
     vi.stubGlobal('fetch', vi.fn()
       .mockResolvedValueOnce(Response.json({ code: 'diary-conflict' }, { status: 409 }))
+      .mockResolvedValueOnce(Response.json({ code: 'diary-task-list-changed' }, { status: 409 }))
       .mockResolvedValueOnce(Response.json({ code: 'diary-locked' }, { status: 423 })))
 
     await expect(diaryTasksApi.completeTask('task-id', 1)).rejects.toBeInstanceOf(DiaryTaskConflictError)
+    await expect(diaryTasksApi.listTasks('stale-cursor')).rejects.toBeInstanceOf(DiaryTaskListChangedError)
     await expect(diaryTasksApi.listTasks()).rejects.toMatchObject({
       status: 423,
       code: 'diary-locked',

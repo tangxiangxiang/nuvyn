@@ -1,9 +1,31 @@
 import type { Database } from 'better-sqlite3'
+import { createHmac, timingSafeEqual } from 'node:crypto'
 import type { DiaryBodyOperation } from './diaryAccess/service.js'
-import { parseTaskFields, type DiaryTask, type TaskFields } from '../shared/diaryTasks.js'
+import { civilDate } from '../shared/diaryLife.js'
+import { parseTaskFields, type DiaryTask, type DiaryTaskPage, type TaskFields } from '../shared/diaryTasks.js'
 import { DiaryConflict } from './diaryLife.js'
 
 export class DiaryTaskNotFound extends Error {}
+export class DiaryTaskCursorError extends Error {}
+export class DiaryTaskListChanged extends Error {}
+
+const PAGE_SIZE = 200
+const MAX_CURSOR_LENGTH = 1024
+const MAX_REVISION = Number.MAX_SAFE_INTEGER
+const TASK_ID_PATTERN = /^[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/
+
+type TaskListQuery =
+  | { type: 'list' }
+  | { type: 'range'; start: string; end: string }
+
+type TaskCursorPayload = {
+  v: 1
+  owner: number
+  revision: number
+  dueDate: string | null
+  id: string
+  query: TaskListQuery
+}
 
 type TaskRow = {
   id: string
@@ -46,6 +68,132 @@ export function diaryTaskStore(db: Database, owner: number, operation: DiaryBody
     return db.prepare('SELECT * FROM diary_tasks WHERE owner_user_id = ? AND id = ?').get(owner, id) as TaskRow | undefined
   }
 
+  function listRevision(): number {
+    return (db.prepare('SELECT revision FROM diary_task_list_revisions WHERE owner_user_id = ?')
+      .get(owner) as { revision: number } | undefined)?.revision ?? 0
+  }
+
+  function advanceListRevision(): void {
+    const result = db.prepare(`INSERT INTO diary_task_list_revisions (owner_user_id, revision) VALUES (?, 1)
+      ON CONFLICT(owner_user_id) DO UPDATE SET revision = revision + 1
+      WHERE revision < ?`).run(owner, MAX_REVISION)
+    if (!result.changes) throw new Error('Diary task list revision exhausted')
+  }
+
+  function cursorSecret(): Buffer {
+    const row = db.prepare('SELECT secret FROM diary_task_list_cursor_key WHERE id = 1').get() as { secret: Buffer } | undefined
+    if (!row || !Buffer.isBuffer(row.secret) || row.secret.length !== 32) {
+      throw new Error('Diary task cursor signing key is unavailable')
+    }
+    return row.secret
+  }
+
+  function hasExactKeys(value: unknown, expected: string[]): value is Record<string, unknown> {
+    if (!value || typeof value !== 'object' || Array.isArray(value)) return false
+    const actual = Object.keys(value).sort()
+    const expectedSorted = [...expected].sort()
+    return actual.length === expectedSorted.length && actual.every((key, index) => key === expectedSorted[index])
+  }
+
+  function cursorMatchesQuery(value: unknown, query: TaskListQuery): boolean {
+    if (query.type === 'list') {
+      return hasExactKeys(value, ['type']) && value.type === 'list'
+    }
+    return hasExactKeys(value, ['type', 'start', 'end'])
+      && value.type === 'range'
+      && value.start === query.start
+      && value.end === query.end
+  }
+
+  function decodeCursor(cursor: string, query: TaskListQuery): TaskCursorPayload {
+    if (!cursor || cursor.length > MAX_CURSOR_LENGTH) throw new DiaryTaskCursorError()
+    const parts = cursor.split('.')
+    if (parts.length !== 2 || !/^[A-Za-z0-9_-]+$/.test(parts[0]!) || !/^[A-Za-z0-9_-]{43}$/.test(parts[1]!)) {
+      throw new DiaryTaskCursorError()
+    }
+    const encodedPayload = parts[0]!
+    const payloadBytes = Buffer.from(encodedPayload, 'base64url')
+    const suppliedSignature = Buffer.from(parts[1]!, 'base64url')
+    if (payloadBytes.toString('base64url') !== encodedPayload
+      || suppliedSignature.toString('base64url') !== parts[1]!
+      || suppliedSignature.length !== 32) throw new DiaryTaskCursorError()
+    const expectedSignature = createHmac('sha256', cursorSecret()).update(encodedPayload).digest()
+    if (!timingSafeEqual(suppliedSignature, expectedSignature)) throw new DiaryTaskCursorError()
+
+    let payload: unknown
+    try {
+      payload = JSON.parse(payloadBytes.toString('utf8'))
+    } catch {
+      throw new DiaryTaskCursorError()
+    }
+    if (!hasExactKeys(payload, ['v', 'owner', 'revision', 'dueDate', 'id', 'query'])) throw new DiaryTaskCursorError()
+    const dueDate = payload.dueDate
+    if (payload.v !== 1
+      || payload.owner !== owner
+      || !Number.isSafeInteger(payload.revision)
+      || (payload.revision as number) < 0
+      || !(dueDate === null || (typeof dueDate === 'string' && civilDate(dueDate)))
+      || typeof payload.id !== 'string'
+      || !TASK_ID_PATTERN.test(payload.id)
+      || !cursorMatchesQuery(payload.query, query)) throw new DiaryTaskCursorError()
+    if (query.type === 'range' && (dueDate === null || dueDate < query.start || dueDate > query.end)) {
+      throw new DiaryTaskCursorError()
+    }
+    return payload as TaskCursorPayload
+  }
+
+  function encodeCursor(revision: number, lastTask: DiaryTask, query: TaskListQuery): string {
+    const payload: TaskCursorPayload = {
+      v: 1,
+      owner,
+      revision,
+      dueDate: lastTask.dueDate,
+      id: lastTask.id,
+      query,
+    }
+    const encodedPayload = Buffer.from(JSON.stringify(payload)).toString('base64url')
+    const signature = createHmac('sha256', cursorSecret()).update(encodedPayload).digest('base64url')
+    return `${encodedPayload}.${signature}`
+  }
+
+  function listPage(query: TaskListQuery, cursor?: string): DiaryTaskPage {
+    operation.assertCurrent()
+    return db.transaction(() => {
+      const parsedCursor = cursor === undefined ? null : decodeCursor(cursor, query)
+      const revision = listRevision()
+      if (parsedCursor && parsedCursor.revision !== revision) throw new DiaryTaskListChanged()
+
+      let rows: TaskRow[]
+      if (query.type === 'list') {
+        if (parsedCursor === null) {
+          rows = db.prepare(`SELECT * FROM diary_tasks WHERE owner_user_id = ?
+            ORDER BY due_date IS NULL, due_date, id LIMIT ?`).all(owner, PAGE_SIZE + 1) as TaskRow[]
+        } else if (parsedCursor.dueDate === null) {
+          rows = db.prepare(`SELECT * FROM diary_tasks WHERE owner_user_id = ? AND due_date IS NULL AND id > ?
+            ORDER BY due_date IS NULL, due_date, id LIMIT ?`).all(owner, parsedCursor.id, PAGE_SIZE + 1) as TaskRow[]
+        } else {
+          rows = db.prepare(`SELECT * FROM diary_tasks WHERE owner_user_id = ?
+            AND (due_date IS NULL OR due_date > ? OR (due_date = ? AND id > ?))
+            ORDER BY due_date IS NULL, due_date, id LIMIT ?`)
+            .all(owner, parsedCursor.dueDate, parsedCursor.dueDate, parsedCursor.id, PAGE_SIZE + 1) as TaskRow[]
+        }
+      } else if (parsedCursor === null) {
+        rows = db.prepare(`SELECT * FROM diary_tasks WHERE owner_user_id = ? AND due_date BETWEEN ? AND ?
+          ORDER BY due_date, id LIMIT ?`).all(owner, query.start, query.end, PAGE_SIZE + 1) as TaskRow[]
+      } else {
+        rows = db.prepare(`SELECT * FROM diary_tasks WHERE owner_user_id = ? AND due_date BETWEEN ? AND ?
+          AND (due_date > ? OR (due_date = ? AND id > ?))
+          ORDER BY due_date, id LIMIT ?`)
+          .all(owner, query.start, query.end, parsedCursor.dueDate, parsedCursor.dueDate, parsedCursor.id, PAGE_SIZE + 1) as TaskRow[]
+      }
+
+      const items = rows.slice(0, PAGE_SIZE).map(task)
+      const lastTask = items.at(-1)
+      if (rows.length <= PAGE_SIZE || !lastTask) return { items, nextCursor: null }
+      return { items, nextCursor: encodeCursor(revision, lastTask, query) }
+    })()
+  }
+
   function transition(id: string, expected: number, completed: boolean): DiaryTask {
     operation.assertCurrent()
     db.transaction(() => {
@@ -70,6 +218,7 @@ export function diaryTaskStore(db: Database, owner: number, operation: DiaryBody
         WHERE owner_user_id = ? AND id = ? AND version = ?`)
         .run(encrypted, Date.now(), nextVersion, owner, id, expected)
       if (!result.changes) throw new DiaryConflict()
+      advanceListRevision()
     })()
     const updated = readTaskRow(id)
     if (!updated) throw new DiaryConflict()
@@ -82,17 +231,11 @@ export function diaryTaskStore(db: Database, owner: number, operation: DiaryBody
       const row = readTaskRow(id)
       return row ? task(row) : null
     },
-    listTasks(offset = 0): { items: DiaryTask[]; next: number | null } {
-      operation.assertCurrent()
-      const rows = db.prepare(`SELECT * FROM diary_tasks WHERE owner_user_id = ?
-        ORDER BY due_date IS NULL, due_date, id LIMIT 201 OFFSET ?`).all(owner, offset) as TaskRow[]
-      return { items: rows.slice(0, 200).map(task), next: rows.length > 200 ? offset + 200 : null }
+    listTasks(cursor?: string): DiaryTaskPage {
+      return listPage({ type: 'list' }, cursor)
     },
-    tasksInRange(start: string, end: string, offset = 0): { items: DiaryTask[]; next: number | null } {
-      operation.assertCurrent()
-      const rows = db.prepare(`SELECT * FROM diary_tasks WHERE owner_user_id = ? AND due_date BETWEEN ? AND ?
-        ORDER BY due_date, id LIMIT 201 OFFSET ?`).all(owner, start, end, offset) as TaskRow[]
-      return { items: rows.slice(0, 200).map(task), next: rows.length > 200 ? offset + 200 : null }
+    tasksInRange(start: string, end: string, cursor?: string): DiaryTaskPage {
+      return listPage({ type: 'range', start, end }, cursor)
     },
     putTask(id: string, fields: TaskFields, expected: number): DiaryTask {
       operation.assertCurrent()
@@ -109,6 +252,7 @@ export function diaryTaskStore(db: Database, owner: number, operation: DiaryBody
             encrypted_fields = excluded.encrypted_fields, updated_at = excluded.updated_at, version = excluded.version`)
           .run(owner, id, fields.dueDate, encrypted, row?.created_at ?? now, now, nextVersion)
         db.prepare('DELETE FROM diary_task_deleted_records WHERE owner_user_id = ? AND id = ?').run(owner, id)
+        advanceListRevision()
       })()
       const saved = readTaskRow(id)
       if (!saved) throw new DiaryConflict()
@@ -137,6 +281,7 @@ export function diaryTaskStore(db: Database, owner: number, operation: DiaryBody
         db.prepare(`INSERT INTO diary_task_deleted_records (owner_user_id, id, version) VALUES (?, ?, ?)
           ON CONFLICT(owner_user_id, id) DO UPDATE SET version = excluded.version`)
           .run(owner, id, deletedVersionValue)
+        advanceListRevision()
       })()
       return deletedVersionValue
     },

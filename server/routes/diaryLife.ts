@@ -6,7 +6,7 @@ import { parseTaskFields } from '../../shared/diaryTasks.js'
 import { withDiaryBodyOperation } from '../diaryAccess/guard.js'
 import { DiaryAccessServiceError } from '../diaryAccess/service.js'
 import { diaryLifeStore, DiaryConflict } from '../diaryLife.js'
-import { diaryTaskStore, DiaryTaskNotFound } from '../diaryTasks.js'
+import { diaryTaskStore, DiaryTaskCursorError, DiaryTaskListChanged, DiaryTaskNotFound } from '../diaryTasks.js'
 import { diaryToday } from '../diaryDate.js'
 import { DiaryAttachmentError } from '../diaryAttachments/service.js'
 import { cleanupDiaryAttachmentStorage, DiaryAttachmentStorage, ensureDiaryAttachmentStorage } from '../diaryAttachments/storage.js'
@@ -31,6 +31,8 @@ async function guarded(c: Context<Env>, run: (store: Store, db: Database, tasks:
     }) ?? c.json({ code: 'diary-locked' }, 423)
   } catch (error) {
     if (error instanceof DiaryAccessServiceError) return c.json({ code: 'diary-locked' }, 423)
+    if (error instanceof DiaryTaskCursorError) return c.json({ code: 'invalid-diary-task-cursor' }, 400)
+    if (error instanceof DiaryTaskListChanged) return c.json({ code: 'diary-task-list-changed' }, 409)
     if (error instanceof DiaryConflict) return c.json({ code: 'diary-conflict' }, 409)
     if (error instanceof DiaryTaskNotFound) return c.json({ code: 'diary-not-found' }, 404)
     if (error instanceof DiaryAttachmentError) return c.json({ code: `diary-attachment-${error.code}` }, error.status)
@@ -136,15 +138,20 @@ routes.get('/countdowns', c => guarded(c, store => {
 }))
 
 routes.get('/tasks/list', c => guarded(c, (_store, _db, tasks) => {
-  const offset = c.req.query('offset') ?? '0'
-  if (!/^\d{1,7}$/.test(offset)) return c.json({ code: 'invalid-diary-task-list-query' }, 400)
-  return c.json(tasks.listTasks(Number(offset)))
+  const query = c.req.query()
+  if (Object.keys(query).some(key => key !== 'cursor')
+    || (query.cursor !== undefined && (!query.cursor || query.cursor.length > 1024))) {
+    return c.json({ code: 'invalid-diary-task-list-query' }, 400)
+  }
+  return c.json(tasks.listTasks(query.cursor))
 }))
 routes.get('/tasks', c => guarded(c, (_store, _db, tasks) => {
-  const { start, end, offset = '0' } = c.req.query()
+  const query = c.req.query()
+  const { start, end, cursor } = query
   if (!civilDate(start) || !civilDate(end) || end < start || dayDistance(start, end) > 366
-    || !/^\d{1,7}$/.test(offset)) return c.json({ code: 'invalid-diary-task-range' }, 400)
-  return c.json(tasks.tasksInRange(start, end, Number(offset)))
+    || Object.keys(query).some(key => !['start', 'end', 'cursor'].includes(key))
+    || (cursor !== undefined && (!cursor || cursor.length > 1024))) return c.json({ code: 'invalid-diary-task-range' }, 400)
+  return c.json(tasks.tasksInRange(start, end, cursor))
 }))
 routes.get('/tasks/:id', c => guarded(c, (_store, _db, tasks) => {
   const id = c.req.param('id')
