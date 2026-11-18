@@ -2,7 +2,10 @@
 import { computed, ref } from 'vue'
 import { NDatePicker, NInput, NSelect, NTimePicker, type InputInst } from 'naive-ui'
 import { MAX_DIARY_TASK_DESCRIPTION_LENGTH, MAX_DIARY_TASK_TITLE_LENGTH, taskTimeFieldsError, type TaskEditorFields } from '../../../shared/diaryTasks'
+import { eventOccurrenceStart, isEventOccurrenceStart, nextOccurrence, type DiaryEvent } from '../../../shared/diaryLife'
 import type { TaskRecurrenceFrequency } from '../../../shared/diaryTaskRecurrence'
+
+type TaskEventOption = { label: string; value: string; event?: DiaryEvent }
 
 const props = withDefaults(defineProps<{
   modelValue: TaskEditorFields
@@ -11,14 +14,16 @@ const props = withDefaults(defineProps<{
   allowRecurrence?: boolean
   allowEventLink?: boolean
   lockRecurrenceStart?: boolean
-  eventOptions?: Array<{ label: string; value: string }>
+  eventOptions?: TaskEventOption[]
   eventOptionsLoading?: boolean
+  preferredOccurrenceDate?: string | null
 }>(), {
   allowRecurrence: true,
   allowEventLink: true,
   lockRecurrenceStart: false,
   eventOptions: () => [],
   eventOptionsLoading: false,
+  preferredOccurrenceDate: null,
 })
 const emit = defineEmits<{
   'update:modelValue': [value: TaskEditorFields]
@@ -99,6 +104,7 @@ const frequency = computed<TaskRecurrenceFrequency | ''>({
       recurrence,
       dueDate: recurrence ? recurrence.startDate : previousDate,
       eventId: recurrence ? null : props.modelValue.eventId,
+      eventOccurrenceDate: recurrence ? null : props.modelValue.eventOccurrenceDate,
     })
   },
 })
@@ -122,9 +128,42 @@ const isBeforeRecurrenceStart = (timestamp: number) => recurrenceStartTimestamp.
 const eventId = computed({
   get: () => props.modelValue.recurrence ? null : props.modelValue.eventId ?? null,
   set: (value: string | null) => {
-    if (!props.modelValue.recurrence) emit('update:modelValue', { ...props.modelValue, eventId: value })
+    if (props.modelValue.recurrence) return
+    if (!value) {
+      emit('update:modelValue', { ...props.modelValue, eventId: null, eventOccurrenceDate: null })
+      return
+    }
+    const event = props.eventOptions.find(option => option.value === value)?.event
+    if (!event) {
+      emit('update:modelValue', { ...props.modelValue, eventId: value, eventOccurrenceDate: null })
+      return
+    }
+    const preferredDate = [props.modelValue.dueDate, props.preferredOccurrenceDate]
+      .map(date => date ? eventOccurrenceStart(event, date) : null)
+      .find((date): date is string => date !== null)
+    const nextDate = nextOccurrence(event, props.today)
+    const recommendedDate = event.recurrence === 'none'
+      ? event.startDate
+      : preferredDate ?? (nextDate ? eventOccurrenceStart(event, nextDate) : null) ?? event.startDate
+    emit('update:modelValue', { ...props.modelValue, eventId: value, eventOccurrenceDate: recommendedDate })
   },
 })
+const eventOccurrenceDate = computed<string | null>({
+  get: () => props.modelValue.eventOccurrenceDate ?? null,
+  set: value => emit('update:modelValue', { ...props.modelValue, eventOccurrenceDate: value }),
+})
+const selectedEvent = computed(() => props.eventOptions.find(option => option.value === eventId.value)?.event ?? null)
+const selectedYearlyEvent = computed(() => selectedEvent.value?.recurrence === 'yearly' ? selectedEvent.value : null)
+const eventSelectOptions = computed(() => props.eventOptions.map(option => ({ label: option.label, value: option.value })))
+function isNotEventOccurrence(timestamp: number): boolean {
+  const date = new Date(timestamp)
+  const localDate = `${date.getFullYear().toString().padStart(4, '0')}-${(date.getMonth() + 1).toString().padStart(2, '0')}-${date.getDate().toString().padStart(2, '0')}`
+  return !selectedYearlyEvent.value || !isEventOccurrenceStart(selectedYearlyEvent.value, localDate)
+}
+const eventOccurrenceError = computed(() => selectedYearlyEvent.value && eventOccurrenceDate.value
+  && !isEventOccurrenceStart(selectedYearlyEvent.value, eventOccurrenceDate.value)
+  ? '请选择该日程实际发生的日期。'
+  : '')
 
 function onEventPickerVisibility(visible: boolean) {
   if (visible) emit('event-picker-open')
@@ -255,7 +294,7 @@ defineExpose({ focusTitle: () => titleInput.value?.focus() })
         class="diary-task-event-select"
         v-model:value="eventId"
         v-model:show="eventSelectShown"
-        :options="eventOptions"
+        :options="eventSelectOptions"
         :loading="eventOptionsLoading"
         :disabled="inert"
         bordered
@@ -265,6 +304,19 @@ defineExpose({ focusTitle: () => titleInput.value?.focus() })
         aria-label="关联日程"
         @update:show="onEventPickerVisibility"
       />
+      <NDatePicker
+        v-if="selectedYearlyEvent"
+        v-model:formatted-value="eventOccurrenceDate"
+        class="diary-task-date-picker diary-task-event-occurrence"
+        type="date"
+        format="yyyy-MM-dd"
+        value-format="yyyy-MM-dd"
+        aria-label="关联日程发生日期"
+        placeholder="选择发生日期"
+        :is-date-disabled="isNotEventOccurrence"
+        :disabled="inert || !eventId"
+      />
+      <span v-if="eventOccurrenceError" class="diary-task-form-error" role="alert">{{ eventOccurrenceError }}</span>
     </div>
     <label class="diary-task-form-field diary-task-form-description">
       <span>备注</span>

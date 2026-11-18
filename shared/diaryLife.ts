@@ -206,6 +206,24 @@ export function occursOn(event: EventFields, date: string): boolean {
     return start >= event.startDate && start <= date && date <= addDays(start, duration)
   })
 }
+/** Returns the start date of the Event occurrence containing a displayed date. */
+export function eventOccurrenceStart(event: EventFields, date: string): string | null {
+  if (!civilDate(date) || date < event.startDate) return null
+  if (event.recurrence === 'none') return date <= event.endDate ? event.startDate : null
+  const year = Temporal.PlainDate.from(date).year
+  const duration = dayDistance(event.startDate, event.endDate)
+  const occurrenceYears = [year, year - 1]
+  const starts = occurrenceYears.map(occurrenceYear => occurrenceInYear(event, occurrenceYear))
+  if (starts.some(start => start === date && start >= event.startDate)) return date
+  for (const start of starts) {
+    if (start && start >= event.startDate && start <= date && date <= addDays(start, duration)) return start
+  }
+  return null
+}
+/** True only for the exact Gregorian start date of a valid Event occurrence. */
+export function isEventOccurrenceStart(event: EventFields, date: string): boolean {
+  return eventOccurrenceStart(event, date) === date
+}
 export function nextOccurrence(event: EventFields, today: string): string | null {
   if (event.recurrence === 'none') return event.startDate >= today ? event.startDate : null
   if (event.dateRule?.calendar === 'chinese') {

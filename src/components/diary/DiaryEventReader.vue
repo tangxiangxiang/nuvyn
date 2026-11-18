@@ -1,8 +1,8 @@
 <script setup lang="ts">
 import { computed, nextTick, onMounted, ref, watch } from 'vue'
 import { NButton, NIcon } from 'naive-ui'
-import { Pencil, X } from '@vicons/tabler'
-import { addDays, dayDistance, displayEventTitle, occurrenceInYear, type DiaryEvent } from '../../../shared/diaryLife'
+import { Pencil, Plus, X } from '@vicons/tabler'
+import { addDays, dayDistance, displayEventTitle, eventOccurrenceStart, type DiaryEvent } from '../../../shared/diaryLife'
 import { formatLunarRule } from '../../../shared/lunarCalendar'
 import type { DiaryTaskListItem } from '../../../shared/diaryTasks'
 import { eventEmojiSource } from '../../features/diary/eventEmoji'
@@ -20,6 +20,7 @@ const props = defineProps<{
 
 const emit = defineEmits<{
   edit: [keyboardActivated: boolean]
+  'create-task': []
   close: []
   'toggle-task': [task: DiaryTaskListItem]
 }>()
@@ -37,19 +38,19 @@ function focusRequestedTarget() {
   if (props.focusTarget) focus(props.focusTarget)
 }
 
+function focusTask(taskId: string) {
+  const button = [...(reader.value?.querySelectorAll<HTMLButtonElement>('[data-task-toggle]') ?? [])]
+    .find(item => item.dataset.taskToggle === taskId)
+  button?.focus({ preventScroll: true })
+}
+
+defineExpose({ focusTask })
+
 watch(() => props.focusTarget, () => { void nextTick(focusRequestedTarget) }, { flush: 'post' })
 onMounted(focusRequestedTarget)
 
 function occurrenceStart(event: DiaryEvent, date: string): string {
-  if (event.recurrence !== 'yearly') return event.startDate
-
-  const year = Number(date.slice(0, 4))
-  const duration = dayDistance(event.startDate, event.endDate)
-  for (const occurrenceYear of [year - 1, year]) {
-    const start = occurrenceInYear(event, occurrenceYear)
-    if (start && start <= date && addDays(start, duration) >= date) return start
-  }
-  return occurrenceInYear(event, year) ?? date
+  return eventOccurrenceStart(event, date) ?? date
 }
 
 function formatDate(date: string, includeYear = true): string {
@@ -100,6 +101,9 @@ const accessibleName = computed(() => title.value)
         <h1>{{ title }}</h1>
       </div>
       <div class="diary-event-reader-actions">
+        <NButton quaternary :disabled="busy" aria-label="为此日程新增待办" @click="emit('create-task')">
+          <NIcon aria-hidden="true" :size="18"><Plus /></NIcon>
+        </NButton>
         <NButton
           quaternary
           class="diary-event-reader-edit"

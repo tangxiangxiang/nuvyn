@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest'
 import { mount } from '@vue/test-utils'
 import { NDatePicker, NInput, NSelect, NTimePicker } from 'naive-ui'
 import DiaryTaskForm from '../DiaryTaskForm.vue'
+import type { DiaryEvent } from '../../../../shared/diaryLife'
 import type { TaskEditorFields } from '../../../../shared/diaryTasks'
 
 function getControl(wrapper: ReturnType<typeof mount>, component: typeof NDatePicker | typeof NSelect | typeof NTimePicker, label: string) {
@@ -95,6 +96,45 @@ describe('DiaryTaskForm', () => {
       startDate: null, startTime: null, dueDate: '2026-11-21', dueTime: '12:00',
     })
     expect(wrapper.find('button.diary-task-clear-date').exists()).toBe(false)
+    wrapper.unmount()
+  })
+
+  it('selects a concrete occurrence for yearly Events and prefers the task due date when it matches', async () => {
+    const event: DiaryEvent = {
+      id: 'a2a41f64-17ae-4b68-9c98-bb45fc4ad8c7',
+      title: '相识纪念日', description: '', emoji: '🎉', type: 'anniversary',
+      startDate: '2020-11-15', endDate: '2020-11-15', startTime: null, endTime: null,
+      allDay: true, dateRule: { calendar: 'gregory' }, recurrence: 'yearly',
+      showCountdown: false, isPrimary: false, version: 1, createdAt: 1, updatedAt: 1,
+    }
+    const initial: TaskEditorFields = {
+      title: '准备礼物', description: '', startDate: null, startTime: null,
+      dueDate: '2026-11-15', dueTime: null, recurrence: null, eventId: null, eventOccurrenceDate: null,
+    }
+    const wrapper = mount(DiaryTaskForm, {
+      props: {
+        modelValue: initial,
+        today: '2026-11-18',
+        eventOptions: [{ value: event.id, label: '相识纪念日 · 每年', event }],
+      },
+    })
+
+    const selector = getControl(wrapper, NSelect, '关联日程')
+    await selector.vm.$emit('update:value', event.id)
+    const selectedDraft = wrapper.emitted('update:modelValue')?.at(-1)?.[0] as TaskEditorFields
+    expect(selectedDraft).toMatchObject({ eventId: event.id, eventOccurrenceDate: '2026-11-15', dueDate: '2026-11-15' })
+    await wrapper.setProps({ modelValue: selectedDraft })
+
+    const occurrencePicker = getControl(wrapper, NDatePicker, '关联日程发生日期')
+    expect(getProp(occurrencePicker, 'formattedValue')).toBe('2026-11-15')
+    const isDateDisabled = getProp(occurrencePicker, 'isDateDisabled') as (timestamp: number) => boolean
+    expect(isDateDisabled(new Date(2026, 10, 15).getTime())).toBe(false)
+    expect(isDateDisabled(new Date(2026, 10, 16).getTime())).toBe(true)
+
+    await occurrencePicker.vm.$emit('update:formatted-value', '2027-11-15')
+    expect(wrapper.emitted('update:modelValue')?.at(-1)?.[0]).toMatchObject({
+      eventId: event.id, eventOccurrenceDate: '2027-11-15', dueDate: '2026-11-15',
+    })
     wrapper.unmount()
   })
 

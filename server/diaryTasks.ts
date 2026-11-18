@@ -2,7 +2,7 @@ import type { Database } from 'better-sqlite3'
 import { createHmac, timingSafeEqual } from 'node:crypto'
 import { Temporal } from '@js-temporal/polyfill'
 import type { DiaryBodyOperation } from './diaryAccess/service.js'
-import { civilDate, parseEvent } from '../shared/diaryLife.js'
+import { civilDate, isEventOccurrenceStart, parseEvent, type EventFields } from '../shared/diaryLife.js'
 import { parseTaskFields, parseTaskOccurrenceState, parseTaskSeriesFields, type DiaryRecurringTaskOccurrence, type DiaryTask, type DiaryTaskItemPage, type DiaryTaskListItem, type DiaryTaskPage, type DiaryTaskSeries, type OneOffTaskFields, type TaskOccurrenceState, type TaskSeriesFields } from '../shared/diaryTasks.js'
 import { taskRecurrenceDates, taskRecurrenceOccursOn } from '../shared/diaryTaskRecurrence.js'
 import { DiaryConflict } from './diaryLife.js'
@@ -11,6 +11,7 @@ export class DiaryTaskNotFound extends Error {}
 export class DiaryTaskCursorError extends Error {}
 export class DiaryTaskListChanged extends Error {}
 export class DiaryTaskAssociationError extends Error {}
+export class DiaryEventLinkedOccurrencesError extends Error {}
 export class DiaryTaskExpansionLimit extends Error {}
 export class DiaryTaskRecurrenceError extends Error {}
 export class DiaryTaskHistoryProtectedError extends Error {}
@@ -97,6 +98,7 @@ export function diaryTaskStore(db: Database, owner: number, operation: DiaryBody
       || !(completedAt === null || (Number.isSafeInteger(completedAt) && (completedAt as number) >= 0))) {
       throw new Error('Invalid Diary task')
     }
+    const association = eventAssociationForTask(row.id)
     return {
       ...fields,
       id: row.id,
@@ -104,7 +106,8 @@ export function diaryTaskStore(db: Database, owner: number, operation: DiaryBody
       version: row.version,
       createdAt: row.created_at,
       updatedAt: row.updated_at,
-      eventId: eventIdForTask(row.id),
+      eventId: association?.eventId ?? null,
+      eventOccurrenceDate: association?.occurrenceDate ?? null,
     }
   }
 
@@ -139,17 +142,32 @@ export function diaryTaskStore(db: Database, owner: number, operation: DiaryBody
     return { state, version: row.version, updatedAt: row.updated_at }
   }
 
-  function eventIdForTask(id: string): string | null {
-    return (db.prepare('SELECT event_id FROM diary_task_event_links WHERE owner_user_id = ? AND task_id = ?')
-      .get(owner, id) as { event_id: string } | undefined)?.event_id ?? null
+  function eventAssociationForTask(id: string): { eventId: string; occurrenceDate: string } | null {
+    const row = db.prepare(`SELECT event_id, occurrence_date FROM diary_task_event_links
+      WHERE owner_user_id = ? AND task_id = ?`).get(owner, id) as { event_id: string; occurrence_date: string } | undefined
+    return row ? { eventId: row.event_id, occurrenceDate: row.occurrence_date } : null
   }
 
-  function assertLinkableEvent(eventId: string): void {
+  function assertLinkableEvent(eventId: string, requestedOccurrenceDate?: string | null): { eventId: string; occurrenceDate: string } {
     const row = db.prepare('SELECT id, encrypted_fields, version FROM diary_events WHERE owner_user_id = ? AND id = ?')
       .get(owner, eventId) as { id: string; encrypted_fields: Buffer; version: number } | undefined
     if (!row) throw new DiaryTaskAssociationError()
     const event = parseEvent(crypto!.decrypt(row.encrypted_fields, JSON.stringify([owner, 'event', row.id, row.version])))
-    if (!event || event.type !== 'schedule' || event.recurrence !== 'none') throw new DiaryTaskAssociationError()
+    if (!event) throw new DiaryTaskAssociationError()
+    const occurrenceDate = requestedOccurrenceDate ?? (event.recurrence === 'none' ? event.startDate : null)
+    if (!occurrenceDate || !civilDate(occurrenceDate) || !isEventOccurrenceStart(event, occurrenceDate)) {
+      throw new DiaryTaskAssociationError()
+    }
+    return { eventId, occurrenceDate }
+  }
+
+  function assertEventLinksRemainValid(eventId: string, fields: EventFields): void {
+    operation.assertCurrent()
+    const links = db.prepare(`SELECT occurrence_date FROM diary_task_event_links
+      WHERE owner_user_id = ? AND event_id = ?`).all(owner, eventId) as Array<{ occurrence_date: string }>
+    if (links.some(link => !isEventOccurrenceStart(fields, link.occurrence_date))) {
+      throw new DiaryEventLinkedOccurrencesError()
+    }
   }
 
   function recurringOccurrence(row: TaskSeriesRow, date: string, occurrenceRow?: TaskOccurrenceRow): DiaryRecurringTaskOccurrence {
@@ -418,7 +436,7 @@ export function diaryTaskStore(db: Database, owner: number, operation: DiaryBody
         }
         oneOffRows = matches
       }
-      const oneOffItems = oneOffRows.map(row => ({ ...task(row), kind: 'one-off' as const, eventId: eventIdForTask(row.id) }))
+      const oneOffItems = oneOffRows.map(row => ({ ...task(row), kind: 'one-off' as const }))
       const recurrenceStatus = query.type === 'list' ? query.status : undefined
       const recurring = recurringItems(query.start, query.end, recurrenceStatus)
         .filter(item => after === null || compareTaskItems(item, { id: after.id, dueDate: after.dueDate } as DiaryTaskListItem) > 0)
@@ -546,39 +564,41 @@ export function diaryTaskStore(db: Database, owner: number, operation: DiaryBody
     })()
   }
 
-  function eventLinkTransition(id: string, eventId: string | null, expected: number): DiaryTask {
+  function eventLinkTransition(id: string, eventId: string | null, expected: number, occurrenceDate?: string | null): DiaryTask {
     operation.assertCurrent()
-    const row = readTaskRow(id)
-    if (!row) {
-      if (deletedVersion(id) > 0) throw new DiaryConflict()
-      throw new DiaryTaskNotFound()
-    }
-    if (row.version !== expected) throw new DiaryConflict()
-    if (eventId !== null) assertLinkableEvent(eventId)
-    const current = task(row)
-    const previousEventId = eventIdForTask(id)
-    if (previousEventId === eventId) throw new DiaryConflict()
-    const now = Date.now()
-    const nextVersion = row.version + 1
-    const encrypted = crypto!.encrypt({
-      title: current.title,
-      description: current.description,
-      startDate: current.startDate,
-      startTime: current.startTime,
-      dueDate: current.dueDate,
-      dueTime: current.dueTime,
-      completedAt: current.completedAt,
-    }, identity(id, nextVersion))
     return db.transaction(() => {
+      const row = readTaskRow(id)
+      if (!row) {
+        if (deletedVersion(id) > 0) throw new DiaryConflict()
+        throw new DiaryTaskNotFound()
+      }
+      if (row.version !== expected) throw new DiaryConflict()
+      const nextAssociation = eventId === null ? null : assertLinkableEvent(eventId, occurrenceDate)
+      const current = task(row)
+      const previousAssociation = eventAssociationForTask(id)
+      if (previousAssociation?.eventId === nextAssociation?.eventId
+        && previousAssociation?.occurrenceDate === nextAssociation?.occurrenceDate) throw new DiaryConflict()
+      const now = Date.now()
+      const nextVersion = row.version + 1
+      const encrypted = crypto!.encrypt({
+        title: current.title,
+        description: current.description,
+        startDate: current.startDate,
+        startTime: current.startTime,
+        dueDate: current.dueDate,
+        dueTime: current.dueTime,
+        completedAt: current.completedAt,
+      }, identity(id, nextVersion))
       const result = db.prepare(`UPDATE diary_tasks SET encrypted_fields = ?, updated_at = ?, version = ?
         WHERE owner_user_id = ? AND id = ? AND version = ?`).run(encrypted, now, nextVersion, owner, id, expected)
       if (!result.changes) throw new DiaryConflict()
-      if (eventId === null) db.prepare('DELETE FROM diary_task_event_links WHERE owner_user_id = ? AND task_id = ?').run(owner, id)
-      else db.prepare(`INSERT INTO diary_task_event_links (owner_user_id, task_id, event_id, created_at) VALUES (?, ?, ?, ?)
-        ON CONFLICT(owner_user_id, task_id) DO UPDATE SET event_id = excluded.event_id, created_at = excluded.created_at`)
-        .run(owner, id, eventId, now)
+      if (nextAssociation === null) db.prepare('DELETE FROM diary_task_event_links WHERE owner_user_id = ? AND task_id = ?').run(owner, id)
+      else db.prepare(`INSERT INTO diary_task_event_links (owner_user_id, task_id, event_id, occurrence_date, created_at) VALUES (?, ?, ?, ?, ?)
+        ON CONFLICT(owner_user_id, task_id) DO UPDATE SET event_id = excluded.event_id,
+        occurrence_date = excluded.occurrence_date, created_at = excluded.created_at`)
+        .run(owner, id, nextAssociation.eventId, nextAssociation.occurrenceDate, now)
       advanceListRevision()
-      return { ...task(readTaskRow(id)!), eventId }
+      return task(readTaskRow(id)!)
     })()
   }
 
@@ -627,14 +647,14 @@ export function diaryTaskStore(db: Database, owner: number, operation: DiaryBody
     })()
     const updated = readTaskRow(id)
     if (!updated) throw new DiaryConflict()
-    return { ...task(updated), eventId: eventIdForTask(id) }
+    return task(updated)
   }
 
   return {
     getTask(id: string): DiaryTask | null {
       operation.assertCurrent()
       const row = readTaskRow(id)
-      return row ? { ...task(row), eventId: eventIdForTask(id) } : null
+      return row ? task(row) : null
     },
     listTasks(cursor?: string, completed?: boolean): DiaryTaskPage {
       return listPage({ type: 'list', ...(completed === undefined ? {} : { completed }) }, cursor)
@@ -642,15 +662,18 @@ export function diaryTaskStore(db: Database, owner: number, operation: DiaryBody
     tasksInRange(start: string, end: string, cursor?: string): DiaryTaskPage {
       return listPage({ type: 'range', start, end }, cursor)
     },
-    putTask(id: string, fields: OneOffTaskFields, expected: number, requestedEventId?: string | null): DiaryTask {
+    putTask(id: string, fields: OneOffTaskFields, expected: number, requestedEventId?: string | null, requestedOccurrenceDate?: string | null): DiaryTask {
       operation.assertCurrent()
       const now = Date.now()
-      const rowBefore = readTaskRow(id)
-      const nextEventId = requestedEventId === undefined ? (rowBefore ? eventIdForTask(id) : null) : requestedEventId
-      if (nextEventId !== null) assertLinkableEvent(nextEventId)
       db.transaction(() => {
         const row = readTaskRow(id)
         if ((row?.version ?? deletedVersion(id)) !== expected) throw new DiaryConflict()
+        const currentAssociation = row ? eventAssociationForTask(id) : null
+        const nextAssociation = requestedEventId === undefined
+          ? currentAssociation
+          : requestedEventId === null
+            ? null
+            : assertLinkableEvent(requestedEventId, requestedOccurrenceDate)
         const completedAt = row ? task(row).completedAt : null
         const nextVersion = expected + 1
         const encrypted = crypto!.encrypt({ ...fields, completedAt }, identity(id, nextVersion))
@@ -660,15 +683,16 @@ export function diaryTaskStore(db: Database, owner: number, operation: DiaryBody
             encrypted_fields = excluded.encrypted_fields, updated_at = excluded.updated_at, version = excluded.version`)
           .run(owner, id, fields.dueDate, encrypted, row?.created_at ?? now, now, nextVersion)
         db.prepare('DELETE FROM diary_task_deleted_records WHERE owner_user_id = ? AND id = ?').run(owner, id)
-        if (nextEventId === null) db.prepare('DELETE FROM diary_task_event_links WHERE owner_user_id = ? AND task_id = ?').run(owner, id)
-        else db.prepare(`INSERT INTO diary_task_event_links (owner_user_id, task_id, event_id, created_at) VALUES (?, ?, ?, ?)
-          ON CONFLICT(owner_user_id, task_id) DO UPDATE SET event_id = excluded.event_id, created_at = excluded.created_at`)
-          .run(owner, id, nextEventId, now)
+        if (nextAssociation === null) db.prepare('DELETE FROM diary_task_event_links WHERE owner_user_id = ? AND task_id = ?').run(owner, id)
+        else db.prepare(`INSERT INTO diary_task_event_links (owner_user_id, task_id, event_id, occurrence_date, created_at) VALUES (?, ?, ?, ?, ?)
+          ON CONFLICT(owner_user_id, task_id) DO UPDATE SET event_id = excluded.event_id,
+          occurrence_date = excluded.occurrence_date, created_at = excluded.created_at`)
+          .run(owner, id, nextAssociation.eventId, nextAssociation.occurrenceDate, now)
         advanceListRevision()
       })()
       const saved = readTaskRow(id)
       if (!saved) throw new DiaryConflict()
-      return { ...task(saved), eventId: nextEventId }
+      return task(saved)
     },
     completeTask(id: string, expected: number): DiaryTask {
       return transition(id, expected, true)
@@ -783,17 +807,18 @@ export function diaryTaskStore(db: Database, owner: number, operation: DiaryBody
     listTaskItems(start: string, end: string, cursor?: string, status?: 'open' | 'completed'): DiaryTaskItemPage {
       return itemPage({ type: 'list', start, end, ...(status === undefined ? {} : { status }) }, cursor)
     },
-    eventTasks(eventId: string): DiaryTask[] {
+    eventTasks(eventId: string, requestedOccurrenceDate?: string | null): DiaryTask[] {
       operation.assertCurrent()
-      assertLinkableEvent(eventId)
+      const association = assertLinkableEvent(eventId, requestedOccurrenceDate)
       const rows = db.prepare(`SELECT task.* FROM diary_task_event_links link
         JOIN diary_tasks task ON task.owner_user_id = link.owner_user_id AND task.id = link.task_id
-        WHERE link.owner_user_id = ? AND link.event_id = ? ORDER BY task.due_date IS NULL, task.due_date, task.id`)
-        .all(owner, eventId) as TaskRow[]
-      return rows.map(row => ({ ...task(row), eventId }))
+        WHERE link.owner_user_id = ? AND link.event_id = ? AND link.occurrence_date = ?
+        ORDER BY task.due_date IS NULL, task.due_date, task.id`)
+        .all(owner, association.eventId, association.occurrenceDate) as TaskRow[]
+      return rows.map(row => task(row))
     },
-    linkTaskToEvent(id: string, eventId: string, expected: number): DiaryTask {
-      return eventLinkTransition(id, eventId, expected)
+    linkTaskToEvent(id: string, eventId: string, expected: number, occurrenceDate?: string | null): DiaryTask {
+      return eventLinkTransition(id, eventId, expected, occurrenceDate)
     },
     unlinkTaskFromEvent(id: string, expected: number): DiaryTask {
       return eventLinkTransition(id, null, expected)
@@ -802,6 +827,9 @@ export function diaryTaskStore(db: Database, owner: number, operation: DiaryBody
       operation.assertCurrent()
       const result = db.prepare('DELETE FROM diary_task_event_links WHERE owner_user_id = ? AND event_id = ?').run(owner, eventId)
       if (result.changes) advanceListRevision()
+    },
+    assertEventLinksRemainValid(eventId: string, fields: EventFields): void {
+      assertEventLinksRemainValid(eventId, fields)
     },
   }
 }

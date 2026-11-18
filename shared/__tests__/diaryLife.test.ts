@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { civilDate, dayDistance, nextOccurrence, occurrenceInYear, occursOn, parseDay, parseEvent, type EventFields } from '../diaryLife'
+import { civilDate, dayDistance, eventOccurrenceStart, isEventOccurrenceStart, nextOccurrence, occurrenceInYear, occursOn, parseDay, parseEvent, type EventFields } from '../diaryLife'
 
 const event: EventFields = { title: '生日', description: '', emoji: '🎂', type: 'anniversary', startDate: '2024-02-29', endDate: '2024-02-29', startTime: null, endTime: null, allDay: true, recurrence: 'yearly', showCountdown: true, isPrimary: false }
 describe('Diary natural days', () => {
@@ -54,6 +54,22 @@ describe('Diary natural days', () => {
     const trip = { ...event, startDate: '2024-12-30', endDate: '2025-01-02' }
     expect(occursOn(trip, '2027-01-01')).toBe(true)
     expect(occursOn(trip, '2027-01-03')).toBe(false)
+    expect(eventOccurrenceStart(trip, '2027-01-01')).toBe('2026-12-30')
+    expect(isEventOccurrenceStart(trip, '2027-01-01')).toBe(false)
+    expect(isEventOccurrenceStart(trip, '2026-12-30')).toBe(true)
+    const oneTimeTrip = { ...trip, recurrence: 'none' as const }
+    expect(eventOccurrenceStart(oneTimeTrip, '2024-12-31')).toBe('2024-12-30')
+    expect(isEventOccurrenceStart(oneTimeTrip, '2024-12-31')).toBe(false)
+  })
+  it('prefers an exact annual occurrence start when long event ranges overlap', () => {
+    const longAnnualEvent = {
+      ...event,
+      startDate: '2020-06-01',
+      endDate: '2021-06-02',
+    }
+    expect(eventOccurrenceStart(longAnnualEvent, '2021-06-01')).toBe('2021-06-01')
+    expect(isEventOccurrenceStart(longAnnualEvent, '2021-06-01')).toBe(true)
+    expect(eventOccurrenceStart(longAnnualEvent, '2021-06-02')).toBe('2021-06-01')
   })
   it('does not count expired one-time events', () => {
     expect(nextOccurrence({ ...event, recurrence: 'none' }, '2025-01-01')).toBeNull()
@@ -86,6 +102,8 @@ describe('Diary natural days', () => {
     expect(nextOccurrence(lunarEvent, '2026-11-16')).toBe('2027-06-23')
     expect(occursOn(lunarEvent, '2027-06-23')).toBe(true)
     expect(occursOn(lunarEvent, '2027-06-22')).toBe(false)
+    expect(eventOccurrenceStart(lunarEvent, '2027-06-23')).toBe('2027-06-23')
+    expect(isEventOccurrenceStart(lunarEvent, '2027-06-23')).toBe(true)
     expect(parseEvent({ ...lunarEvent, recurrence: 'none' })).toBeNull()
     expect(parseEvent({ ...lunarEvent, allDay: false })).toBeNull()
     expect(parseEvent({ ...lunarEvent, endDate: '2026-11-17' })).toBeNull()

@@ -64,8 +64,12 @@ async function request<T>(path: string, method = 'GET', body?: unknown, signal?:
 }
 
 export const diaryTasksApi = {
-  createTask(fields: OneOffTaskFields, eventId?: string | null): Promise<{ task: DiaryTask }> {
-    return request(`/tasks/${createDiaryTaskId()}`, 'PUT', { ...fields, ...(eventId === undefined ? {} : { eventId }), expectedVersion: 0 })
+  createTask(fields: OneOffTaskFields, eventId?: string | null, occurrenceDate?: string | null): Promise<{ task: DiaryTask }> {
+    return request(`/tasks/${createDiaryTaskId()}`, 'PUT', {
+      ...fields,
+      ...(eventId === undefined ? {} : { eventId, occurrenceDate: occurrenceDate ?? null }),
+      expectedVersion: 0,
+    })
   },
   getTask(id: string, signal?: AbortSignal): Promise<{ task: DiaryTask }> {
     return request(`/tasks/${encodeURIComponent(id)}`, 'GET', undefined, signal)
@@ -81,8 +85,12 @@ export const diaryTasksApi = {
     if (cursor !== undefined) query.set('cursor', cursor)
     return request(`/tasks?${query}`, 'GET', undefined, signal)
   },
-  updateTask(id: string, fields: OneOffTaskFields, expectedVersion: number, eventId?: string | null): Promise<{ task: DiaryTask }> {
-    return request(`/tasks/${encodeURIComponent(id)}`, 'PUT', { ...fields, ...(eventId === undefined ? {} : { eventId }), expectedVersion })
+  updateTask(id: string, fields: OneOffTaskFields, expectedVersion: number, eventId?: string | null, occurrenceDate?: string | null): Promise<{ task: DiaryTask }> {
+    return request(`/tasks/${encodeURIComponent(id)}`, 'PUT', {
+      ...fields,
+      ...(eventId === undefined ? {} : { eventId, occurrenceDate: occurrenceDate ?? null }),
+      expectedVersion,
+    })
   },
   completeTask(id: string, expectedVersion: number): Promise<{ task: DiaryTask }> {
     return request(`/tasks/${encodeURIComponent(id)}/complete`, 'POST', { expectedVersion })
@@ -131,7 +139,8 @@ export const diaryTasksApi = {
   skipOccurrence(seriesId: string, date: string, expectedVersion: number): Promise<{ occurrence: DiaryTaskListItem }> {
     return request(`/task-series/${encodeURIComponent(seriesId)}/occurrences/${encodeURIComponent(date)}/skip`, 'POST', { expectedVersion })
   },
-  eventTasks(eventId: string, signal?: AbortSignal): Promise<{ tasks: DiaryTask[] }> {
-    return request(`/events/${encodeURIComponent(eventId)}/tasks`, 'GET', undefined, signal)
+  eventTasks(eventId: string, occurrenceDate: string, signal?: AbortSignal): Promise<{ tasks: DiaryTask[] }> {
+    const query = new URLSearchParams({ occurrenceDate })
+    return request(`/events/${encodeURIComponent(eventId)}/tasks?${query}`, 'GET', undefined, signal)
   },
 }

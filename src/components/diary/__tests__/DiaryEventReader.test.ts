@@ -83,6 +83,8 @@ describe('DiaryEventReader', () => {
     expect(wrapper.get('.diary-task-title').text()).toBe('准备身份证')
     expect(wrapper.get('.diary-task-rows').classes()).toContain('diary-task-rows--plain')
     expect(wrapper.get('.diary-task-row').classes()).not.toContain('diary-cloud-card')
+    await wrapper.get('[aria-label="为此日程新增待办"]').trigger('click')
+    expect(wrapper.emitted('create-task')).toHaveLength(1)
     await wrapper.get('.diary-task-toggle').trigger('click')
     expect(wrapper.emitted('toggle-task')?.[0]?.[0]).toMatchObject({ id: task.id })
     wrapper.unmount()

@@ -143,14 +143,14 @@ export function diaryLifeStore(db: Database, owner: number, operation: DiaryBody
         .all(owner, offset) as Row[]
       return { items: rows.slice(0, 200).map(event), next: rows.length > 200 ? offset + 200 : null }
     },
-    putEvent(id: string, fields: EventFields, expected: number, onInvalidateTaskLinks?: () => void) {
+    putEvent(id: string, fields: EventFields, expected: number, onValidateTaskLinks?: () => void) {
       operation.assertCurrent()
       const now = Date.now()
       const payload = crypto.encrypt(fields, identity('event', id, expected + 1))
       db.transaction(() => {
         const row = db.prepare('SELECT version FROM diary_events WHERE owner_user_id = ? AND id = ?').get(owner, id) as { version: number } | undefined
         if ((row?.version ?? deletedVersion('event', id)) !== expected) throw new DiaryConflict()
-        onInvalidateTaskLinks?.()
+        onValidateTaskLinks?.()
         db.prepare(`INSERT INTO diary_events VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
           ON CONFLICT(owner_user_id, id) DO UPDATE SET start_date = excluded.start_date, end_date = excluded.end_date,
           recurrence = excluded.recurrence, encrypted_fields = excluded.encrypted_fields,
