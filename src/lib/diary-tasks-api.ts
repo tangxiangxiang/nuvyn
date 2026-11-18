@@ -1,5 +1,5 @@
 import { diaryAuthFetch } from './auth-session'
-import type { DiaryTask, DiaryTaskListStatus, DiaryTaskPage, TaskFields } from '../../shared/diaryTasks'
+import type { DiaryRecurringTaskOccurrence, DiaryTask, DiaryTaskItemPage, DiaryTaskListItem, DiaryTaskListStatus, DiaryTaskPage, DiaryTaskSeries, TaskFields, TaskSeriesFields } from '../../shared/diaryTasks'
 export type { DiaryTaskPage } from '../../shared/diaryTasks'
 
 export class DiaryTaskApiError extends Error {
@@ -56,8 +56,8 @@ async function request<T>(path: string, method = 'GET', body?: unknown, signal?:
 }
 
 export const diaryTasksApi = {
-  createTask(fields: TaskFields): Promise<{ task: DiaryTask }> {
-    return request(`/tasks/${createDiaryTaskId()}`, 'PUT', { ...fields, expectedVersion: 0 })
+  createTask(fields: TaskFields, eventId?: string | null): Promise<{ task: DiaryTask }> {
+    return request(`/tasks/${createDiaryTaskId()}`, 'PUT', { ...fields, ...(eventId === undefined ? {} : { eventId }), expectedVersion: 0 })
   },
   getTask(id: string, signal?: AbortSignal): Promise<{ task: DiaryTask }> {
     return request(`/tasks/${encodeURIComponent(id)}`, 'GET', undefined, signal)
@@ -73,8 +73,8 @@ export const diaryTasksApi = {
     if (cursor !== undefined) query.set('cursor', cursor)
     return request(`/tasks?${query}`, 'GET', undefined, signal)
   },
-  updateTask(id: string, fields: TaskFields, expectedVersion: number): Promise<{ task: DiaryTask }> {
-    return request(`/tasks/${encodeURIComponent(id)}`, 'PUT', { ...fields, expectedVersion })
+  updateTask(id: string, fields: TaskFields, expectedVersion: number, eventId?: string | null): Promise<{ task: DiaryTask }> {
+    return request(`/tasks/${encodeURIComponent(id)}`, 'PUT', { ...fields, ...(eventId === undefined ? {} : { eventId }), expectedVersion })
   },
   completeTask(id: string, expectedVersion: number): Promise<{ task: DiaryTask }> {
     return request(`/tasks/${encodeURIComponent(id)}/complete`, 'POST', { expectedVersion })
@@ -84,5 +84,46 @@ export const diaryTasksApi = {
   },
   deleteTask(id: string, expectedVersion: number): Promise<{ ok: true; version: number }> {
     return request(`/tasks/${encodeURIComponent(id)}`, 'DELETE', { expectedVersion })
+  },
+  taskItemsInRange(start: string, end: string, cursor?: string, signal?: AbortSignal): Promise<DiaryTaskItemPage> {
+    const query = new URLSearchParams({ start, end })
+    if (cursor !== undefined) query.set('cursor', cursor)
+    return request(`/task-occurrences?${query}`, 'GET', undefined, signal)
+  },
+  listTaskItems(start: string, end: string, cursor?: string, signal?: AbortSignal, status?: DiaryTaskListStatus): Promise<DiaryTaskItemPage> {
+    const query = new URLSearchParams({ start, end })
+    if (cursor !== undefined) query.set('cursor', cursor)
+    if (status !== undefined) query.set('status', status)
+    return request(`/task-items?${query}`, 'GET', undefined, signal)
+  },
+  createSeries(fields: TaskSeriesFields): Promise<{ series: DiaryTaskSeries }> {
+    return request(`/task-series/${createDiaryTaskId()}`, 'PUT', { ...fields, expectedVersion: 0 })
+  },
+  updateSeries(seriesId: string, effectiveDate: string, fields: TaskSeriesFields, expectedVersion: number): Promise<{ series: DiaryTaskSeries }> {
+    return request(`/task-series/${encodeURIComponent(seriesId)}`, 'PUT', { ...fields, newSeriesId: createDiaryTaskId(), effectiveDate, expectedVersion })
+  },
+  getSeries(seriesId: string, signal?: AbortSignal): Promise<{ series: DiaryTaskSeries }> {
+    return request(`/task-series/${encodeURIComponent(seriesId)}`, 'GET', undefined, signal)
+  },
+  getOccurrence(seriesId: string, date: string, signal?: AbortSignal): Promise<{ occurrence: DiaryRecurringTaskOccurrence }> {
+    return request(`/task-series/${encodeURIComponent(seriesId)}/occurrences/${encodeURIComponent(date)}`, 'GET', undefined, signal)
+  },
+  stopSeries(seriesId: string, effectiveDate: string, expectedVersion: number): Promise<{ series: DiaryTaskSeries }> {
+    return request(`/task-series/${encodeURIComponent(seriesId)}/stop`, 'POST', { effectiveDate, expectedVersion })
+  },
+  deleteSeries(seriesId: string, expectedVersion: number): Promise<{ ok: true; version: number }> {
+    return request(`/task-series/${encodeURIComponent(seriesId)}`, 'DELETE', { expectedVersion })
+  },
+  completeOccurrence(seriesId: string, date: string, expectedVersion: number): Promise<{ occurrence: DiaryTaskListItem }> {
+    return request(`/task-series/${encodeURIComponent(seriesId)}/occurrences/${encodeURIComponent(date)}/complete`, 'POST', { expectedVersion })
+  },
+  reopenOccurrence(seriesId: string, date: string, expectedVersion: number): Promise<{ occurrence: DiaryTaskListItem }> {
+    return request(`/task-series/${encodeURIComponent(seriesId)}/occurrences/${encodeURIComponent(date)}/reopen`, 'POST', { expectedVersion })
+  },
+  skipOccurrence(seriesId: string, date: string, expectedVersion: number): Promise<{ occurrence: DiaryTaskListItem }> {
+    return request(`/task-series/${encodeURIComponent(seriesId)}/occurrences/${encodeURIComponent(date)}/skip`, 'POST', { expectedVersion })
+  },
+  eventTasks(eventId: string, signal?: AbortSignal): Promise<{ tasks: DiaryTask[] }> {
+    return request(`/events/${encodeURIComponent(eventId)}/tasks`, 'GET', undefined, signal)
   },
 }

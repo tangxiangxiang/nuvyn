@@ -1,23 +1,25 @@
 <script setup lang="ts">
-import type { DiaryTask } from '../../../shared/diaryTasks'
+import type { DiaryTaskListItem } from '../../../shared/diaryTasks'
 import { taskDueDateLabel } from '../../features/diary/diaryTaskCalendar'
 
 const props = withDefaults(defineProps<{
-  items: DiaryTask[]
+  items: DiaryTaskListItem[]
   today: string
   busyIds?: Set<string>
   showDueDate?: boolean
+  editable?: boolean
 }>(), {
   busyIds: () => new Set<string>(),
   showDueDate: true,
+  editable: true,
 })
 
 const emit = defineEmits<{
-  toggle: [task: DiaryTask]
-  edit: [task: DiaryTask, keyboardActivated: boolean]
+  toggle: [task: DiaryTaskListItem]
+  edit: [task: DiaryTaskListItem, keyboardActivated: boolean]
 }>()
 
-function detail(task: DiaryTask): string {
+function detail(task: DiaryTaskListItem): string {
   if (props.showDueDate) return taskDueDateLabel(task, props.today)
   return task.dueTime ?? ''
 }
@@ -25,7 +27,7 @@ function detail(task: DiaryTask): string {
 
 <template>
   <div class="diary-task-rows">
-    <div v-for="task in items" :key="task.id" class="diary-task-row" :class="{ 'is-completed': task.completedAt !== null }">
+    <div v-for="task in items" :key="task.id" class="diary-task-row" :class="{ 'is-completed': task.completedAt !== null, 'is-skipped': task.kind === 'recurring' && task.skipped }">
       <button
         type="button"
         class="diary-task-toggle"
@@ -39,6 +41,7 @@ function detail(task: DiaryTask): string {
         <span aria-hidden="true">✓</span>
       </button>
       <button
+        v-if="editable"
         type="button"
         class="diary-task-edit"
         :data-task-id="task.id"
@@ -46,9 +49,15 @@ function detail(task: DiaryTask): string {
         :disabled="busyIds.has(task.id)"
         @click="emit('edit', task, $event.detail === 0)"
       >
-        <span class="diary-task-title">{{ task.title }}</span>
+        <span class="diary-task-title">{{ task.title }}<span v-if="task.kind === 'recurring'" class="diary-task-repeat" aria-label="重复待办"> ↻</span></span>
         <small v-if="detail(task)">{{ detail(task) }}</small>
+        <small v-if="task.kind === 'recurring' && task.skipped">本次已跳过</small>
       </button>
+      <div v-else class="diary-task-edit">
+        <span class="diary-task-title">{{ task.title }}<span v-if="task.kind === 'recurring'" class="diary-task-repeat" aria-label="重复待办"> ↻</span></span>
+        <small v-if="detail(task)">{{ detail(task) }}</small>
+        <small v-if="task.kind === 'recurring' && task.skipped">本次已跳过</small>
+      </div>
     </div>
   </div>
 </template>

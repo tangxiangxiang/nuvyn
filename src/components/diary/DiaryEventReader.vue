@@ -4,18 +4,24 @@ import { NButton, NIcon } from 'naive-ui'
 import { Pencil, X } from '@vicons/tabler'
 import { addDays, dayDistance, displayEventTitle, occurrenceInYear, type DiaryEvent } from '../../../shared/diaryLife'
 import { formatLunarRule } from '../../../shared/lunarCalendar'
+import type { DiaryTaskListItem } from '../../../shared/diaryTasks'
 import { eventEmojiSource } from '../../features/diary/eventEmoji'
+import DiaryTaskRows from './DiaryTaskRows.vue'
 
 const props = defineProps<{
   event: DiaryEvent
   occurrenceDate: string
   busy?: boolean
   focusTarget?: 'container' | 'edit' | null
+  relatedTasks?: DiaryTaskListItem[]
+  busyTaskIds?: Set<string>
+  today?: string
 }>()
 
 const emit = defineEmits<{
   edit: [keyboardActivated: boolean]
   close: []
+  'toggle-task': [task: DiaryTaskListItem]
 }>()
 
 const reader = ref<HTMLElement | null>(null)
@@ -117,6 +123,17 @@ const accessibleName = computed(() => title.value)
       </p>
       <p v-if="event.description.trim()" class="diary-event-reader-description">{{ event.description }}</p>
     </div>
+    <section v-if="relatedTasks?.length" class="diary-event-reader-tasks" aria-label="相关待办">
+      <h2>相关待办</h2>
+      <DiaryTaskRows
+        :items="relatedTasks"
+        :today="today ?? occurrenceDate"
+        :busy-ids="busyTaskIds"
+        :show-due-date="false"
+        :editable="false"
+        @toggle="emit('toggle-task', $event)"
+      />
+    </section>
   </article>
 </template>
 
@@ -132,6 +149,8 @@ const accessibleName = computed(() => title.value)
 .diary-event-reader-content { display: flex; min-width: 0; flex-direction: column; gap: 14px; }
 .diary-event-reader-date { margin: 0; color: var(--text-muted, #6b7280); font-size: 14px; line-height: 1.5; }
 .diary-event-reader-description { margin: 0; color: var(--text); font-size: 15px; line-height: 1.7; white-space: pre-wrap; overflow-wrap: anywhere; }
+.diary-event-reader-tasks { display: flex; min-width: 0; flex-direction: column; gap: 8px; }
+.diary-event-reader-tasks h2 { margin: 0; color: var(--text-muted, #6b7280); font-size: 14px; font-weight: 600; }
 @media (hover: hover) and (pointer: fine) and (not (any-pointer: coarse)) {
   .diary-event-reader-edit { opacity: 0; transition: opacity .14s ease; }
   .diary-event-reader-header:hover .diary-event-reader-edit,

@@ -55,6 +55,7 @@ export const diaryLifeApi = {
     return items
   },
   eventListPage: (offset = 0, signal?: AbortSignal) => request<{ items: DiaryEvent[]; next: number | null }>(`/events/list?offset=${offset}`, 'GET', undefined, signal),
+  event: (id: string, signal?: AbortSignal) => request<{ event: DiaryEvent }>(`/events/${encodeURIComponent(id)}`, 'GET', undefined, signal),
   saveEvent: (id: string, fields: EventFields, expectedVersion: number) => request<{ event: DiaryEvent }>(`/events/${id}`, 'PUT', { ...fields, expectedVersion }),
   deleteEvent: (id: string, expectedVersion: number) => request(`/events/${id}`, 'DELETE', { expectedVersion }),
 }

@@ -2,14 +2,14 @@
 import { computed, ref } from 'vue'
 import { NButton, NEmpty, NSpin } from 'naive-ui'
 import { dayDistance, displayEventTitle, nextOccurrence, type DiaryEvent } from '../../../shared/diaryLife'
-import type { DiaryTask, DiaryTaskListStatus } from '../../../shared/diaryTasks'
+import type { DiaryTaskListItem, DiaryTaskListStatus } from '../../../shared/diaryTasks'
 import { formatLunarRule } from '../../../shared/lunarCalendar'
 import { eventEmojiSource } from '../../features/diary/eventEmoji'
 import DiaryTaskRows from './DiaryTaskRows.vue'
 
 const props = withDefaults(defineProps<{
   items: DiaryEvent[]
-  tasks?: DiaryTask[]
+  tasks?: DiaryTaskListItem[]
   taskStatus?: DiaryTaskListStatus
   busyTaskIds?: Set<string>
   today: string
@@ -39,8 +39,8 @@ const emit = defineEmits<{
   retry: []
   'load-more': []
   select: [event: DiaryEvent, scrollTop: number, keyboardActivated: boolean]
-  'toggle-task': [task: DiaryTask]
-  'edit-task': [task: DiaryTask, scrollTop: number, keyboardActivated: boolean]
+  'toggle-task': [task: DiaryTaskListItem]
+  'edit-task': [task: DiaryTaskListItem, scrollTop: number, keyboardActivated: boolean]
   'load-more-tasks': []
   'retry-tasks': []
   'toggle-task-status': []
@@ -107,7 +107,7 @@ const countdowns = computed(() => new Map(props.items.map(event => {
   return [event.id, date ? dayDistance(props.today, date) : null]
 })))
 
-function editTask(task: DiaryTask, keyboardActivated: boolean) {
+function editTask(task: DiaryTaskListItem, keyboardActivated: boolean) {
   emit('edit-task', task, scroller.value?.scrollTop ?? 0, keyboardActivated)
 }
 </script>

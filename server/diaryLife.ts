@@ -143,13 +143,14 @@ export function diaryLifeStore(db: Database, owner: number, operation: DiaryBody
         .all(owner, offset) as Row[]
       return { items: rows.slice(0, 200).map(event), next: rows.length > 200 ? offset + 200 : null }
     },
-    putEvent(id: string, fields: EventFields, expected: number) {
+    putEvent(id: string, fields: EventFields, expected: number, onInvalidateTaskLinks?: () => void) {
       operation.assertCurrent()
       const now = Date.now()
       const payload = crypto.encrypt(fields, identity('event', id, expected + 1))
       db.transaction(() => {
         const row = db.prepare('SELECT version FROM diary_events WHERE owner_user_id = ? AND id = ?').get(owner, id) as { version: number } | undefined
         if ((row?.version ?? deletedVersion('event', id)) !== expected) throw new DiaryConflict()
+        onInvalidateTaskLinks?.()
         db.prepare(`INSERT INTO diary_events VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
           ON CONFLICT(owner_user_id, id) DO UPDATE SET start_date = excluded.start_date, end_date = excluded.end_date,
           recurrence = excluded.recurrence, encrypted_fields = excluded.encrypted_fields,
@@ -159,7 +160,7 @@ export function diaryLifeStore(db: Database, owner: number, operation: DiaryBody
       })()
       return this.getEvent(id)!
     },
-    remove(kind: 'day' | 'event', id: string, version: number) {
+    remove(kind: 'day' | 'event', id: string, version: number, beforeEventDelete?: () => void) {
       operation.assertCurrent()
       const table = kind === 'day' ? 'diary_days' : 'diary_events'
       const column = kind === 'day' ? 'date' : 'id'
@@ -168,6 +169,7 @@ export function diaryLifeStore(db: Database, owner: number, operation: DiaryBody
           db.prepare(`UPDATE diary_day_attachments SET status = 'deleting', expires_at = NULL, stage_session_id = NULL
             WHERE owner_user_id = ? AND day_date = ? AND status IN ('staged', 'attached')`).run(owner, id)
         }
+        if (kind === 'event') beforeEventDelete?.()
         const result = db.prepare(`DELETE FROM ${table} WHERE owner_user_id = ? AND ${column} = ? AND version = ?`).run(owner, id, version)
         if (!result.changes) throw new DiaryConflict()
         db.prepare('INSERT INTO diary_deleted_records VALUES (?, ?, ?, ?) ON CONFLICT(owner_user_id, kind, id) DO UPDATE SET version = excluded.version').run(owner, kind, id, version + 1)

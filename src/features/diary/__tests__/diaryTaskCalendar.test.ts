@@ -1,10 +1,11 @@
 import { describe, expect, it, vi } from 'vitest'
-import type { DiaryTask, DiaryTaskPage } from '../../../../shared/diaryTasks'
+import type { DiaryTask, DiaryTaskListItem, DiaryTaskItemPage } from '../../../../shared/diaryTasks'
 import { DiaryTaskListChangedError } from '../../../lib/diary-tasks-api'
 import { groupTasksByDueDate, listDiaryTasksInRange, taskDueDateLabel } from '../diaryTaskCalendar'
 
-function makeTask(overrides: Partial<DiaryTask> = {}): DiaryTask {
+function makeTask(overrides: Partial<DiaryTask> = {}): DiaryTaskListItem {
   return {
+    kind: 'one-off',
     id: '00000000-0000-4000-8000-000000000001',
     title: 'Task',
     description: '',
@@ -24,7 +25,7 @@ describe('Diary task calendar helpers', () => {
     const second = makeTask({ id: 'second', dueDate: '2026-11-18' })
     let changedOnce = false
     const cursors: Array<string | undefined> = []
-    const readPage = vi.fn(async (_start: string, _end: string, cursor?: string): Promise<DiaryTaskPage> => {
+    const readPage = vi.fn(async (_start: string, _end: string, cursor?: string): Promise<DiaryTaskItemPage> => {
       cursors.push(cursor)
       if (cursor === 'stale' && !changedOnce) {
         changedOnce = true
@@ -56,7 +57,7 @@ describe('Diary task calendar helpers', () => {
 
   it('stops pagination after the request is aborted', async () => {
     const controller = new AbortController()
-    const readPage = vi.fn(async (_start: string, _end: string, _cursor?: string, signal?: AbortSignal): Promise<DiaryTaskPage> => {
+    const readPage = vi.fn(async (_start: string, _end: string, _cursor?: string, signal?: AbortSignal): Promise<DiaryTaskItemPage> => {
       expect(signal).toBe(controller.signal)
       controller.abort()
       return { items: [makeTask()], nextCursor: 'next' }

@@ -1,18 +1,18 @@
 import { addDays, dayDistance } from '../../../shared/diaryLife'
-import { isTaskOverdue, type DiaryTask, type DiaryTaskPage } from '../../../shared/diaryTasks'
+import { isTaskOverdue, type DiaryTaskListItem, type DiaryTaskItemPage } from '../../../shared/diaryTasks'
 import { DiaryTaskListChangedError, diaryTasksApi } from '../../lib/diary-tasks-api'
 
-type RangePageReader = (start: string, end: string, cursor?: string, signal?: AbortSignal) => Promise<DiaryTaskPage>
+type RangePageReader = (start: string, end: string, cursor?: string, signal?: AbortSignal) => Promise<DiaryTaskItemPage>
 
 /** Reads every page in a calendar range as one revision-consistent snapshot. */
 export async function listDiaryTasksInRange(
   start: string,
   end: string,
   signal?: AbortSignal,
-  readPage: RangePageReader = diaryTasksApi.tasksInRange,
-): Promise<DiaryTask[]> {
+  readPage: RangePageReader = diaryTasksApi.taskItemsInRange,
+): Promise<DiaryTaskListItem[]> {
   for (let attempt = 0; attempt < 2; attempt += 1) {
-    const items = new Map<string, DiaryTask>()
+    const items = new Map<string, DiaryTaskListItem>()
     let cursor: string | undefined
     try {
       do {
@@ -31,8 +31,8 @@ export async function listDiaryTasksInRange(
   return []
 }
 
-export function groupTasksByDueDate(tasks: DiaryTask[]): Map<string, DiaryTask[]> {
-  const grouped = new Map<string, DiaryTask[]>()
+export function groupTasksByDueDate(tasks: DiaryTaskListItem[]): Map<string, DiaryTaskListItem[]> {
+  const grouped = new Map<string, DiaryTaskListItem[]>()
   for (const task of tasks) {
     if (!task.dueDate) continue
     const items = grouped.get(task.dueDate) ?? []
@@ -42,7 +42,7 @@ export function groupTasksByDueDate(tasks: DiaryTask[]): Map<string, DiaryTask[]
   return grouped
 }
 
-export function taskDueDateLabel(task: Pick<DiaryTask, 'dueDate' | 'dueTime' | 'completedAt'>, today: string): string {
+export function taskDueDateLabel(task: Pick<DiaryTaskListItem, 'dueDate' | 'dueTime' | 'completedAt'>, today: string): string {
   const { dueDate, dueTime } = task
   if (!dueDate) return '无日期'
   const nextDay = addDays(today, 1)

@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest'
 import { mount } from '@vue/test-utils'
 import { lunarToSolar, type ChineseEventDateRule } from '../../../../shared/lunarCalendar'
 import type { DiaryEvent } from '../../../../shared/diaryLife'
+import type { DiaryTaskListItem } from '../../../../shared/diaryTasks'
 import DiaryEventReader from '../DiaryEventReader.vue'
 
 function makeEvent(overrides: Partial<DiaryEvent> = {}): DiaryEvent {
@@ -51,6 +52,35 @@ describe('DiaryEventReader', () => {
     expect(wrapper.text()).not.toContain('重复')
     expect(wrapper.findAll('[aria-label="编辑事件"]')).toHaveLength(1)
     expect(wrapper.findAll('[aria-label="关闭事件"]')).toHaveLength(1)
+    expect(wrapper.find('.diary-event-reader-tasks').exists()).toBe(false)
+    wrapper.unmount()
+  })
+
+  it('shows related tasks only when present and emits direct completion actions', async () => {
+    const event = makeEvent({ type: 'schedule', title: '周六体检', startDate: '2026-11-21', endDate: '2026-11-21' })
+    const task: DiaryTaskListItem = {
+      kind: 'one-off',
+      id: 'task-1',
+      title: '准备身份证',
+      description: '',
+      dueDate: '2026-11-20',
+      dueTime: null,
+      completedAt: null,
+      eventId: event.id,
+      version: 1,
+      createdAt: 1,
+      updatedAt: 1,
+    }
+    const wrapper = mount(DiaryEventReader, {
+      props: { event, occurrenceDate: event.startDate, today: '2026-11-18', relatedTasks: [task] },
+      attachTo: document.body,
+      global: { stubs: naiveStubs },
+    })
+
+    expect(wrapper.get('.diary-event-reader-tasks h2').text()).toBe('相关待办')
+    expect(wrapper.get('.diary-task-title').text()).toBe('准备身份证')
+    await wrapper.get('.diary-task-toggle').trigger('click')
+    expect(wrapper.emitted('toggle-task')?.[0]?.[0]).toMatchObject({ id: task.id })
     wrapper.unmount()
   })
 

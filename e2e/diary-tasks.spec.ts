@@ -157,7 +157,7 @@ test('a failed calendar Todo request preserves birthday Events and retries only 
       await route.fulfill({ json: { items: [event], next: null } })
       return
     }
-    if (request.method() === 'GET' && url.pathname === '/api/diary/life/tasks') {
+    if (request.method() === 'GET' && url.pathname === '/api/diary/life/task-occurrences') {
       taskRequests += 1
       if (taskRequests === 1) {
         await taskFailureGate
@@ -215,7 +215,7 @@ test('a failed calendar Event request preserves interactive Todos and retries on
       else await route.fulfill({ json: { items: [], next: null } })
       return
     }
-    if (request.method() === 'GET' && url.pathname === '/api/diary/life/tasks') {
+    if (request.method() === 'GET' && url.pathname === '/api/diary/life/task-occurrences') {
       taskRequests += 1
       await route.fulfill({ json: {
         items: [{ id: taskId, title: 'Events 失败时仍可勾选', description: '', dueDate: date, dueTime: null, completedAt, version: taskVersion, createdAt: 1, updatedAt: taskVersion }],
@@ -289,7 +289,7 @@ test('a delayed Todo page from the previous month cannot replace current calenda
   await page.route('**/api/diary/life/**', async route => {
     const request = route.request()
     const url = new URL(request.url())
-    if (request.method() === 'GET' && url.pathname === '/api/diary/life/tasks') {
+    if (request.method() === 'GET' && url.pathname === '/api/diary/life/task-occurrences') {
       taskRequests += 1
       if (taskRequests === 1) {
         await previousMonthGate
@@ -353,7 +353,7 @@ test('a Todo response from a locked Diary session cannot enter the next unlocked
   await page.route('**/api/diary/life/**', async route => {
     const request = route.request()
     const url = new URL(request.url())
-    if (request.method() === 'GET' && url.pathname === '/api/diary/life/tasks') {
+    if (request.method() === 'GET' && url.pathname === '/api/diary/life/task-occurrences') {
       taskRequests += 1
       if (taskRequests === 1) {
         staleRequestStarted()
@@ -389,4 +389,165 @@ test('a Todo response from a locked Diary session cannot enter the next unlocked
   } finally {
     releaseStale()
   }
+})
+
+test('recurring Todo completion and skipping are scoped to one date', async ({ page }) => {
+  await page.goto('/diary')
+  await unlockDiary(page)
+  await page.getByTestId('diary-view-toggle').click()
+
+  const startDate = `${testYear}-11-16`
+  const skippedDate = `${testYear}-11-17`
+  const followingDate = `${testYear}-11-18`
+  const stoppedAfterDate = `${testYear}-11-19`
+  const title = `Daily task ${Math.random().toString(36).slice(2, 8)}`
+  const calendar = page.locator('.diary-life-calendar')
+  const startCell = calendar.locator(`[data-date="${startDate}"]`)
+  await startCell.click()
+  await chooseDiaryAction(page, page.getByRole('button', { name: '更多当天事件操作' }), '新增待办')
+
+  const editor = page.locator('.diary-task-edit-dialog')
+  await page.getByRole('textbox', { name: '待办名称' }).fill(title)
+  await page.getByLabel('重复规则').selectOption('daily')
+  await page.getByLabel('开始日期').fill(startDate)
+  await page.getByRole('button', { name: '保存', exact: true }).click()
+
+  await expect(page.getByRole('checkbox', { name: `完成待办：${title}` })).toBeVisible()
+  await expect(page.locator('.diary-task-title').filter({ hasText: title })).toContainText('↻')
+  await page.getByRole('checkbox', { name: `完成待办：${title}` }).click()
+  await expect(page.locator('.diary-task-row.is-completed')).toContainText(title)
+  await expect(startCell.locator('.life-task-marker')).toHaveCount(0)
+
+  await page.getByRole('button', { name: '关闭当天事件' }).click()
+  const skippedCell = calendar.locator(`[data-date="${skippedDate}"]`)
+  await skippedCell.click()
+  await expect(page.getByRole('checkbox', { name: `完成待办：${title}` })).toBeVisible()
+  await page.getByRole('button', { name: `编辑待办：${title}` }).click()
+  await expect(editor).toBeVisible()
+
+  for (const viewport of [
+    { width: 320, height: 720 },
+    { width: 390, height: 844 },
+    { width: 430, height: 900 },
+    { width: 768, height: 1024 },
+    { width: 1280, height: 900 },
+  ]) {
+    await page.setViewportSize(viewport)
+    const bounds = await editor.boundingBox()
+    expect(bounds).not.toBeNull()
+    expect(bounds!.x).toBeGreaterThanOrEqual(0)
+    expect(bounds!.x + bounds!.width).toBeLessThanOrEqual(viewport.width + 1)
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true)
+  }
+
+  await page.getByRole('button', { name: '跳过本次' }).click()
+  await expect(page.locator('.diary-task-row.is-skipped')).toContainText('本次已跳过')
+  await page.getByRole('button', { name: '关闭当天事件' }).click()
+  const followingCell = calendar.locator(`[data-date="${followingDate}"]`)
+  await followingCell.click()
+  await expect(page.getByRole('checkbox', { name: `完成待办：${title}` })).toBeVisible()
+  await page.getByRole('button', { name: `编辑待办：${title}` }).click()
+  await page.getByRole('button', { name: '结束重复' }).click()
+  const stopConfirmation = page.getByRole('dialog', { name: '结束后续重复安排？当前这次和之前的记录会保留。' })
+  await stopConfirmation.getByRole('button', { name: /^(Confirm|确认|确定)$/ }).click()
+
+  await page.getByRole('button', { name: '关闭当天事件' }).click()
+  const stoppedCell = calendar.locator(`[data-date="${stoppedAfterDate}"]`)
+  await stoppedCell.click()
+  await expect(page.getByRole('checkbox', { name: `完成待办：${title}` })).toHaveCount(0)
+
+  await page.getByRole('button', { name: '关闭当天事件' }).click()
+  await followingCell.click()
+  await page.getByRole('button', { name: `编辑待办：${title}` }).click()
+  await page.getByRole('button', { name: '删除', exact: true }).click()
+  const deleteConfirmation = page.getByRole('dialog', { name: '删除整个重复任务及已记录的完成、跳过状态？' })
+  await deleteConfirmation.getByRole('button', { name: /^(Confirm|确认|确定)$/ }).click()
+  await expect(followingCell.locator('.life-task-marker')).toHaveCount(0)
+})
+
+test('editing a recurring Todo changes future occurrences and preserves completed history', async ({ page }) => {
+  await page.goto('/diary')
+  await unlockDiary(page)
+  await page.getByTestId('diary-view-toggle').click()
+
+  const firstDate = `${testYear}-11-16`
+  const effectiveDate = `${testYear}-11-17`
+  const followingDate = `${testYear}-11-24`
+  const title = `Series split ${Math.random().toString(36).slice(2, 9)}`
+  const calendar = page.locator('.diary-life-calendar')
+  const firstCell = calendar.locator(`[data-date="${firstDate}"]`)
+  const effectiveCell = calendar.locator(`[data-date="${effectiveDate}"]`)
+  const followingCell = calendar.locator(`[data-date="${followingDate}"]`)
+
+  await firstCell.click()
+  await chooseDiaryAction(page, page.getByRole('button', { name: '更多当天事件操作' }), '新增待办')
+  await page.getByRole('textbox', { name: '待办名称' }).fill(title)
+  await page.getByLabel('重复规则').selectOption('daily')
+  await page.getByLabel('开始日期').fill(firstDate)
+  await page.getByRole('button', { name: '保存', exact: true }).click()
+  await page.getByRole('checkbox', { name: `完成待办：${title}` }).click()
+  await expect(page.locator('.diary-task-row.is-completed')).toContainText(title)
+
+  await page.getByRole('button', { name: '关闭当天事件' }).click()
+  await effectiveCell.click()
+  await page.getByRole('button', { name: `编辑待办：${title}` }).click()
+  await page.getByLabel('重复规则').selectOption('weekly')
+  await page.getByRole('button', { name: '保存', exact: true }).click()
+  await expect(page.getByRole('checkbox', { name: `完成待办：${title}` })).toBeVisible()
+
+  await page.getByRole('button', { name: '关闭当天事件' }).click()
+  await firstCell.click()
+  await expect(page.locator('.diary-task-row.is-completed')).toContainText(title)
+  await page.getByRole('button', { name: '关闭当天事件' }).click()
+  await expect(firstCell.locator('.life-task-marker')).toHaveCount(0)
+
+  await followingCell.click()
+  await expect(page.getByRole('checkbox', { name: `完成待办：${title}` })).toBeVisible()
+})
+
+test('a one-off Todo can be linked to a schedule and survives Event deletion', async ({ page }) => {
+  await page.goto('/diary')
+  await unlockDiary(page)
+  await page.getByTestId('diary-view-toggle').click()
+
+  const date = `${testYear}-11-21`
+  const eventTitle = `Checkup ${Math.random().toString(36).slice(2, 8)}`
+  const taskTitle = `Prepare ID ${Math.random().toString(36).slice(2, 8)}`
+  const cell = page.locator(`.diary-life-calendar [data-date="${date}"]`)
+  await cell.click()
+  await chooseDiaryAction(page, page.getByRole('button', { name: '更多当天事件操作' }), '新增事件')
+  await page.getByTestId('event-type-schedule').click()
+  await page.getByRole('textbox', { name: '事件名称' }).fill(eventTitle)
+  await page.getByLabel('开始日期').fill(date)
+  await page.getByLabel('结束日期').fill(date)
+  await page.getByRole('button', { name: '保存', exact: true }).click()
+
+  await expect(page.getByRole('heading', { name: eventTitle })).toBeVisible()
+  await page.getByRole('button', { name: '关闭事件' }).click()
+  await chooseDiaryAction(page, page.getByRole('button', { name: '更多当天事件操作' }), '新增待办')
+  await page.getByRole('textbox', { name: '待办名称' }).fill(taskTitle)
+  await page.getByLabel('截止日期').fill(date)
+  await page.getByRole('button', { name: '选择日程' }).click()
+  const eventOption = page.getByText(`${date} · ${eventTitle}`, { exact: true })
+  await expect(eventOption).toBeVisible()
+  await eventOption.click()
+  await page.getByRole('button', { name: '保存', exact: true }).click()
+
+  await page.getByRole('button', { name: eventTitle }).click()
+  const relatedTasks = page.locator('.diary-event-reader-tasks')
+  await expect(relatedTasks.getByRole('heading', { name: '相关待办' })).toBeVisible()
+  await expect(relatedTasks).toContainText(taskTitle)
+  await relatedTasks.getByRole('checkbox', { name: `完成待办：${taskTitle}` }).click()
+  await expect(relatedTasks.locator('.diary-task-row.is-completed')).toContainText(taskTitle)
+
+  await page.getByRole('button', { name: '编辑事件' }).click()
+  await page.getByRole('button', { name: '删除事件', exact: true }).click()
+  const eventDeleteConfirmation = page.getByRole('dialog', { name: '删除这条事件？' })
+  await eventDeleteConfirmation.getByRole('button', { name: /^(Confirm|确认|确定)$/ }).click()
+  await expect(page.getByRole('checkbox', { name: `恢复待办：${taskTitle}` })).toBeVisible()
+
+  await page.getByRole('button', { name: `编辑待办：${taskTitle}` }).click()
+  await page.getByRole('button', { name: '删除', exact: true }).click()
+  const taskDeleteConfirmation = page.getByRole('dialog', { name: '删除这条待办？' })
+  await taskDeleteConfirmation.getByRole('button', { name: /^(Confirm|确认|确定)$/ }).click()
 })

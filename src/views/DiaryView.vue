@@ -16,7 +16,7 @@ import { createDiaryEntryId, createDiaryEventId, diaryLifeApi } from '../lib/dia
 import { createDiaryAttachmentClientId, diaryAttachmentsApi } from '../lib/diary-attachments-api'
 import { DiaryAttachmentPreviewUrls } from '../lib/diaryAttachmentPreviewUrls'
 import { addDays, compareEvents, displayEventTitle, localToday, MAX_DIARY_IMAGE_GROUP_SIZE, nextOccurrence, occursOn, parseDay, parseEvent, type DiaryDay, type DiaryDaySummary, type DiaryEvent, type DayFields, type DiaryImageGroup, type EventFields } from '../../shared/diaryLife'
-import { parseTaskFields, type DiaryTask, type DiaryTaskListStatus, type TaskFields } from '../../shared/diaryTasks'
+import { parseTaskFields, parseTaskSeriesFields, type DiaryRecurringTaskOccurrence, type DiaryTaskListItem, type DiaryTaskListStatus, type TaskEditorFields } from '../../shared/diaryTasks'
 import { DIARY_ATTACHMENT_STAGE_HEARTBEAT_INTERVAL_MS, MAX_DIARY_ATTACHMENT_BYTES, MAX_DIARY_DAY_ATTACHMENTS, type DiaryAttachment } from '../../shared/diaryAttachments'
 import { NUVYN_BROWSER_STORAGE_KEYS, ownerScopedStorageKey, readStorageKey, writeStorageKey } from '../technicalNamespace'
 import DiaryLifeCalendar from '../components/diary/DiaryLifeCalendar.vue'
@@ -73,7 +73,7 @@ type EventSurface =
   | { kind: 'recent-list' }
   | { kind: 'read'; event: DiaryEvent; occurrenceDate: string; returnTo: EventReturnContext; focusTarget: EventFocusTarget }
   | { kind: 'edit'; event: DiaryEvent | null; eventId: string; draft: EventFields; initial: string; occurrenceDate: string; returnTo: EventReturnContext; focusReturnToReader: boolean }
-  | { kind: 'task-edit'; task: DiaryTask | null; draft: TaskFields; initial: string; returnTo: TaskReturnContext }
+  | { kind: 'task-edit'; task: DiaryTaskListItem | null; draft: TaskEditorFields; initial: string; returnTo: TaskReturnContext }
 const eventSurface = ref<EventSurface | null>(null)
 const initial = ref('')
 const busy = ref(false)
@@ -105,11 +105,11 @@ const eventListLoaded = ref(false)
 const eventListLoading = ref(false)
 const eventListLoadingMore = ref(false)
 const eventListError = ref('')
-const calendarTasks = ref<DiaryTask[]>([])
+const calendarTasks = ref<DiaryTaskListItem[]>([])
 const calendarTasksLoading = ref(false)
 const calendarTasksByDate = computed(() => groupTasksByDueDate(calendarTasks.value))
 const calendarError = computed(() => mode.value === 'diary' ? diaryCalendarError.value : eventCalendarError.value)
-const recentTaskItems = ref<DiaryTask[]>([])
+const recentTaskItems = ref<DiaryTaskListItem[]>([])
 const recentTaskStatus = ref<DiaryTaskListStatus>('open')
 const recentTaskNext = ref<string | null>(null)
 const recentTaskLoaded = ref(false)
@@ -117,6 +117,10 @@ const recentTaskLoading = ref(false)
 const recentTaskLoadingMore = ref(false)
 const recentTaskError = ref('')
 const busyTaskIds = ref(new Set<string>())
+const eventReaderTasks = ref<DiaryTaskListItem[]>([])
+const taskEventOptions = ref<Array<{ label: string; value: string }>>([])
+const taskEventOptionsLoading = ref(false)
+const taskEventOptionsLoaded = ref(false)
 const taskFormError = ref('')
 const taskConflictNeedsReload = ref(false)
 const eventDayActions = [
@@ -215,6 +219,9 @@ const attachmentPreviewUrls = new DiaryAttachmentPreviewUrls()
 let eventListRequest: AbortController | null = null
 let recentTaskRequest: AbortController | null = null
 let taskDetailRequest: AbortController | null = null
+let eventReaderTaskRequest: AbortController | null = null
+let taskEventOptionsRequest: AbortController | null = null
+let taskEventOptionsSequence = 0
 let taskContextSequence = 0
 let timer: ReturnType<typeof setInterval> | undefined
 let disposed = false
@@ -252,7 +259,8 @@ const markers = computed(() => {
   } else {
     for (let date = range.value.start; date <= range.value.end; date = addDays(date, 1)) {
       const matches = events.value.filter(e => occursOn(e, date)).sort(compareEvents)
-      const hasTasks = (calendarTasksByDate.value.get(date) ?? []).some(task => task.completedAt === null)
+      const hasTasks = (calendarTasksByDate.value.get(date) ?? []).some(task => task.completedAt === null
+        && !(task.kind === 'recurring' && task.skipped))
       if (matches[0]) result[date] = { source: eventEmojiSource(matches[0].emoji), emoji: matches[0].emoji, count: matches.length, hasTasks }
       else if (hasTasks) result[date] = { hasTasks: true }
     }
@@ -420,6 +428,9 @@ function resetForm() {
   selected.value = null
   serverToday.value = null
   eventSurface.value = null
+  eventReaderTaskRequest?.abort()
+  eventReaderTaskRequest = null
+  eventReaderTasks.value = []
   day.value = null
   dayAttachments.value = []
   draftAttachments.value = []
@@ -454,6 +465,10 @@ function clearPrivateData() {
   recentTaskRequest = null
   taskDetailRequest?.abort()
   taskDetailRequest = null
+  eventReaderTaskRequest?.abort()
+  eventReaderTaskRequest = null
+  taskEventOptionsRequest?.abort()
+  taskEventOptionsRequest = null
   busy.value = false
   clearShellCommands()
   cancelConfirmation?.()
@@ -480,6 +495,10 @@ function clearPrivateData() {
   recentTaskLoadingMore.value = false
   recentTaskError.value = ''
   busyTaskIds.value = new Set()
+  eventReaderTasks.value = []
+  taskEventOptions.value = []
+  taskEventOptionsLoading.value = false
+  taskEventOptionsLoaded.value = false
   taskFormError.value = ''
   taskConflictNeedsReload.value = false
 }
@@ -543,7 +562,7 @@ async function loadRecentTasks(reset = false, minimumItems = 0) {
     do {
       let page
       try {
-        page = await diaryTasksApi.listTasks(cursor, scope.signal, currentStatus)
+        page = await diaryTasksApi.listTaskItems(addDays(today.value, -30), addDays(today.value, 90), cursor, scope.signal, currentStatus)
       } catch (cause) {
         if (scope.signal.aborted || recentTaskRequest !== scope || !isCurrent() || currentStatus !== recentTaskStatus.value) return
         if (cause instanceof DiaryTaskListChangedError && cursor !== undefined && listChangeRetries < 2) {
@@ -750,23 +769,99 @@ function restoreTaskContext(context: TaskReturnContext) {
   })
 }
 
-function taskFields(task: DiaryTask | null, dueDate: string | null): TaskFields {
+function taskFields(task: DiaryTaskListItem | null, dueDate: string | null): TaskEditorFields {
+  if (task?.kind === 'recurring') return {
+    title: task.title,
+    description: task.description,
+    dueDate: task.occurrenceDate,
+    dueTime: task.dueTime,
+    recurrence: { ...task.recurrence, startDate: task.occurrenceDate },
+    eventId: null,
+  }
   return task
-    ? { title: task.title, description: task.description, dueDate: task.dueDate, dueTime: task.dueTime }
-    : { title: '', description: '', dueDate, dueTime: null }
+    ? { title: task.title, description: task.description, dueDate: task.dueDate, dueTime: task.dueTime, recurrence: null, eventId: task.eventId ?? null }
+    : { title: '', description: '', dueDate, dueTime: null, recurrence: null, eventId: null }
 }
 
-function startTaskEdit(task: DiaryTask | null, returnTo: TaskReturnContext) {
+function startTaskEdit(task: DiaryTaskListItem | null, returnTo: TaskReturnContext) {
   if (busy.value || attachmentBusy.value || !access.isUnlocked.value) return
+  taskEventOptionsRequest?.abort()
+  taskEventOptionsRequest = null
+  taskEventOptionsSequence += 1
+  taskEventOptions.value = []
+  taskEventOptionsLoading.value = false
+  taskEventOptionsLoaded.value = false
   const draft = taskFields(task, returnTo.kind === 'day-list' ? returnTo.date : null)
   eventSurface.value = { kind: 'task-edit', task, draft, initial: JSON.stringify(draft), returnTo }
   taskFormError.value = ''
   taskConflictNeedsReload.value = false
+  if (task?.kind === 'one-off' && task.eventId) void loadCurrentTaskEventOption(task.eventId, returnTo)
   if (!task) {
     const isCurrent = capturePrivateOperation()
     void nextTick(() => {
       if (isCurrent() && eventSurface.value?.kind === 'task-edit') taskForm.value?.focusTitle()
     })
+  }
+}
+
+function taskEventOption(event: DiaryEvent): { label: string; value: string } {
+  return { label: `${event.startDate} · ${displayEventTitle(event, event.startDate)}`, value: event.id }
+}
+
+function isLinkableTaskEvent(event: DiaryEvent): boolean {
+  return event.type === 'schedule' && event.recurrence === 'none'
+}
+
+async function loadCurrentTaskEventOption(eventId: string, returnTo: TaskReturnContext) {
+  const editor = eventSurface.value
+  if (editor?.kind !== 'task-edit' || editor.returnTo !== returnTo) return
+  const controller = new AbortController()
+  taskEventOptionsRequest = controller
+  const sequence = ++taskEventOptionsSequence
+  const isCurrent = capturePrivateOperation()
+  try {
+    const result = await diaryLifeApi.event(eventId, controller.signal)
+    if (controller.signal.aborted || sequence !== taskEventOptionsSequence || !isCurrent()
+      || eventSurface.value?.kind !== 'task-edit' || eventSurface.value.returnTo !== returnTo) return
+    if (isLinkableTaskEvent(result.event)) taskEventOptions.value = [taskEventOption(result.event)]
+  } catch {
+    // A deleted or no-longer-linkable Event is safely cleared by the server.
+  } finally {
+    if (taskEventOptionsRequest === controller) taskEventOptionsRequest = null
+  }
+}
+
+async function loadTaskEventOptions() {
+  const editor = eventSurface.value
+  if (editor?.kind !== 'task-edit' || editor.draft.recurrence || !access.isUnlocked.value
+    || taskEventOptionsLoaded.value || taskEventOptionsLoading.value) return
+  taskEventOptionsRequest?.abort()
+  const controller = new AbortController()
+  taskEventOptionsRequest = controller
+  const sequence = ++taskEventOptionsSequence
+  const isCurrent = capturePrivateOperation()
+  const isEditorCurrent = () => eventSurface.value?.kind === 'task-edit'
+    && eventSurface.value.returnTo === editor.returnTo
+    && eventSurface.value.task?.id === editor.task?.id
+  taskEventOptionsLoading.value = true
+  try {
+    const options = new Map(taskEventOptions.value.map(option => [option.value, option]))
+    let offset: number | null = 0
+    while (offset !== null) {
+      const page = await diaryLifeApi.eventListPage(offset, controller.signal)
+      if (controller.signal.aborted || sequence !== taskEventOptionsSequence || !isCurrent() || !isEditorCurrent()) return
+      for (const event of page.items) if (isLinkableTaskEvent(event)) options.set(event.id, taskEventOption(event))
+      offset = page.next
+    }
+    taskEventOptions.value = [...options.values()].sort((left, right) => left.label.localeCompare(right.label))
+    taskEventOptionsLoaded.value = true
+  } catch {
+    if (!controller.signal.aborted && sequence === taskEventOptionsSequence && isCurrent() && isEditorCurrent()) {
+      taskFormError.value = '日程加载失败，请重试。'
+    }
+  } finally {
+    if (taskEventOptionsRequest === controller) taskEventOptionsRequest = null
+    if (sequence === taskEventOptionsSequence) taskEventOptionsLoading.value = false
   }
 }
 
@@ -781,17 +876,17 @@ function createTaskFromRecent() {
   startTaskEdit(null, { kind: 'recent-list', scrollTop: eventListDialog.value?.getScrollTop() ?? 0, taskId: '', restoreFocus: false })
 }
 
-function editTaskFromDay(task: DiaryTask, keyboardActivated: boolean) {
+function editTaskFromDay(task: DiaryTaskListItem, keyboardActivated: boolean) {
   if (selected.value === null || eventSurface.value?.kind !== 'day-list') return
   startTaskEdit(task, { kind: 'day-list', date: selected.value, taskId: task.id, restoreFocus: keyboardActivated })
 }
 
-function editTaskFromRecent(task: DiaryTask, scrollTop: number, keyboardActivated: boolean) {
+function editTaskFromRecent(task: DiaryTaskListItem, scrollTop: number, keyboardActivated: boolean) {
   if (eventSurface.value?.kind !== 'recent-list') return
   startTaskEdit(task, { kind: 'recent-list', scrollTop, taskId: task.id, restoreFocus: keyboardActivated })
 }
 
-function updateTaskDraft(next: TaskFields) {
+function updateTaskDraft(next: TaskEditorFields) {
   const surface = eventSurface.value
   if (surface?.kind === 'task-edit' && access.isUnlocked.value && !busy.value) {
     eventSurface.value = { ...surface, draft: next }
@@ -806,7 +901,7 @@ async function cancelTaskEdit(interaction?: MouseEvent) {
   restoreTaskContext({ ...surface.returnTo, restoreFocus: interaction?.detail === 0 || surface.returnTo.restoreFocus })
 }
 
-function updateCalendarTask(task: DiaryTask | null, previousId?: string) {
+function updateCalendarTask(task: DiaryTaskListItem | null, previousId?: string) {
   const removedId = previousId ?? task?.id
   const existing = calendarTasks.value.find(item => item.id === removedId || item.id === task?.id)
   if (task && existing && existing.version > task.version) return
@@ -840,7 +935,7 @@ async function refreshTaskContext(context: TaskReturnContext) {
   focusTaskContext(context)
 }
 
-async function toggleTask(task: DiaryTask, context: TaskReturnContext) {
+async function toggleTask(task: DiaryTaskListItem, context: TaskReturnContext) {
   if (busyTaskIds.value.has(task.id) || !access.isUnlocked.value) return
   if (!isTaskContextActive(context)) return
   const isCurrentSession = capturePrivateOperation()
@@ -850,11 +945,16 @@ async function toggleTask(task: DiaryTask, context: TaskReturnContext) {
     && isTaskContextActive(context)
   busyTaskIds.value = new Set(busyTaskIds.value).add(task.id)
   try {
-    const result = task.completedAt === null
-      ? await diaryTasksApi.completeTask(task.id, task.version)
-      : await diaryTasksApi.reopenTask(task.id, task.version)
+    const result = task.kind === 'recurring'
+      ? task.completedAt === null
+        ? await diaryTasksApi.completeOccurrence(task.seriesId, task.occurrenceDate, task.occurrenceVersion)
+        : await diaryTasksApi.reopenOccurrence(task.seriesId, task.occurrenceDate, task.occurrenceVersion)
+      : task.completedAt === null
+        ? await diaryTasksApi.completeTask(task.id, task.version)
+        : await diaryTasksApi.reopenTask(task.id, task.version)
     if (!isCurrentSession()) return
-    updateCalendarTask(result.task)
+    if ('task' in result) updateCalendarTask({ ...result.task, kind: 'one-off' })
+    else updateCalendarTask(result.occurrence as DiaryRecurringTaskOccurrence)
     if (!isCurrentContext()) return
     if (context.kind === 'recent-list' && task.completedAt !== null) recentTaskStatus.value = 'open'
     await refreshTaskContext(context)
@@ -873,6 +973,57 @@ async function toggleTask(task: DiaryTask, context: TaskReturnContext) {
   }
 }
 
+async function changeEditedOccurrenceState() {
+  const editor = eventSurface.value?.kind === 'task-edit' ? eventSurface.value : null
+  const task = editor?.task
+  if (!editor || task?.kind !== 'recurring' || busy.value || dirty.value || !access.isUnlocked.value) return
+  const action = task.skipped ? 'reopen' : 'skip'
+  if (action === 'skip' && task.completedAt !== null) return
+  const isCurrent = capturePrivateOperation()
+  busy.value = true
+  taskFormError.value = ''
+  try {
+    const result = action === 'reopen'
+      ? await diaryTasksApi.reopenOccurrence(task.seriesId, task.occurrenceDate, task.occurrenceVersion)
+      : await diaryTasksApi.skipOccurrence(task.seriesId, task.occurrenceDate, task.occurrenceVersion)
+    if (!isCurrent() || eventSurface.value !== editor) return
+    updateCalendarTask(result.occurrence)
+    await refreshTaskContext({ ...editor.returnTo, taskId: result.occurrence.id, restoreFocus: true })
+  } catch (cause) {
+    if (!isCurrent() || eventSurface.value !== editor) return
+    taskFormError.value = cause instanceof DiaryTaskConflictError
+      ? '这次待办已在其他设备更新，请重新加载后再试。'
+      : '更新失败，请重试。'
+    taskConflictNeedsReload.value = cause instanceof DiaryTaskConflictError
+  } finally {
+    if (isCurrent()) busy.value = false
+  }
+}
+
+async function stopEditedSeries() {
+  const editor = eventSurface.value?.kind === 'task-edit' ? eventSurface.value : null
+  const task = editor?.task
+  if (!editor || task?.kind !== 'recurring' || busy.value || dirty.value || !access.isUnlocked.value
+    || task.recurrence.untilDate === task.occurrenceDate) return
+  const isCurrent = capturePrivateOperation()
+  busy.value = true
+  taskFormError.value = ''
+  try {
+    if (!await confirm('结束后续重复安排？当前这次和之前的记录会保留。') || !isCurrent() || eventSurface.value !== editor) return
+    await diaryTasksApi.stopSeries(task.seriesId, task.occurrenceDate, task.seriesVersion)
+    if (!isCurrent() || eventSurface.value !== editor) return
+    await refreshTaskContext({ ...editor.returnTo, taskId: task.id, restoreFocus: true })
+  } catch (cause) {
+    if (!isCurrent() || eventSurface.value !== editor) return
+    taskFormError.value = cause instanceof DiaryTaskConflictError
+      ? '重复任务已在其他设备更新，请重新加载后再试。'
+      : '结束重复失败，请重试。'
+    taskConflictNeedsReload.value = cause instanceof DiaryTaskConflictError
+  } finally {
+    if (isCurrent()) busy.value = false
+  }
+}
+
 function isTaskContextActive(context: TaskReturnContext): boolean {
   if (context.kind === 'recent-list') return eventSurface.value?.kind === 'recent-list'
   return eventSurface.value?.kind === 'day-list' && eventSurface.value.date === context.date
@@ -880,7 +1031,66 @@ function isTaskContextActive(context: TaskReturnContext): boolean {
 
 function startEventRead(event: DiaryEvent, occurrenceDate: string, returnTo: EventReturnContext, focusTarget: EventFocusTarget = null) {
   if (busy.value || eventSurface.value?.kind === 'edit' || !access.isUnlocked.value) return
+  eventReaderTaskRequest?.abort()
+  eventReaderTaskRequest = null
+  eventReaderTasks.value = []
   eventSurface.value = { kind: 'read', event, occurrenceDate, returnTo, focusTarget }
+  if (isLinkableTaskEvent(event)) void loadEventReaderTasks(event.id)
+}
+
+async function loadEventReaderTasks(eventId: string) {
+  const surface = eventSurface.value
+  if (surface?.kind !== 'read' || surface.event.id !== eventId || !isLinkableTaskEvent(surface.event)) return
+  eventReaderTaskRequest?.abort()
+  const controller = new AbortController()
+  eventReaderTaskRequest = controller
+  const isCurrent = capturePrivateOperation()
+  try {
+    const result = await diaryTasksApi.eventTasks(eventId, controller.signal)
+    if (controller.signal.aborted || !isCurrent() || eventSurface.value?.kind !== 'read' || eventSurface.value.event.id !== eventId) return
+    eventReaderTasks.value = result.tasks.map(task => ({ ...task, kind: 'one-off' as const }))
+  } catch {
+    if (!controller.signal.aborted && isCurrent() && eventSurface.value?.kind === 'read' && eventSurface.value.event.id === eventId) {
+      toast.error('相关待办加载失败。')
+    }
+  } finally {
+    if (eventReaderTaskRequest === controller) eventReaderTaskRequest = null
+  }
+}
+
+async function toggleEventReaderTask(task: DiaryTaskListItem) {
+  const surface = eventSurface.value
+  if (surface?.kind !== 'read' || task.kind === 'recurring' || busyTaskIds.value.has(task.id) || !access.isUnlocked.value) return
+  const eventId = surface.event.id
+  const isCurrent = capturePrivateOperation()
+  busyTaskIds.value = new Set(busyTaskIds.value).add(task.id)
+  try {
+    const result = task.completedAt === null
+      ? await diaryTasksApi.completeTask(task.id, task.version)
+      : await diaryTasksApi.reopenTask(task.id, task.version)
+    if (!isCurrent() || eventSurface.value?.kind !== 'read' || eventSurface.value.event.id !== eventId) return
+    const updated: DiaryTaskListItem = { ...result.task, kind: 'one-off' }
+    eventReaderTasks.value = eventReaderTasks.value.map(item => item.id === updated.id ? updated : item)
+    updateCalendarTask(updated)
+    await Promise.all([
+      reloadCalendarTasks(),
+      recentTaskLoaded.value ? loadRecentTasks(true, recentTaskItems.value.length) : Promise.resolve(),
+    ])
+  } catch (cause) {
+    if (!isCurrent()) return
+    toast.error(cause instanceof DiaryTaskConflictError ? '待办已在其他设备更新，列表已刷新。' : '待办更新失败，请重试。')
+    await loadEventReaderTasks(eventId)
+    await Promise.all([
+      reloadCalendarTasks(),
+      recentTaskLoaded.value ? loadRecentTasks(true, recentTaskItems.value.length) : Promise.resolve(),
+    ])
+  } finally {
+    if (isCurrent()) {
+      const next = new Set(busyTaskIds.value)
+      next.delete(task.id)
+      busyTaskIds.value = next
+    }
+  }
 }
 
 function startEventEditFromReader(keyboardActivated = false) {
@@ -948,6 +1158,20 @@ async function closeEventSurface(interaction?: MouseEvent) {
 }
 
 const stopTeardown = subscribeDiaryTeardown(clearPrivateData)
+watch(() => eventSurface.value?.kind, kind => {
+  if (kind !== 'read') {
+    eventReaderTaskRequest?.abort()
+    eventReaderTaskRequest = null
+    eventReaderTasks.value = []
+  }
+  if (kind !== 'task-edit') {
+    taskEventOptionsRequest?.abort()
+    taskEventOptionsRequest = null
+    taskEventOptionsLoading.value = false
+    taskEventOptionsLoaded.value = false
+    taskEventOptions.value = []
+  }
+}, { flush: 'sync' })
 watch([month, mode, access.isUnlocked, access.epoch, storageKey], () => {
   if (access.isUnlocked.value && storageKey.value) void load()
   else clearPrivateData()
@@ -1236,9 +1460,33 @@ function updateEventDraft(next: EventFields) {
 async function saveTask() {
   const editor = eventSurface.value?.kind === 'task-edit' ? eventSurface.value : null
   if (!editor || busy.value || !access.isUnlocked.value) return
-  const fields = parseTaskFields(editor.draft)
-  if (!fields) {
+  const oneOffFields = parseTaskFields(editor.draft)
+  let seriesFields = parseTaskSeriesFields({
+    title: editor.draft.title,
+    description: editor.draft.description,
+    dueTime: editor.draft.dueTime,
+    recurrence: editor.draft.recurrence,
+  })
+  if (seriesFields && editor.task?.kind === 'recurring') {
+    const frequencyChanged = editor.draft.recurrence?.frequency !== editor.task.recurrence.frequency
+    seriesFields = {
+      ...seriesFields,
+      recurrence: {
+        ...seriesFields.recurrence,
+        startDate: frequencyChanged ? editor.task.occurrenceDate : editor.task.recurrence.startDate,
+      },
+    }
+  }
+  if (!oneOffFields || (editor.draft.recurrence && !seriesFields)) {
     taskFormError.value = editor.draft.title.trim() ? '请检查待办名称、截止日期和时间。' : '请输入待办名称。'
+    return
+  }
+  if (editor.task?.kind === 'one-off' && editor.draft.recurrence) {
+    taskFormError.value = '已有待办暂不支持转换为重复任务。'
+    return
+  }
+  if (editor.draft.recurrence && editor.draft.eventId) {
+    taskFormError.value = '重复待办暂不支持关联日程。'
     return
   }
   const isCurrent = capturePrivateOperation()
@@ -1246,13 +1494,22 @@ async function saveTask() {
   taskFormError.value = ''
   taskConflictNeedsReload.value = false
   try {
-    const result = editor.task
-      ? await diaryTasksApi.updateTask(editor.task.id, fields, editor.task.version)
-      : await diaryTasksApi.createTask(fields)
+    let focusTaskId = editor.task?.id ?? ''
+    if (editor.task?.kind === 'recurring') {
+      const result = await diaryTasksApi.updateSeries(editor.task.seriesId, editor.task.occurrenceDate, seriesFields!, editor.task.seriesVersion)
+      focusTaskId = `${result.series.id}:${editor.task.occurrenceDate}`
+    } else if (editor.draft.recurrence) {
+      const result = await diaryTasksApi.createSeries(seriesFields!)
+      focusTaskId = `${result.series.id}:${result.series.effectiveFrom}`
+    } else {
+      const result = editor.task
+        ? await diaryTasksApi.updateTask(editor.task.id, oneOffFields!, editor.task.version, editor.draft.eventId)
+        : await diaryTasksApi.createTask(oneOffFields!, editor.draft.eventId)
+      focusTaskId = result.task.id
+    }
     if (!isCurrent() || eventSurface.value !== editor) return
-    updateCalendarTask(result.task, editor.task?.id)
     if (!editor.task && editor.returnTo.kind === 'recent-list') recentTaskStatus.value = 'open'
-    await refreshTaskContext({ ...editor.returnTo, taskId: result.task.id, restoreFocus: true })
+    await refreshTaskContext({ ...editor.returnTo, taskId: focusTaskId, restoreFocus: true })
   } catch (cause) {
     if (!isCurrent() || eventSurface.value !== editor) return
     if (cause instanceof DiaryTaskConflictError) {
@@ -1274,8 +1531,10 @@ async function deleteTask() {
   taskFormError.value = ''
   taskConflictNeedsReload.value = false
   try {
-    if (!await confirm('删除这条待办？') || !isCurrent() || eventSurface.value !== editor) return
-    await diaryTasksApi.deleteTask(editor.task.id, editor.task.version)
+    const prompt = editor.task.kind === 'recurring' ? '删除整个重复任务及已记录的完成、跳过状态？' : '删除这条待办？'
+    if (!await confirm(prompt) || !isCurrent() || eventSurface.value !== editor) return
+    if (editor.task.kind === 'recurring') await diaryTasksApi.deleteSeries(editor.task.seriesId, editor.task.seriesVersion)
+    else await diaryTasksApi.deleteTask(editor.task.id, editor.task.version)
     if (!isCurrent() || eventSurface.value !== editor) return
     updateCalendarTask(null, editor.task.id)
     await refreshTaskContext(editor.returnTo)
@@ -1301,7 +1560,9 @@ async function reloadTaskEditor() {
   const isCurrent = capturePrivateOperation()
   busy.value = true
   try {
-    const { task } = await diaryTasksApi.getTask(editor.task.id, controller.signal)
+    const task = editor.task.kind === 'recurring'
+      ? (await diaryTasksApi.getOccurrence(editor.task.seriesId, editor.task.occurrenceDate, controller.signal)).occurrence
+      : { ...(await diaryTasksApi.getTask(editor.task.id, controller.signal)).task, kind: 'one-off' as const }
     if (controller.signal.aborted || !isCurrent() || eventSurface.value !== editor) return
     const draft = taskFields(task, null)
     eventSurface.value = { ...editor, task, draft, initial: JSON.stringify(draft) }
@@ -1330,6 +1591,7 @@ async function cancelEventEdit(interaction?: MouseEvent) {
       returnTo: surface.returnTo,
       focusTarget: interaction?.detail === 0 || surface.focusReturnToReader ? 'edit' : null,
     }
+    if (isLinkableTaskEvent(surface.event)) void loadEventReaderTasks(surface.event.id)
     formError.value = ''
   } else {
     restoreEventContext(surface.returnTo)
@@ -1405,6 +1667,7 @@ async function save(keyboardActivated = false) {
         returnTo,
         focusTarget: keyboardActivated || editor.focusReturnToReader ? 'container' : null,
       }
+      if (isLinkableTaskEvent(result.event)) void loadEventReaderTasks(result.event.id)
       return
     }
   } catch (e) { if (isCurrent()) formError.value = (e as Error).message }
@@ -1580,10 +1843,14 @@ onBeforeUnmount(() => {
           v-else-if="eventSurface?.kind === 'read'"
           :event="eventSurface.event"
           :occurrence-date="eventSurface.occurrenceDate"
+          :today="today"
+          :related-tasks="eventReaderTasks"
+          :busy-task-ids="busyTaskIds"
           :busy="busy"
           :focus-target="eventSurface.focusTarget"
           @edit="startEventEditFromReader"
           @close="closeEventSurface"
+          @toggle-task="toggleEventReaderTask"
         />
         <div v-else-if="eventDraft" class="diary-event-form-content">
           <p v-if="formError" class="diary-event-form-error" role="alert">{{ formError }}</p>
@@ -1604,6 +1871,13 @@ onBeforeUnmount(() => {
             :key="editingTask?.id ?? 'new-task'"
             :model-value="taskDraft"
             :inert="busy"
+            :today="today"
+            :allow-recurrence="!editingTask || editingTask.kind === 'recurring'"
+            :allow-event-link="!editingTask || editingTask.kind === 'one-off'"
+            :lock-recurrence-start="editingTask?.kind === 'recurring'"
+            :event-options="taskEventOptions"
+            :event-options-loading="taskEventOptionsLoading"
+            @event-picker-open="loadTaskEventOptions"
             @update:model-value="updateTaskDraft"
           />
         </div>
@@ -1643,11 +1917,18 @@ onBeforeUnmount(() => {
         </div>
 
         <template v-if="eventSurface?.kind === 'task-edit'" #footer>
-          <div class="life-actions">
-            <NButton v-if="editingTask" quaternary type="error" :disabled="busy" @click="deleteTask">删除</NButton>
-            <span />
-            <NButton :disabled="busy" @click="cancelTaskEdit($event)">取消</NButton>
-            <NButton type="primary" :loading="busy" @click="saveTask">保存</NButton>
+          <div class="diary-task-footer">
+            <div v-if="editingTask?.kind === 'recurring'" class="diary-task-series-actions">
+              <NButton v-if="editingTask.skipped" quaternary :disabled="busy || dirty" @click="changeEditedOccurrenceState">恢复本次</NButton>
+              <NButton v-else-if="editingTask.completedAt === null" quaternary :disabled="busy || dirty" @click="changeEditedOccurrenceState">跳过本次</NButton>
+              <NButton v-if="editingTask.recurrence.untilDate !== editingTask.occurrenceDate" quaternary :disabled="busy || dirty" @click="stopEditedSeries">结束重复</NButton>
+            </div>
+            <div class="life-actions">
+              <NButton v-if="editingTask" quaternary type="error" :disabled="busy" @click="deleteTask">删除</NButton>
+              <span />
+              <NButton :disabled="busy" @click="cancelTaskEdit($event)">取消</NButton>
+              <NButton type="primary" :loading="busy" @click="saveTask">保存</NButton>
+            </div>
           </div>
         </template>
         <template v-if="eventSurface?.kind === 'edit'" #footer>
@@ -1717,6 +1998,8 @@ onBeforeUnmount(() => {
 .diary-task-reload { margin: -4px 0 12px; }
 .day-list-empty { margin: 0; padding: 12px 0; color: var(--text-muted, #6b7280); text-align: center; }
 .life-actions { display: flex; align-items: center; gap: 12px; }.life-actions > span { flex: 1; }
+.diary-task-footer { display: flex; flex-direction: column; gap: 8px; }
+.diary-task-series-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; }
 .event-emoji { width: 20px; height: 20px; flex: none; object-fit: contain; }
 .diary-event-header-actions { display: flex; align-items: center; gap: 4px; }
 .unlock-diary { display: block; margin: 20vh auto; }
