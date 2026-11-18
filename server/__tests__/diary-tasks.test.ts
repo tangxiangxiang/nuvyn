@@ -7,7 +7,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import app from '../index'
 import { createSession } from '../auth/session'
 import { closeAuthTestContext, createAuthenticatedTestContext, jsonRequest, unlockDiaryAccessForTesting, withAuthCookie, withDiaryCapability, type AuthenticatedTestContext } from './helpers/auth'
-import { DiaryTaskAssociationError, DiaryTaskCursorError, diaryTaskStore } from '../diaryTasks'
+import { DiaryTaskCursorError, diaryTaskStore } from '../diaryTasks'
 import * as database from '../db'
 import { isTaskOverdue } from '../../shared/diaryTasks'
 import { lunarToSolar } from '../../shared/lunarCalendar'
@@ -151,7 +151,7 @@ describe('Diary task API', () => {
     })
   })
 
-  it('keeps start fields encrypted and intact through completion and Event link transitions', async () => {
+  it('keeps Todo fields encrypted and intact while Events remain independent', async () => {
     const taskId = randomUUID()
     const eventId = randomUUID()
     const taskFields = fields({
@@ -161,7 +161,8 @@ describe('Diary task API', () => {
       dueDate: '2026-11-21',
       dueTime: '12:00',
     })
-    expect((await request('PUT', `/events/${eventId}`, { ...scheduleFields(), expectedVersion: 0 })).status).toBe(200)
+    const sameDateEvent = { ...scheduleFields(), startDate: '2026-11-21', endDate: '2026-11-21' }
+    expect((await request('PUT', `/events/${eventId}`, { ...sameDateEvent, expectedVersion: 0 })).status).toBe(200)
     expect((await request('PUT', `/tasks/${taskId}`, { ...taskFields, expectedVersion: 0 })).status).toBe(200)
 
     const encryptedRow = db.prepare('SELECT encrypted_fields FROM diary_tasks WHERE owner_user_id = ? AND id = ?')
@@ -172,12 +173,20 @@ describe('Diary task API', () => {
     expect(completed.status).toBe(200)
     expect((await (await request('GET', `/tasks/${taskId}`)).json()).task).toMatchObject(taskFields)
     expect((await request('POST', `/tasks/${taskId}/reopen`, { expectedVersion: 2 })).status).toBe(200)
-    const linked = await request('PUT', `/tasks/${taskId}/event-link`, { eventId, expectedVersion: 3 })
-    expect(linked.status).toBe(200)
-    expect((await linked.json()).task).toMatchObject({ ...taskFields, eventId, version: 4 })
-    const unlinked = await request('DELETE', `/tasks/${taskId}/event-link`, { expectedVersion: 4 })
-    expect(unlinked.status).toBe(200)
-    expect((await unlinked.json()).task).toMatchObject({ ...taskFields, startDate: '2026-11-19', startTime: '09:00', eventId: null, version: 5 })
+
+    const changedEvent = await request('PUT', `/events/${eventId}`, {
+      ...sameDateEvent, startDate: '2026-11-22', endDate: '2026-11-22', expectedVersion: 1,
+    })
+    expect(changedEvent.status).toBe(200)
+    expect((await (await request('GET', `/tasks/${taskId}`)).json()).task).toMatchObject({ ...taskFields, version: 3 })
+
+    expect((await request('DELETE', `/events/${eventId}`, { expectedVersion: 2 })).status).toBe(200)
+    expect((await (await request('GET', `/tasks/${taskId}`)).json()).task).toMatchObject({ ...taskFields, version: 3 })
+
+    const independentEventId = randomUUID()
+    expect((await request('PUT', `/events/${independentEventId}`, { ...sameDateEvent, expectedVersion: 0 })).status).toBe(200)
+    expect((await request('DELETE', `/tasks/${taskId}`, { expectedVersion: 3 })).status).toBe(200)
+    expect((await request('GET', `/events/${independentEventId}`)).status).toBe(200)
   })
 
   it('includes far-future and start-only open tasks in paginated recent items but not calendar ranges', async () => {
@@ -626,131 +635,51 @@ describe('Diary task API', () => {
     expect((await request('GET', `/task-items?start=${start}&end=${end}&status=open&cursor=${encodeURIComponent(first.nextCursor)}`)).status).toBe(409)
   })
 
-  it('associates one-off tasks with exact occurrences of all Event types', async () => {
-    const scheduleId = randomUUID()
-    const schedule = scheduleFields({ startDate: '2026-11-21', endDate: '2026-11-23' })
-    expect((await request('PUT', `/events/${scheduleId}`, { ...schedule, expectedVersion: 0 })).status).toBe(200)
+  it('rejects legacy Event-Todo association writes and keeps date-coincident records independent', async () => {
+    const eventId = randomUUID()
+    const taskId = randomUUID()
+    const sameDate = { ...scheduleFields(), startDate: '2026-11-21', endDate: '2026-11-21' }
+    expect((await request('PUT', `/events/${eventId}`, { ...sameDate, expectedVersion: 0 })).status).toBe(200)
 
-    const firstTaskId = randomUUID()
-    const first = await request('PUT', `/tasks/${firstTaskId}`, {
-      ...fields({ title: '买体检报告袋', dueDate: '2026-11-20' }), eventId: scheduleId, expectedVersion: 0,
-    })
-    expect(first.status).toBe(200)
-    expect((await first.json()).task).toMatchObject({
-      id: firstTaskId, eventId: scheduleId, eventOccurrenceDate: '2026-11-21', dueDate: '2026-11-20',
-    })
-
-    const secondTaskId = randomUUID()
-    expect((await request('PUT', `/tasks/${secondTaskId}`, {
-      ...fields({ title: '准备身份证', startDate: '2026-11-19', startTime: '09:00', dueDate: '2026-11-20' }),
-      eventId: scheduleId, occurrenceDate: '2026-11-21', expectedVersion: 0,
-    })).status).toBe(200)
-    expect((await request('PUT', `/tasks/${randomUUID()}`, {
-      ...fields(), eventId: scheduleId, occurrenceDate: '2026-11-22', expectedVersion: 0,
-    })).status).toBe(400)
-    const linkedTasks = (await (await request('GET', `/events/${scheduleId}/tasks?occurrenceDate=2026-11-21`)).json()).tasks
-    expect(linkedTasks.map((task: { id: string }) => task.id).sort()).toEqual([firstTaskId, secondTaskId].sort())
-    expect((await request('GET', `/events/${scheduleId}/tasks?occurrenceDate=2026-11-22`)).status).toBe(400)
-
-    const anniversaryId = randomUUID()
-    expect((await request('PUT', `/events/${anniversaryId}`, {
-      ...scheduleFields({ title: '相识纪念日', type: 'anniversary', startDate: '2020-06-19', endDate: '2020-06-19', recurrence: 'yearly' }),
-      expectedVersion: 0,
-    })).status).toBe(200)
-    const anniversaryTaskId = randomUUID()
-    expect((await request('PUT', `/tasks/${anniversaryTaskId}`, {
-      ...fields({ dueDate: '2025-06-18' }), eventId: anniversaryId, occurrenceDate: '2025-06-19', expectedVersion: 0,
-    })).status).toBe(200)
-    await expect((await request('GET', `/events/${anniversaryId}/tasks?occurrenceDate=2025-06-19`)).json()).resolves.toMatchObject({
-      tasks: [expect.objectContaining({ id: anniversaryTaskId, eventOccurrenceDate: '2025-06-19' })],
-    })
-
-    const milestoneId = randomUUID()
-    expect((await request('PUT', `/events/${milestoneId}`, {
-      ...scheduleFields({ title: '毕业纪念', type: 'milestone', startDate: '2026-07-03', endDate: '2026-07-03' }), expectedVersion: 0,
-    })).status).toBe(200)
-    const milestoneTaskId = randomUUID()
-    expect((await request('PUT', `/tasks/${milestoneTaskId}`, {
-      ...fields(), eventId: milestoneId, expectedVersion: 0,
-    })).status).toBe(200)
-    await expect((await request('GET', `/events/${milestoneId}/tasks?occurrenceDate=2026-07-03`)).json()).resolves.toMatchObject({
-      tasks: [expect.objectContaining({ id: milestoneTaskId })],
-    })
-
-    const birthLunarYear = 1951
-    const birthdayStart = lunarToSolar({ year: birthLunarYear, month: 10, day: 7, isLeapMonth: false })!
-    const birthday2026 = lunarToSolar({ year: 2026, month: 10, day: 7, isLeapMonth: false })!
-    const birthday2027 = lunarToSolar({ year: 2027, month: 10, day: 7, isLeapMonth: false })!
-    const birthdayId = randomUUID()
-    const birthdayRule = {
-      calendar: 'chinese', lunarMonth: 10, lunarDay: 7, isLeapMonth: false,
-      leapMonthPolicy: 'regular-month', shortMonthPolicy: 'last-day',
+    for (const legacyFields of [
+      { eventId, occurrenceDate: '2026-11-21' },
+      { occurrenceDate: '2026-11-21' },
+      { eventId, eventOccurrenceDate: '2026-11-21' },
+      { eventOccurrenceDate: '2026-11-21' },
+    ]) {
+      expect((await request('PUT', `/tasks/${taskId}`, {
+        ...fields({ dueDate: '2026-11-21' }), ...legacyFields, expectedVersion: 0,
+      })).status).toBe(400)
     }
-    expect((await request('PUT', `/events/${birthdayId}`, {
-      title: '爷爷', description: '', emoji: '🎂', type: 'birthday',
-      startDate: birthdayStart, endDate: birthdayStart, startTime: null, endTime: null,
-      allDay: true, dateRule: birthdayRule, birthday: { birthLunarYear }, recurrence: 'yearly',
-      showCountdown: true, isPrimary: false, expectedVersion: 0,
-    })).status).toBe(200)
-    const birthdayTask2026 = randomUUID()
-    expect((await request('PUT', `/tasks/${birthdayTask2026}`, {
-      ...fields({ title: '给爷爷打电话', dueDate: '2026-11-13' }),
-      eventId: birthdayId, occurrenceDate: birthday2026, expectedVersion: 0,
-    })).status).toBe(200)
-    await expect((await request('GET', `/events/${birthdayId}/tasks?occurrenceDate=${birthday2026}`)).json()).resolves.toMatchObject({
-      tasks: [expect.objectContaining({ id: birthdayTask2026, eventOccurrenceDate: birthday2026 })],
-    })
-    await expect((await request('GET', `/events/${birthdayId}/tasks?occurrenceDate=${birthday2027}`)).json()).resolves.toMatchObject({ tasks: [] })
-    expect((await request('GET', `/events/${birthdayId}/tasks`)).status).toBe(400)
-    const birthdayTask2027 = randomUUID()
-    expect((await request('PUT', `/tasks/${birthdayTask2027}`, {
-      ...fields({ title: '给爷爷买礼物' }), eventId: birthdayId, occurrenceDate: birthday2027, expectedVersion: 0,
-    })).status).toBe(200)
-
-    const otherOwner = Number(db.prepare(`INSERT INTO users (username, username_normalized, password_hash, disabled, created_at, updated_at)
-      VALUES (?, ?, ?, 0, ?, ?)`).run('event-link-owner', 'event-link-owner', 'test', Date.now(), Date.now()).lastInsertRowid)
-    await auth.runtime.diaryAccess.withBodyOperation(auth.session.id, capability, operation => {
-      const otherStore = diaryTaskStore(db, otherOwner, operation)
-      const otherTaskId = randomUUID()
-      otherStore.putTask(otherTaskId, { title: 'Private owner task', description: '', startDate: null, startTime: null, dueDate: null, dueTime: null }, 0)
-      expect(() => otherStore.linkTaskToEvent(otherTaskId, scheduleId, 1)).toThrow(DiaryTaskAssociationError)
-      expect(() => otherStore.eventTasks(scheduleId, '2026-11-21')).toThrow(DiaryTaskAssociationError)
-    })
-
-    const changedEvent = await request('PUT', `/events/${scheduleId}`, {
-      ...scheduleFields({ startDate: '2026-11-22', endDate: '2026-11-22' }), expectedVersion: 1,
-    })
-    expect(changedEvent.status).toBe(409)
-    expect(await changedEvent.json()).toEqual({ code: 'diary-event-linked-occurrences' })
-    expect((await (await request('GET', `/tasks/${secondTaskId}`)).json()).task).toMatchObject({
-      dueDate: '2026-11-20', startDate: '2026-11-19', startTime: '09:00', eventId: scheduleId, eventOccurrenceDate: '2026-11-21',
-    })
-
-    const changedDescription = await request('PUT', `/events/${scheduleId}`, {
-      ...schedule, description: '更新描述但保留发生日期', expectedVersion: 1,
-    })
-    expect(changedDescription.status).toBe(200)
-    const movedLink = await request('PUT', `/tasks/${firstTaskId}`, {
-      ...fields({ title: '整理检查报告', dueDate: '2026-11-20' }),
-      eventId: anniversaryId, occurrenceDate: '2026-06-19', expectedVersion: 1,
-    })
-    expect((await movedLink.json()).task).toMatchObject({ eventId: anniversaryId, eventOccurrenceDate: '2026-06-19', version: 2 })
-
-    const seriesId = randomUUID()
-    expect((await request('PUT', `/task-series/${seriesId}`, {
-      ...seriesFields(), eventId: anniversaryId, occurrenceDate: '2025-06-19', expectedVersion: 0,
+    expect((await request('PUT', `/task-series/${randomUUID()}`, {
+      ...seriesFields(), eventId, expectedVersion: 0,
     })).status).toBe(400)
 
-    expect((await request('DELETE', `/events/${scheduleId}`, { expectedVersion: 2 })).status).toBe(200)
-    expect((await (await request('GET', `/tasks/${secondTaskId}`)).json()).task).toMatchObject({
-      id: secondTaskId, eventId: null, eventOccurrenceDate: null, dueDate: '2026-11-20', startDate: '2026-11-19', startTime: '09:00',
+    const created = await request('PUT', `/tasks/${taskId}`, {
+      ...fields({ dueDate: '2026-11-21' }), eventId: null, occurrenceDate: null, eventOccurrenceDate: null, expectedVersion: 0,
     })
-    expect(db.prepare('SELECT COUNT(*) AS count FROM diary_task_event_links WHERE owner_user_id = ? AND event_id = ?').get(auth.userId, scheduleId))
-      .toMatchObject({ count: 0 })
+    expect(created.status).toBe(200)
+    const createdBody = await created.json()
+    expect(createdBody.task).not.toHaveProperty('eventId')
+    expect(createdBody.task).not.toHaveProperty('eventOccurrenceDate')
 
-    expect((await request('DELETE', `/tasks/${birthdayTask2027}`, { expectedVersion: 1 })).status).toBe(200)
-    await expect((await request('GET', `/events/${birthdayId}/tasks?occurrenceDate=${birthday2027}`)).json()).resolves.toMatchObject({ tasks: [] })
-    expect((await request('GET', `/events/${birthdayId}`)).status).toBe(200)
+    expect((await request('GET', `/events/${eventId}`)).status).toBe(200)
+    expect((await request('GET', `/tasks/${taskId}`)).status).toBe(200)
+    expect((await request('GET', `/events/${eventId}/tasks?occurrenceDate=2026-11-21`)).status).toBe(404)
+    expect((await request('PUT', `/tasks/${taskId}/event-link`, { eventId, expectedVersion: 1 })).status).toBe(404)
+    expect((await request('DELETE', `/tasks/${taskId}/event-link`, { expectedVersion: 1 })).status).toBe(404)
+
+    expect((await request('PUT', `/events/${eventId}`, {
+      ...sameDate, startDate: '2026-11-22', endDate: '2026-11-22', expectedVersion: 1,
+    })).status).toBe(200)
+    expect((await request('GET', `/tasks/${taskId}`)).status).toBe(200)
+    expect((await request('DELETE', `/events/${eventId}`, { expectedVersion: 2 })).status).toBe(200)
+    expect((await request('GET', `/tasks/${taskId}`)).status).toBe(200)
+
+    const retainedEventId = randomUUID()
+    expect((await request('PUT', `/events/${retainedEventId}`, { ...sameDate, expectedVersion: 0 })).status).toBe(200)
+    expect((await request('DELETE', `/tasks/${taskId}`, { expectedVersion: 1 })).status).toBe(200)
+    expect((await request('GET', `/events/${retainedEventId}`)).status).toBe(200)
   })
 
   it('uses content-free delete tombstones to reject stale task resurrection', async () => {
@@ -1049,7 +978,6 @@ describe('Diary task API', () => {
       ['GET', `/task-series/${id}/occurrences/2026-11-17`],
       ['GET', '/task-occurrences?start=2026-11-01&end=2026-11-30'],
       ['GET', '/task-items?start=2026-11-01&end=2026-11-30'],
-      ['GET', `/events/${id}/tasks`],
       ['PUT', `/tasks/${id}`, { ...fields(), expectedVersion: 0 }],
       ['PUT', `/task-series/${id}`, { ...seriesFields(), expectedVersion: 0 }],
       ['POST', `/task-series/${id}/occurrences/2026-11-17/complete`, { expectedVersion: 0 }],
@@ -1186,7 +1114,7 @@ describe('Diary task API', () => {
       showCountdown: true, isPrimary: false, expectedVersion: 0,
     })).status).toBe(200)
 
-    db.exec('DROP TABLE diary_task_event_links; DROP TABLE diary_task_occurrences; DROP TABLE diary_task_series_deleted_records; DROP TABLE diary_task_series; DROP TABLE diary_task_list_cursor_key; DROP TABLE diary_task_list_revisions; DROP TABLE diary_task_deleted_records; DROP TABLE diary_tasks; UPDATE schema_version SET version = 46')
+    db.exec('DROP TABLE diary_task_occurrences; DROP TABLE diary_task_series_deleted_records; DROP TABLE diary_task_series; DROP TABLE diary_task_list_cursor_key; DROP TABLE diary_task_list_revisions; DROP TABLE diary_task_deleted_records; DROP TABLE diary_tasks; UPDATE schema_version SET version = 46')
     database.applyMigrations(db)
 
     expect((await (await request('GET', `/days/${dayDate}`)).json()).day.entries).toEqual(['Existing diary entry'])
@@ -1200,45 +1128,7 @@ describe('Diary task API', () => {
     })
     expect((await request('GET', `/tasks/${taskId}`)).status).toBe(404)
     expect(db.prepare("SELECT version FROM diary_deleted_records WHERE owner_user_id = ? AND kind = 'event' AND id = ?").get(auth.userId, eventId)).toMatchObject({ version: 2 })
-    expect(db.prepare("SELECT version FROM schema_version").get()).toMatchObject({ version: 50 })
-  })
-
-  it('backfills the occurrence date of legacy non-recurring Event links without touching task data', async () => {
-    const eventId = randomUUID()
-    const taskId = randomUUID()
-    expect((await request('PUT', `/events/${eventId}`, { ...scheduleFields(), expectedVersion: 0 })).status).toBe(200)
-    expect((await request('PUT', `/tasks/${taskId}`, { ...fields(), eventId, expectedVersion: 0 })).status).toBe(200)
-    const before = db.prepare(`SELECT encrypted_fields, version FROM diary_tasks
-      WHERE owner_user_id = ? AND id = ?`).get(auth.userId, taskId) as { encrypted_fields: Buffer; version: number }
-
-    db.exec(`DROP TABLE diary_task_event_links;
-      CREATE TABLE diary_task_event_links (
-        owner_user_id INTEGER NOT NULL,
-        task_id TEXT NOT NULL,
-        event_id TEXT NOT NULL,
-        created_at INTEGER NOT NULL,
-        PRIMARY KEY (owner_user_id, task_id),
-        FOREIGN KEY (owner_user_id, task_id) REFERENCES diary_tasks(owner_user_id, id) ON DELETE CASCADE,
-        FOREIGN KEY (owner_user_id, event_id) REFERENCES diary_events(owner_user_id, id) ON DELETE CASCADE
-      );
-      CREATE INDEX idx_diary_task_event_links_event ON diary_task_event_links(owner_user_id, event_id, task_id);`)
-    db.prepare(`INSERT INTO diary_task_event_links (owner_user_id, task_id, event_id, created_at)
-      VALUES (?, ?, ?, ?)`).run(auth.userId, taskId, eventId, Date.now())
-    db.prepare('UPDATE schema_version SET version = 49').run()
-    database.applyMigrations(db)
-
-    expect(db.prepare(`SELECT event_id, occurrence_date FROM diary_task_event_links
-      WHERE owner_user_id = ? AND task_id = ?`).get(auth.userId, taskId)).toEqual({
-      event_id: eventId, occurrence_date: '2026-11-21',
-    })
-    const after = db.prepare(`SELECT encrypted_fields, version FROM diary_tasks
-      WHERE owner_user_id = ? AND id = ?`).get(auth.userId, taskId) as typeof before
-    expect(after).toEqual(before)
-    expect((await (await request('GET', `/tasks/${taskId}`)).json()).task).toMatchObject({
-      eventId, eventOccurrenceDate: '2026-11-21', version: 1,
-    })
-    expect(db.pragma('foreign_key_check')).toEqual([])
-    expect(db.prepare('SELECT version FROM schema_version').get()).toMatchObject({ version: 50 })
+    expect(db.prepare("SELECT version FROM schema_version").get()).toMatchObject({ version: 51 })
   })
 
   it('adds the list revision foundation without changing existing Todo ciphertext or version', async () => {
@@ -1249,7 +1139,7 @@ describe('Diary task API', () => {
     const before = db.prepare('SELECT owner_user_id, id, due_date, encrypted_fields, version FROM diary_tasks WHERE owner_user_id = ? AND id = ?')
       .get(auth.userId, id) as { owner_user_id: number; id: string; due_date: string; encrypted_fields: Buffer; version: number }
 
-    db.exec('DROP TABLE diary_task_event_links; DROP TABLE diary_task_occurrences; DROP TABLE diary_task_series_deleted_records; DROP TABLE diary_task_series; DROP TABLE diary_task_list_cursor_key; DROP TABLE diary_task_list_revisions; UPDATE schema_version SET version = 47')
+    db.exec('DROP TABLE diary_task_occurrences; DROP TABLE diary_task_series_deleted_records; DROP TABLE diary_task_series; DROP TABLE diary_task_list_cursor_key; DROP TABLE diary_task_list_revisions; UPDATE schema_version SET version = 47')
     database.applyMigrations(db)
 
     const after = db.prepare('SELECT owner_user_id, id, due_date, encrypted_fields, version FROM diary_tasks WHERE owner_user_id = ? AND id = ?')
@@ -1257,7 +1147,7 @@ describe('Diary task API', () => {
     expect(after).toEqual(before)
     expect((await (await request('GET', `/tasks/${id}`)).json()).task).toEqual(task)
     expect((await (await request('GET', '/tasks/list')).json()).items).toContainEqual(task)
-    expect(db.prepare('SELECT version FROM schema_version').get()).toMatchObject({ version: 50 })
+    expect(db.prepare('SELECT version FROM schema_version').get()).toMatchObject({ version: 51 })
     expect((db.prepare('SELECT revision FROM diary_task_list_revisions WHERE owner_user_id = ?').get(auth.userId) as { revision: number }).revision).toBe(0)
   })
 })

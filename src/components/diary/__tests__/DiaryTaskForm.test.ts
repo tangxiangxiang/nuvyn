@@ -3,9 +3,7 @@ import { describe, expect, it } from 'vitest'
 import { mount } from '@vue/test-utils'
 import { NDatePicker, NInput, NSelect, NTimePicker } from 'naive-ui'
 import DiaryTaskForm from '../DiaryTaskForm.vue'
-import { occurrenceInYear, type DiaryEvent } from '../../../../shared/diaryLife'
 import type { TaskEditorFields } from '../../../../shared/diaryTasks'
-import { taskEventOccurrenceValue } from '../../../features/diary/taskEventOccurrences'
 
 function getControl(wrapper: ReturnType<typeof mount>, component: typeof NDatePicker | typeof NSelect | typeof NTimePicker, label: string) {
   return wrapper.findAllComponents(component).find(control => control.attributes('aria-label') === label)!
@@ -19,7 +17,7 @@ describe('DiaryTaskForm', () => {
   it('marks the task title and recurring end date as required', () => {
     const initial: TaskEditorFields = {
       title: '', description: '', startDate: null, startTime: null, dueDate: null, dueTime: null,
-      recurrence: { frequency: 'daily', startDate: '2026-11-16', untilDate: null }, eventId: null,
+      recurrence: { frequency: 'daily', startDate: '2026-11-16', untilDate: null },
     }
     const wrapper = mount(DiaryTaskForm, { props: { modelValue: initial, today: '2026-11-16' } })
 
@@ -35,7 +33,7 @@ describe('DiaryTaskForm', () => {
   it('uses Naive pickers and clears a time without clearing its date', async () => {
     const initial: TaskEditorFields = {
       title: '预约体检', description: '', startDate: '2026-11-18', startTime: '09:30',
-      dueDate: '2026-11-20', dueTime: '10:30', recurrence: null, eventId: null,
+      dueDate: '2026-11-20', dueTime: '10:30', recurrence: null,
     }
     const wrapper = mount(DiaryTaskForm, { props: { modelValue: initial, today: '2026-11-16' } })
     const startDate = getControl(wrapper, NDatePicker, '开始日期')
@@ -65,7 +63,6 @@ describe('DiaryTaskForm', () => {
       dueDate: '2026-11-18',
       dueTime: '09:30',
       recurrence: null,
-      eventId: null,
     }
     const wrapper = mount(DiaryTaskForm, { props: { modelValue: initial, today: '2026-11-16' } })
 
@@ -82,7 +79,7 @@ describe('DiaryTaskForm', () => {
   it('clears optional start dates with their time while keeping start and due pairs independent', async () => {
     const initial: TaskEditorFields = {
       title: '准备发布', description: '', startDate: null, startTime: null,
-      dueDate: '2026-11-21', dueTime: '12:00', recurrence: null, eventId: null,
+      dueDate: '2026-11-21', dueTime: '12:00', recurrence: null,
     }
     const wrapper = mount(DiaryTaskForm, { props: { modelValue: initial, today: '2026-11-16' } })
 
@@ -100,134 +97,10 @@ describe('DiaryTaskForm', () => {
     wrapper.unmount()
   })
 
-  it('selects yearly Event occurrences in one control and prioritizes the year closest to the task due date', async () => {
-    const event: DiaryEvent = {
-      id: 'a2a41f64-17ae-4b68-9c98-bb45fc4ad8c7',
-      title: '相识纪念日', description: '', emoji: '🎉', type: 'anniversary',
-      startDate: '2020-11-15', endDate: '2020-11-15', startTime: null, endTime: null,
-      allDay: true, dateRule: { calendar: 'gregory' }, recurrence: 'yearly',
-      showCountdown: false, isPrimary: false, version: 1, createdAt: 1, updatedAt: 1,
-    }
-    const initial: TaskEditorFields = {
-      title: '准备礼物', description: '', startDate: null, startTime: null,
-      dueDate: '2026-11-13', dueTime: null, recurrence: null, eventId: null, eventOccurrenceDate: null,
-    }
-    const wrapper = mount(DiaryTaskForm, {
-      props: {
-        modelValue: initial,
-        today: '2026-11-18',
-        eventOptions: [event],
-      },
-    })
-
-    const selector = getControl(wrapper, NSelect, '关联日程')
-    const eventOptions = getProp(selector, 'options') as Array<{ label: string; value: string; eventId: string; occurrenceDate: string }>
-    const date2025 = occurrenceInYear(event, 2025)!
-    const date2026 = occurrenceInYear(event, 2026)!
-    const date2027 = occurrenceInYear(event, 2027)!
-    expect(eventOptions.slice(0, 3).map(option => option.label)).toEqual([
-      `相识纪念日 · ${date2026}`,
-      `相识纪念日 · ${date2025}`,
-      `相识纪念日 · ${date2027}`,
-    ])
-    expect(eventOptions[0]).toMatchObject({ eventId: event.id, occurrenceDate: date2026 })
-    expect(wrapper.find('[aria-label="关联日程发生日期"]').exists()).toBe(false)
-    await selector.vm.$emit('update:value', taskEventOccurrenceValue(event.id, date2026))
-    const selectedDraft = wrapper.emitted('update:modelValue')?.at(-1)?.[0] as TaskEditorFields
-    expect(selectedDraft).toMatchObject({ eventId: event.id, eventOccurrenceDate: date2026, dueDate: '2026-11-13' })
-    await wrapper.setProps({ modelValue: selectedDraft })
-
-    expect(selector.props('value')).toBe(taskEventOccurrenceValue(event.id, date2026))
-    await selector.vm.$emit('update:value', taskEventOccurrenceValue(event.id, date2027))
-    const selected2027 = wrapper.emitted('update:modelValue')?.at(-1)?.[0] as TaskEditorFields
-    expect(selected2027).toMatchObject({
-      eventId: event.id, eventOccurrenceDate: date2027, dueDate: '2026-11-13',
-    })
-    await wrapper.setProps({ modelValue: selected2027 })
-    expect(selector.props('value')).toBe(taskEventOccurrenceValue(event.id, date2027))
-
-    await selector.vm.$emit('search', '2030')
-    const generatedOptions = getProp(selector, 'options') as Array<{ label: string; value: string }>
-    const date2030 = occurrenceInYear(event, 2030)!
-    expect(generatedOptions.some(option => option.label === `相识纪念日 · ${date2030}`)).toBe(true)
-    wrapper.unmount()
-  })
-
-  it('hides an existing Event UUID while loading and restores its occurrence label when loaded', async () => {
-    const event: DiaryEvent = {
-      id: 'a2a41f64-17ae-4b68-9c98-bb45fc4ad8c7',
-      title: '相识纪念日', description: '', emoji: '🎉', type: 'anniversary',
-      startDate: '2020-11-15', endDate: '2020-11-15', startTime: null, endTime: null,
-      allDay: true, dateRule: { calendar: 'gregory' }, recurrence: 'yearly',
-      showCountdown: false, isPrimary: false, version: 1, createdAt: 1, updatedAt: 1,
-    }
-    const initial: TaskEditorFields = {
-      title: '准备礼物', description: '', startDate: null, startTime: null,
-      dueDate: '2026-11-13', dueTime: null, recurrence: null,
-      eventId: event.id, eventOccurrenceDate: '2026-11-15',
-    }
-    const wrapper = mount(DiaryTaskForm, {
-      props: { modelValue: initial, today: '2026-11-18', eventOptionsLoading: true },
-    })
-    const selector = getControl(wrapper, NSelect, '关联日程')
-    expect(selector.props('value')).toBeNull()
-    expect(selector.props('placeholder')).toBe('正在加载关联日程…')
-    expect(wrapper.text()).not.toContain(event.id)
-
-    await wrapper.setProps({ eventOptions: [event], eventOptionsLoading: false })
-    expect(selector.props('value')).toBe(taskEventOccurrenceValue(event.id, '2026-11-15'))
-    expect(wrapper.text()).not.toContain(event.id)
-    wrapper.unmount()
-  })
-
-  it('uses the actual lunar occurrence date and clears both Event fields together', async () => {
-    const event: DiaryEvent = {
-      id: 'd84f90c2-2432-4594-868c-320214dd3bf2',
-      title: '农历生日', description: '', emoji: '🎂', type: 'birthday',
-      startDate: '2020-06-23', endDate: '2020-06-23', startTime: null, endTime: null,
-      allDay: true,
-      dateRule: { calendar: 'chinese', lunarMonth: 5, lunarDay: 19, isLeapMonth: false, leapMonthPolicy: 'regular-month', shortMonthPolicy: 'last-day' },
-      recurrence: 'yearly', showCountdown: false, isPrimary: false, version: 1, createdAt: 1, updatedAt: 1,
-    }
-    const lunarDate = occurrenceInYear(event, 2026)!
-    const initial: TaskEditorFields = {
-      title: '准备生日礼物', description: '', startDate: null, startTime: null,
-      dueDate: '2026-07-02', dueTime: null, recurrence: null,
-      eventId: event.id, eventOccurrenceDate: lunarDate,
-    }
-    const wrapper = mount(DiaryTaskForm, { props: { modelValue: initial, today: '2026-07-01', eventOptions: [event] } })
-    const selector = getControl(wrapper, NSelect, '关联日程')
-    expect(lunarDate).toBe('2026-07-03')
-    expect((getProp(selector, 'options') as Array<{ label: string }>).some(option => option.label === `农历生日 · ${lunarDate}`)).toBe(true)
-
-    await selector.vm.$emit('update:value', null)
-    expect(wrapper.emitted('update:modelValue')?.at(-1)?.[0]).toMatchObject({ eventId: null, eventOccurrenceDate: null })
-    wrapper.unmount()
-  })
-
-  it('shows retryable load failure without exposing or clearing the saved association', async () => {
-    const initial: TaskEditorFields = {
-      title: '准备礼物', description: '', startDate: null, startTime: null,
-      dueDate: '2026-11-13', dueTime: null, recurrence: null,
-      eventId: 'a2a41f64-17ae-4b68-9c98-bb45fc4ad8c7', eventOccurrenceDate: '2026-11-15',
-    }
-    const wrapper = mount(DiaryTaskForm, {
-      props: { modelValue: initial, today: '2026-11-18', eventOptionsError: '关联日程加载失败。' },
-    })
-    const selector = getControl(wrapper, NSelect, '关联日程')
-    expect(selector.props('value')).toBeNull()
-    expect(selector.props('placeholder')).toBe('日程加载失败，打开选择框重试')
-    expect(wrapper.get('[role="status"]').text()).toContain('打开选择框可重试')
-    await selector.vm.$emit('update:show', true)
-    expect(wrapper.emitted('event-picker-open')).toHaveLength(1)
-    expect(wrapper.emitted('update:modelValue')).toBeUndefined()
-    wrapper.unmount()
-  })
-
   it('shows a concise error for invalid same-day start and due times', () => {
     const initial: TaskEditorFields = {
       title: '准备发布', description: '', startDate: '2026-11-19', startTime: '15:00',
-      dueDate: '2026-11-19', dueTime: '12:00', recurrence: null, eventId: null,
+      dueDate: '2026-11-19', dueTime: '12:00', recurrence: null,
     }
     const wrapper = mount(DiaryTaskForm, { props: { modelValue: initial, today: '2026-11-16' } })
 
@@ -235,7 +108,7 @@ describe('DiaryTaskForm', () => {
     wrapper.unmount()
   })
 
-  it('starts a recurrence on the selected due date and removes an Event link', async () => {
+  it('starts a recurrence on the selected due date', async () => {
     const initial: TaskEditorFields = {
       title: '每周整理笔记',
       description: '',
@@ -244,7 +117,6 @@ describe('DiaryTaskForm', () => {
       dueDate: '2026-11-18',
       dueTime: null,
       recurrence: null,
-      eventId: 'a2a41f64-17ae-4b68-9c98-bb45fc4ad8c7',
     }
     const wrapper = mount(DiaryTaskForm, { props: { modelValue: initial, today: '2026-11-16' } })
 
@@ -252,7 +124,6 @@ describe('DiaryTaskForm', () => {
     expect(wrapper.emitted('update:modelValue')?.at(-1)?.[0]).toMatchObject({
       dueDate: '2026-11-18',
       recurrence: { frequency: 'weekly', startDate: '2026-11-18', untilDate: null },
-      eventId: null,
     })
     wrapper.unmount()
   })
@@ -266,7 +137,6 @@ describe('DiaryTaskForm', () => {
       dueDate: '2026-11-16',
       dueTime: null,
       recurrence: null,
-      eventId: null,
     }
     const wrapper = mount(DiaryTaskForm, { props: { modelValue: initial, today: '2026-11-16' } })
 
@@ -282,7 +152,7 @@ describe('DiaryTaskForm', () => {
 
   it('allows a new recurring task start date to be selected', async () => {
     const initial: TaskEditorFields = {
-      title: '每周整理笔记', description: '', startDate: null, startTime: null, dueDate: null, dueTime: null, recurrence: null, eventId: null,
+      title: '每周整理笔记', description: '', startDate: null, startTime: null, dueDate: null, dueTime: null, recurrence: null,
     }
     const wrapper = mount(DiaryTaskForm, { props: { modelValue: initial, today: '2026-11-16' } })
     await getControl(wrapper, NSelect, '重复规则').vm.$emit('update:value', 'daily')
@@ -299,7 +169,7 @@ describe('DiaryTaskForm', () => {
   it('keeps an existing recurring start date required and locked', async () => {
     const initial: TaskEditorFields = {
       title: '每周整理笔记', description: '', startDate: null, startTime: null, dueDate: '2026-11-16', dueTime: null,
-      recurrence: { frequency: 'daily', startDate: '2026-11-16', untilDate: null }, eventId: null,
+      recurrence: { frequency: 'daily', startDate: '2026-11-16', untilDate: null },
     }
     const wrapper = mount(DiaryTaskForm, {
       props: { modelValue: initial, today: '2026-11-16', lockRecurrenceStart: true },
@@ -318,26 +188,12 @@ describe('DiaryTaskForm', () => {
 
   it('can hide recurrence for an existing one-off task', () => {
     const initial: TaskEditorFields = {
-      title: '预约体检', description: '', startDate: null, startTime: null, dueDate: null, dueTime: null, recurrence: null, eventId: null,
+      title: '预约体检', description: '', startDate: null, startTime: null, dueDate: null, dueTime: null, recurrence: null,
     }
     const wrapper = mount(DiaryTaskForm, { props: { modelValue: initial, today: '2026-11-16', allowRecurrence: false } })
     expect(wrapper.find('[aria-label="重复规则"]').exists()).toBe(false)
     wrapper.unmount()
   })
 
-  it('shows the schedule selector by default and loads options when opened', async () => {
-    const initial: TaskEditorFields = {
-      title: '准备证件', description: '', startDate: null, startTime: null, dueDate: '2026-11-20', dueTime: null, recurrence: null, eventId: null,
-    }
-    const wrapper = mount(DiaryTaskForm, { props: { modelValue: initial, today: '2026-11-16' } })
-    const selector = getControl(wrapper, NSelect, '关联日程')
 
-    expect(wrapper.find('.diary-task-event-select').exists()).toBe(true)
-    expect(selector.props('placeholder')).toBe('不关联日程')
-    expect(selector.props('bordered')).toBe(true)
-    expect(selector.props('clearable')).toBe(true)
-    await selector.vm.$emit('update:show', true)
-    expect(wrapper.emitted('event-picker-open')).toHaveLength(1)
-    wrapper.unmount()
-  })
 })

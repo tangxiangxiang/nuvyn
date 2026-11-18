@@ -6,7 +6,7 @@ import { parseTaskFields, parseTaskSeriesFields } from '../../shared/diaryTasks.
 import { withDiaryBodyOperation } from '../diaryAccess/guard.js'
 import { DiaryAccessServiceError } from '../diaryAccess/service.js'
 import { diaryLifeStore, DiaryConflict } from '../diaryLife.js'
-import { diaryTaskStore, DiaryEventLinkedOccurrencesError, DiaryTaskAssociationError, DiaryTaskCursorError, DiaryTaskExpansionLimit, DiaryTaskHistoryProtectedError, DiaryTaskListChanged, DiaryTaskNotFound, DiaryTaskRecurrenceError } from '../diaryTasks.js'
+import { diaryTaskStore, DiaryTaskCursorError, DiaryTaskExpansionLimit, DiaryTaskHistoryProtectedError, DiaryTaskListChanged, DiaryTaskNotFound, DiaryTaskRecurrenceError } from '../diaryTasks.js'
 import { diaryToday } from '../diaryDate.js'
 import { DiaryAttachmentError } from '../diaryAttachments/service.js'
 import { cleanupDiaryAttachmentStorage, DiaryAttachmentStorage, ensureDiaryAttachmentStorage } from '../diaryAttachments/storage.js'
@@ -19,6 +19,9 @@ routes.use('*', async (c, next) => { c.header('Cache-Control', 'no-store'); awai
 routes.use('*', bodyLimit({ maxSize: 32768 }))
 type Store = ReturnType<typeof diaryLifeStore>
 type TaskStore = ReturnType<typeof diaryTaskStore>
+function hasLegacyTaskEventAssociation(body: Record<string, unknown>): boolean {
+  return ['eventId', 'eventOccurrenceDate', 'occurrenceDate'].some(key => body[key] !== undefined && body[key] !== null)
+}
 async function guarded(c: Context<Env>, run: (store: Store, db: Database, tasks: TaskStore) => Promise<Response> | Response) {
   const owner = c.get('authUser')?.id
   if (!owner) return c.json({ code: 'auth-session-required' }, 401)
@@ -35,8 +38,6 @@ async function guarded(c: Context<Env>, run: (store: Store, db: Database, tasks:
     if (error instanceof DiaryTaskListChanged) return c.json({ code: 'diary-task-list-changed' }, 409)
     if (error instanceof DiaryConflict) return c.json({ code: 'diary-conflict' }, 409)
     if (error instanceof DiaryTaskNotFound) return c.json({ code: 'diary-not-found' }, 404)
-    if (error instanceof DiaryTaskAssociationError) return c.json({ code: 'invalid-diary-task-event-link' }, 400)
-    if (error instanceof DiaryEventLinkedOccurrencesError) return c.json({ code: 'diary-event-linked-occurrences' }, 409)
     if (error instanceof DiaryTaskHistoryProtectedError) return c.json({ code: 'diary-task-history-protected' }, 409)
     if (error instanceof DiaryTaskRecurrenceError) return c.json({ code: 'invalid-diary-task-occurrence' }, 400)
     if (error instanceof DiaryTaskExpansionLimit) return c.json({ code: 'diary-task-range-too-large' }, 413)
@@ -134,12 +135,6 @@ routes.get('/events/:id', c => guarded(c, store => {
   const event = store.getEvent(c.req.param('id'))
   return event ? c.json({ event }) : c.json({ code: 'diary-not-found' }, 404)
 }))
-routes.get('/events/:id/tasks', c => guarded(c, (_store, _db, tasks) => {
-  const id = c.req.param('id')
-  const occurrenceDate = c.req.query('occurrenceDate')
-  if (!idValid(id) || (occurrenceDate !== undefined && !civilDate(occurrenceDate))) return c.json({ code: 'invalid-diary-event-id' }, 400)
-  return c.json({ tasks: tasks.eventTasks(id, occurrenceDate) })
-}))
 routes.get('/countdowns', c => guarded(c, store => {
   const { today, offset = '0' } = c.req.query()
   if (!civilDate(today) || !/^\d{1,7}$/.test(offset)) return c.json({ code: 'invalid-diary-countdown-query' }, 400)
@@ -199,8 +194,7 @@ routes.put('/task-series/:id', c => guarded(c, async (_store, _db, tasks) => {
   const body = await c.req.json().catch(() => null)
   const fields = parseTaskSeriesFields(body)
   if (!idValid(id) || !fields || !version(body?.expectedVersion)
-    || (body.eventId !== undefined && body.eventId !== null)
-    || (body.occurrenceDate !== undefined && body.occurrenceDate !== null)) return c.json({ code: 'invalid-diary-task-series' }, 400)
+    || hasLegacyTaskEventAssociation(body)) return c.json({ code: 'invalid-diary-task-series' }, 400)
   if (body.expectedVersion === 0) return c.json({ series: tasks.putSeries(id, fields, 0) })
   if (!idValid(body.newSeriesId) || !civilDate(body.effectiveDate)) return c.json({ code: 'invalid-diary-task-series' }, 400)
   return c.json({ series: tasks.updateSeriesFrom(id, body.newSeriesId, body.effectiveDate, fields, body.expectedVersion) })
@@ -244,26 +238,10 @@ routes.put('/tasks/:id', c => guarded(c, async (_store, _db, tasks) => {
   if (!idValid(id) || !body || typeof body !== 'object' || Array.isArray(body)
     || Object.prototype.hasOwnProperty.call(body, 'completedAt')) return c.json({ code: 'invalid-diary-task' }, 400)
   const fields = parseTaskFields(body)
-  if (!fields || !version(body.expectedVersion)
-    || (body.eventId !== undefined && body.eventId !== null && (typeof body.eventId !== 'string' || !idValid(body.eventId)))
-    || (body.occurrenceDate !== undefined && body.occurrenceDate !== null && !civilDate(body.occurrenceDate))
-    || ((body.eventId === undefined || body.eventId === null) && body.occurrenceDate !== undefined && body.occurrenceDate !== null)) {
+  if (!fields || !version(body.expectedVersion) || hasLegacyTaskEventAssociation(body)) {
     return c.json({ code: 'invalid-diary-task' }, 400)
   }
-  return c.json({ task: tasks.putTask(id, fields, body.expectedVersion, body.eventId as string | null | undefined, body.occurrenceDate as string | null | undefined) })
-}))
-routes.put('/tasks/:id/event-link', c => guarded(c, async (_store, _db, tasks) => {
-  const id = c.req.param('id')
-  const body = await c.req.json().catch(() => null)
-  if (!idValid(id) || !idValid(body?.eventId) || !version(body?.expectedVersion) || body.expectedVersion < 1
-    || (body.occurrenceDate !== undefined && body.occurrenceDate !== null && !civilDate(body.occurrenceDate))) return c.json({ code: 'invalid-diary-task-event-link' }, 400)
-  return c.json({ task: tasks.linkTaskToEvent(id, body.eventId, body.expectedVersion, body.occurrenceDate) })
-}))
-routes.delete('/tasks/:id/event-link', c => guarded(c, async (_store, _db, tasks) => {
-  const id = c.req.param('id')
-  const body = await c.req.json().catch(() => null)
-  if (!idValid(id) || !version(body?.expectedVersion) || body.expectedVersion < 1) return c.json({ code: 'invalid-diary-task-event-link' }, 400)
-  return c.json({ task: tasks.unlinkTaskFromEvent(id, body.expectedVersion) })
+  return c.json({ task: tasks.putTask(id, fields, body.expectedVersion) })
 }))
 for (const action of ['complete', 'reopen'] as const) {
   routes.post(`/tasks/:id/${action}`, c => guarded(c, async (_store, _db, tasks) => {
@@ -291,21 +269,20 @@ routes.delete('/tasks/:id', c => guarded(c, async (_store, _db, tasks) => {
   const versionAfterDelete = tasks.removeTask(id, body.expectedVersion)
   return c.json({ ok: true, version: versionAfterDelete })
 }))
-routes.put('/events/:id', c => guarded(c, async (store, _db, tasks) => {
+routes.put('/events/:id', c => guarded(c, async store => {
   const id = c.req.param('id')
   const body = await c.req.json().catch(() => null)
   const fields = parseEvent(body)
   if (!idValid(id) || !fields || !version(body?.expectedVersion)) return c.json({ code: 'invalid-diary-event' }, 400)
-  return c.json({ event: store.putEvent(id, fields, body.expectedVersion, () => tasks.assertEventLinksRemainValid(id, fields)) })
+  return c.json({ event: store.putEvent(id, fields, body.expectedVersion) })
 }))
 for (const kind of ['days', 'events'] as const) {
-  routes.delete(`/${kind}/:id`, c => guarded(c, async (store, db, tasks) => {
+  routes.delete(`/${kind}/:id`, c => guarded(c, async (store, db) => {
     const body = await c.req.json().catch(() => null)
     const id = c.req.param('id')
     if (!version(body?.expectedVersion) || body.expectedVersion < 1 || !(kind === 'days' ? civilDate(id) : idValid(id))) return c.json({ code: 'invalid-diary-delete' }, 400)
     if (kind === 'days' && id > diaryToday()) return c.json({ code: 'diary-future-date' }, 403)
-    store.remove(kind === 'days' ? 'day' : 'event', id, body.expectedVersion,
-      kind === 'events' ? () => tasks.removeEventLinks(id) : undefined)
+    store.remove(kind === 'days' ? 'day' : 'event', id, body.expectedVersion)
     if (kind === 'days') await cleanupDiaryAttachmentStorage(db, undefined, c.get('authUser')?.id).catch(() => {})
     return c.json({ ok: true })
   }))

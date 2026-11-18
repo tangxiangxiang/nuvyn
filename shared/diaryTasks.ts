@@ -13,20 +13,12 @@ export interface OneOffTaskFields extends TaskFields {
   startTime: string | null
 }
 
-export interface TaskEventAssociation {
-  taskId: string
-  eventId: string
-  occurrenceDate: string
-}
-
 export interface DiaryTask extends OneOffTaskFields {
   id: string
   completedAt: number | null
   version: number
   createdAt: number
   updatedAt: number
-  eventId?: string | null
-  eventOccurrenceDate?: string | null
 }
 
 export interface TaskSeriesFields {
@@ -61,7 +53,7 @@ export interface DiaryRecurringTaskOccurrence extends TaskFields {
   updatedAt: number
 }
 
-export type DiaryTaskListItem = (DiaryTask & { kind?: 'one-off'; eventId?: string | null }) | DiaryRecurringTaskOccurrence
+export type DiaryTaskListItem = (DiaryTask & { kind?: 'one-off' }) | DiaryRecurringTaskOccurrence
 
 export interface TaskOccurrenceState {
   status: 'pending' | 'completed' | 'skipped'
@@ -80,8 +72,6 @@ export interface DiaryTaskItemPage {
 
 export interface TaskEditorFields extends OneOffTaskFields {
   recurrence: TaskRecurrenceRule | null
-  eventId: string | null
-  eventOccurrenceDate?: string | null
 }
 
 export type DiaryTaskListStatus = 'open' | 'completed'

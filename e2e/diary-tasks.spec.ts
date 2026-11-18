@@ -903,7 +903,7 @@ test('editing a recurring Todo changes future occurrences and preserves complete
   await expect(page.getByRole('checkbox', { name: `完成待办：${title}` })).toBeVisible()
 })
 
-test('a one-off Todo can be linked to a schedule and survives Event deletion', async ({ page }) => {
+test('date-coincident Todo and Event remain independent records', async ({ page }) => {
   await page.goto('/diary')
   await unlockDiary(page)
   await page.getByTestId('diary-view-toggle').click()
@@ -925,62 +925,29 @@ test('a one-off Todo can be linked to a schedule and survives Event deletion', a
   await chooseDiaryAction(page, page.getByRole('button', { name: '更多当天事件操作' }), '新增待办')
   await page.getByRole('textbox', { name: '待办名称' }).fill(taskTitle)
   await fillDiaryTaskDate(page, '截止日期', date)
-  await expect(page.locator('.diary-task-event-select')).toBeVisible()
-  await selectNaiveOption(page, '关联日程', `${eventTitle} · ${date}`)
   await page.getByRole('button', { name: '保存', exact: true }).click()
 
-  await page.getByRole('button', { name: `编辑待办：${taskTitle}` }).click()
-  const taskEditor = page.locator('.diary-task-edit-dialog')
-  await expect(taskEditor.locator('.diary-task-event-select .n-base-selection-label')).toContainText(`${eventTitle} · ${date}`)
-  await expect(taskEditor.locator('[aria-label="关联日程发生日期"]')).toHaveCount(0)
-  await expect(taskEditor.locator('.diary-task-event-select')).not.toContainText(/[a-f0-9]{8}-[a-f0-9-]{27}/i)
-
-  let eventListAttempt = 0
-  const firstEventPage = (url: URL) => url.pathname === '/api/diary/life/events/list' && url.searchParams.get('offset') === '0'
-  await page.route(firstEventPage, route => {
-    eventListAttempt += 1
-    return eventListAttempt === 1
-      ? route.fulfill({ status: 500, contentType: 'application/json', body: '{}' })
-      : route.continue()
-  })
-  const eventSelect = taskEditor.locator('.diary-task-event-select .n-base-selection')
-  await eventSelect.click()
-  await expect(taskEditor.locator('.diary-task-form-error')).toContainText('关联日程加载失败')
-  await page.keyboard.press('Escape')
-  await eventSelect.click()
-  await expect(taskEditor.locator('.diary-task-form-error')).toHaveCount(0)
-  await expect(page.getByText(`${eventTitle} · ${date}`, { exact: true }).last()).toBeVisible()
-  await page.unroute(firstEventPage)
-  const originalViewport = page.viewportSize()
-  for (const width of [320, 390, 430, 768, 1280]) {
-    await page.setViewportSize({ width, height: originalViewport?.height ?? 900 })
-    await eventSelect.click()
-    const menu = page.locator('.n-base-select-menu').last()
-    await expect(menu).toBeVisible()
-    const menuBounds = await menu.boundingBox()
-    expect(menuBounds).not.toBeNull()
-    expect(menuBounds!.x).toBeGreaterThanOrEqual(0)
-    expect(menuBounds!.x + menuBounds!.width).toBeLessThanOrEqual(width + 1)
-    await page.keyboard.press('Escape')
-  }
-  if (originalViewport) await page.setViewportSize(originalViewport)
-  await page.getByRole('button', { name: '取消', exact: true }).click()
-
-  await page.getByRole('button', { name: eventTitle }).click()
-  const relatedTasks = page.locator('.diary-event-reader-tasks')
-  await expect(relatedTasks.getByRole('heading', { name: '相关待办' })).toBeVisible()
-  await expect(relatedTasks).toContainText(taskTitle)
-  await relatedTasks.getByRole('checkbox', { name: `完成待办：${taskTitle}` }).click()
-  await expect(relatedTasks.locator('.diary-task-row.is-completed')).toContainText(taskTitle)
-
-  await page.getByRole('button', { name: '编辑事件' }).click()
-  await page.getByRole('button', { name: '删除事件', exact: true }).click()
-  const eventDeleteConfirmation = page.getByRole('dialog', { name: '删除这条事件？' })
-  await eventDeleteConfirmation.getByRole('button', { name: /^(Confirm|确认|确定)$/ }).click()
-  await expect(page.getByRole('checkbox', { name: `恢复待办：${taskTitle}` })).toBeVisible()
+  const eventButton = page.getByRole('button', { name: eventTitle, exact: true })
+  await expect(eventButton).toBeVisible()
+  await expect(page.getByRole('checkbox', { name: `完成待办：${taskTitle}`, exact: true })).toBeVisible()
 
   await page.getByRole('button', { name: `编辑待办：${taskTitle}` }).click()
   await page.getByRole('button', { name: '删除', exact: true }).click()
   const taskDeleteConfirmation = page.getByRole('dialog', { name: '删除这条待办？' })
   await taskDeleteConfirmation.getByRole('button', { name: /^(Confirm|确认|确定)$/ }).click()
+  await expect(eventButton).toBeVisible()
+
+  const remainingTaskTitle = `${taskTitle} independent`
+  await chooseDiaryAction(page, page.getByRole('button', { name: '更多当天事件操作' }), '新增待办')
+  await page.getByRole('textbox', { name: '待办名称' }).fill(remainingTaskTitle)
+  await fillDiaryTaskDate(page, '截止日期', date)
+  await page.getByRole('button', { name: '保存', exact: true }).click()
+  await expect(page.getByRole('checkbox', { name: `完成待办：${remainingTaskTitle}`, exact: true })).toBeVisible()
+
+  await eventButton.click()
+  await page.getByRole('button', { name: '编辑事件' }).click()
+  await page.getByRole('button', { name: '删除事件', exact: true }).click()
+  const eventDeleteConfirmation = page.getByRole('dialog', { name: '删除这条事件？' })
+  await eventDeleteConfirmation.getByRole('button', { name: /^(Confirm|确认|确定)$/ }).click()
+  await expect(page.getByRole('checkbox', { name: `完成待办：${remainingTaskTitle}`, exact: true })).toBeVisible()
 })

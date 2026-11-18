@@ -220,10 +220,6 @@ export function eventOccurrenceStart(event: EventFields, date: string): string |
   }
   return null
 }
-/** True only for the exact Gregorian start date of a valid Event occurrence. */
-export function isEventOccurrenceStart(event: EventFields, date: string): boolean {
-  return eventOccurrenceStart(event, date) === date
-}
 export function nextOccurrence(event: EventFields, today: string): string | null {
   if (event.recurrence === 'none') return event.startDate >= today ? event.startDate : null
   if (event.dateRule?.calendar === 'chinese') {

@@ -2,13 +2,6 @@ import { diaryAuthFetch } from './auth-session'
 import type { DiaryDay, DiaryDaySummary, DiaryEvent, DiarySearchPage, DayFields, EventFields } from '../../shared/diaryLife'
 import type { DiaryAttachment } from '../../shared/diaryAttachments'
 
-export class DiaryEventLinkedOccurrencesError extends Error {
-  constructor() {
-    super('该事件的某次发生仍关联待办。请先更改或清除相关待办的日程关联，再修改事件日期或重复规则。')
-    this.name = 'DiaryEventLinkedOccurrencesError'
-  }
-}
-
 function createDiaryId(): string {
   if (typeof crypto.randomUUID === 'function') return crypto.randomUUID()
   // Web Crypto still provides random bytes on HTTP origins where randomUUID is absent.
@@ -30,9 +23,6 @@ async function request<T>(path: string, method = 'GET', body?: unknown, signal?:
     const payload = await response.json().catch(() => null) as { code?: unknown } | null
     if (response.status === 403 && payload?.code === 'diary-future-date') {
       throw new Error('未来日期的日记只能查看。')
-    }
-    if (response.status === 409 && payload?.code === 'diary-event-linked-occurrences') {
-      throw new DiaryEventLinkedOccurrencesError()
     }
     throw new Error(response.status === 409 ? '记录已更新，请重新打开后再编辑。' : '操作失败，请重试。')
   }
