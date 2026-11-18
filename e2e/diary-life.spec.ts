@@ -1,6 +1,6 @@
 import type { Locator, Page, Request } from '@playwright/test'
 import { test, expect } from './fixtures/auth'
-import { chooseDiaryAction, chooseDiaryDayAction, openEmptyDiaryDay, saveDiaryDay, unlockDiary } from './helpers/diary-life'
+import { chooseDiaryAction, chooseDiaryDayAction, diaryMonthLabel, openEmptyDiaryDay, saveDiaryDay, unlockDiary } from './helpers/diary-life'
 
 const scrollTestImage = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAAAAAA6fptVAAAACklEQVR4nGNgAAAAAgABSK+kcQAAAABJRU5ErkJggg==', 'base64')
 const diaryLifeFixtureBaseYear = 1000 + Math.floor(Math.random() * 700)
@@ -319,7 +319,7 @@ for (const viewport of [{ width: 390, height: 844 }, { width: 430, height: 900 }
       await listedEvent.click()
       await expect(eventList).toHaveCount(0)
       await expect(reader.locator('h1')).toHaveText(updatedEventTitle)
-      await expect(calendar.locator('.life-month-label')).toHaveText(eventDate!.slice(0, 7))
+      await expect(calendar.locator('.life-month-label')).toHaveText(diaryMonthLabel(eventDate!.slice(0, 7)))
       await expect(cell).toHaveAttribute('aria-pressed', 'false')
       await reader.getByRole('button', { name: '编辑事件' }).click()
       await expect(eventTitleInput).toHaveValue(updatedEventTitle)
@@ -521,14 +521,14 @@ test('keeps event calendar context aligned after date edits', async ({ page }) =
   await page.getByRole('button', { name: '保存', exact: true }).click()
   await expect(reader.locator('.diary-event-reader-date')).toContainText('2026年12月5日')
   await reader.getByRole('button', { name: '关闭事件' }).click()
-  await expect(calendar.locator('.life-month-label')).toHaveText('2026-12')
+  await expect(calendar.locator('.life-month-label')).toHaveText(diaryMonthLabel('2026-12'))
   await expect(calendar.locator(`[data-date="${movedDate}"]`)).toHaveAttribute('aria-pressed', 'true')
   await expect(page.getByRole('button', { name: '日期调整日程', exact: true })).toBeVisible()
 
   await page.getByRole('button', { name: '关闭当天事件' }).click()
   const arrows = calendar.locator('.n-calendar-header').getByRole('button')
   await arrows.first().click()
-  await expect(calendar.locator('.life-month-label')).toHaveText('2026-11')
+  await expect(calendar.locator('.life-month-label')).toHaveText(diaryMonthLabel('2026-11'))
   await expect(originalCell.locator('.life-marker')).toHaveCount(0)
 
   const yearlyDate = '2026-11-21'
@@ -544,7 +544,7 @@ test('keeps event calendar context aligned after date edits', async ({ page }) =
   await page.getByRole('button', { name: '关闭当天事件' }).click()
 
   for (let index = 0; index < 12; index++) await arrows.last().click()
-  await expect(calendar.locator('.life-month-label')).toHaveText('2027-11')
+  await expect(calendar.locator('.life-month-label')).toHaveText(diaryMonthLabel('2027-11'))
   const nextYearCell = calendar.locator('[data-date="2027-11-21"]')
   await nextYearCell.click()
   const yearlyEvent = page.getByRole('button', { name: '年度日程', exact: true })
@@ -563,7 +563,7 @@ test('keeps event calendar context aligned after date edits', async ({ page }) =
   await expect(reader.getByRole('button', { name: '编辑事件' })).toBeFocused()
   await page.getByRole('button', { name: '关闭事件' }).focus()
   await page.keyboard.press('Enter')
-  await expect(calendar.locator('.life-month-label')).toHaveText('2027-11')
+  await expect(calendar.locator('.life-month-label')).toHaveText(diaryMonthLabel('2027-11'))
   await expect(nextYearCell).toHaveAttribute('aria-pressed', 'true')
   await expect(yearlyEvent).toBeFocused()
 
@@ -573,7 +573,7 @@ test('keeps event calendar context aligned after date edits', async ({ page }) =
   await titleInput.fill('年度日程已更新')
   await page.getByRole('button', { name: '保存', exact: true }).click()
   await expect(reader.locator('h1')).toHaveText('年度日程已更新')
-  await expect(calendar.locator('.life-month-label')).toHaveText('2027-11')
+  await expect(calendar.locator('.life-month-label')).toHaveText(diaryMonthLabel('2027-11'))
   await expect(calendar.locator('[data-date="2027-11-21"]')).toHaveAttribute('aria-pressed', 'true')
 
   await reader.getByRole('button', { name: '关闭事件' }).click()
@@ -862,7 +862,7 @@ test('lunar Events preserve their rule across countdowns, editing and calendar d
   await listedEvent.click()
   await expect(eventList).toHaveCount(0)
   await expect(reader.locator('h1')).toHaveText(title)
-  await expect(calendar.locator('.life-month-label')).toHaveText('2027-06')
+  await expect(calendar.locator('.life-month-label')).toHaveText(diaryMonthLabel('2027-06'))
   await expect(calendar.locator('[aria-pressed="true"]')).toHaveCount(0)
   await reader.getByRole('button', { name: '编辑事件' }).click()
   await expect(page.getByLabel('农历月份', { exact: true })).toHaveValue('5')
@@ -1397,17 +1397,20 @@ for (const viewport of [
 }
 
 for (const viewport of [
+  { width: 1920, height: 1080 },
   { width: 1800, height: 830 },
   { width: 1280, height: 800 },
   { width: 1024, height: 768 },
   { width: 768, height: 1024 },
+  { width: 601, height: 900 },
+  { width: 600, height: 900 },
   { width: 430, height: 844 },
   { width: 390, height: 844 },
   { width: 320, height: 568 },
 ]) {
   test(`calendar layout stays aligned at ${viewport.width}×${viewport.height}`, async ({ page }, testInfo) => {
     await page.setViewportSize(viewport)
-    const english = viewport.width === 1280
+    const english = viewport.width >= 1200
     if (!english) await page.addInitScript(() => Object.defineProperty(navigator, 'language', { value: 'zh-CN' }))
     await page.goto('/diary')
     await unlockDiary(page)
@@ -1422,17 +1425,28 @@ for (const viewport of [
     const center = (box: { x: number; width: number }) => box.x + box.width / 2
     const calendarBox = (await calendar.boundingBox())!
     const titleBox = (await title.boundingBox())!
+    const initialMonth = `${diaryLifeFixtureYear(testInfo)}-01`
+    const todayBackground = await today.locator('.life-date-badge').evaluate(node => getComputedStyle(node).backgroundColor)
 
-    await expect(title).toHaveText(/^\d{4}-\d{2}$/)
+    await expect(title).toHaveAttribute('data-month', initialMonth)
+    await expect(title).toHaveText(diaryMonthLabel(initialMonth, english ? 'en' : 'zh'))
+    expect(calendarBox.width).toBeLessThanOrEqual(800)
+    expect(Math.abs(center(calendarBox) - viewport.width / 2)).toBeLessThan(1)
     await expect(arrows).toHaveCount(2)
     expect(Math.abs(center(calendarBox) - center(titleBox))).toBeLessThan(1)
+    await calendar.getByTestId('diary-calendar-month-picker').click()
+    await expect(page.locator('.n-date-panel').first()).toBeVisible()
+    await page.keyboard.press('Escape')
+    await expect(page.locator('.n-date-panel')).toHaveCount(0)
     const left = (await arrows.first().boundingBox())!
     const right = (await arrows.last().boundingBox())!
     expect(Math.abs((center(left) + center(right)) / 2 - center(titleBox))).toBeLessThan(1)
-    expect([left.width, left.height, right.width, right.height]).toEqual([44, 44, 44, 44])
+    const arrowSize = viewport.width <= 600 ? 40 : 44
+    expect([left.width, left.height, right.width, right.height]).toEqual([arrowSize, arrowSize, arrowSize, arrowSize])
     await expect(grid).toHaveCSS('border-top-width', '0px')
     await expect(grid.locator('.n-calendar-cell').first()).toHaveCSS('border-bottom-width', '0px')
-    expect(await number.evaluate(node => getComputedStyle(node, '::after').width)).toBe('14px')
+    expect(await number.evaluate(node => getComputedStyle(node, '::after').content)).toBe('none')
+    expect(await today.locator('.life-date-badge').evaluate(node => getComputedStyle(node).backgroundColor)).not.toBe('rgba(0, 0, 0, 0)')
 
     const labels = calendar.locator('.life-weekdays span')
     const dates = calendar.locator('.life-date')
@@ -1462,6 +1476,7 @@ for (const viewport of [
     expect(scroll.scrollbarGutter).toBe('auto')
     const monthBefore = await title.innerText()
     const rowHeight = (await dates.first().boundingBox())!.height
+    expect(rowHeight).toBe(viewport.width <= 600 ? 68 : 80)
     await arrows.last().click()
     await expect(title).not.toHaveText(monthBefore)
     expect((await calendar.boundingBox())!.height).toBe(calendarBox.height)
@@ -1471,6 +1486,8 @@ for (const viewport of [
 
     await openEmptyDiaryDay(page, today)
     await expect(today).toHaveAttribute('aria-pressed', 'true')
+    await expect.poll(() => today.locator('.life-date-badge').evaluate(node => getComputedStyle(node).backgroundColor))
+      .not.toBe(todayBackground)
     await expect(page.getByTestId('diary-edit-entry')).toHaveCount(0)
     await page.getByTestId('diary-cancel-edit').click()
     await expect(page.getByTestId('diary-day-dialog')).toHaveCount(0)

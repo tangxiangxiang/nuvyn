@@ -1,6 +1,16 @@
 import type { Locator, Page, Request, Response } from '@playwright/test'
 import { expect } from '../fixtures/auth'
 
+export function diaryMonthLabel(month: string, locale: 'zh' | 'en' = 'en'): string {
+  const match = /^(\d{4})-(\d{2})$/.exec(month)
+  if (!match) return month
+  return new Intl.DateTimeFormat(locale === 'zh' ? 'zh-CN' : 'en-US', {
+    year: 'numeric',
+    month: 'long',
+    timeZone: 'UTC',
+  }).format(new Date(Date.UTC(Number(match[1]), Number(match[2]) - 1, 1)))
+}
+
 export async function openEmptyDiaryDay(page: Page, cell: Locator, open = () => cell.click()) {
   const date = await cell.getAttribute('data-date')
   if (!date) throw new Error('Cannot open Diary day: target calendar cell has no data-date')

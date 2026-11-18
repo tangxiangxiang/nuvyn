@@ -3,10 +3,17 @@ import { mount, enableAutoUnmount } from '@vue/test-utils'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import DiaryLifeCalendar from '../DiaryLifeCalendar.vue'
 import { alarmClockAsset } from '../../../features/diary/deadlineReminderAssets'
+import { useI18n } from '../../../composables/useI18n'
 
 enableAutoUnmount(afterEach)
-beforeEach(() => vi.useFakeTimers())
-afterEach(() => vi.useRealTimers())
+beforeEach(() => {
+  vi.useFakeTimers()
+  useI18n().setLocale('zh')
+})
+afterEach(() => {
+  vi.useRealTimers()
+  useI18n().setLocale('zh')
+})
 
 function mountCalendar(markers: Record<string, { source?: string; emoji?: string; count?: number; hasTasks?: boolean; taskDeadlineState?: 'normal' | 'due-soon' | 'overdue' | 'inactive' }> = {}) {
   const wrapper = mount(DiaryLifeCalendar, {
@@ -30,6 +37,19 @@ function mountCalendar(markers: Record<string, { source?: string; emoji?: string
 }
 
 describe('Diary calendar wheel navigation', () => {
+  it('localizes the month heading while preserving the yyyy-MM picker value', () => {
+    const { wrapper } = mountCalendar()
+    expect(wrapper.get('.life-month-label').text()).toBe('2026年11月')
+    expect(wrapper.get('.life-month-label').attributes('data-month')).toBe('2026-11')
+    wrapper.unmount()
+
+    useI18n().setLocale('en')
+    const english = mountCalendar()
+    expect(english.wrapper.get('.life-month-label').text()).toBe('November 2026')
+    expect(english.wrapper.get('.life-month-label').attributes('data-month')).toBe('2026-11')
+    english.wrapper.unmount()
+  })
+
   it('ignores light movement and flips only once for a strong flick with a long tail', () => {
     const { wheel, months } = mountCalendar()
     wheel([12, 18, 24, 20])

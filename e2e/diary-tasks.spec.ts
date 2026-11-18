@@ -1,5 +1,5 @@
 import { test, expect } from './fixtures/auth'
-import { chooseDiaryAction, unlockDiary } from './helpers/diary-life'
+import { chooseDiaryAction, diaryMonthLabel, unlockDiary } from './helpers/diary-life'
 
 const fixtureYear = 1900 + Math.floor(Math.random() * 100)
 let testYear = fixtureYear
@@ -641,7 +641,7 @@ test('a delayed Todo page from the previous month cannot replace current calenda
     const calendar = page.locator('.diary-life-calendar')
     const arrows = calendar.locator('.n-calendar-header').getByRole('button')
     await arrows.last().click()
-    await expect(calendar.locator('.life-month-label')).toHaveText(`${testYear}-12`)
+    await expect(calendar.locator('.life-month-label')).toHaveText(diaryMonthLabel(`${testYear}-12`))
     const currentCell = calendar.locator(`[data-date="${currentMonthTask.dueDate}"]`)
     await expect(currentCell.locator('.life-task-marker')).toBeVisible()
 

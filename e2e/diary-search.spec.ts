@@ -1,5 +1,5 @@
 import { test, expect } from './fixtures/auth'
-import { unlockDiary } from './helpers/diary-life'
+import { diaryMonthLabel, unlockDiary } from './helpers/diary-life'
 
 const currentDate = '2024-06-08'
 const longDate = '2025-06-12'
@@ -74,13 +74,13 @@ test('Diary private search opens current and cross-year hits in reading mode and
   await expect(currentDialog).toContainText('Current month memory: blue teacup')
   await expect(currentDialog.getByTestId('diary-bullet-reader')).toBeVisible()
   await expect(currentDialog.getByTestId('diary-bullet-editor')).toHaveCount(0)
-  await expect(page.locator('.life-month-label')).toHaveText(currentDate.slice(0, 7))
+  await expect(page.locator('.life-month-label')).toHaveText(diaryMonthLabel(currentDate.slice(0, 7)))
   await page.getByRole('button', { name: '关闭日记' }).click()
 
   for (const width of [768, 390]) {
     await page.setViewportSize({ width, height: width === 390 ? 844 : 1024 })
     const dialog = await searchFor(page, 'search needle', longDate)
-    await expect(page.locator('.life-month-label')).toHaveText(longDate.slice(0, 7))
+    await expect(page.locator('.life-month-label')).toHaveText(diaryMonthLabel(longDate.slice(0, 7)))
     await expect(page.locator(`.diary-life-calendar [data-date="${longDate}"]`)).toHaveAttribute('aria-pressed', 'true')
     await expect(dialog.getByTestId('diary-bullet-editor')).toHaveCount(0)
     const matchingEntry = dialog.locator(`[data-entry-id="${longEntryIds[74]}"]`)

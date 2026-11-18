@@ -1961,7 +1961,7 @@ onBeforeUnmount(() => {
   min-width: 0;
   height: calc(100dvh - var(--navbar-h, 36px));
   box-sizing: border-box;
-  padding: 8px 20px clamp(16px, 3dvh, 32px);
+  padding: 24px 20px clamp(16px, 3dvh, 32px);
   overflow: auto;
   color: var(--text);
   scrollbar-width: none;
@@ -2002,7 +2002,7 @@ onBeforeUnmount(() => {
 .event-emoji { width: 20px; height: 20px; flex: none; object-fit: contain; }
 .diary-event-header-actions { display: flex; align-items: center; gap: 4px; }
 .unlock-diary { display: block; margin: 20vh auto; }
-@media (max-width: 600px) { .diary-life { padding-inline: 8px; } }
+@media (max-width: 600px) { .diary-life { padding: 16px 8px clamp(16px, 3dvh, 32px); } }
 </style>
 <style>
 .diary-life-dialog.n-card { width: min(640px, calc(100vw - 32px)); max-height: calc(100dvh - 32px); overflow: auto; scrollbar-width: none; }
