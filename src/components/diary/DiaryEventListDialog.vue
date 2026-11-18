@@ -5,6 +5,9 @@ import { dayDistance, displayEventTitle, nextOccurrence, type DiaryEvent } from 
 import type { DiaryTaskListItem, DiaryTaskListStatus } from '../../../shared/diaryTasks'
 import { formatLunarRule } from '../../../shared/lunarCalendar'
 import { eventEmojiSource } from '../../features/diary/eventEmoji'
+import { shouldShowEventDeadlineReminder } from '../../features/diary/deadlineVisualState'
+import { alarmClockAsset } from '../../features/diary/deadlineReminderAssets'
+import { usePrefersReducedMotion } from '../../composables/usePrefersReducedMotion'
 import DiaryTaskRows from './DiaryTaskRows.vue'
 import './diaryCloudCard.css'
 
@@ -48,6 +51,7 @@ const emit = defineEmits<{
 }>()
 
 const scroller = ref<HTMLElement | null>(null)
+const prefersReducedMotion = usePrefersReducedMotion()
 const taskLabel = computed(() => props.taskStatus === 'open' ? '待办事项' : '已完成')
 const isCompletelyEmpty = computed(() => !props.loading && !props.error && !props.taskLoading && !props.taskError
   && props.items.length === 0 && props.tasks.length === 0)
@@ -136,7 +140,7 @@ function editTask(task: DiaryTaskListItem, keyboardActivated: boolean) {
           <span>{{ taskError }}</span>
           <NButton text type="primary" @click="emit('retry-tasks')">重试</NButton>
         </div>
-        <DiaryTaskRows v-else :items="tasks" :today="today" :busy-ids="busyTaskIds" @toggle="emit('toggle-task', $event)" @edit="editTask" />
+        <DiaryTaskRows v-else :items="tasks" :today="today" :busy-ids="busyTaskIds" show-deadline-reminder @toggle="emit('toggle-task', $event)" @edit="editTask" />
         <div v-if="taskHasMore" class="diary-event-list-more">
           <NButton secondary :loading="taskLoadingMore" @click="emit('load-more-tasks')">加载更多待办</NButton>
         </div>
@@ -175,9 +179,12 @@ function editTask(task: DiaryTaskListItem, keyboardActivated: boolean) {
             <strong>{{ eventTitle(event) }}</strong>
             <span class="diary-event-list-meta">{{ secondaryLabel(event) }}</span>
           </span>
-          <span v-if="countdowns.get(event.id) !== null && countdowns.get(event.id) !== undefined" class="diary-event-list-countdown">
-            <strong>{{ countdowns.get(event.id) === 0 ? '今天' : countdowns.get(event.id) }}</strong>
-            <small>{{ countdowns.get(event.id) === 0 ? '就是今天' : '天后' }}</small>
+          <span v-if="countdowns.get(event.id) !== null && countdowns.get(event.id) !== undefined || shouldShowEventDeadlineReminder(event, today)" class="diary-event-list-trailing">
+            <img v-if="shouldShowEventDeadlineReminder(event, today)" class="diary-event-deadline-reminder" :src="alarmClockAsset(prefersReducedMotion)" alt="" aria-hidden="true" data-testid="event-deadline-reminder">
+            <span v-if="countdowns.get(event.id) !== null && countdowns.get(event.id) !== undefined" class="diary-event-list-countdown">
+              <strong>{{ countdowns.get(event.id) === 0 ? '今天' : countdowns.get(event.id) }}</strong>
+              <small>{{ countdowns.get(event.id) === 0 ? '就是今天' : '天后' }}</small>
+            </span>
           </span>
         </button>
         <div v-if="hasMore" class="diary-event-list-more">
@@ -239,6 +246,8 @@ function editTask(task: DiaryTaskListItem, keyboardActivated: boolean) {
   font-weight: 600;
 }
 .diary-event-list-meta { color: var(--text-muted, #6b7280); font-size: 13px; }
+.diary-event-list-trailing { display: flex; align-items: center; justify-content: flex-end; gap: 8px; }
+.diary-event-deadline-reminder { width: 20px; height: 20px; flex: none; object-fit: contain; }
 .diary-event-list-countdown { display: flex; min-width: 62px; flex-direction: column; align-items: flex-end; white-space: nowrap; }
 .diary-event-list-countdown strong { font-size: 16px; font-variant-numeric: tabular-nums; }
 .diary-event-list-countdown small { color: var(--text-muted, #6b7280); font-size: 12px; }

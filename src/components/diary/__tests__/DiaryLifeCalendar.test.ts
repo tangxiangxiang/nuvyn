@@ -2,12 +2,13 @@
 import { mount, enableAutoUnmount } from '@vue/test-utils'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import DiaryLifeCalendar from '../DiaryLifeCalendar.vue'
+import { alarmClockAsset } from '../../../features/diary/deadlineReminderAssets'
 
 enableAutoUnmount(afterEach)
 beforeEach(() => vi.useFakeTimers())
 afterEach(() => vi.useRealTimers())
 
-function mountCalendar(markers: Record<string, { source?: string; emoji?: string; count?: number; hasTasks?: boolean }> = {}) {
+function mountCalendar(markers: Record<string, { source?: string; emoji?: string; count?: number; hasTasks?: boolean; taskDeadlineState?: 'normal' | 'due-soon' | 'overdue' | 'inactive' }> = {}) {
   const wrapper = mount(DiaryLifeCalendar, {
     props: { today: '2026-11-16', selectedDate: null, month: '2026-11-01', revision: 0, markers },
   })
@@ -78,5 +79,25 @@ describe('Diary calendar wheel navigation', () => {
     expect(taskOnly.text()).not.toContain('⏱️')
     expect(taskOnly.text()).not.toContain('⏰')
     wrapper.unmount()
+  })
+
+  it('uses Alarm Clock for due-soon and overdue tasks while preserving event emoji', () => {
+    const { wrapper } = mountCalendar({
+      '2026-11-18': { source: '/emoji/event-birthday.svg', emoji: '🎂', count: 1, hasTasks: true, taskDeadlineState: 'due-soon' },
+      '2026-11-17': { hasTasks: true, taskDeadlineState: 'overdue' },
+    })
+
+    const today = wrapper.get('.life-date[data-date="2026-11-18"] .life-task-marker')
+    expect(today.attributes('src')).toBe(alarmClockAsset(false))
+    expect(today.attributes('alt')).toBe('即将截止待办')
+    expect(wrapper.get('.life-date[data-date="2026-11-18"] .life-marker img:not(.life-task-marker)').attributes('src')).toBe('/emoji/event-birthday.svg')
+    expect(wrapper.get('.life-date[data-date="2026-11-17"] .life-task-marker').attributes('src')).toBe(alarmClockAsset(false))
+    expect(wrapper.findAll('.life-task-marker')).toHaveLength(2)
+    wrapper.unmount()
+  })
+
+  it('selects a static Alarm Clock asset when reduced motion is enabled', () => {
+    expect(alarmClockAsset(true)).toBe('/emoji/alarm-clock.svg')
+    expect(alarmClockAsset(false)).toBe('/emoji/alarm-clock-animated.png')
   })
 })

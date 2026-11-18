@@ -8,7 +8,7 @@ bundle or a compliance certification.
 
 | Component | License or evidence |
 | --- | --- |
-| Microsoft Fluent Emoji Color SVGs | MIT, copyright Microsoft Corporation. The [original license text](public/emoji/FLUENT-EMOJI-LICENSE.txt) accompanies the bundled assets. See the [pinned source and per-asset mapping](docs/third-party/fluent-emoji.md). |
+| Microsoft Fluent Emoji SVG and APNG assets | MIT, copyright Microsoft Corporation. The [original license text](public/emoji/FLUENT-EMOJI-LICENSE.txt) accompanies the bundled assets. See the [pinned sources and per-asset mapping](docs/third-party/fluent-emoji.md). |
 | Excalidraw `0.18.0-4e758db` | The locked package declares MIT for the library code. See the [upstream license](https://github.com/excalidraw/excalidraw/blob/master/LICENSE). Confirm the full notice at the shipped revision. Bundled fonts need their own notices. |
 | Assistant font | SIL Open Font License 1.1. Assistant font files are present in the locally inspected browser build. See the [font license](https://github.com/google/fonts/blob/main/ofl/assistant/OFL.txt). |
 | Monaco Editor and Codicons | Monaco Editor declares MIT and provides `LICENSE` and `ThirdPartyNotices.txt` in its installed package. The browser build contains the Codicon font. See the [Codicons upstream notices](https://github.com/microsoft/vscode-codicons/blob/main/LICENSE), including the separate Git-logo attribution. |

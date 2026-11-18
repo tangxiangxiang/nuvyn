@@ -2,17 +2,20 @@
 import { computed, onBeforeUnmount, ref } from 'vue'
 import { NCalendar, NDatePicker } from 'naive-ui'
 import { useI18n } from '../../composables/useI18n'
+import { usePrefersReducedMotion } from '../../composables/usePrefersReducedMotion'
 import { diaryCalendarMonthFromFields, diaryDateFromCalendarFields, naiveCalendarValueForMonth } from './diaryCalendarAdapter'
+import { taskDeadlineAsset } from '../../features/diary/deadlineReminderAssets'
+import type { DeadlineVisualState } from '../../features/diary/deadlineVisualState'
 
 const PIXEL_WHEEL_MONTH_THRESHOLD = 220
 const LINE_WHEEL_MONTH_THRESHOLD = 6
 const WHEEL_GESTURE_GAP_MS = 120
 const WHEEL_TAIL_MAX_DELTA = 24
 const WHEEL_RESTART_MIN_INCREASE = 12
-const STOPWATCH_MARKER_SOURCE = '/emoji/stopwatch.svg'
-const props = defineProps<{ today: string; selectedDate: string | null; month: string; revision: number; markers: Record<string, { source?: string; emoji?: string; count?: number; hasEntries?: boolean; hasAttachments?: boolean; hasTasks?: boolean }> }>()
+const props = defineProps<{ today: string; selectedDate: string | null; month: string; revision: number; markers: Record<string, { source?: string; emoji?: string; count?: number; hasEntries?: boolean; hasAttachments?: boolean; hasTasks?: boolean; taskDeadlineState?: DeadlineVisualState }> }>()
 const emit = defineEmits<{ select: [date: string]; month: [date: string] }>()
 const { locale } = useI18n()
+const prefersReducedMotion = usePrefersReducedMotion()
 // Match the firstDayOfWeek of the zhCN and enUS locales in NuvynUiRoot.
 const weekdays = computed(() => locale.value === 'zh'
   ? ['周一', '周二', '周三', '周四', '周五', '周六', '周日']
@@ -214,7 +217,13 @@ function selectDate(date: string, event: MouseEvent) {
           <span v-else-if="markers[dateFor(year, month, date)]?.emoji">{{ markers[dateFor(year, month, date)]?.emoji }}</span>
           <span v-else-if="markers[dateFor(year, month, date)]?.hasEntries || markers[dateFor(year, month, date)]?.hasAttachments" class="life-entry-marker" aria-label="有日记内容">•</span>
           <small v-if="(markers[dateFor(year, month, date)]?.count ?? 0) > 1">+{{ markers[dateFor(year, month, date)]!.count! - 1 }}</small>
-          <img v-if="markers[dateFor(year, month, date)]?.hasTasks" class="life-task-marker" :src="STOPWATCH_MARKER_SOURCE" alt="有未完成待办">
+          <img
+            v-if="markers[dateFor(year, month, date)]?.hasTasks"
+            class="life-task-marker"
+            :data-deadline-state="markers[dateFor(year, month, date)]?.taskDeadlineState ?? 'normal'"
+            :src="taskDeadlineAsset(markers[dateFor(year, month, date)]?.taskDeadlineState ?? 'normal', prefersReducedMotion)"
+            :alt="markers[dateFor(year, month, date)]?.taskDeadlineState === 'overdue' ? '逾期待办' : markers[dateFor(year, month, date)]?.taskDeadlineState === 'due-soon' ? '即将截止待办' : '有未完成待办'"
+          >
         </span>
       </button>
     </template>

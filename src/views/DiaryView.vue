@@ -30,6 +30,7 @@ import '../components/diary/diaryCloudCard.css'
 import { DiaryTaskConflictError, DiaryTaskHistoryProtectedError, DiaryTaskListChangedError, diaryTasksApi } from '../lib/diary-tasks-api'
 import { groupTasksByDueDate, listDiaryTasksInRange } from '../features/diary/diaryTaskCalendar'
 import { eventEmojiSource } from '../features/diary/eventEmoji'
+import { mostUrgentTaskDeadlineState, type DeadlineVisualState } from '../features/diary/deadlineVisualState'
 import { clearDiarySearchOpen, consumeDiarySearchOpen, diarySearchOpenIntent, type DiarySearchOpenIntent } from '../composables/diary/useDiarySearchNavigation'
 
 const access = useDiaryAccessSession()
@@ -251,7 +252,7 @@ function dayEventLabel(event: DiaryEvent): string {
   return displayEventTitle(event, selected.value)
 }
 const markers = computed(() => {
-  const result: Record<string, { source?: string; emoji?: string; count?: number; hasEntries?: boolean; hasAttachments?: boolean; hasTasks?: boolean }> = {}
+  const result: Record<string, { source?: string; emoji?: string; count?: number; hasEntries?: boolean; hasAttachments?: boolean; hasTasks?: boolean; taskDeadlineState?: DeadlineVisualState }> = {}
   if (mode.value === 'diary') {
     for (const d of days.value) {
       if (d.moodId) result[d.date] = { source: preferences.sourceFor(d.moodId), hasAttachments: d.hasAttachments }
@@ -260,10 +261,10 @@ const markers = computed(() => {
   } else {
     for (let date = range.value.start; date <= range.value.end; date = addDays(date, 1)) {
       const matches = events.value.filter(e => occursOn(e, date)).sort(compareEvents)
-      const hasTasks = (calendarTasksByDate.value.get(date) ?? []).some(task => task.completedAt === null
-        && !(task.kind === 'recurring' && task.skipped))
-      if (matches[0]) result[date] = { source: eventEmojiSource(matches[0].emoji), emoji: matches[0].emoji, count: matches.length, hasTasks }
-      else if (hasTasks) result[date] = { hasTasks: true }
+      const taskDeadlineState = mostUrgentTaskDeadlineState(calendarTasksByDate.value.get(date) ?? [], today.value)
+      const hasTasks = taskDeadlineState !== 'inactive'
+      if (matches[0]) result[date] = { source: eventEmojiSource(matches[0].emoji), emoji: matches[0].emoji, count: matches.length, hasTasks, taskDeadlineState }
+      else if (hasTasks) result[date] = { hasTasks: true, taskDeadlineState }
     }
   }
   return result

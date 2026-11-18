@@ -93,6 +93,39 @@ describe('DiaryEventListDialog content', () => {
     wrapper.unmount()
   })
 
+  it('adds an Alarm Clock for a near event without replacing its emoji or countdown', () => {
+    const tomorrow = makeEvent({
+      id: 'tomorrow',
+      title: '爷爷生日',
+      startDate: '2026-11-19',
+      endDate: '2026-11-19',
+      recurrence: 'none',
+      type: 'birthday',
+    })
+    const wrapper = mount(DiaryEventListDialog, {
+      props: { items: [tomorrow], today: '2026-11-18' },
+      global: { stubs: naiveStubs },
+    })
+
+    const card = wrapper.get('[data-event-id="tomorrow"]')
+    expect(card.find('.diary-event-list-emoji img').attributes('src')).toBe('/emoji/event-birthday.svg')
+    expect(card.find('[data-testid="event-deadline-reminder"]').attributes('src')).toBe('/emoji/alarm-clock-animated.png')
+    expect(card.find('.diary-event-list-countdown').text()).toContain('1')
+    expect(card.attributes('aria-label')).toBe('爷爷生日')
+    wrapper.unmount()
+  })
+
+  it('does not show reminder animation for a future event more than one day away', () => {
+    const later = makeEvent({ startDate: '2026-11-20', endDate: '2026-11-20', recurrence: 'none' })
+    const wrapper = mount(DiaryEventListDialog, {
+      props: { items: [later], today: '2026-11-18' },
+      global: { stubs: naiveStubs },
+    })
+
+    expect(wrapper.find('[data-testid="event-deadline-reminder"]').exists()).toBe(false)
+    wrapper.unmount()
+  })
+
   it('shows tasks and events together while keeping task completion separate from event selection', async () => {
     const event = makeEvent({ id: 'event-2', title: '爷爷75岁生日' })
     const task = makeTask()

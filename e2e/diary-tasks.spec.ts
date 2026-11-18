@@ -15,7 +15,7 @@ test('creates a dated task, completes it, restores it, and moves it to a new cal
   await page.getByTestId('diary-view-toggle').click()
 
   const date = `${testYear}-11-16`
-  const nextDate = `${testYear}-11-17`
+  const nextDate = `${testYear}-11-19`
   const cell = page.locator(`.diary-life-calendar [data-date="${date}"]`)
   await expect(cell).toBeVisible()
   await cell.click()
@@ -34,8 +34,8 @@ test('creates a dated task, completes it, restores it, and moves it to a new cal
   await expect(complete).toBeVisible()
   const marker = cell.locator('.life-task-marker')
   await expect(marker).toBeVisible()
-  await expect(marker).toHaveAttribute('src', '/emoji/stopwatch.svg')
-  await expect(marker).toHaveJSProperty('naturalWidth', 32)
+  await expect(marker).toHaveAttribute('src', '/emoji/alarm-clock-animated.png')
+  await expect(marker).toHaveJSProperty('naturalWidth', 256)
 
   const secondTitle = `${title} second`
   await chooseDiaryAction(page, page.getByRole('button', { name: '更多当天事件操作' }), '新增待办')
@@ -110,10 +110,37 @@ test('creates a dated task, completes it, restores it, and moves it to a new cal
   await expect(nextCell.locator('.life-task-marker')).toBeVisible()
   await page.getByRole('button', { name: '关闭当天事件' }).click()
   await nextCell.click()
+  await expect(nextCell.locator('.life-task-marker')).toHaveAttribute('src', '/emoji/stopwatch.svg')
   await page.getByRole('button', { name: `编辑待办：${title}`, exact: true }).click()
   await page.getByRole('button', { name: '删除', exact: true }).click()
   await page.getByRole('dialog', { name: '删除这条待办？' }).getByRole('button', { name: /^(Confirm|确认|确定)$/ }).click()
   await expect(nextCell.locator('.life-task-marker')).toHaveCount(0)
+})
+
+test('uses the static Alarm Clock when reduced motion is enabled', async ({ page }) => {
+  await page.emulateMedia({ reducedMotion: 'reduce' })
+  await page.goto('/diary')
+  await unlockDiary(page)
+  await page.getByTestId('diary-view-toggle').click()
+
+  const date = `${testYear}-11-16`
+  const cell = page.locator(`.diary-life-calendar [data-date="${date}"]`)
+  await cell.click()
+  await chooseDiaryAction(page, page.getByRole('button', { name: '更多当天事件操作' }), '新增待办')
+  const title = `Reduced motion ${Math.random().toString(36).slice(2, 8)}`
+  await page.getByRole('textbox', { name: '待办名称' }).fill(title)
+  await page.getByLabel('截止日期').fill(date)
+  await page.getByRole('button', { name: '保存', exact: true }).click()
+
+  const marker = cell.locator('.life-task-marker')
+  await expect(marker).toBeVisible()
+  await expect(marker).toHaveAttribute('src', '/emoji/alarm-clock.svg')
+  await expect(marker).toHaveJSProperty('naturalWidth', 32)
+
+  await page.getByRole('button', { name: `编辑待办：${title}` }).click()
+  await page.getByRole('button', { name: '删除', exact: true }).click()
+  await page.getByRole('dialog', { name: '删除这条待办？' }).getByRole('button', { name: /^(Confirm|确认|确定)$/ }).click()
+  await expect(marker).toHaveCount(0)
 })
 
 test('keeps long task titles and due times aligned without horizontal overflow', async ({ page }) => {

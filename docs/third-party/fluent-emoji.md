@@ -111,6 +111,21 @@ The Diary Todo calendar marker uses the same pinned source and license.
 | --- | --- |
 | `public/emoji/stopwatch.svg` | `assets/Stopwatch/Color/stopwatch_color.svg` |
 
+The Diary deadline reminder uses the animated Fluent Emoji repository for its
+APNG and the static Fluent Emoji repository for its reduced-motion fallback.
+Both repositories publish MIT-licensed Fluent Emoji assets. The complete MIT
+text is included at `public/emoji/FLUENT-EMOJI-LICENSE.txt`.
+
+| Nuvyn bundled asset | Upstream asset |
+| --- | --- |
+| `public/emoji/alarm-clock-animated.png` | `microsoft/fluentui-emoji-animated@daa0365c09795789ed2bc6e8b228c97736cb6669/assets/Alarm clock/animated/alarm_clock_animated.png` |
+| `public/emoji/alarm-clock.svg` | `microsoft/fluentui-emoji@1ffb34c752ecf5d402f04cfb4b392c77f57c54bc/assets/Alarm clock/Color/alarm_clock_color.svg` |
+
+The animated PNG was fetched from the upstream Git LFS media endpoint, not copied
+from its text pointer. Its verified SHA-256 is
+`0929c06ab883b7e4c3cf7717dfa0d93d42733d455fcf7d2874c013866e89d769` and it
+contains 37 frames at approximately 24 fps.
+
 Diary Reborn event presets use unchanged SVGs from the same pinned revision
 and MIT license. Presets never determine an event's category. Other user-entered
 Emoji use the platform glyph renderer without loading remote resources.

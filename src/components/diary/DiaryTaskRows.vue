@@ -1,6 +1,9 @@
 <script setup lang="ts">
 import type { DiaryTaskListItem } from '../../../shared/diaryTasks'
 import { taskDueDateLabel } from '../../features/diary/diaryTaskCalendar'
+import { taskDeadlineVisualState } from '../../features/diary/deadlineVisualState'
+import { alarmClockAsset } from '../../features/diary/deadlineReminderAssets'
+import { usePrefersReducedMotion } from '../../composables/usePrefersReducedMotion'
 import './diaryCloudCard.css'
 
 const props = withDefaults(defineProps<{
@@ -10,12 +13,15 @@ const props = withDefaults(defineProps<{
   showDueDate?: boolean
   editable?: boolean
   variant?: 'card' | 'plain'
+  showDeadlineReminder?: boolean
 }>(), {
   busyIds: () => new Set<string>(),
   showDueDate: true,
   editable: true,
   variant: 'card',
+  showDeadlineReminder: false,
 })
+const prefersReducedMotion = usePrefersReducedMotion()
 
 const emit = defineEmits<{
   toggle: [task: DiaryTaskListItem]
@@ -26,6 +32,12 @@ function detail(task: DiaryTaskListItem): string {
   if (props.showDueDate) return taskDueDateLabel(task, props.today)
   if (!task.dueTime) return ''
   return task.kind === 'recurring' ? task.dueTime : `截止 ${task.dueTime}`
+}
+
+function hasDeadlineReminder(task: DiaryTaskListItem): boolean {
+  if (!props.showDeadlineReminder) return false
+  const state = taskDeadlineVisualState(task, props.today)
+  return state === 'due-soon' || state === 'overdue'
 }
 </script>
 
@@ -57,14 +69,20 @@ function detail(task: DiaryTaskListItem): string {
           <span class="diary-task-title">{{ task.title }}<span v-if="task.kind === 'recurring'" class="diary-task-repeat" aria-label="重复待办"> ↻</span></span>
           <small v-if="task.kind === 'recurring' && task.skipped" class="diary-task-status">本次已跳过</small>
         </span>
-        <small v-if="detail(task)" class="diary-task-detail">{{ detail(task) }}</small>
+        <span v-if="detail(task) || hasDeadlineReminder(task)" class="diary-task-trailing">
+          <small v-if="detail(task)" class="diary-task-detail">{{ detail(task) }}</small>
+          <img v-if="hasDeadlineReminder(task)" class="diary-task-deadline-reminder" :src="alarmClockAsset(prefersReducedMotion)" alt="" aria-hidden="true">
+        </span>
       </button>
       <div v-else class="diary-task-edit">
         <span class="diary-task-copy">
           <span class="diary-task-title">{{ task.title }}<span v-if="task.kind === 'recurring'" class="diary-task-repeat" aria-label="重复待办"> ↻</span></span>
           <small v-if="task.kind === 'recurring' && task.skipped" class="diary-task-status">本次已跳过</small>
         </span>
-        <small v-if="detail(task)" class="diary-task-detail">{{ detail(task) }}</small>
+        <span v-if="detail(task) || hasDeadlineReminder(task)" class="diary-task-trailing">
+          <small v-if="detail(task)" class="diary-task-detail">{{ detail(task) }}</small>
+          <img v-if="hasDeadlineReminder(task)" class="diary-task-deadline-reminder" :src="alarmClockAsset(prefersReducedMotion)" alt="" aria-hidden="true">
+        </span>
       </div>
     </div>
   </div>
@@ -138,8 +156,9 @@ function detail(task: DiaryTaskListItem): string {
 .diary-task-repeat { white-space: nowrap; }
 .diary-task-detail,
 .diary-task-status { color: var(--text-muted, #6b7280); font-size: 12px; }
+.diary-task-trailing { display: flex; align-items: center; justify-self: end; gap: 5px; min-width: 0; }
+.diary-task-deadline-reminder { width: 18px; height: 18px; flex: none; object-fit: contain; }
 .diary-task-detail {
-  justify-self: end;
   padding: 3px 6px;
   border-radius: 6px;
   background-color: color-mix(in srgb, var(--text) 4%, transparent);

@@ -31,7 +31,8 @@ describe('DiaryTaskRows', () => {
     expect(wrapper.get('.diary-task-row').classes()).toContain('diary-cloud-card')
     expect(wrapper.get('.diary-task-edit').element.children[0]?.className).toBe('diary-task-copy')
     expect(wrapper.get('.diary-task-detail').text()).toBe('截止 12:00')
-    expect(wrapper.get('.diary-task-edit').element.children[1]?.className).toBe('diary-task-detail')
+    expect(wrapper.get('.diary-task-edit').element.children[1]?.className).toBe('diary-task-trailing')
+    expect(wrapper.get('.diary-task-trailing').find('.diary-task-detail').exists()).toBe(true)
     wrapper.unmount()
   })
 
@@ -40,6 +41,21 @@ describe('DiaryTaskRows', () => {
 
     expect(wrapper.find('.diary-task-detail').exists()).toBe(false)
     expect(wrapper.get('.diary-task-title').text()).toBe('OEE报表开发')
+    wrapper.unmount()
+  })
+
+  it('shows deadline Alarm Clock only in reminder lists for open urgent tasks', () => {
+    const urgent = makeTask({ dueDate: '2026-11-18' })
+    const future = makeTask({ id: 'future', dueDate: '2026-11-21' })
+    const completed = makeTask({ id: 'completed', dueDate: '2026-11-18', completedAt: 1 })
+    const wrapper = mount(DiaryTaskRows, {
+      props: { items: [urgent, future, completed], today: '2026-11-18', showDeadlineReminder: true },
+    })
+
+    const rows = wrapper.findAll('.diary-task-row')
+    expect(rows[0]!.find('.diary-task-deadline-reminder').attributes('src')).toBe('/emoji/alarm-clock-animated.png')
+    expect(rows[1]!.find('.diary-task-deadline-reminder').exists()).toBe(false)
+    expect(rows[2]!.find('.diary-task-deadline-reminder').exists()).toBe(false)
     wrapper.unmount()
   })
 
