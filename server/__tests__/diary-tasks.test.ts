@@ -218,6 +218,133 @@ describe('Diary task API', () => {
       .toMatchObject({ version: 3 })
   })
 
+  it('stops a recurring series when no later occurrence state has been recorded', async () => {
+    const id = randomUUID()
+    const daily = seriesFields({ recurrence: { frequency: 'daily', startDate: '2026-11-16', untilDate: null } })
+    expect((await request('PUT', `/task-series/${id}`, { ...daily, expectedVersion: 0 })).status).toBe(200)
+    const revision = taskListRevision()
+
+    const stopped = await request('POST', `/task-series/${id}/stop`, { effectiveDate: '2026-11-20', expectedVersion: 1 })
+
+    expect(stopped.status).toBe(200)
+    expect((await stopped.json()).series).toMatchObject({ recurrence: { untilDate: '2026-11-20' }, version: 2 })
+    expect(taskListRevision()).toBe(revision + 1)
+    expect((await request('GET', `/task-series/${id}/occurrences/2026-11-20`)).status).toBe(200)
+    expect((await request('GET', `/task-series/${id}/occurrences/2026-11-21`)).status).toBe(400)
+  })
+
+  it('protects a completed future occurrence when stopping a recurring series', async () => {
+    const id = randomUUID()
+    const daily = seriesFields({ recurrence: { frequency: 'daily', startDate: '2026-11-16', untilDate: null } })
+    expect((await request('PUT', `/task-series/${id}`, { ...daily, expectedVersion: 0 })).status).toBe(200)
+    expect((await request('POST', `/task-series/${id}/occurrences/2026-11-25/complete`, { expectedVersion: 0 })).status).toBe(200)
+    const revision = taskListRevision()
+
+    const stopped = await request('POST', `/task-series/${id}/stop`, { effectiveDate: '2026-11-20', expectedVersion: 1 })
+
+    expect(stopped.status).toBe(409)
+    expect(await stopped.json()).toEqual({ code: 'diary-task-history-protected' })
+    expect(taskListRevision()).toBe(revision)
+    expect((await (await request('GET', `/task-series/${id}`)).json()).series)
+      .toMatchObject({ recurrence: { untilDate: null }, version: 1 })
+    expect((await (await request('GET', `/task-series/${id}/occurrences/2026-11-25`)).json()).occurrence)
+      .toMatchObject({ completedAt: Date.now(), skipped: false, occurrenceVersion: 1 })
+  })
+
+  it('protects a skipped future occurrence when stopping a recurring series', async () => {
+    const id = randomUUID()
+    const daily = seriesFields({ recurrence: { frequency: 'daily', startDate: '2026-11-16', untilDate: null } })
+    expect((await request('PUT', `/task-series/${id}`, { ...daily, expectedVersion: 0 })).status).toBe(200)
+    expect((await request('POST', `/task-series/${id}/occurrences/2026-11-25/skip`, { expectedVersion: 0 })).status).toBe(200)
+    const revision = taskListRevision()
+
+    const stopped = await request('POST', `/task-series/${id}/stop`, { effectiveDate: '2026-11-20', expectedVersion: 1 })
+
+    expect(stopped.status).toBe(409)
+    expect(await stopped.json()).toEqual({ code: 'diary-task-history-protected' })
+    expect(taskListRevision()).toBe(revision)
+    expect((await (await request('GET', `/task-series/${id}`)).json()).series)
+      .toMatchObject({ recurrence: { untilDate: null }, version: 1 })
+    expect((await (await request('GET', `/task-series/${id}/occurrences/2026-11-25`)).json()).occurrence)
+      .toMatchObject({ completedAt: null, skipped: true, occurrenceVersion: 1 })
+  })
+
+  it('protects a reopened future occurrence with a pending version when stopping a series', async () => {
+    const id = randomUUID()
+    const daily = seriesFields({ recurrence: { frequency: 'daily', startDate: '2026-11-16', untilDate: null } })
+    expect((await request('PUT', `/task-series/${id}`, { ...daily, expectedVersion: 0 })).status).toBe(200)
+    expect((await request('POST', `/task-series/${id}/occurrences/2026-11-25/complete`, { expectedVersion: 0 })).status).toBe(200)
+    expect((await request('POST', `/task-series/${id}/occurrences/2026-11-25/reopen`, { expectedVersion: 1 })).status).toBe(200)
+    const revision = taskListRevision()
+
+    const stopped = await request('POST', `/task-series/${id}/stop`, { effectiveDate: '2026-11-20', expectedVersion: 1 })
+
+    expect(stopped.status).toBe(409)
+    expect(await stopped.json()).toEqual({ code: 'diary-task-history-protected' })
+    expect(taskListRevision()).toBe(revision)
+    expect((await (await request('GET', `/task-series/${id}`)).json()).series)
+      .toMatchObject({ recurrence: { untilDate: null }, version: 1 })
+    expect((await (await request('GET', `/task-series/${id}/occurrences/2026-11-25`)).json()).occurrence)
+      .toMatchObject({ completedAt: null, skipped: false, occurrenceVersion: 2 })
+    expect(db.prepare(`SELECT version FROM diary_task_occurrences
+      WHERE owner_user_id = ? AND series_id = ? AND occurrence_date = ?`).get(auth.userId, id, '2026-11-25'))
+      .toMatchObject({ version: 2 })
+  })
+
+  it('allows stopping on a recorded occurrence date and keeps that date accessible', async () => {
+    const id = randomUUID()
+    const daily = seriesFields({ recurrence: { frequency: 'daily', startDate: '2026-11-16', untilDate: null } })
+    expect((await request('PUT', `/task-series/${id}`, { ...daily, expectedVersion: 0 })).status).toBe(200)
+    expect((await request('POST', `/task-series/${id}/occurrences/2026-11-20/complete`, { expectedVersion: 0 })).status).toBe(200)
+    const revision = taskListRevision()
+
+    const stopped = await request('POST', `/task-series/${id}/stop`, { effectiveDate: '2026-11-20', expectedVersion: 1 })
+
+    expect(stopped.status).toBe(200)
+    expect((await stopped.json()).series).toMatchObject({ recurrence: { untilDate: '2026-11-20' }, version: 2 })
+    expect(taskListRevision()).toBe(revision + 1)
+    expect((await (await request('GET', `/task-series/${id}/occurrences/2026-11-20`)).json()).occurrence)
+      .toMatchObject({ completedAt: Date.now(), occurrenceVersion: 1 })
+    expect((await request('GET', `/task-series/${id}/occurrences/2026-11-21`)).status).toBe(400)
+  })
+
+  it('returns a CAS conflict without advancing revision after a series was stopped', async () => {
+    const id = randomUUID()
+    const daily = seriesFields({ recurrence: { frequency: 'daily', startDate: '2026-11-16', untilDate: null } })
+    expect((await request('PUT', `/task-series/${id}`, { ...daily, expectedVersion: 0 })).status).toBe(200)
+    expect((await request('POST', `/task-series/${id}/stop`, { effectiveDate: '2026-11-25', expectedVersion: 1 })).status).toBe(200)
+    const revision = taskListRevision()
+
+    const stale = await request('POST', `/task-series/${id}/stop`, { effectiveDate: '2026-11-26', expectedVersion: 1 })
+
+    expect(stale.status).toBe(409)
+    expect(await stale.json()).toEqual({ code: 'diary-conflict' })
+    expect(taskListRevision()).toBe(revision)
+    expect((await (await request('GET', `/task-series/${id}`)).json()).series)
+      .toMatchObject({ recurrence: { untilDate: '2026-11-25' }, version: 2 })
+  })
+
+  it('ignores another owner’s future occurrence state when stopping a series', async () => {
+    const id = randomUUID()
+    const daily = seriesFields({ recurrence: { frequency: 'daily', startDate: '2026-11-16', untilDate: null } })
+    const otherOwner = Number(db.prepare(`INSERT INTO users (username, username_normalized, password_hash, disabled, created_at, updated_at)
+      VALUES (?, ?, ?, 0, ?, ?)`).run('second-series-owner', 'second-series-owner', 'test', Date.now(), Date.now()).lastInsertRowid)
+    await auth.runtime.diaryAccess.withBodyOperation(auth.session.id, capability, operation => {
+      const otherStore = diaryTaskStore(db, otherOwner, operation)
+      otherStore.putSeries(id, daily, 0)
+      otherStore.completeOccurrence(id, '2026-11-25', 0)
+    })
+    expect((await request('PUT', `/task-series/${id}`, { ...daily, expectedVersion: 0 })).status).toBe(200)
+    const revision = taskListRevision()
+
+    const stopped = await request('POST', `/task-series/${id}/stop`, { effectiveDate: '2026-11-20', expectedVersion: 1 })
+
+    expect(stopped.status).toBe(200)
+    expect((await stopped.json()).series).toMatchObject({ recurrence: { untilDate: '2026-11-20' }, version: 2 })
+    expect(taskListRevision()).toBe(revision + 1)
+    expect((await request('GET', `/task-series/${id}/occurrences/2026-11-21`)).status).toBe(400)
+  })
+
   it('keeps split boundaries and completed or skipped history when an old Series is edited again', async () => {
     const id = randomUUID()
     expect((await request('PUT', `/task-series/${id}`, {

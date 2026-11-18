@@ -711,18 +711,24 @@ export function diaryTaskStore(db: Database, owner: number, operation: DiaryBody
     },
     stopSeries(id: string, effectiveDate: string, expected: number): DiaryTaskSeries {
       operation.assertCurrent()
-      const row = readSeriesRow(id)
-      if (!row) {
-        if (deletedSeriesVersion(id) > 0) throw new DiaryConflict()
-        throw new DiaryTaskNotFound()
-      }
-      if (row.version !== expected) throw new DiaryConflict()
-      const current = series(row)
-      if (!taskRecurrenceOccursOn(current.recurrence, effectiveDate, row.effective_from)
-        || current.recurrence.untilDate === effectiveDate) throw new DiaryTaskRecurrenceError()
-      const fields: TaskSeriesFields = { title: current.title, description: current.description, dueTime: current.dueTime,
-        recurrence: { ...current.recurrence, untilDate: effectiveDate } }
       return db.transaction(() => {
+        operation.assertCurrent()
+        const row = readSeriesRow(id)
+        if (!row) {
+          if (deletedSeriesVersion(id) > 0) throw new DiaryConflict()
+          throw new DiaryTaskNotFound()
+        }
+        if (row.version !== expected) throw new DiaryConflict()
+        const current = series(row)
+        if (!taskRecurrenceOccursOn(current.recurrence, effectiveDate, row.effective_from)
+          || current.recurrence.untilDate === effectiveDate) throw new DiaryTaskRecurrenceError()
+        const laterOccurrence = db.prepare(`SELECT 1 FROM diary_task_occurrences
+          WHERE owner_user_id = ? AND series_id = ? AND occurrence_date > ? LIMIT 1`)
+          .get(owner, id, effectiveDate)
+        if (laterOccurrence) throw new DiaryTaskHistoryProtectedError()
+
+        const fields: TaskSeriesFields = { title: current.title, description: current.description, dueTime: current.dueTime,
+          recurrence: { ...current.recurrence, untilDate: effectiveDate } }
         const encrypted = crypto!.encrypt(fields, seriesIdentity(id, expected + 1))
         const result = db.prepare(`UPDATE diary_task_series SET until_date = ?, encrypted_fields = ?, updated_at = ?, version = ?
           WHERE owner_user_id = ? AND id = ? AND version = ?`)
@@ -730,7 +736,7 @@ export function diaryTaskStore(db: Database, owner: number, operation: DiaryBody
         if (!result.changes) throw new DiaryConflict()
         advanceListRevision()
         return series(readSeriesRow(id)!)
-      })()
+      }).immediate()
     },
     removeSeries(id: string, expected: number): number {
       operation.assertCurrent()
