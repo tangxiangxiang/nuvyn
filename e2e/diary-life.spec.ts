@@ -314,7 +314,7 @@ for (const viewport of [{ width: 390, height: 844 }, { width: 430, height: 900 }
       await expect(listedEvent).toBeVisible()
       if (viewport.width === 1280) {
         await expect(listedEvent.locator('.diary-event-list-countdown')).toBeVisible()
-        await expect(listedEvent.locator('.diary-event-list-countdown strong')).toHaveText(/^\d+$/)
+        await expect(listedEvent.locator('.diary-event-list-countdown')).toHaveText(/^(\d+天后|今天|明天|后天)$/)
       }
       await listedEvent.click()
       await expect(eventList).toHaveCount(0)
@@ -691,7 +691,7 @@ test.describe('Diary Event list scrolling', () => {
     await expect(scroller).toHaveCSS('scrollbar-width', 'none')
     expect(await scroller.evaluate(node => getComputedStyle(node, '::-webkit-scrollbar').display)).toBe('none')
     await expect.poll(() => scroller.evaluate(node => node.scrollHeight - node.clientHeight)).toBeGreaterThan(0)
-    await expect(eventList.locator('.diary-event-list-item').first().locator('.diary-event-list-countdown')).toBeVisible()
+    await expect(eventList.locator('.diary-event-list-item').first().locator('.diary-event-list-primary-info')).toBeVisible()
     await expect(page.getByTestId('diary-life')).toHaveCSS('scrollbar-width', 'none')
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true)
 
@@ -824,7 +824,7 @@ test('lunar Events preserve their rule across countdowns, editing and calendar d
   await page.getByRole('menuitem', { name: '新增事件', exact: true }).click()
   await page.getByTestId('event-type-anniversary').click()
 
-  const title = `农历生日 ${testInfo.repeatEachIndex + 1}`
+  const title = `农历生日 ${'标题很长'.repeat(10)} ${testInfo.repeatEachIndex + 1}`
   await page.getByRole('textbox', { name: '事件名称', exact: true }).fill(title)
   await page.getByRole('button', { name: '农历', exact: true }).click()
   await selectNaiveOption(page, '农历月份', '五月')
@@ -856,13 +856,29 @@ test('lunar Events preserve their rule across countdowns, editing and calendar d
   await page.getByTestId('diary-event-list-toggle').click()
   const eventList = page.locator('.diary-event-list-dialog')
   const listedEvent = eventList.getByRole('button').filter({ hasText: title })
-  await expect(listedEvent.locator('.diary-event-list-meta')).toHaveText('农历五月十九')
-  const initialCountdown = listedEvent.locator('.diary-event-list-countdown strong')
-  await expect(initialCountdown).toHaveText(/^\d+$/)
+  await expect(listedEvent.locator('.diary-event-list-meta')).toHaveCount(0)
+  await expect(listedEvent).not.toContainText('农历五月十九')
+  const initialCountdown = listedEvent.locator('.diary-event-list-primary-info')
+  await expect(initialCountdown).toHaveText(/^\d+天后$/)
   const nextOccurrenceCountdown = await initialCountdown.innerText()
+  const listedTitle = listedEvent.locator('.diary-event-row-title')
+  for (const width of [320, 390, 430, 768, 1280]) {
+    await page.setViewportSize({ width, height: width < 600 ? 844 : 900 })
+    await expect(listedEvent).toBeVisible()
+    await expect(listedTitle).toHaveCSS('white-space', 'nowrap')
+    await expect(listedTitle).toHaveCSS('text-overflow', 'ellipsis')
+    await expect(initialCountdown).toBeVisible()
+    const rowBounds = await listedEvent.boundingBox()
+    expect(rowBounds).not.toBeNull()
+    expect(rowBounds!.x).toBeGreaterThanOrEqual(0)
+    expect(rowBounds!.x + rowBounds!.width).toBeLessThanOrEqual(width + 1)
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true)
+  }
+  await page.setViewportSize({ width: 1280, height: 900 })
   await listedEvent.click()
   await expect(eventList).toHaveCount(0)
   await expect(reader.locator('h1')).toHaveText(title)
+  await expect(reader.locator('.diary-event-reader-date')).toContainText('农历五月十九')
   await expect(calendar.locator('.life-month-label')).toHaveText(diaryMonthLabel('2027-06'))
   await expect(calendar.locator('[aria-pressed="true"]')).toHaveCount(0)
   await reader.getByRole('button', { name: '编辑事件' }).click()
@@ -878,7 +894,7 @@ test('lunar Events preserve their rule across countdowns, editing and calendar d
   await discard.getByRole('button', { name: /^(Confirm|确认|确定)$/ }).click()
   await expect(reader.locator('h1')).toHaveText(title)
   await reader.getByRole('button', { name: '关闭事件' }).click()
-  await expect(listedEvent.locator('.diary-event-list-meta')).toHaveText('农历五月十九')
+  await expect(listedEvent.locator('.diary-event-list-meta')).toHaveCount(0)
 
   await listedEvent.click()
   await reader.getByRole('button', { name: '编辑事件' }).click()
@@ -887,9 +903,9 @@ test('lunar Events preserve their rule across countdowns, editing and calendar d
   await page.getByRole('button', { name: '保存', exact: true }).click()
   await expect(reader.locator('h1')).toHaveText(title)
   await reader.getByRole('button', { name: '关闭事件' }).click()
-  await expect(listedEvent.locator('.diary-event-list-meta')).toHaveText('农历五月二十')
-  await expect(listedEvent.locator('.diary-event-list-countdown strong')).toHaveText(/\d+/)
-  await expect(listedEvent.locator('.diary-event-list-countdown strong')).not.toHaveText(nextOccurrenceCountdown)
+  await expect(listedEvent.locator('.diary-event-list-meta')).toHaveCount(0)
+  await expect(listedEvent.locator('.diary-event-list-primary-info')).toHaveText(/^\d+天后$/)
+  await expect(listedEvent.locator('.diary-event-list-primary-info')).not.toHaveText(nextOccurrenceCountdown)
   await page.getByRole('button', { name: '关闭事件列表' }).click()
 
   const updatedOccurrenceCell = calendar.locator('[data-date="2027-06-24"]')

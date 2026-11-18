@@ -104,6 +104,8 @@ function deadlineReminderSource(task: DiaryTaskListItem): string {
   box-sizing: border-box;
   padding: 4px 8px;
 }
+.day-tasks .diary-task-row { min-height: 48px; padding-top: 0; padding-bottom: 0; }
+.day-tasks .diary-task-edit { min-height: 46px; padding-top: 0; padding-bottom: 0; }
 .diary-task-rows--plain { gap: 0; }
 .diary-task-rows--plain .diary-task-row {
   border: 0;

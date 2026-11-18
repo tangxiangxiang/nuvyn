@@ -51,9 +51,9 @@ const naiveStubs = {
 }
 
 describe('DiaryEventListDialog content', () => {
-  it('shows concise event details, countdowns, and keeps API order', async () => {
+  it('shows one-line event titles and countdowns while keeping API order', async () => {
     const first = makeEvent({ id: 'first', title: '较早显示', isPrimary: false })
-    const second = makeEvent({ id: 'second', title: '优先事件', isPrimary: true, startDate: '2026-11-18', endDate: '2026-11-18', recurrence: 'none', type: 'milestone' })
+    const second = makeEvent({ id: 'second', title: '优先事件', isPrimary: true, startDate: '2026-11-17', endDate: '2026-11-17', recurrence: 'none', type: 'milestone' })
     const wrapper = mount(DiaryEventListDialog, {
       props: { items: [first, second], today: '2026-11-15' },
       global: { stubs: naiveStubs },
@@ -62,11 +62,12 @@ describe('DiaryEventListDialog content', () => {
     const rows = wrapper.findAll('.diary-event-list-item')
     expect(rows.map(row => row.attributes('aria-label'))).toEqual(['较早显示', '优先事件'])
     expect(rows[0]!.classes()).toContain('diary-cloud-card')
-    expect(rows[0]!.text()).toContain('6 月 19 日')
     expect(rows[0]!.text()).toContain('较早显示')
     expect(rows[0]!.text()).not.toContain('周年')
-    expect(rows[1]!.text()).toContain('3')
-    expect(rows[1]!.text()).toContain('天后')
+    expect(rows[0]!.find('.diary-event-list-meta').exists()).toBe(false)
+    expect(rows[0]!.find('.diary-event-row-title').text()).toBe('较早显示')
+    expect(rows[0]!.find('.diary-event-list-primary-info').text()).toMatch(/^\d+天后$/)
+    expect(rows[1]!.find('.diary-event-list-primary-info').text()).toBe('后天')
     const scroller = wrapper.get('.diary-event-list-scroll').element
     scroller.scrollTop = 120
     await rows[0]!.trigger('click')
@@ -89,7 +90,24 @@ describe('DiaryEventListDialog content', () => {
     expect(wrapper.findAll('.diary-event-list-item')[0]!.find('.diary-event-list-countdown').exists()).toBe(false)
     expect(wrapper.findAll('.diary-event-list-item')[1]!.text()).toContain('3')
     await wrapper.setProps({ today: '2026-11-18' })
-    expect(wrapper.findAll('.diary-event-list-countdown')[0]!.text()).toContain('就是今天')
+    expect(wrapper.findAll('.diary-event-list-countdown')[0]!.text()).toBe('今天')
+    wrapper.unmount()
+  })
+
+  it('uses a concise Gregorian date when countdowns are disabled', () => {
+    const event = makeEvent({
+      recurrence: 'none',
+      startDate: '2026-11-28',
+      endDate: '2026-11-28',
+      showCountdown: false,
+    })
+    const wrapper = mount(DiaryEventListDialog, {
+      props: { items: [event], today: '2026-11-18' },
+      global: { stubs: naiveStubs },
+    })
+
+    expect(wrapper.get('.diary-event-list-primary-info').text()).toBe('11月28日')
+    expect(wrapper.find('.diary-event-list-countdown').exists()).toBe(false)
     wrapper.unmount()
   })
 
@@ -108,9 +126,9 @@ describe('DiaryEventListDialog content', () => {
     })
 
     const card = wrapper.get('[data-event-id="tomorrow"]')
-    expect(card.find('.diary-event-list-emoji img').attributes('src')).toBe('/emoji/event-birthday.svg')
+    expect(card.find('.diary-event-row-emoji img').attributes('src')).toBe('/emoji/event-birthday.svg')
     expect(card.find('[data-testid="event-deadline-reminder"]').attributes('src')).toBe('/emoji/alarm-clock-animated.png')
-    expect(card.find('.diary-event-list-countdown').text()).toContain('1')
+    expect(card.find('.diary-event-list-countdown').text()).toBe('明天')
     expect(card.attributes('aria-label')).toBe('爷爷生日')
     wrapper.unmount()
   })
@@ -135,7 +153,7 @@ describe('DiaryEventListDialog content', () => {
     })
 
     expect(wrapper.find('.diary-list-section-header h3').text()).toBe('待办事项')
-    expect(wrapper.find('.diary-event-list-section h3').text()).toBe('重要日程')
+    expect(wrapper.find('.day-events > h3').text()).toBe('重要日程')
     expect(wrapper.find('.diary-event-list-item').text()).toContain('爷爷75岁生日')
     expect(wrapper.get('[role="checkbox"]').attributes('aria-checked')).toBe('false')
     expect(wrapper.get('.diary-task-row').classes()).toContain('diary-cloud-card')
@@ -173,7 +191,7 @@ describe('DiaryEventListDialog content', () => {
       global: { stubs: naiveStubs },
     })
     expect(taskOnly.find('.diary-list-section-title').exists()).toBe(false)
-    expect(taskOnly.find('.diary-event-list-section').exists()).toBe(false)
+    expect(taskOnly.find('.day-events').exists()).toBe(false)
     taskOnly.unmount()
 
     const empty = mount(DiaryEventListDialog, {

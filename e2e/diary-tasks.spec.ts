@@ -931,6 +931,21 @@ test('date-coincident Todo and Event remain independent records', async ({ page 
   await expect(eventButton).toBeVisible()
   await expect(page.getByRole('checkbox', { name: `完成待办：${taskTitle}`, exact: true })).toBeVisible()
 
+  const dayDialog = page.locator('.diary-life-dialog')
+  const dayWidth = (await dayDialog.boundingBox())!.width
+  const dayHeadingColor = await dayDialog.getByRole('heading', { name: '待办事项' }).evaluate(heading => getComputedStyle(heading).color)
+  await expect(eventButton).toHaveCSS('height', '48px')
+  await page.getByRole('button', { name: '关闭当天事件' }).click()
+  await page.getByTestId('diary-event-list-toggle').click()
+  const recentDialog = page.locator('.diary-event-list-dialog')
+  const recentTask = recentDialog.locator('.diary-task-row').filter({ hasText: taskTitle })
+  await expect(recentTask).toHaveCSS('height', '48px')
+  await expect(eventButton).toHaveCSS('height', '48px')
+  await expect(recentDialog.getByRole('heading', { name: '待办事项' })).toHaveCSS('color', dayHeadingColor)
+  expect((await recentDialog.boundingBox())!.width).toBeCloseTo(dayWidth, 0)
+  await page.getByRole('button', { name: '关闭事件列表' }).click()
+  await cell.click()
+
   await page.getByRole('button', { name: `编辑待办：${taskTitle}` }).click()
   await page.getByRole('button', { name: '删除', exact: true }).click()
   const taskDeleteConfirmation = page.getByRole('dialog', { name: '删除这条待办？' })

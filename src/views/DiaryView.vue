@@ -2,7 +2,7 @@
 import { computed, inject, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { onBeforeRouteLeave } from 'vue-router'
 import { NButton, NIcon, NModal, NSpin } from 'naive-ui'
-import { Plus, X } from '@vicons/tabler'
+import { X } from '@vicons/tabler'
 import { Temporal } from '@js-temporal/polyfill'
 import { DiaryAccessContextKey } from '../composables/diary/diaryAccessContext'
 import { AppShellContextKey } from '../composables/appShellContext'
@@ -24,9 +24,10 @@ import DiaryDayDialog from '../components/diary/DiaryDayDialog.vue'
 import DiaryEventForm from '../components/diary/DiaryEventForm.vue'
 import DiaryEventReader from '../components/diary/DiaryEventReader.vue'
 import DiaryEventListDialog from '../components/diary/DiaryEventListDialog.vue'
+import DiaryEventRow from '../components/diary/DiaryEventRow.vue'
 import DiaryTaskForm from '../components/diary/DiaryTaskForm.vue'
 import DiaryTaskRows from '../components/diary/DiaryTaskRows.vue'
-import '../components/diary/diaryCloudCard.css'
+import '../components/diary/diaryDayList.css'
 import { DiaryTaskConflictError, DiaryTaskHistoryProtectedError, DiaryTaskListChangedError, diaryTasksApi } from '../lib/diary-tasks-api'
 import { groupTasksByDueDate, listDiaryTasksInRange } from '../features/diary/diaryTaskCalendar'
 import { eventEmojiSource } from '../features/diary/eventEmoji'
@@ -786,11 +787,6 @@ function createTaskFromDay() {
   const surface = eventSurface.value
   if (surface?.kind !== 'day-list' || !access.isUnlocked.value || busy.value || attachmentBusy.value) return
   startTaskEdit(null, { kind: 'day-list', date: surface.date, taskId: '', restoreFocus: false })
-}
-
-function createTaskFromRecent() {
-  if (eventSurface.value?.kind !== 'recent-list' || busy.value || !access.isUnlocked.value) return
-  startTaskEdit(null, { kind: 'recent-list', scrollTop: eventListDialog.value?.getScrollTop() ?? 0, taskId: '', restoreFocus: false })
 }
 
 function editTaskFromDay(task: DiaryTaskListItem, keyboardActivated: boolean) {
@@ -1641,17 +1637,6 @@ onBeforeUnmount(() => {
         </template>
         <template v-if="eventSurface?.kind !== 'read'" #header-extra>
           <div class="diary-event-header-actions">
-            <NButton
-              v-if="eventSurface?.kind === 'recent-list'"
-              quaternary
-              circle
-              class="diary-task-add-button"
-              aria-label="新增待办"
-              :disabled="busy"
-              @click="createTaskFromRecent"
-            >
-              <NIcon aria-hidden="true" :size="18"><Plus /></NIcon>
-            </NButton>
             <DiaryActionMenu
               v-if="eventSurface?.kind === 'day-list'"
               class="diary-event-more-menu"
@@ -1749,13 +1734,15 @@ onBeforeUnmount(() => {
               <span>{{ eventCalendarError }}</span>
               <NButton text type="primary" @click="reloadCalendarEvents">重试</NButton>
             </div>
-            <button v-for="event in selectedEvents" :key="event.id" type="button" class="diary-cloud-card" :data-event-id="event.id" :aria-label="dayEventLabel(event)" @click="selectEventFromDay(event, $event)">
-              <strong>
-                <img v-if="eventEmojiSource(event.emoji)" :src="eventEmojiSource(event.emoji)" class="event-emoji" alt="">
-                <span v-else class="day-event-emoji" aria-hidden="true">{{ event.emoji }}</span>
-                <span class="day-event-title-text">{{ displayEventTitle(event, selected) }}</span>
-              </strong>
-            </button>
+            <DiaryEventRow
+              v-for="event in selectedEvents"
+              :key="event.id"
+              :title="displayEventTitle(event, selected)"
+              :emoji="event.emoji"
+              :data-event-id="event.id"
+              :aria-label="dayEventLabel(event)"
+              @click="selectEventFromDay(event, $event)"
+            />
           </section>
           <p v-if="!selectedEvents.length && !selectedTasks.length && !calendarTasksLoading && !calendarTaskError && !calendarEventLoading && !eventCalendarError" class="day-list-empty">还没有待办或事件</p>
         </div>
@@ -1808,34 +1795,12 @@ onBeforeUnmount(() => {
   min-height: 100%;
 }
 .diary-life-error { margin-top: 8px; padding: 8px 0; }
-.day-events > button { text-align: left; color: inherit; font: inherit; cursor: pointer; display: flex; flex-direction: column; gap: 6px; padding: 8px; }
-.day-list-content { display: flex; flex-direction: column; gap: 14px; }
-.day-tasks,
-.day-events {
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-}
-.day-tasks :deep(.diary-task-row) { min-height: 48px; padding-top: 0; padding-bottom: 0; }
-.day-tasks :deep(.diary-task-edit) { min-height: 46px; padding-top: 0; padding-bottom: 0; }
-.day-tasks > h3,
-.day-events > h3 { margin: 0; color: var(--text-muted, #6b7280); font-size: 13px; font-weight: 600; }
-.day-events > button {
-  width: 100%;
-  align-items: flex-start;
-  padding: 13px 12px;
-}
-.day-events > button:focus-visible { outline: none; }
-.day-events > button strong { display: flex; max-width: 100%; align-items: center; gap: 6px; font-size: 16px; font-weight: 600; }
-.day-event-emoji { flex: none; font-size: 20px; line-height: 1; }
-.day-event-title-text { min-width: 0; line-height: 20px; overflow-wrap: anywhere; }
 .diary-event-form-error { margin: 0 0 14px; color: var(--danger, #dc2626); }
 .diary-task-reload { margin: -4px 0 12px; }
 .day-list-empty { margin: 0; padding: 12px 0; color: var(--text-muted, #6b7280); text-align: center; }
 .life-actions { display: flex; align-items: center; gap: 8px; }.life-actions > span { flex: 1; }
 .diary-task-footer { display: flex; flex-direction: column; gap: 8px; }
 .diary-task-series-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; }
-.event-emoji { width: 20px; height: 20px; flex: none; object-fit: contain; }
 .diary-event-header-actions { display: flex; align-items: center; gap: 4px; }
 .unlock-diary { display: block; margin: 20vh auto; }
 @media (max-width: 600px) { .diary-life { padding: 16px 8px clamp(16px, 3dvh, 32px); } }
@@ -1843,7 +1808,6 @@ onBeforeUnmount(() => {
 <style>
 .diary-life-dialog.n-card { width: min(640px, calc(100vw - 32px)); max-height: calc(100dvh - 32px); overflow: auto; scrollbar-width: none; }
 .diary-life-dialog.n-card::-webkit-scrollbar { display: none; }
-.diary-event-list-dialog.n-card { width: min(620px, calc(100vw - 32px)); }
 .diary-event-edit-dialog.n-card {
   display: flex;
   flex-direction: column;
