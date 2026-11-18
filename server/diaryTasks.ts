@@ -13,6 +13,7 @@ export class DiaryTaskListChanged extends Error {}
 export class DiaryTaskAssociationError extends Error {}
 export class DiaryTaskExpansionLimit extends Error {}
 export class DiaryTaskRecurrenceError extends Error {}
+export class DiaryTaskHistoryProtectedError extends Error {}
 
 const PAGE_SIZE = 200
 const MAX_CURSOR_LENGTH = 1024
@@ -463,12 +464,38 @@ export function diaryTaskStore(db: Database, owner: number, operation: DiaryBody
     const previous = series(source)
     if (!taskRecurrenceOccursOn(previous.recurrence, effectiveDate, source.effective_from)) throw new DiaryTaskRecurrenceError()
     return db.transaction(() => {
+      const recordedStates = db.prepare(`SELECT * FROM diary_task_occurrences WHERE owner_user_id = ? AND series_id = ?
+        ORDER BY occurrence_date`).all(owner, id) as TaskOccurrenceRow[]
+      const stateRowsFromEffectiveDate = recordedStates.filter(row => row.occurrence_date >= effectiveDate)
+      const preservesContent = fields.title === previous.title
+        && fields.description === previous.description
+        && fields.dueTime === previous.dueTime
+
       if (effectiveDate === source.effective_from) {
+        // A finite end may be the only surviving evidence that this Series was
+        // already split (including splits made before this protection shipped).
+        // Never let an edit silently reopen that boundary.
+        if (source.until_date !== null && (fields.recurrence.untilDate === null
+          || fields.recurrence.untilDate > source.until_date)) throw new DiaryTaskHistoryProtectedError()
+        if (!preservesContent && recordedStates.length) throw new DiaryTaskHistoryProtectedError()
+        if (recordedStates.some(row => !taskRecurrenceOccursOn(fields.recurrence, row.occurrence_date, source.effective_from))) {
+          throw new DiaryTaskHistoryProtectedError()
+        }
         const updated = writeSeries(id, fields, source.effective_from, expected)
         advanceListRevision()
         return updated
       }
       if (!TASK_ID_PATTERN.test(newId) || newId === id || readSeriesRow(newId) || deletedSeriesVersion(newId) > 0) throw new DiaryConflict()
+      // Existing finite Series can represent a historical split boundary even
+      // when no explicit predecessor/successor link exists. Keep new segments
+      // inside that known boundary rather than guessing which Series follows.
+      if (source.until_date !== null && (fields.recurrence.untilDate === null
+        || fields.recurrence.untilDate > source.until_date)) throw new DiaryTaskHistoryProtectedError()
+      if (stateRowsFromEffectiveDate.length && !preservesContent) throw new DiaryTaskHistoryProtectedError()
+      const newSeriesEffectiveFrom = effectiveDate
+      if (stateRowsFromEffectiveDate.some(stateRow => !taskRecurrenceOccursOn(fields.recurrence, stateRow.occurrence_date, newSeriesEffectiveFrom))) {
+        throw new DiaryTaskHistoryProtectedError()
+      }
       const previousDay = Temporal.PlainDate.from(effectiveDate).subtract({ days: 1 }).toString()
       const closedRule = { ...previous, recurrence: { ...previous.recurrence, untilDate: previousDay } }
       const closeEncrypted = crypto!.encrypt(closedRule, seriesIdentity(id, expected + 1))
@@ -480,17 +507,12 @@ export function diaryTaskStore(db: Database, owner: number, operation: DiaryBody
 
       // Preserve recorded state for future dates that remain occurrences under
       // the edited rule, re-encrypting for the new series identity.
-      const futureStates = db.prepare(`SELECT * FROM diary_task_occurrences WHERE owner_user_id = ?
-        AND series_id = ? AND occurrence_date >= ? ORDER BY occurrence_date`)
-        .all(owner, id, effectiveDate) as TaskOccurrenceRow[]
-      for (const stateRow of futureStates) {
-        if (taskRecurrenceOccursOn(newSeries.recurrence, stateRow.occurrence_date, effectiveDate)) {
-          const state = occurrenceState(stateRow, id, stateRow.occurrence_date).state
-          const encrypted = crypto!.encrypt(state, occurrenceIdentity(newId, stateRow.occurrence_date, stateRow.version))
-          db.prepare(`INSERT INTO diary_task_occurrences (owner_user_id, series_id, occurrence_date, encrypted_fields, version, updated_at)
-            VALUES (?, ?, ?, ?, ?, ?)`)
-            .run(owner, newId, stateRow.occurrence_date, encrypted, stateRow.version, stateRow.updated_at)
-        }
+      for (const stateRow of stateRowsFromEffectiveDate) {
+        const state = occurrenceState(stateRow, id, stateRow.occurrence_date).state
+        const encrypted = crypto!.encrypt(state, occurrenceIdentity(newId, stateRow.occurrence_date, stateRow.version))
+        db.prepare(`INSERT INTO diary_task_occurrences (owner_user_id, series_id, occurrence_date, encrypted_fields, version, updated_at)
+          VALUES (?, ?, ?, ?, ?, ?)`)
+          .run(owner, newId, stateRow.occurrence_date, encrypted, stateRow.version, stateRow.updated_at)
       }
       advanceListRevision()
       return newSeries

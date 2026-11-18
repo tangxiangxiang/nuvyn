@@ -43,4 +43,32 @@ describe('Diary task recurrence', () => {
     expect(() => taskRecurrenceDates({ ...rule, untilDate: null }, '2026-01-01', '2027-01-02', rule.startDate, 366)).toThrow(RangeError)
     expect(taskRecurrenceOccursOn({ ...rule, untilDate: '9999-12-31' }, '9999-12-31')).toBe(true)
   })
+
+  it('enumerates the final supported civil date without incrementing past it', () => {
+    const daily = { frequency: 'daily' as const, startDate: '9999-12-30', untilDate: null }
+    expect(taskRecurrenceDates(daily, '9999-12-31', '9999-12-31')).toEqual(['9999-12-31'])
+    expect(taskRecurrenceDates(daily, '9999-12-30', '9999-12-31')).toEqual(['9999-12-30', '9999-12-31'])
+  })
+
+  it('handles year, month-end, and leap-day transitions inside bounded windows', () => {
+    const daily = { frequency: 'daily' as const, startDate: '2026-12-31', untilDate: null }
+    expect(taskRecurrenceDates(daily, '2026-12-31', '2027-01-02')).toEqual([
+      '2026-12-31', '2027-01-01', '2027-01-02',
+    ])
+
+    const monthEnd = { frequency: 'monthly' as const, startDate: '2024-01-31', untilDate: null }
+    expect(taskRecurrenceDates(monthEnd, '2024-02-01', '2024-03-31')).toEqual(['2024-02-29', '2024-03-31'])
+
+    const leapDay = { frequency: 'yearly' as const, startDate: '2024-02-29', untilDate: null }
+    expect(taskRecurrenceDates(leapDay, '2024-02-29', '2025-02-28')).toEqual(['2024-02-29', '2025-02-28'])
+  })
+
+  it('keeps the inclusive maximum range and rejects ranges beyond it', () => {
+    const daily = { frequency: 'daily' as const, startDate: '2024-01-01', untilDate: null }
+    const maximum = taskRecurrenceDates(daily, '2024-01-01', '2024-12-31', daily.startDate, 366)
+    expect(maximum).toHaveLength(366)
+    expect(maximum.at(-1)).toBe('2024-12-31')
+    expect(() => taskRecurrenceDates(daily, '2024-01-01', '2025-01-01', daily.startDate, 366)).toThrow(RangeError)
+    expect(taskRecurrenceDates(daily, '2024-02-01', '2024-01-31')).toEqual([])
+  })
 })

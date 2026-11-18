@@ -121,6 +121,6 @@ export function parseTaskOccurrenceState(value: unknown): TaskOccurrenceState | 
 }
 
 /** Overdue is a date-derived view of an unfinished task, never stored state. */
-export function isTaskOverdue(task: Pick<DiaryTask, 'completedAt' | 'dueDate'>, today: string): boolean {
-  return task.completedAt === null && task.dueDate !== null && task.dueDate < today
+export function isTaskOverdue(task: Pick<DiaryTask, 'completedAt' | 'dueDate'> & { skipped?: boolean }, today: string): boolean {
+  return task.completedAt === null && task.skipped !== true && task.dueDate !== null && task.dueDate < today
 }

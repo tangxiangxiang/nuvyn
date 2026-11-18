@@ -6,7 +6,7 @@ import { parseTaskFields, parseTaskSeriesFields } from '../../shared/diaryTasks.
 import { withDiaryBodyOperation } from '../diaryAccess/guard.js'
 import { DiaryAccessServiceError } from '../diaryAccess/service.js'
 import { diaryLifeStore, DiaryConflict } from '../diaryLife.js'
-import { diaryTaskStore, DiaryTaskAssociationError, DiaryTaskCursorError, DiaryTaskExpansionLimit, DiaryTaskListChanged, DiaryTaskNotFound, DiaryTaskRecurrenceError } from '../diaryTasks.js'
+import { diaryTaskStore, DiaryTaskAssociationError, DiaryTaskCursorError, DiaryTaskExpansionLimit, DiaryTaskHistoryProtectedError, DiaryTaskListChanged, DiaryTaskNotFound, DiaryTaskRecurrenceError } from '../diaryTasks.js'
 import { diaryToday } from '../diaryDate.js'
 import { DiaryAttachmentError } from '../diaryAttachments/service.js'
 import { cleanupDiaryAttachmentStorage, DiaryAttachmentStorage, ensureDiaryAttachmentStorage } from '../diaryAttachments/storage.js'
@@ -36,6 +36,7 @@ async function guarded(c: Context<Env>, run: (store: Store, db: Database, tasks:
     if (error instanceof DiaryConflict) return c.json({ code: 'diary-conflict' }, 409)
     if (error instanceof DiaryTaskNotFound) return c.json({ code: 'diary-not-found' }, 404)
     if (error instanceof DiaryTaskAssociationError) return c.json({ code: 'invalid-diary-task-event-link' }, 400)
+    if (error instanceof DiaryTaskHistoryProtectedError) return c.json({ code: 'diary-task-history-protected' }, 409)
     if (error instanceof DiaryTaskRecurrenceError) return c.json({ code: 'invalid-diary-task-occurrence' }, 400)
     if (error instanceof DiaryTaskExpansionLimit) return c.json({ code: 'diary-task-range-too-large' }, 413)
     if (error instanceof DiaryAttachmentError) return c.json({ code: `diary-attachment-${error.code}` }, error.status)

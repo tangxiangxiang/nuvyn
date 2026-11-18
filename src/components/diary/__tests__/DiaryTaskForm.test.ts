@@ -16,7 +16,7 @@ describe('DiaryTaskForm', () => {
     }
     const wrapper = mount(DiaryTaskForm, { props: { modelValue: initial, today: '2026-11-16' } })
 
-    await wrapper.get('input[type="date"]').setValue('')
+    await wrapper.get('button.diary-task-clear-date').trigger('click')
     expect(wrapper.emitted('update:modelValue')?.at(-1)?.[0]).toMatchObject({
       dueDate: null,
       dueTime: null,
@@ -40,6 +40,41 @@ describe('DiaryTaskForm', () => {
       dueDate: '2026-11-18',
       recurrence: { frequency: 'weekly', startDate: '2026-11-18', untilDate: null },
       eventId: null,
+    })
+    wrapper.unmount()
+  })
+
+  it('allows a new recurring task start date to be selected', async () => {
+    const initial: TaskEditorFields = {
+      title: '每周整理笔记', description: '', dueDate: null, dueTime: null, recurrence: null, eventId: null,
+    }
+    const wrapper = mount(DiaryTaskForm, { props: { modelValue: initial, today: '2026-11-16' } })
+    await wrapper.get('select[aria-label="重复规则"]').setValue('daily')
+    const recurringDraft = wrapper.emitted('update:modelValue')?.at(-1)?.[0] as TaskEditorFields
+    expect(recurringDraft).toMatchObject({ recurrence: { frequency: 'daily', startDate: '2026-11-16' } })
+    await wrapper.setProps({ modelValue: recurringDraft })
+    await wrapper.get('input[aria-label="开始日期"]').setValue('2026-11-18')
+    expect(wrapper.emitted('update:modelValue')?.at(-1)?.[0]).toMatchObject({
+      recurrence: { startDate: '2026-11-18' },
+    })
+    wrapper.unmount()
+  })
+
+  it('keeps an existing recurring start date locked and hides its clear action', async () => {
+    const initial: TaskEditorFields = {
+      title: '每周整理笔记', description: '', dueDate: '2026-11-16', dueTime: null,
+      recurrence: { frequency: 'daily', startDate: '2026-11-16', untilDate: null }, eventId: null,
+    }
+    const wrapper = mount(DiaryTaskForm, {
+      props: { modelValue: initial, today: '2026-11-16', lockRecurrenceStart: true },
+    })
+
+    expect(wrapper.get('input[aria-label="开始日期"]').attributes('disabled')).toBeDefined()
+    expect(wrapper.find('button.diary-task-clear-date').exists()).toBe(false)
+    expect(wrapper.get('select[aria-label="重复规则"]').find('option[value=""]').exists()).toBe(false)
+    await wrapper.get('select[aria-label="重复规则"]').setValue('weekly')
+    expect(wrapper.emitted('update:modelValue')?.at(-1)?.[0]).toMatchObject({
+      recurrence: { frequency: 'weekly', startDate: '2026-11-16' },
     })
     wrapper.unmount()
   })

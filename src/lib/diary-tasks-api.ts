@@ -21,6 +21,13 @@ export class DiaryTaskConflictError extends DiaryTaskApiError {
   }
 }
 
+export class DiaryTaskHistoryProtectedError extends DiaryTaskApiError {
+  constructor() {
+    super(409, 'diary-task-history-protected', '该重复任务已有历史边界或记录，无法安全扩展或改写历史。请从后续日期开始创建新的重复任务。')
+    this.name = 'DiaryTaskHistoryProtectedError'
+  }
+}
+
 export class DiaryTaskListChangedError extends DiaryTaskApiError {
   constructor() {
     super(409, 'diary-task-list-changed', '任务列表已更新，请从第一页重新加载。')
@@ -49,6 +56,7 @@ async function request<T>(path: string, method = 'GET', body?: unknown, signal?:
     const payload = await response.json().catch(() => null) as { code?: unknown } | null
     const code = typeof payload?.code === 'string' ? payload.code : null
     if (response.status === 409 && code === 'diary-task-list-changed') throw new DiaryTaskListChangedError()
+    if (response.status === 409 && code === 'diary-task-history-protected') throw new DiaryTaskHistoryProtectedError()
     if (response.status === 409) throw new DiaryTaskConflictError()
     throw new DiaryTaskApiError(response.status, code, '任务操作失败，请重试。')
   }

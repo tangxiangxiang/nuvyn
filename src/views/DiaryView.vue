@@ -26,7 +26,7 @@ import DiaryEventReader from '../components/diary/DiaryEventReader.vue'
 import DiaryEventListDialog from '../components/diary/DiaryEventListDialog.vue'
 import DiaryTaskForm from '../components/diary/DiaryTaskForm.vue'
 import DiaryTaskRows from '../components/diary/DiaryTaskRows.vue'
-import { DiaryTaskConflictError, DiaryTaskListChangedError, diaryTasksApi } from '../lib/diary-tasks-api'
+import { DiaryTaskConflictError, DiaryTaskHistoryProtectedError, DiaryTaskListChangedError, diaryTasksApi } from '../lib/diary-tasks-api'
 import { groupTasksByDueDate, listDiaryTasksInRange } from '../features/diary/diaryTaskCalendar'
 import { eventEmojiSource } from '../features/diary/eventEmoji'
 import { clearDiarySearchOpen, consumeDiarySearchOpen, diarySearchOpenIntent, type DiarySearchOpenIntent } from '../composables/diary/useDiarySearchNavigation'
@@ -1512,7 +1512,9 @@ async function saveTask() {
     await refreshTaskContext({ ...editor.returnTo, taskId: focusTaskId, restoreFocus: true })
   } catch (cause) {
     if (!isCurrent() || eventSurface.value !== editor) return
-    if (cause instanceof DiaryTaskConflictError) {
+    if (cause instanceof DiaryTaskHistoryProtectedError) {
+      taskFormError.value = '这条重复任务已有历史边界或记录，无法安全扩展或覆盖历史内容。请从后续日期开始创建新的重复任务。'
+    } else if (cause instanceof DiaryTaskConflictError) {
       taskFormError.value = '待办已在其他设备更新，当前草稿已保留。请重新加载后再保存。'
       taskConflictNeedsReload.value = true
     } else {

@@ -65,9 +65,13 @@ export function taskRecurrenceDates(
   if (distance >= maxDays) throw new RangeError('Diary task recurrence range exceeds the supported window')
 
   const dates: string[] = []
-  for (let date = Temporal.PlainDate.from(first); Temporal.PlainDate.compare(date, Temporal.PlainDate.from(last)) <= 0; date = date.add({ days: 1 })) {
+  const lastDate = Temporal.PlainDate.from(last)
+  let date = Temporal.PlainDate.from(first)
+  while (Temporal.PlainDate.compare(date, lastDate) <= 0) {
     const civil = date.toString()
     if (taskRecurrenceOccursOn(rule, civil, effectiveFrom)) dates.push(civil)
+    if (Temporal.PlainDate.compare(date, lastDate) === 0) break
+    date = date.add({ days: 1 })
   }
   return dates
 }

@@ -27,6 +27,7 @@ const emit = defineEmits<{
 const titleInput = ref<InputInst | null>(null)
 const eventPickerExpanded = ref(Boolean(props.modelValue.eventId))
 const eventSelectShown = ref(false)
+const recurrenceStartLocked = computed(() => props.modelValue.recurrence !== null && props.lockRecurrenceStart)
 const title = computed({
   get: () => props.modelValue.title,
   set: (title: string) => emit('update:modelValue', { ...props.modelValue, title }),
@@ -34,6 +35,7 @@ const title = computed({
 const date = computed({
   get: () => props.modelValue.recurrence?.startDate ?? props.modelValue.dueDate ?? '',
   set: (value: string) => {
+    if (recurrenceStartLocked.value) return
     if (props.modelValue.recurrence) {
       emit('update:modelValue', { ...props.modelValue, recurrence: { ...props.modelValue.recurrence, startDate: value } })
     } else {
@@ -50,7 +52,7 @@ const description = computed({
   set: (description: string) => emit('update:modelValue', { ...props.modelValue, description }),
 })
 const frequencyOptions = computed(() => [
-  ...(props.modelValue.recurrence && props.lockRecurrenceStart ? [] : [{ value: '' as const, label: '不重复' }]),
+  ...(recurrenceStartLocked.value ? [] : [{ value: '' as const, label: '不重复' }]),
   { value: 'daily' as const, label: '每天' },
   { value: 'weekly' as const, label: '每周' },
   { value: 'monthly' as const, label: '每月' },
@@ -59,6 +61,7 @@ const frequencyOptions = computed(() => [
 const frequency = computed({
   get: () => props.modelValue.recurrence?.frequency ?? '',
   set: (value: TaskRecurrenceFrequency | '') => {
+    if (recurrenceStartLocked.value && value === '') return
     const previousDate = props.modelValue.recurrence?.startDate ?? props.modelValue.dueDate
     const recurrence = value ? {
       frequency: value,
@@ -118,13 +121,13 @@ defineExpose({ focusTitle: () => titleInput.value?.focus() })
     <div class="diary-task-form-due">
       <label class="diary-task-form-field">
         <span>{{ modelValue.recurrence ? '开始日期' : '截止日期' }}</span>
-        <input v-model="date" type="date" :aria-label="modelValue.recurrence ? '开始日期' : '截止日期'" :disabled="inert || (modelValue.recurrence !== null && lockRecurrenceStart)">
+        <input v-model="date" type="date" :aria-label="modelValue.recurrence ? '开始日期' : '截止日期'" :disabled="inert || recurrenceStartLocked">
       </label>
       <label class="diary-task-form-field">
         <span>截止时间</span>
         <input v-model="time" type="time" aria-label="截止时间" :disabled="inert || !date">
       </label>
-      <button v-if="date" type="button" class="diary-task-clear-date" :disabled="inert" @click="date = ''">清除日期</button>
+      <button v-if="date && !recurrenceStartLocked" type="button" class="diary-task-clear-date" :disabled="inert" @click="date = ''">清除日期</button>
     </div>
     <label v-if="allowRecurrence" class="diary-task-form-field">
       <span>重复</span>

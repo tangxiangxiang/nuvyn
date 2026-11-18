@@ -42,7 +42,7 @@ export function groupTasksByDueDate(tasks: DiaryTaskListItem[]): Map<string, Dia
   return grouped
 }
 
-export function taskDueDateLabel(task: Pick<DiaryTaskListItem, 'dueDate' | 'dueTime' | 'completedAt'>, today: string): string {
+export function taskDueDateLabel(task: Pick<DiaryTaskListItem, 'dueDate' | 'dueTime' | 'completedAt'> & { skipped?: boolean }, today: string): string {
   const { dueDate, dueTime } = task
   if (!dueDate) return '无日期'
   const nextDay = addDays(today, 1)

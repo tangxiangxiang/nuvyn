@@ -30,6 +30,11 @@ function request(method: string, route: string, body?: unknown, unlocked = true)
   return app.fetch(unlocked ? withDiaryCapability(auth, req, capability) : withAuthCookie(auth, req))
 }
 
+function taskListRevision(): number {
+  return (db.prepare('SELECT revision FROM diary_task_list_revisions WHERE owner_user_id = ?')
+    .get(auth.userId) as { revision: number } | undefined)?.revision ?? 0
+}
+
 function fields(overrides: Record<string, unknown> = {}) {
   return { title: 'Buy groceries', description: 'Milk\nBread', dueDate: '2026-11-17', dueTime: '09:30', ...overrides }
 }
@@ -180,7 +185,6 @@ describe('Diary task API', () => {
     const id = randomUUID()
     expect((await request('PUT', `/task-series/${id}`, { ...seriesFields(), expectedVersion: 0 })).status).toBe(200)
     expect((await request('POST', `/task-series/${id}/occurrences/2026-11-16/complete`, { expectedVersion: 0 })).status).toBe(200)
-    expect((await request('POST', `/task-series/${id}/occurrences/2026-11-23/complete`, { expectedVersion: 0 })).status).toBe(200)
 
     const nextId = randomUUID()
     const edited = await request('PUT', `/task-series/${id}`, {
@@ -195,9 +199,10 @@ describe('Diary task API', () => {
       occurrence: { title: '每周整理笔记', completedAt: Date.now() },
     })
     expect(await (await request('GET', `/task-series/${nextId}/occurrences/2026-11-23`)).json()).toMatchObject({
-      occurrence: { title: '每周复盘', completedAt: Date.now(), occurrenceVersion: 1 },
+      occurrence: { title: '每周复盘', completedAt: null, skipped: false, occurrenceVersion: 0 },
     })
     expect((await request('GET', `/task-series/${id}/occurrences/2026-11-23`)).status).toBe(400)
+    expect((await request('POST', `/task-series/${nextId}/occurrences/2026-11-23/complete`, { expectedVersion: 0 })).status).toBe(200)
 
     const stopped = await request('POST', `/task-series/${nextId}/stop`, { effectiveDate: '2026-11-30', expectedVersion: 1 })
     expect((await stopped.json()).series).toMatchObject({ recurrence: { untilDate: '2026-11-30' }, version: 2 })
@@ -211,6 +216,173 @@ describe('Diary task API', () => {
     expect((await request('PUT', `/task-series/${nextId}`, { ...seriesFields(), expectedVersion: 0 })).status).toBe(409)
     expect(db.prepare('SELECT version FROM diary_task_series_deleted_records WHERE owner_user_id = ? AND id = ?').get(auth.userId, nextId))
       .toMatchObject({ version: 3 })
+  })
+
+  it('keeps split boundaries and completed or skipped history when an old Series is edited again', async () => {
+    const id = randomUUID()
+    expect((await request('PUT', `/task-series/${id}`, {
+      ...seriesFields({ recurrence: { frequency: 'daily', startDate: '2026-11-16', untilDate: null } }),
+      expectedVersion: 0,
+    })).status).toBe(200)
+    expect((await request('POST', `/task-series/${id}/occurrences/2026-11-18/complete`, { expectedVersion: 0 })).status).toBe(200)
+    expect((await request('POST', `/task-series/${id}/occurrences/2026-11-19/skip`, { expectedVersion: 0 })).status).toBe(200)
+
+    const nextId = randomUUID()
+    const split = await request('PUT', `/task-series/${id}`, {
+      ...seriesFields({ title: '每周复盘', recurrence: { frequency: 'weekly', startDate: '2026-11-23', untilDate: null } }),
+      newSeriesId: nextId,
+      effectiveDate: '2026-11-23',
+      expectedVersion: 1,
+    })
+    expect(split.status).toBe(200)
+    expect((await split.json()).series).toMatchObject({ id: nextId, effectiveFrom: '2026-11-23', version: 1 })
+    expect((await (await request('GET', `/task-series/${id}`)).json()).series).toMatchObject({
+      recurrence: { untilDate: '2026-11-22' }, version: 2,
+    })
+
+    const beforeRejectedEdit = taskListRevision()
+    const reopened = await request('PUT', `/task-series/${id}`, {
+      ...seriesFields({ recurrence: { frequency: 'daily', startDate: '2026-11-16', untilDate: null } }),
+      newSeriesId: randomUUID(),
+      effectiveDate: '2026-11-16',
+      expectedVersion: 2,
+    })
+    expect(reopened.status).toBe(409)
+    expect(await reopened.json()).toEqual({ code: 'diary-task-history-protected' })
+    expect(taskListRevision()).toBe(beforeRejectedEdit)
+    expect((await (await request('GET', `/task-series/${id}`)).json()).series).toMatchObject({
+      recurrence: { untilDate: '2026-11-22' }, version: 2,
+    })
+    expect((await (await request('GET', `/task-series/${id}/occurrences/2026-11-18`)).json()).occurrence)
+      .toMatchObject({ title: '每周整理笔记', completedAt: Date.now() })
+    expect((await (await request('GET', `/task-series/${id}/occurrences/2026-11-19`)).json()).occurrence)
+      .toMatchObject({ title: '每周整理笔记', skipped: true })
+
+    const items = (await (await request('GET', '/task-occurrences?start=2026-11-16&end=2026-11-25')).json()).items as Array<{ seriesId: string; occurrenceDate: string }>
+    expect(new Set(items.map(item => item.occurrenceDate)).size).toBe(items.length)
+    expect(items.filter(item => item.occurrenceDate === '2026-11-23').map(item => item.seriesId)).toEqual([nextId])
+    expect(items.filter(item => item.seriesId === id).every(item => item.occurrenceDate <= '2026-11-22')).toBe(true)
+  })
+
+  it('rejects same-start edits that would rewrite recorded task content', async () => {
+    const id = randomUUID()
+    expect((await request('PUT', `/task-series/${id}`, { ...seriesFields(), expectedVersion: 0 })).status).toBe(200)
+    expect((await request('POST', `/task-series/${id}/occurrences/2026-11-16/complete`, { expectedVersion: 0 })).status).toBe(200)
+    const revision = taskListRevision()
+    const rejected = await request('PUT', `/task-series/${id}`, {
+      ...seriesFields({ title: '被改写的历史任务' }),
+      newSeriesId: randomUUID(),
+      effectiveDate: '2026-11-16',
+      expectedVersion: 1,
+    })
+    expect(rejected.status).toBe(409)
+    expect(await rejected.json()).toEqual({ code: 'diary-task-history-protected' })
+    expect(taskListRevision()).toBe(revision)
+    expect((await (await request('GET', `/task-series/${id}`)).json()).series).toMatchObject({ title: '每周整理笔记', version: 1 })
+    expect((await (await request('GET', `/task-series/${id}/occurrences/2026-11-16`)).json()).occurrence)
+      .toMatchObject({ title: '每周整理笔记', completedAt: Date.now() })
+  })
+
+  it('rolls back a split when a recorded future state is absent from the new recurrence', async () => {
+    const id = randomUUID()
+    expect((await request('PUT', `/task-series/${id}`, {
+      ...seriesFields({ recurrence: { frequency: 'daily', startDate: '2026-11-16', untilDate: null } }),
+      expectedVersion: 0,
+    })).status).toBe(200)
+    expect((await request('POST', `/task-series/${id}/occurrences/2026-11-20/skip`, { expectedVersion: 0 })).status).toBe(200)
+    const revision = taskListRevision()
+    const newId = randomUUID()
+    const rejected = await request('PUT', `/task-series/${id}`, {
+      ...seriesFields({ recurrence: { frequency: 'weekly', startDate: '2026-11-18', untilDate: null } }),
+      newSeriesId: newId,
+      effectiveDate: '2026-11-18',
+      expectedVersion: 1,
+    })
+    expect(rejected.status).toBe(409)
+    expect(await rejected.json()).toEqual({ code: 'diary-task-history-protected' })
+    expect(taskListRevision()).toBe(revision)
+    expect((await (await request('GET', `/task-series/${id}`)).json()).series).toMatchObject({
+      recurrence: { untilDate: null }, version: 1,
+    })
+    expect((await request('GET', `/task-series/${newId}`)).status).toBe(404)
+    expect((await (await request('GET', `/task-series/${id}/occurrences/2026-11-20`)).json()).occurrence)
+      .toMatchObject({ skipped: true, occurrenceVersion: 1 })
+  })
+
+  it('moves a recorded future skip only when the new recurrence preserves its date and content', async () => {
+    const id = randomUUID()
+    expect((await request('PUT', `/task-series/${id}`, {
+      ...seriesFields({ recurrence: { frequency: 'daily', startDate: '2026-11-16', untilDate: null } }),
+      expectedVersion: 0,
+    })).status).toBe(200)
+    expect((await request('POST', `/task-series/${id}/occurrences/2026-11-23/skip`, { expectedVersion: 0 })).status).toBe(200)
+    const newId = randomUUID()
+    const split = await request('PUT', `/task-series/${id}`, {
+      ...seriesFields({ recurrence: { frequency: 'weekly', startDate: '2026-11-23', untilDate: null } }),
+      newSeriesId: newId,
+      effectiveDate: '2026-11-23',
+      expectedVersion: 1,
+    })
+    expect(split.status).toBe(200)
+    expect((await (await request('GET', `/task-series/${newId}/occurrences/2026-11-23`)).json()).occurrence)
+      .toMatchObject({ title: '每周整理笔记', skipped: true, occurrenceVersion: 1 })
+  })
+
+  it('keeps three consecutive Series splits disjoint', async () => {
+    const firstId = randomUUID()
+    expect((await request('PUT', `/task-series/${firstId}`, {
+      ...seriesFields({ recurrence: { frequency: 'daily', startDate: '2026-11-16', untilDate: null } }),
+      expectedVersion: 0,
+    })).status).toBe(200)
+
+    const secondId = randomUUID()
+    expect((await request('PUT', `/task-series/${firstId}`, {
+      ...seriesFields({ title: '每周复盘', recurrence: { frequency: 'weekly', startDate: '2026-11-18', untilDate: null } }),
+      newSeriesId: secondId,
+      effectiveDate: '2026-11-18',
+      expectedVersion: 1,
+    })).status).toBe(200)
+
+    const thirdId = randomUUID()
+    expect((await request('PUT', `/task-series/${secondId}`, {
+      ...seriesFields({ title: '每月回顾', recurrence: { frequency: 'monthly', startDate: '2026-11-25', untilDate: null } }),
+      newSeriesId: thirdId,
+      effectiveDate: '2026-11-25',
+      expectedVersion: 1,
+    })).status).toBe(200)
+
+    const items = (await (await request('GET', '/task-occurrences?start=2026-11-16&end=2026-11-27')).json()).items as Array<{ seriesId: string; occurrenceDate: string }>
+    expect(new Set(items.map(item => item.occurrenceDate)).size).toBe(items.length)
+    expect(items.filter(item => item.occurrenceDate === '2026-11-16' || item.occurrenceDate === '2026-11-17')
+      .every(item => item.seriesId === firstId)).toBe(true)
+    expect(items.filter(item => item.occurrenceDate === '2026-11-18').map(item => item.seriesId)).toEqual([secondId])
+    expect(items.filter(item => item.occurrenceDate === '2026-11-25').map(item => item.seriesId)).toEqual([thirdId])
+    expect(items.some(item => item.seriesId === firstId && item.occurrenceDate >= '2026-11-18')).toBe(false)
+    expect(items.some(item => item.seriesId === secondId && item.occurrenceDate >= '2026-11-25')).toBe(false)
+  })
+
+  it('allows only one update at a Series version and does not advance revision for the stale request', async () => {
+    const id = randomUUID()
+    expect((await request('PUT', `/task-series/${id}`, { ...seriesFields(), expectedVersion: 0 })).status).toBe(200)
+    const winner = await request('PUT', `/task-series/${id}`, {
+      ...seriesFields({ title: '胜出的修改' }),
+      newSeriesId: randomUUID(),
+      effectiveDate: '2026-11-16',
+      expectedVersion: 1,
+    })
+    expect(winner.status).toBe(200)
+    const revision = taskListRevision()
+    const stale = await request('PUT', `/task-series/${id}`, {
+      ...seriesFields({ title: '过期修改' }),
+      newSeriesId: randomUUID(),
+      effectiveDate: '2026-11-16',
+      expectedVersion: 1,
+    })
+    expect(stale.status).toBe(409)
+    expect(await stale.json()).toEqual({ code: 'diary-conflict' })
+    expect(taskListRevision()).toBe(revision)
+    expect((await (await request('GET', `/task-series/${id}`)).json()).series)
+      .toMatchObject({ title: '胜出的修改', version: 2 })
   })
 
   it('paginates mixed recurrence instances with revision-bound cursors and bounded expansion', async () => {

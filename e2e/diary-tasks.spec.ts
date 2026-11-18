@@ -424,6 +424,8 @@ test('recurring Todo completion and skipping are scoped to one date', async ({ p
   await expect(page.getByRole('checkbox', { name: `完成待办：${title}` })).toBeVisible()
   await page.getByRole('button', { name: `编辑待办：${title}` }).click()
   await expect(editor).toBeVisible()
+  await expect(page.getByLabel('开始日期')).toBeDisabled()
+  await expect(editor.getByRole('button', { name: '清除日期' })).toHaveCount(0)
 
   for (const viewport of [
     { width: 320, height: 720 },
@@ -442,6 +444,8 @@ test('recurring Todo completion and skipping are scoped to one date', async ({ p
 
   await page.getByRole('button', { name: '跳过本次' }).click()
   await expect(page.locator('.diary-task-row.is-skipped')).toContainText('本次已跳过')
+  await expect(page.locator('.diary-task-row.is-skipped')).not.toContainText('已逾期')
+  await expect(skippedCell.locator('.life-task-marker')).toHaveCount(0)
   await page.getByRole('button', { name: '关闭当天事件' }).click()
   const followingCell = calendar.locator(`[data-date="${followingDate}"]`)
   await followingCell.click()
@@ -498,6 +502,15 @@ test('editing a recurring Todo changes future occurrences and preserves complete
   await page.getByRole('button', { name: '关闭当天事件' }).click()
   await firstCell.click()
   await expect(page.locator('.diary-task-row.is-completed')).toContainText(title)
+  await page.getByRole('button', { name: `编辑待办：${title}` }).click()
+  const oldSeriesEditor = page.locator('.diary-task-edit-dialog')
+  await expect(page.getByLabel('开始日期')).toBeDisabled()
+  await expect(oldSeriesEditor.getByRole('button', { name: '清除日期' })).toHaveCount(0)
+  await page.getByLabel('重复结束日期').fill('')
+  await oldSeriesEditor.getByRole('button', { name: '保存', exact: true }).click()
+  await expect(oldSeriesEditor.getByRole('alert')).toContainText('历史边界')
+  await page.getByLabel('重复结束日期').fill(firstDate)
+  await oldSeriesEditor.getByRole('button', { name: '取消' }).click()
   await page.getByRole('button', { name: '关闭当天事件' }).click()
   await expect(firstCell.locator('.life-task-marker')).toHaveCount(0)
 

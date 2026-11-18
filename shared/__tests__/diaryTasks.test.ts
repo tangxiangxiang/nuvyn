@@ -40,4 +40,14 @@ describe('Diary task overdue calculation', () => {
     expect(isTaskOverdue({ ...task, dueDate: '2026-11-15', completedAt: 1 }, '2026-11-16')).toBe(false)
     expect(isTaskOverdue({ ...task, dueDate: null }, '2026-11-16')).toBe(false)
   })
+
+  it('does not mark skipped occurrences overdue and recalculates after reopening', () => {
+    const yesterday = { ...task, dueDate: '2026-11-15' }
+    expect(isTaskOverdue(yesterday, '2026-11-16')).toBe(true)
+    expect(isTaskOverdue({ ...yesterday, skipped: true }, '2026-11-16')).toBe(false)
+    expect(isTaskOverdue({ ...yesterday, skipped: false }, '2026-11-16')).toBe(true)
+    expect(isTaskOverdue({ ...task, dueDate: '2026-11-16' }, '2026-11-16')).toBe(false)
+    expect(isTaskOverdue({ ...task, dueDate: '2026-11-17' }, '2026-11-16')).toBe(false)
+    expect(isTaskOverdue({ ...task, dueDate: null }, '2026-11-16')).toBe(false)
+  })
 })

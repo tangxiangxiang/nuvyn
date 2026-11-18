@@ -53,6 +53,7 @@ describe('Diary task calendar helpers', () => {
     expect(taskDueDateLabel(undated, '2026-11-16')).toBe('无日期')
     expect(taskDueDateLabel(makeTask({ dueDate: '2026-11-17', dueTime: '09:30' }), '2026-11-16'))
       .toBe('明天 09:30')
+    expect(taskDueDateLabel({ ...overdue, skipped: true }, '2026-11-16')).toBe('11月14日')
   })
 
   it('stops pagination after the request is aborted', async () => {
