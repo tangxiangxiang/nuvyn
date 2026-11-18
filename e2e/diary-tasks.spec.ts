@@ -275,7 +275,7 @@ test('lays out an Event, event count and deadline icon within one calendar date 
     expect(taskBounds!.width).toBe(width <= 420 ? 18 : 21)
     expect(taskBounds!.height).toBe(width <= 420 ? 18 : 21)
     expect(eventBounds!.x).toBeGreaterThanOrEqual(cellBounds!.x)
-    expect(taskBounds!.x + taskBounds!.width).toBeLessThanOrEqual(cellBounds!.x + cellBounds!.width + 1)
+    expect(taskBounds!.x + taskBounds!.width).toBeLessThanOrEqual(cellBounds!.x + cellBounds!.width)
     expect(eventBounds!.x + eventBounds!.width).toBeLessThanOrEqual(taskBounds!.x)
     expect(Math.abs((eventBounds!.y + eventBounds!.height / 2) - (taskBounds!.y + taskBounds!.height / 2))).toBeLessThanOrEqual(1)
     if (width <= 420) await expect(marker.locator('small')).toBeHidden()
