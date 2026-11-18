@@ -83,8 +83,11 @@ for (const [width, height] of [[320, 740], [390, 844], [430, 932], [600, 900], [
           }
           await expect(page.locator('.navbar .workspace-board-link-label')).toBeVisible()
         } else {
-          await expect(page.locator('.navbar .scope-chip-label').first()).toBeHidden()
-          await expect(page.locator('.navbar .workspace-board-link-label')).toBeHidden()
+          for (const name of ['笔记', '日程', '账本']) {
+            await expect(page.locator('.navbar .scope-chip-label').filter({ hasText: name })).toBeVisible()
+          }
+          await expect(page.locator('.navbar .workspace-board-link-label')).toBeVisible()
+          await expect(page.locator('.navbar .scope-chip-icon, .navbar .workspace-board-link-icon')).toHaveCount(0)
         }
         // Narrow screens may scroll workspace links, but may not create
         // document-level overflow or displace account/actions.

@@ -956,8 +956,9 @@ body.brand-constellation-active * {
 .navbar .workspace-navigation {
   display: inline-flex;
   align-items: center;
-  gap: 4px;
+  gap: 8px;
   margin-left: 0;
+  white-space: nowrap;
 }
 .navbar .scope-chips {
   display: inline-flex;
@@ -965,26 +966,22 @@ body.brand-constellation-active * {
   gap: 4px;
 }
 .navbar .nav-workspace-link {
-  /* Icon + label + small count badge. Padding is a bit wider than the
-     icon-only nav actions to give the text room to breathe; the count
-     badge is absolute-positioned so it doesn't add to the row height. */
+  /* Keep the workspace destinations compact and text-led. */
   position: relative;
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  gap: 5px;
-  padding: 4px 8px;
+  padding: 4px 10px;
   background: transparent;
   border: 1px solid transparent;
-  border-radius: 6px;
+  border-radius: 8px;
   color: var(--text-muted);
   cursor: pointer;
   transition: color 0.15s, background 0.15s, border-color 0.15s;
 }
 .navbar .nav-workspace-link:hover {
   color: var(--text-h);
-  background: var(--bg-soft);
-  border-color: var(--border);
+  background: color-mix(in srgb, var(--accent) 5%, transparent);
 }
 /* A mouse click on a locked Diary opens the access dialog without changing
    the active scope. Do not leave the clicked chip looking selected while it
@@ -995,44 +992,24 @@ body.brand-constellation-active * {
   border-color: transparent;
 }
 .navbar .nav-workspace-link.active {
-  /* Soft filled accent — matches the pressed state of mode-toggle
-     above so all "active" affordances in the navbar read the same. */
   color: var(--accent);
-  background: var(--bg-soft);
-  border-color: var(--border);
-}
-.navbar .scope-chip-icon {
-  display: inline-flex;
-  width: 14px;
-  height: 14px;
-  align-items: center;
-  justify-content: center;
-  flex-shrink: 0;
-}
-.navbar .scope-chip-icon :where(svg) {
-  width: 14px;
-  height: 14px;
-  display: block;
+  background: color-mix(in srgb, var(--accent) 8%, transparent);
+  font-weight: 600;
 }
 .navbar .scope-chip-label,
 .navbar .workspace-board-link-label {
-  /* Mono so the three names (inbox / literature / archive) feel like
-     route-like identifiers, matching the file-tree row visual language.
-     Truncates on very narrow viewports rather than wrapping. */
-  font-family: var(--mono);
-  font-size: 0.78rem;
+  font-family: inherit;
+  font-size: 14px;
   line-height: 1;
+  font-weight: 400;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
   min-width: 0;
 }
-
-.navbar .workspace-board-link-icon {
-  display: inline-flex;
-  width: 14px;
-  height: 14px;
-}
+.navbar .nav-workspace-link.active .scope-chip-label,
+.navbar .nav-workspace-link.active .workspace-board-link-label { font-weight: 600; }
+.navbar .nav-workspace-link:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
 
 /* Layout */
 main.container {
@@ -1696,6 +1673,11 @@ main.container.auth-page-shell {
    as the other Workspaces. Do not force 40px buttons into a 36px navbar. */
 .navbar.note-tablet-nav .nav-actions { gap: 2px; }
 @media (min-width: 601px) and (max-width: 1199px) {
+  .navbar.is-workspace .nav-workspace-link {
+    padding-left: 8px;
+    padding-right: 8px;
+  }
+
   .navbar.note-tablet-nav .nav-workspace-link {
     box-sizing: border-box;
     height: 28px;
@@ -1794,8 +1776,8 @@ main.container.auth-page-shell {
 /* Diary Calendar shares the same global navbar spacing as every Workspace;
    the common <=600px compact rules below also cover Diary on phones. */
 
-/* Phone navigation exposes all four workspaces with icon-only controls.
-   Its strip may scroll without pushing the account/actions off-screen. */
+/* Phone navigation keeps all four workspace names and scrolls the strip
+   without pushing the account/actions off-screen. */
 @media (max-width: 600px) {
   .navbar.is-workspace .navbar-inner {
     box-sizing: border-box;
@@ -1805,9 +1787,7 @@ main.container.auth-page-shell {
     padding-right: 4px;
   }
 
-  .navbar.is-workspace .brand-wordmark,
-  .navbar.is-workspace .scope-chip-label,
-  .navbar.is-workspace .workspace-board-link-label {
+  .navbar.is-workspace .brand-wordmark {
     display: none;
   }
 
@@ -1825,6 +1805,7 @@ main.container.auth-page-shell {
     overflow-y: hidden;
     overscroll-behavior-x: contain;
     scrollbar-width: none;
+    -webkit-overflow-scrolling: touch;
   }
 
   .navbar.is-workspace .workspace-navigation::-webkit-scrollbar { display: none; }

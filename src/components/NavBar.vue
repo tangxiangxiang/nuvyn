@@ -2,23 +2,18 @@
 import { computed, inject, nextTick, onBeforeUnmount, onMounted, ref, watch, type ComponentPublicInstance } from 'vue'
 import { NButton, NDropdown, NIcon } from 'naive-ui'
 import {
-  Box,
-  Calendar,
   CalendarEvent,
   Edit,
   Eye,
   Photo,
   LayoutSidebarLeftExpand,
   LayoutSidebarRightExpand,
-  Lock,
   List as ListIcon,
   Moon,
   MoodSmile,
-  Notes,
   Search,
   Sun,
   Volume,
-  Wallet,
 } from '@vicons/tabler'
 import { useRoute, useRouter } from 'vue-router'
 import { useTheme } from '../composables/useTheme'
@@ -75,6 +70,8 @@ const workspaceMobileMediaQuery = typeof window !== 'undefined' && typeof window
   ? window.matchMedia(workspaceMobileNavigationQuery)
   : null
 const isMobileWorkspaceViewport = ref(workspaceMobileMediaQuery?.matches ?? false)
+const workspaceNavigationRef = ref<HTMLElement | null>(null)
+let workspaceNavigationResizeFrame = 0
 
 function onWorkspaceViewportChange(event: MediaQueryListEvent): void {
   isMobileWorkspaceViewport.value = event.matches
@@ -120,14 +117,40 @@ const themeTitle = computed<string>(() => {
 
 const scopeChips = computed(() => {
   const chips = [
-    { scope: 'note', label: workspaceDisplayNames.note, icon: Notes },
-    { scope: 'diary', label: workspaceDisplayNames.diary, icon: props.diaryUnlocked ? Calendar : Lock },
-    { scope: 'ledger', label: workspaceDisplayNames.ledger, icon: Wallet },
+    { scope: 'note', label: workspaceDisplayNames.note },
+    { scope: 'diary', label: workspaceDisplayNames.diary },
+    { scope: 'ledger', label: workspaceDisplayNames.ledger },
   ] as const
   return chips.filter((chip) => (
     isWorkspaceNavigationAvailable(chip.scope, workspaceNavigationViewport.value)
   ))
 })
+
+function revealActiveWorkspaceNavigation(): void {
+  const navigation = workspaceNavigationRef.value
+  if (!navigation || navigation.scrollWidth <= navigation.clientWidth) return
+
+  const activeLink = navigation.querySelector<HTMLElement>(
+    '.nav-workspace-link.active, .workspace-board-link[aria-current="page"]',
+  )
+  if (!activeLink) return
+
+  const navigationBounds = navigation.getBoundingClientRect()
+  const linkBounds = activeLink.getBoundingClientRect()
+  if (linkBounds.left < navigationBounds.left) {
+    navigation.scrollLeft -= navigationBounds.left - linkBounds.left
+  } else if (linkBounds.right > navigationBounds.right) {
+    navigation.scrollLeft += linkBounds.right - navigationBounds.right
+  }
+}
+
+function onWorkspaceWindowResize(): void {
+  if (workspaceNavigationResizeFrame) cancelAnimationFrame(workspaceNavigationResizeFrame)
+  workspaceNavigationResizeFrame = requestAnimationFrame(() => {
+    workspaceNavigationResizeFrame = 0
+    revealActiveWorkspaceNavigation()
+  })
+}
 
 function scopeLabel(scope: ScopeKey, label: string): string {
   return isScopeActive(scope)
@@ -883,10 +906,17 @@ function onEscape(event: KeyboardEvent) {
 watch(() => route?.fullPath, () => {
   navigationSelectedScope.value = null
   stopBrandConstellation()
+  void nextTick(revealActiveWorkspaceNavigation)
+})
+
+watch(workspaceNavigationViewport, () => {
+  void nextTick(revealActiveWorkspaceNavigation)
 })
 
 onMounted(() => {
   workspaceMobileMediaQuery?.addEventListener('change', onWorkspaceViewportChange)
+  window.addEventListener('resize', onWorkspaceWindowResize)
+  void nextTick(revealActiveWorkspaceNavigation)
   reducedMotionMediaQuery = typeof window.matchMedia === 'function'
     ? window.matchMedia('(prefers-reduced-motion: reduce)')
     : null
@@ -901,6 +931,8 @@ onBeforeUnmount(() => {
   analysisExportDisposed = true
   leaveAnalysisScopeChip()
   workspaceMobileMediaQuery?.removeEventListener('change', onWorkspaceViewportChange)
+  window.removeEventListener('resize', onWorkspaceWindowResize)
+  if (workspaceNavigationResizeFrame) cancelAnimationFrame(workspaceNavigationResizeFrame)
   reducedMotionMediaQuery?.removeEventListener('change', onReducedMotionChange)
   stopBrandConstellation()
   if (brandClickSuppressTimer) clearTimeout(brandClickSuppressTimer)
@@ -943,7 +975,7 @@ onBeforeUnmount(() => {
       </NButton>
       <!-- Scope filter: lives in the navbar (the file tree header is too
            narrow on 150px sidebars). The Ledger chip opens the Ledger workspace. -->
-      <div v-if="isWorkspace" class="workspace-navigation">
+      <div v-if="isWorkspace" ref="workspaceNavigationRef" class="workspace-navigation">
         <div v-if="showScopeChips" class="scope-chips" role="tablist" :aria-label="t('nav.scope_label')">
           <NButton
             v-for="chip in scopeChips"
@@ -961,7 +993,6 @@ onBeforeUnmount(() => {
             @mouseenter="enterScopeChip(chip.scope)"
             @mouseleave="leaveAnalysisScopeChip"
           >
-            <NIcon class="scope-chip-icon" aria-hidden="true"><component :is="chip.icon" /></NIcon>
             <span class="scope-chip-label">{{ chip.label }}</span>
           </NButton>
         </div>
@@ -977,7 +1008,6 @@ onBeforeUnmount(() => {
           :aria-label="workspaceDisplayNames.board"
           @click="router.push({ name: 'board' })"
         >
-          <NIcon class="workspace-board-link-icon" aria-hidden="true"><Box /></NIcon>
           <span class="workspace-board-link-label">{{ workspaceDisplayNames.board }}</span>
         </NButton>
       </div>

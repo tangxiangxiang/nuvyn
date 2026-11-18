@@ -25,17 +25,27 @@ async function expectMobileNavigation(page: Page): Promise<void> {
     await expect(navigation.locator('.scope-chip').filter({ hasText: WORKSPACE_NAMES[scope] })).toBeVisible()
   }
   await expect(navigation.locator('.workspace-board-link')).toBeVisible()
-  await expect(navigation.locator('.scope-chip-label').first()).toBeHidden()
-  await expect(navigation.locator('.workspace-board-link-label')).toBeHidden()
+  await expect(navigation.locator('.scope-chip-label')).toHaveCount(3)
+  await expect(navigation.locator('.scope-chip-label').first()).toBeVisible()
+  await expect(navigation.locator('.workspace-board-link-label')).toBeVisible()
+  await expect(navigation.locator('.scope-chip-icon, .workspace-board-link-icon')).toHaveCount(0)
   await expect(page.locator('.navbar .brand-wordmark')).toBeHidden()
   await expect(page.locator('.navbar .account-menu-root')).toBeInViewport()
+  await expect.poll(() => navigation.evaluate(element => {
+    const active = element.querySelector<HTMLElement>('.nav-workspace-link.active, .workspace-board-link[aria-current="page"]')
+    if (!active) return false
+    const container = element.getBoundingClientRect()
+    const item = active.getBoundingClientRect()
+    return item.left >= container.left - 1 && item.right <= container.right + 1
+  })).toBe(true)
+  await expect(navigation).toHaveCSS('scrollbar-width', 'none')
   expect(await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth))
     .toBeLessThanOrEqual(1)
 }
 
 test('workspace names stay Chinese across mobile, tablet and desktop', async ({ page }) => {
   const navigation = page.locator('.workspace-navigation')
-  for (const width of [320, 390, 430, 768, 1280]) {
+  for (const width of [320, 390, 430, 600, 601, 768, 1280, 1920]) {
     await page.setViewportSize({ width, height: 900 })
     await page.goto('/board')
     await expect(navigation.locator('.scope-chip-label')).toHaveText([
@@ -45,10 +55,10 @@ test('workspace names stay Chinese across mobile, tablet and desktop', async ({ 
     ])
     await expect(navigation.locator('.workspace-board-link')).toHaveAttribute('aria-label', WORKSPACE_NAMES.board)
     await expect(navigation.locator('.workspace-board-link-label')).toHaveText(WORKSPACE_NAMES.board)
+    await expect(navigation.locator('.scope-chip-icon, .workspace-board-link-icon')).toHaveCount(0)
     for (const [index, name] of [WORKSPACE_NAMES.note, WORKSPACE_NAMES.diary, WORKSPACE_NAMES.ledger].entries()) {
       await expect(navigation.locator('.scope-chip').nth(index)).toHaveAttribute('aria-label', new RegExp(name))
-      if (width <= 600) await expect(navigation.locator('.scope-chip-label').nth(index)).toBeHidden()
-      else await expect(navigation.locator('.scope-chip-label').nth(index)).toBeVisible()
+      await expect(navigation.locator('.scope-chip-label').nth(index)).toBeVisible()
     }
     expect(await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth)).toBeLessThanOrEqual(1)
   }
@@ -223,6 +233,9 @@ test('mobile direct Board route highlights its navigation entry', async ({ page 
   await expectMobileNavigation(page)
   await expect(page.locator('.scope-chip[aria-pressed="true"]')).toHaveCount(0)
   await expect(page.locator('.workspace-board-link')).toHaveAttribute('aria-current', 'page')
+
+  await page.setViewportSize({ width: 320, height: MOBILE_VIEWPORT.height })
+  await expectMobileNavigation(page)
 })
 
 test('mobile navigation switches between Note, Board and Ledger', async ({ page }) => {
@@ -233,15 +246,18 @@ test('mobile navigation switches between Note, Board and Ledger', async ({ page 
   await page.locator('.scope-chip').filter({ hasText: WORKSPACE_NAMES.note }).click()
   await expect(page).toHaveURL(/\/vault(?:[/?#]|$)/)
   await expect(page.locator('.scope-chip').filter({ hasText: WORKSPACE_NAMES.note })).toHaveAttribute('aria-pressed', 'true')
+  await expectMobileNavigation(page)
 
   await page.locator('.workspace-board-link').click()
   await expect(page).toHaveURL(/\/board(?:[/?#]|$)/)
   await expect(page.getByTestId('board-home')).toBeVisible()
   await expect(page.locator('.workspace-board-link')).toHaveAttribute('aria-current', 'page')
+  await expectMobileNavigation(page)
 
   await page.locator('.scope-chip').filter({ hasText: WORKSPACE_NAMES.ledger }).click()
   await expect(page).toHaveURL(/\/ledger(?:[/?#]|$)/)
   await expect(page.getByTestId('ledger-page')).toBeVisible()
+  await expectMobileNavigation(page)
 })
 
 test('Diary Calendar matches Note navbar geometry across tablet breakpoints', async ({ page }) => {
