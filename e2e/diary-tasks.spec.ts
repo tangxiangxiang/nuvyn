@@ -926,8 +926,45 @@ test('a one-off Todo can be linked to a schedule and survives Event deletion', a
   await page.getByRole('textbox', { name: '待办名称' }).fill(taskTitle)
   await fillDiaryTaskDate(page, '截止日期', date)
   await expect(page.locator('.diary-task-event-select')).toBeVisible()
-  await selectNaiveOption(page, '关联日程', `${date} · ${eventTitle}`)
+  await selectNaiveOption(page, '关联日程', `${eventTitle} · ${date}`)
   await page.getByRole('button', { name: '保存', exact: true }).click()
+
+  await page.getByRole('button', { name: `编辑待办：${taskTitle}` }).click()
+  const taskEditor = page.locator('.diary-task-edit-dialog')
+  await expect(taskEditor.locator('.diary-task-event-select .n-base-selection-label')).toContainText(`${eventTitle} · ${date}`)
+  await expect(taskEditor.locator('[aria-label="关联日程发生日期"]')).toHaveCount(0)
+  await expect(taskEditor.locator('.diary-task-event-select')).not.toContainText(/[a-f0-9]{8}-[a-f0-9-]{27}/i)
+
+  let eventListAttempt = 0
+  const firstEventPage = (url: URL) => url.pathname === '/api/diary/life/events/list' && url.searchParams.get('offset') === '0'
+  await page.route(firstEventPage, route => {
+    eventListAttempt += 1
+    return eventListAttempt === 1
+      ? route.fulfill({ status: 500, contentType: 'application/json', body: '{}' })
+      : route.continue()
+  })
+  const eventSelect = taskEditor.locator('.diary-task-event-select .n-base-selection')
+  await eventSelect.click()
+  await expect(taskEditor.locator('.diary-task-form-error')).toContainText('关联日程加载失败')
+  await page.keyboard.press('Escape')
+  await eventSelect.click()
+  await expect(taskEditor.locator('.diary-task-form-error')).toHaveCount(0)
+  await expect(page.getByText(`${eventTitle} · ${date}`, { exact: true }).last()).toBeVisible()
+  await page.unroute(firstEventPage)
+  const originalViewport = page.viewportSize()
+  for (const width of [320, 390, 430, 768, 1280]) {
+    await page.setViewportSize({ width, height: originalViewport?.height ?? 900 })
+    await eventSelect.click()
+    const menu = page.locator('.n-base-select-menu').last()
+    await expect(menu).toBeVisible()
+    const menuBounds = await menu.boundingBox()
+    expect(menuBounds).not.toBeNull()
+    expect(menuBounds!.x).toBeGreaterThanOrEqual(0)
+    expect(menuBounds!.x + menuBounds!.width).toBeLessThanOrEqual(width + 1)
+    await page.keyboard.press('Escape')
+  }
+  if (originalViewport) await page.setViewportSize(originalViewport)
+  await page.getByRole('button', { name: '取消', exact: true }).click()
 
   await page.getByRole('button', { name: eventTitle }).click()
   const relatedTasks = page.locator('.diary-event-reader-tasks')

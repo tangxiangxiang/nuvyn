@@ -122,8 +122,9 @@ const recentTaskLoadingMore = ref(false)
 const recentTaskError = ref('')
 const busyTaskIds = ref(new Set<string>())
 const eventReaderTasks = ref<DiaryTaskListItem[]>([])
-const taskEventOptions = ref<Array<{ label: string; value: string; event: DiaryEvent }>>([])
+const taskEventOptions = ref<DiaryEvent[]>([])
 const taskEventOptionsLoading = ref(false)
+const taskEventOptionsError = ref('')
 const taskEventOptionsLoaded = ref(false)
 const taskFormError = ref('')
 const taskConflictNeedsReload = ref(false)
@@ -226,6 +227,7 @@ let taskDetailRequest: AbortController | null = null
 let eventReaderTaskRequest: AbortController | null = null
 let taskEventOptionsRequest: AbortController | null = null
 let taskEventOptionsSequence = 0
+let taskEventOptionsListLoading = false
 let taskContextSequence = 0
 let timer: ReturnType<typeof setInterval> | undefined
 let disposed = false
@@ -502,7 +504,9 @@ function clearPrivateData() {
   eventReaderTasks.value = []
   taskEventOptions.value = []
   taskEventOptionsLoading.value = false
+  taskEventOptionsError.value = ''
   taskEventOptionsLoaded.value = false
+  taskEventOptionsListLoading = false
   taskFormError.value = ''
   taskConflictNeedsReload.value = false
 }
@@ -809,18 +813,23 @@ function startTaskEdit(task: DiaryTaskListItem | null, returnTo: TaskReturnConte
   taskEventOptionsRequest?.abort()
   taskEventOptionsRequest = null
   taskEventOptionsSequence += 1
-  taskEventOptions.value = []
-  taskEventOptionsLoading.value = false
-  taskEventOptionsLoaded.value = false
   const draft = taskFields(task, returnTo.kind === 'day-list' ? returnTo.date : null)
   if (!task && preferredAssociation) {
     draft.eventId = preferredAssociation.eventId
     draft.eventOccurrenceDate = preferredAssociation.occurrenceDate
   }
+  const cachedEvent = draft.eventId
+    ? [...events.value, ...eventListItems.value].find(event => event.id === draft.eventId) ?? null
+    : null
+  taskEventOptions.value = cachedEvent ? [cachedEvent] : []
+  taskEventOptionsLoading.value = Boolean(draft.eventId && !cachedEvent)
+  taskEventOptionsError.value = ''
+  taskEventOptionsLoaded.value = false
+  taskEventOptionsListLoading = false
   eventSurface.value = { kind: 'task-edit', task, draft, initial: JSON.stringify(draft), returnTo }
   taskFormError.value = ''
   taskConflictNeedsReload.value = false
-  if (draft.eventId) void loadCurrentTaskEventOption(draft.eventId, draft.eventOccurrenceDate ?? null, returnTo)
+  if (draft.eventId && !cachedEvent) void loadCurrentTaskEventOption(draft.eventId, returnTo)
   if (!task) {
     const isCurrent = capturePrivateOperation()
     void nextTick(() => {
@@ -829,37 +838,37 @@ function startTaskEdit(task: DiaryTaskListItem | null, returnTo: TaskReturnConte
   }
 }
 
-function taskEventOption(event: DiaryEvent, occurrenceDate?: string | null): { label: string; value: string; event: DiaryEvent } {
-  const title = displayEventTitle(event, occurrenceDate)
-  const label = event.recurrence === 'yearly'
-    ? `${title} · ${occurrenceDate ?? '每年'}`
-    : `${event.startDate} · ${title}`
-  return { label, value: event.id, event }
-}
-
-async function loadCurrentTaskEventOption(eventId: string, occurrenceDate: string | null, returnTo: TaskReturnContext) {
+async function loadCurrentTaskEventOption(eventId: string, returnTo: TaskReturnContext) {
   const editor = eventSurface.value
   if (editor?.kind !== 'task-edit' || editor.returnTo !== returnTo) return
   const controller = new AbortController()
   taskEventOptionsRequest = controller
   const sequence = ++taskEventOptionsSequence
   const isCurrent = capturePrivateOperation()
+  taskEventOptionsLoading.value = true
+  taskEventOptionsError.value = ''
   try {
     const result = await diaryLifeApi.event(eventId, controller.signal)
     if (controller.signal.aborted || sequence !== taskEventOptionsSequence || !isCurrent()
       || eventSurface.value?.kind !== 'task-edit' || eventSurface.value.returnTo !== returnTo) return
-    taskEventOptions.value = [taskEventOption(result.event, occurrenceDate)]
+    const options = new Map(taskEventOptions.value.map(event => [event.id, event]))
+    options.set(result.event.id, result.event)
+    taskEventOptions.value = [...options.values()]
   } catch {
-    // A deleted Event remains recoverable from the task by clearing or replacing its link.
+    if (!controller.signal.aborted && sequence === taskEventOptionsSequence
+      && eventSurface.value?.kind === 'task-edit' && eventSurface.value.returnTo === returnTo) {
+      taskEventOptionsError.value = '关联日程加载失败。'
+    }
   } finally {
     if (taskEventOptionsRequest === controller) taskEventOptionsRequest = null
+    if (sequence === taskEventOptionsSequence) taskEventOptionsLoading.value = false
   }
 }
 
 async function loadTaskEventOptions() {
   const editor = eventSurface.value
   if (editor?.kind !== 'task-edit' || editor.draft.recurrence || !access.isUnlocked.value
-    || taskEventOptionsLoaded.value || taskEventOptionsLoading.value) return
+    || taskEventOptionsLoaded.value || taskEventOptionsListLoading) return
   taskEventOptionsRequest?.abort()
   const controller = new AbortController()
   taskEventOptionsRequest = controller
@@ -869,30 +878,29 @@ async function loadTaskEventOptions() {
     && eventSurface.value.returnTo === editor.returnTo
     && eventSurface.value.task?.id === editor.task?.id
   taskEventOptionsLoading.value = true
+  taskEventOptionsListLoading = true
+  taskEventOptionsError.value = ''
   try {
-    const options = new Map(taskEventOptions.value.map(option => [option.value, option]))
+    const options = new Map(taskEventOptions.value.map(event => [event.id, event]))
     let offset: number | null = 0
     while (offset !== null) {
       const page = await diaryLifeApi.eventListPage(offset, controller.signal)
       if (controller.signal.aborted || sequence !== taskEventOptionsSequence || !isCurrent() || !isEditorCurrent()) return
       for (const event of page.items) {
-        const currentEditor = eventSurface.value
-        const selectedOccurrenceDate = currentEditor?.kind === 'task-edit' && currentEditor.draft.eventId === event.id
-          ? currentEditor.draft.eventOccurrenceDate
-          : null
-        options.set(event.id, taskEventOption(event, selectedOccurrenceDate))
+        options.set(event.id, event)
       }
       offset = page.next
     }
-    taskEventOptions.value = [...options.values()].sort((left, right) => left.label.localeCompare(right.label))
+    taskEventOptions.value = [...options.values()]
     taskEventOptionsLoaded.value = true
   } catch {
     if (!controller.signal.aborted && sequence === taskEventOptionsSequence && isCurrent() && isEditorCurrent()) {
-      taskFormError.value = '日程加载失败，请重试。'
+      taskEventOptionsError.value = '关联日程加载失败。'
     }
   } finally {
     if (taskEventOptionsRequest === controller) taskEventOptionsRequest = null
     if (sequence === taskEventOptionsSequence) taskEventOptionsLoading.value = false
+    if (sequence === taskEventOptionsSequence) taskEventOptionsListLoading = false
   }
 }
 
@@ -930,14 +938,6 @@ function updateTaskDraft(next: TaskEditorFields) {
   const surface = eventSurface.value
   if (surface?.kind === 'task-edit' && access.isUnlocked.value && !busy.value) {
     eventSurface.value = { ...surface, draft: next }
-    if (next.eventId && next.eventOccurrenceDate) {
-      const selected = taskEventOptions.value.find(option => option.value === next.eventId)
-      if (selected) {
-        taskEventOptions.value = taskEventOptions.value.map(option => option.value === next.eventId
-          ? taskEventOption(selected.event, next.eventOccurrenceDate)
-          : option)
-      }
-    }
   }
 }
 
@@ -1227,7 +1227,9 @@ watch(() => eventSurface.value?.kind, kind => {
     taskEventOptionsRequest?.abort()
     taskEventOptionsRequest = null
     taskEventOptionsLoading.value = false
+    taskEventOptionsError.value = ''
     taskEventOptionsLoaded.value = false
+    taskEventOptionsListLoading = false
     taskEventOptions.value = []
   }
 }, { flush: 'sync' })
@@ -1957,6 +1959,7 @@ onBeforeUnmount(() => {
             :lock-recurrence-start="editingTask?.kind === 'recurring'"
             :event-options="taskEventOptions"
             :event-options-loading="taskEventOptionsLoading"
+            :event-options-error="taskEventOptionsError"
             :preferred-occurrence-date="eventSurface?.kind === 'task-edit' && eventSurface.returnTo.kind === 'event-reader' ? eventSurface.returnTo.occurrenceDate : null"
             @event-picker-open="loadTaskEventOptions"
             @update:model-value="updateTaskDraft"

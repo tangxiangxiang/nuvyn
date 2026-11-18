@@ -3,8 +3,9 @@ import { describe, expect, it } from 'vitest'
 import { mount } from '@vue/test-utils'
 import { NDatePicker, NInput, NSelect, NTimePicker } from 'naive-ui'
 import DiaryTaskForm from '../DiaryTaskForm.vue'
-import type { DiaryEvent } from '../../../../shared/diaryLife'
+import { occurrenceInYear, type DiaryEvent } from '../../../../shared/diaryLife'
 import type { TaskEditorFields } from '../../../../shared/diaryTasks'
+import { taskEventOccurrenceValue } from '../../../features/diary/taskEventOccurrences'
 
 function getControl(wrapper: ReturnType<typeof mount>, component: typeof NDatePicker | typeof NSelect | typeof NTimePicker, label: string) {
   return wrapper.findAllComponents(component).find(control => control.attributes('aria-label') === label)!
@@ -99,7 +100,7 @@ describe('DiaryTaskForm', () => {
     wrapper.unmount()
   })
 
-  it('selects a concrete occurrence for yearly Events and prefers the task due date when it matches', async () => {
+  it('selects yearly Event occurrences in one control and prioritizes the year closest to the task due date', async () => {
     const event: DiaryEvent = {
       id: 'a2a41f64-17ae-4b68-9c98-bb45fc4ad8c7',
       title: '相识纪念日', description: '', emoji: '🎉', type: 'anniversary',
@@ -109,32 +110,117 @@ describe('DiaryTaskForm', () => {
     }
     const initial: TaskEditorFields = {
       title: '准备礼物', description: '', startDate: null, startTime: null,
-      dueDate: '2026-11-15', dueTime: null, recurrence: null, eventId: null, eventOccurrenceDate: null,
+      dueDate: '2026-11-13', dueTime: null, recurrence: null, eventId: null, eventOccurrenceDate: null,
     }
     const wrapper = mount(DiaryTaskForm, {
       props: {
         modelValue: initial,
         today: '2026-11-18',
-        eventOptions: [{ value: event.id, label: '相识纪念日 · 每年', event }],
+        eventOptions: [event],
       },
     })
 
     const selector = getControl(wrapper, NSelect, '关联日程')
-    await selector.vm.$emit('update:value', event.id)
+    const eventOptions = getProp(selector, 'options') as Array<{ label: string; value: string; eventId: string; occurrenceDate: string }>
+    const date2025 = occurrenceInYear(event, 2025)!
+    const date2026 = occurrenceInYear(event, 2026)!
+    const date2027 = occurrenceInYear(event, 2027)!
+    expect(eventOptions.slice(0, 3).map(option => option.label)).toEqual([
+      `相识纪念日 · ${date2026}`,
+      `相识纪念日 · ${date2025}`,
+      `相识纪念日 · ${date2027}`,
+    ])
+    expect(eventOptions[0]).toMatchObject({ eventId: event.id, occurrenceDate: date2026 })
+    expect(wrapper.find('[aria-label="关联日程发生日期"]').exists()).toBe(false)
+    await selector.vm.$emit('update:value', taskEventOccurrenceValue(event.id, date2026))
     const selectedDraft = wrapper.emitted('update:modelValue')?.at(-1)?.[0] as TaskEditorFields
-    expect(selectedDraft).toMatchObject({ eventId: event.id, eventOccurrenceDate: '2026-11-15', dueDate: '2026-11-15' })
+    expect(selectedDraft).toMatchObject({ eventId: event.id, eventOccurrenceDate: date2026, dueDate: '2026-11-13' })
     await wrapper.setProps({ modelValue: selectedDraft })
 
-    const occurrencePicker = getControl(wrapper, NDatePicker, '关联日程发生日期')
-    expect(getProp(occurrencePicker, 'formattedValue')).toBe('2026-11-15')
-    const isDateDisabled = getProp(occurrencePicker, 'isDateDisabled') as (timestamp: number) => boolean
-    expect(isDateDisabled(new Date(2026, 10, 15).getTime())).toBe(false)
-    expect(isDateDisabled(new Date(2026, 10, 16).getTime())).toBe(true)
-
-    await occurrencePicker.vm.$emit('update:formatted-value', '2027-11-15')
-    expect(wrapper.emitted('update:modelValue')?.at(-1)?.[0]).toMatchObject({
-      eventId: event.id, eventOccurrenceDate: '2027-11-15', dueDate: '2026-11-15',
+    expect(selector.props('value')).toBe(taskEventOccurrenceValue(event.id, date2026))
+    await selector.vm.$emit('update:value', taskEventOccurrenceValue(event.id, date2027))
+    const selected2027 = wrapper.emitted('update:modelValue')?.at(-1)?.[0] as TaskEditorFields
+    expect(selected2027).toMatchObject({
+      eventId: event.id, eventOccurrenceDate: date2027, dueDate: '2026-11-13',
     })
+    await wrapper.setProps({ modelValue: selected2027 })
+    expect(selector.props('value')).toBe(taskEventOccurrenceValue(event.id, date2027))
+
+    await selector.vm.$emit('search', '2030')
+    const generatedOptions = getProp(selector, 'options') as Array<{ label: string; value: string }>
+    const date2030 = occurrenceInYear(event, 2030)!
+    expect(generatedOptions.some(option => option.label === `相识纪念日 · ${date2030}`)).toBe(true)
+    wrapper.unmount()
+  })
+
+  it('hides an existing Event UUID while loading and restores its occurrence label when loaded', async () => {
+    const event: DiaryEvent = {
+      id: 'a2a41f64-17ae-4b68-9c98-bb45fc4ad8c7',
+      title: '相识纪念日', description: '', emoji: '🎉', type: 'anniversary',
+      startDate: '2020-11-15', endDate: '2020-11-15', startTime: null, endTime: null,
+      allDay: true, dateRule: { calendar: 'gregory' }, recurrence: 'yearly',
+      showCountdown: false, isPrimary: false, version: 1, createdAt: 1, updatedAt: 1,
+    }
+    const initial: TaskEditorFields = {
+      title: '准备礼物', description: '', startDate: null, startTime: null,
+      dueDate: '2026-11-13', dueTime: null, recurrence: null,
+      eventId: event.id, eventOccurrenceDate: '2026-11-15',
+    }
+    const wrapper = mount(DiaryTaskForm, {
+      props: { modelValue: initial, today: '2026-11-18', eventOptionsLoading: true },
+    })
+    const selector = getControl(wrapper, NSelect, '关联日程')
+    expect(selector.props('value')).toBeNull()
+    expect(selector.props('placeholder')).toBe('正在加载关联日程…')
+    expect(wrapper.text()).not.toContain(event.id)
+
+    await wrapper.setProps({ eventOptions: [event], eventOptionsLoading: false })
+    expect(selector.props('value')).toBe(taskEventOccurrenceValue(event.id, '2026-11-15'))
+    expect(wrapper.text()).not.toContain(event.id)
+    wrapper.unmount()
+  })
+
+  it('uses the actual lunar occurrence date and clears both Event fields together', async () => {
+    const event: DiaryEvent = {
+      id: 'd84f90c2-2432-4594-868c-320214dd3bf2',
+      title: '农历生日', description: '', emoji: '🎂', type: 'birthday',
+      startDate: '2020-06-23', endDate: '2020-06-23', startTime: null, endTime: null,
+      allDay: true,
+      dateRule: { calendar: 'chinese', lunarMonth: 5, lunarDay: 19, isLeapMonth: false, leapMonthPolicy: 'regular-month', shortMonthPolicy: 'last-day' },
+      recurrence: 'yearly', showCountdown: false, isPrimary: false, version: 1, createdAt: 1, updatedAt: 1,
+    }
+    const lunarDate = occurrenceInYear(event, 2026)!
+    const initial: TaskEditorFields = {
+      title: '准备生日礼物', description: '', startDate: null, startTime: null,
+      dueDate: '2026-07-02', dueTime: null, recurrence: null,
+      eventId: event.id, eventOccurrenceDate: lunarDate,
+    }
+    const wrapper = mount(DiaryTaskForm, { props: { modelValue: initial, today: '2026-07-01', eventOptions: [event] } })
+    const selector = getControl(wrapper, NSelect, '关联日程')
+    expect(lunarDate).toBe('2026-07-03')
+    expect((getProp(selector, 'options') as Array<{ label: string }>).some(option => option.label === `农历生日 · ${lunarDate}`)).toBe(true)
+
+    await selector.vm.$emit('update:value', null)
+    expect(wrapper.emitted('update:modelValue')?.at(-1)?.[0]).toMatchObject({ eventId: null, eventOccurrenceDate: null })
+    wrapper.unmount()
+  })
+
+  it('shows retryable load failure without exposing or clearing the saved association', async () => {
+    const initial: TaskEditorFields = {
+      title: '准备礼物', description: '', startDate: null, startTime: null,
+      dueDate: '2026-11-13', dueTime: null, recurrence: null,
+      eventId: 'a2a41f64-17ae-4b68-9c98-bb45fc4ad8c7', eventOccurrenceDate: '2026-11-15',
+    }
+    const wrapper = mount(DiaryTaskForm, {
+      props: { modelValue: initial, today: '2026-11-18', eventOptionsError: '关联日程加载失败。' },
+    })
+    const selector = getControl(wrapper, NSelect, '关联日程')
+    expect(selector.props('value')).toBeNull()
+    expect(selector.props('placeholder')).toBe('日程加载失败，打开选择框重试')
+    expect(wrapper.get('[role="status"]').text()).toContain('打开选择框可重试')
+    await selector.vm.$emit('update:show', true)
+    expect(wrapper.emitted('event-picker-open')).toHaveLength(1)
+    expect(wrapper.emitted('update:modelValue')).toBeUndefined()
     wrapper.unmount()
   })
 
