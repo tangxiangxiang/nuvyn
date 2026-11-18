@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import type { DiaryEvent } from '../../../../shared/diaryLife'
 import type { DiaryTaskListItem } from '../../../../shared/diaryTasks'
-import { mostUrgentTaskDeadlineState, shouldShowEventDeadlineReminder, taskDeadlineVisualState } from '../deadlineVisualState'
+import { mostUrgentTaskDeadlineState, shouldShowEventDeadlineReminder, taskDeadlineVisualState, todoDayVisualState } from '../deadlineVisualState'
 
 type OneOffTask = Extract<DiaryTaskListItem, { kind?: 'one-off' }>
 
@@ -70,6 +70,66 @@ describe('Diary deadline visual state', () => {
     expect(mostUrgentTaskDeadlineState([makeTask({ dueDate: '2026-11-19' }), makeTask({ dueDate: '2026-11-21' })], today)).toBe('due-soon')
     expect(mostUrgentTaskDeadlineState([makeTask({ dueDate: '2026-11-21' })], today)).toBe('normal')
     expect(mostUrgentTaskDeadlineState([makeTask({ completedAt: 1 })], today)).toBe('inactive')
+  })
+
+  it('derives a completed marker only when every occurrence is completed', () => {
+    expect(todoDayVisualState([], today)).toBe('none')
+    expect(todoDayVisualState([makeTask({ completedAt: 10 })], today)).toBe('completed')
+    expect(todoDayVisualState([
+      makeTask({ completedAt: 10 }),
+      makeTask({ id: 'task-2', completedAt: 11 }),
+    ], today)).toBe('completed')
+    expect(todoDayVisualState([
+      makeTask({ completedAt: 10 }),
+      makeTask({ id: 'task-2', dueDate: '2026-11-21' }),
+    ], today)).toBe('pending')
+    expect(todoDayVisualState([
+      makeTask({ completedAt: 10 }),
+      { ...makeTask({ id: 'series:2026-11-17', dueDate: '2026-11-17' }), skipped: true },
+    ], today)).toBe('none')
+    expect(todoDayVisualState([
+      { ...makeTask({ id: 'series:2026-11-17', dueDate: '2026-11-17' }), skipped: true },
+    ], today)).toBe('none')
+  })
+
+  it('distinguishes a late completion by the completion timestamp local date', () => {
+    const dueDate = '2026-11-17'
+    const onTimeAt = new Date(2026, 10, 17, 23, 59).getTime()
+    const lateAt = new Date(2026, 10, 18, 0, 0).getTime()
+    expect(todoDayVisualState([makeTask({ dueDate, dueTime: '00:01', completedAt: onTimeAt })], today)).toBe('completed')
+    expect(todoDayVisualState([makeTask({ dueDate, completedAt: lateAt })], today)).toBe('completed-late')
+    expect(todoDayVisualState([makeTask({ dueDate: '2026-11-18', completedAt: lateAt })], today)).toBe('completed')
+    expect(todoDayVisualState([
+      makeTask({ dueDate, completedAt: onTimeAt }),
+      makeTask({ id: 'late', dueDate, completedAt: lateAt }),
+    ], today)).toBe('completed-late')
+    const lateOccurrence = { ...makeTask({ id: 'series:2026-11-17', dueDate, completedAt: lateAt }), kind: 'recurring' as const }
+    const onTimeOccurrence = { ...makeTask({ id: 'series:2026-11-18', dueDate: '2026-11-18', completedAt: lateAt }), kind: 'recurring' as const }
+    expect(todoDayVisualState([lateOccurrence], today)).toBe('completed-late')
+    expect(todoDayVisualState([onTimeOccurrence], today)).toBe('completed')
+    expect(todoDayVisualState([
+      makeTask({ dueDate, completedAt: lateAt }),
+      makeTask({ id: 'pending', dueDate, completedAt: null }),
+    ], today)).toBe('overdue')
+  })
+
+  it('prioritizes overdue and due-soon pending tasks over completion', () => {
+    expect(todoDayVisualState([
+      makeTask({ completedAt: 10 }),
+      makeTask({ id: 'overdue', dueDate: '2026-11-17' }),
+      makeTask({ id: 'soon', dueDate: '2026-11-19' }),
+    ], today)).toBe('overdue')
+    expect(todoDayVisualState([
+      makeTask({ completedAt: 10 }),
+      makeTask({ id: 'soon', dueDate: '2026-11-19' }),
+      makeTask({ id: 'ordinary', dueDate: '2026-11-21' }),
+    ], today)).toBe('due-soon')
+    expect(todoDayVisualState([
+      makeTask({ id: 'reopened', completedAt: null, dueDate: '2026-11-21' }),
+    ], today)).toBe('pending')
+    expect(todoDayVisualState([
+      makeTask({ id: 'late-complete', completedAt: 10, dueDate: '2026-11-17' }),
+    ], today)).toBe('completed')
   })
 
   it('reminds for events today, tomorrow, active multi-day events and lunar birthdays', () => {

@@ -67,11 +67,13 @@ test('creates a dated task, completes it, restores it, and moves it to a new cal
 
   await complete.click()
   await expect(page.locator('.diary-task-row.is-completed')).toContainText(title)
-  await expect(marker).toHaveCount(0)
+  await expect(marker).toHaveAttribute('src', '/emoji/party-popper.svg')
+  await expect(marker).toHaveAttribute('data-todo-day-state', 'completed-late')
+  await expect(marker).toHaveClass(/life-task-marker--completed-late/)
 
   await page.getByRole('checkbox', { name: `恢复待办：${title}`, exact: true }).click()
   await expect(page.getByRole('checkbox', { name: `完成待办：${title}`, exact: true })).toBeVisible()
-  await expect(marker).toBeVisible()
+  await expect(marker).toHaveAttribute('src', '/emoji/alarm-clock-animated.png')
 
   await page.getByRole('button', { name: `编辑待办：${title}`, exact: true }).click()
   await page.getByRole('textbox', { name: '待办名称' }).fill(`${title} 草稿`)
@@ -119,6 +121,39 @@ test('creates a dated task, completes it, restores it, and moves it to a new cal
   await page.getByRole('button', { name: '删除', exact: true }).click()
   await page.getByRole('dialog', { name: '删除这条待办？' }).getByRole('button', { name: /^(Confirm|确认|确定)$/ }).click()
   await expect(nextCell.locator('.life-task-marker')).toHaveCount(0)
+})
+
+test('overdue Todos use Bomb and return to Party when completed late', async ({ page }) => {
+  await page.goto('/diary')
+  await unlockDiary(page)
+  await page.getByTestId('diary-view-toggle').click()
+
+  const dueDate = `${testYear}-11-15`
+  const cell = page.locator(`.diary-life-calendar [data-date="${dueDate}"]`)
+  await cell.click()
+  await chooseDiaryAction(page, page.getByRole('button', { name: '更多当天事件操作' }), '新增待办')
+  const title = `Overdue task ${Math.random().toString(36).slice(2, 8)}`
+  await page.getByRole('textbox', { name: '待办名称' }).fill(title)
+  await page.getByLabel('截止日期').fill(dueDate)
+  await page.getByRole('button', { name: '保存', exact: true }).click()
+
+  const marker = cell.locator('.life-task-marker')
+  await expect(marker).toHaveAttribute('src', '/emoji/bomb-animated.png')
+  await expect(marker).toHaveAttribute('data-todo-day-state', 'overdue')
+  await expect(marker).toHaveJSProperty('naturalWidth', 256)
+  await page.getByRole('checkbox', { name: `完成待办：${title}`, exact: true }).click()
+  await expect(marker).toHaveAttribute('src', '/emoji/party-popper.svg')
+  await expect(marker).toHaveAttribute('data-todo-day-state', 'completed-late')
+  await expect(marker).toHaveClass(/life-task-marker--completed-late/)
+  await expect(marker).toHaveAttribute('alt', '当天待办已全部完成（含逾期完成）')
+  expect(await marker.evaluate(image => getComputedStyle(image).filter)).toBe('grayscale(1)')
+  await page.getByRole('checkbox', { name: `恢复待办：${title}`, exact: true }).click()
+  await expect(marker).toHaveAttribute('src', '/emoji/bomb-animated.png')
+
+  await page.getByRole('button', { name: `编辑待办：${title}`, exact: true }).click()
+  await page.getByRole('button', { name: '删除', exact: true }).click()
+  await page.getByRole('dialog', { name: '删除这条待办？' }).getByRole('button', { name: /^(Confirm|确认|确定)$/ }).click()
+  await expect(marker).toHaveCount(0)
 })
 
 test('starts a new recurring task on its explicit start date and ignores hidden one-off time validation', async ({ page }) => {
@@ -386,7 +421,9 @@ test('shows a cross-day Todo only on its due date and keeps its start plan in Re
   await expect(checkbox).toBeVisible()
   await expect(dueCell.locator('.life-task-marker')).toBeVisible()
   await checkbox.click()
-  await expect(dueCell.locator('.life-task-marker')).toHaveCount(0)
+  await expect(dueCell.locator('.life-task-marker')).toHaveAttribute('src', '/emoji/party-popper.svg')
+  await expect(dueCell.locator('.life-task-marker')).toHaveAttribute('data-todo-day-state', 'completed-late')
+  await expect(dueCell.locator('.life-task-marker')).toHaveClass(/life-task-marker--completed-late/)
 
   await page.getByRole('button', { name: '关闭当天事件' }).click()
   await page.getByTestId('diary-event-list-toggle').click()
@@ -585,7 +622,8 @@ test('a failed calendar Event request preserves interactive Todos and retries on
 
     await taskCheckbox.click()
     await expect(dayDialog.locator('.diary-task-row.is-completed')).toContainText('Events 失败时仍可勾选')
-    await expect(cell.locator('.life-task-marker')).toHaveCount(0)
+    await expect(cell.locator('.life-task-marker')).toHaveAttribute('src', '/emoji/party-popper.svg')
+    await expect(cell.locator('.life-task-marker')).toHaveAttribute('data-todo-day-state', 'completed-late')
     expect(eventRequests).toBe(2)
     expect(taskRequests).toBe(2)
   } finally {
@@ -748,7 +786,8 @@ test('recurring Todo completion and skipping are scoped to one date', async ({ p
   await expect(page.locator('.diary-task-title').filter({ hasText: title })).toContainText('↻')
   await page.getByRole('checkbox', { name: `完成待办：${title}` }).click()
   await expect(page.locator('.diary-task-row.is-completed')).toContainText(title)
-  await expect(startCell.locator('.life-task-marker')).toHaveCount(0)
+  await expect(startCell.locator('.life-task-marker')).toHaveAttribute('src', '/emoji/party-popper.svg')
+  await expect(startCell.locator('.life-task-marker')).toHaveAttribute('data-todo-day-state', 'completed-late')
 
   await page.getByRole('button', { name: '关闭当天事件' }).click()
   const skippedCell = calendar.locator(`[data-date="${skippedDate}"]`)
@@ -806,9 +845,9 @@ test('editing a recurring Todo changes future occurrences and preserves complete
   await unlockDiary(page)
   await page.getByTestId('diary-view-toggle').click()
 
-  const firstDate = `${testYear}-11-16`
-  const effectiveDate = `${testYear}-11-17`
-  const followingDate = `${testYear}-11-24`
+  const firstDate = `${testYear}-11-20`
+  const effectiveDate = `${testYear}-11-21`
+  const followingDate = `${testYear}-11-28`
   const title = `Series split ${Math.random().toString(36).slice(2, 9)}`
   const calendar = page.locator('.diary-life-calendar')
   const firstCell = calendar.locator(`[data-date="${firstDate}"]`)
@@ -844,7 +883,8 @@ test('editing a recurring Todo changes future occurrences and preserves complete
   await page.getByLabel('重复结束日期').fill(firstDate)
   await oldSeriesEditor.getByRole('button', { name: '取消' }).click()
   await page.getByRole('button', { name: '关闭当天事件' }).click()
-  await expect(firstCell.locator('.life-task-marker')).toHaveCount(0)
+  await expect(firstCell.locator('.life-task-marker')).toHaveAttribute('src', '/emoji/party-popper.svg')
+  await expect(firstCell.locator('.life-task-marker')).toHaveAttribute('data-todo-day-state', 'completed-late')
 
   await followingCell.click()
   await expect(page.getByRole('checkbox', { name: `完成待办：${title}` })).toBeVisible()

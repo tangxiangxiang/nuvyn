@@ -2,21 +2,48 @@
 import { computed, onBeforeUnmount, ref } from 'vue'
 import { NCalendar, NDatePicker } from 'naive-ui'
 import { useI18n } from '../../composables/useI18n'
-import { usePrefersReducedMotion } from '../../composables/usePrefersReducedMotion'
 import { diaryCalendarMonthFromFields, diaryDateFromCalendarFields, naiveCalendarValueForMonth } from './diaryCalendarAdapter'
-import { taskDeadlineAsset } from '../../features/diary/deadlineReminderAssets'
-import type { DeadlineVisualState } from '../../features/diary/deadlineVisualState'
-import DiaryAlarmClockIcon from './DiaryAlarmClockIcon.vue'
+import { shouldAnimateTodoDayMarker, todoDayMarkerAssets, type TodoDayMarkerAssets } from '../../features/diary/deadlineReminderAssets'
+import type { TodoDayVisualState } from '../../features/diary/deadlineVisualState'
+import DiaryAnimatedEmoji from './DiaryAnimatedEmoji.vue'
 
 const PIXEL_WHEEL_MONTH_THRESHOLD = 220
 const LINE_WHEEL_MONTH_THRESHOLD = 6
 const WHEEL_GESTURE_GAP_MS = 120
 const WHEEL_TAIL_MAX_DELTA = 24
 const WHEEL_RESTART_MIN_INCREASE = 12
-const props = defineProps<{ today: string; selectedDate: string | null; month: string; revision: number; markers: Record<string, { source?: string; emoji?: string; count?: number; hasEntries?: boolean; hasAttachments?: boolean; hasTasks?: boolean; taskDeadlineState?: DeadlineVisualState }> }>()
+const props = defineProps<{ today: string; selectedDate: string | null; month: string; revision: number; markers: Record<string, { source?: string; emoji?: string; count?: number; hasEntries?: boolean; hasAttachments?: boolean; hasTasks?: boolean; todoDayState?: TodoDayVisualState }> }>()
 const emit = defineEmits<{ select: [date: string]; month: [date: string] }>()
 const { locale } = useI18n()
-const prefersReducedMotion = usePrefersReducedMotion()
+interface TodoMarkerPresentation extends TodoDayMarkerAssets {
+  state: TodoDayVisualState
+  animate: boolean
+}
+
+const todoMarkers = computed<Record<string, TodoMarkerPresentation>>(() => {
+  const result: Record<string, TodoMarkerPresentation> = {}
+  for (const [date, marker] of Object.entries(props.markers)) {
+    const state = marker.todoDayState
+    if (!state || state === 'none') continue
+    const assets = todoDayMarkerAssets(state)
+    if (!assets) continue
+    result[date] = {
+      ...assets,
+      state,
+      animate: shouldAnimateTodoDayMarker(date, props.month, props.today),
+    }
+  }
+  return result
+})
+
+function todoMarkerAlt(state: TodoDayVisualState): string {
+  if (state === 'due-soon') return '即将截止待办'
+  if (state === 'overdue') return '逾期待办'
+  if (state === 'completed') return '当天待办已全部完成'
+  if (state === 'completed-late') return '当天待办已全部完成（含逾期完成）'
+  return state === 'pending' ? '有未完成待办' : ''
+}
+
 // Match the firstDayOfWeek of the zhCN and enUS locales in NuvynUiRoot.
 const weekdays = computed(() => locale.value === 'zh'
   ? ['周一', '周二', '周三', '周四', '周五', '周六', '周日']
@@ -224,18 +251,21 @@ function selectDate(date: string, event: MouseEvent) {
         <span
           v-if="markers[dateFor(year, month, date)]"
           class="life-marker"
-          :class="{ 'life-marker--with-task': markers[dateFor(year, month, date)]?.hasTasks }"
+          :class="{ 'life-marker--with-task': Boolean(todoMarkers[dateFor(year, month, date)]) }"
         >
           <img v-if="markers[dateFor(year, month, date)]?.source" :class="{ 'life-event-marker': Boolean(markers[dateFor(year, month, date)]?.emoji) }" :src="markers[dateFor(year, month, date)]?.source" alt="">
           <span v-else-if="markers[dateFor(year, month, date)]?.emoji" class="life-event-marker">{{ markers[dateFor(year, month, date)]?.emoji }}</span>
           <span v-else-if="markers[dateFor(year, month, date)]?.hasEntries || markers[dateFor(year, month, date)]?.hasAttachments" class="life-entry-marker" aria-label="有日记内容">•</span>
           <small v-if="(markers[dateFor(year, month, date)]?.count ?? 0) > 1">+{{ markers[dateFor(year, month, date)]!.count! - 1 }}</small>
-          <DiaryAlarmClockIcon
-            v-if="markers[dateFor(year, month, date)]?.hasTasks"
+          <DiaryAnimatedEmoji
+            v-if="todoMarkers[dateFor(year, month, date)]"
             class="life-task-marker"
-            :data-deadline-state="markers[dateFor(year, month, date)]?.taskDeadlineState ?? 'normal'"
-            :src="taskDeadlineAsset(markers[dateFor(year, month, date)]?.taskDeadlineState ?? 'normal', prefersReducedMotion)"
-            :alt="markers[dateFor(year, month, date)]?.taskDeadlineState === 'overdue' ? '逾期待办' : markers[dateFor(year, month, date)]?.taskDeadlineState === 'due-soon' ? '即将截止待办' : '有未完成待办'"
+            :class="{ 'life-task-marker--completed-late': todoMarkers[dateFor(year, month, date)]?.state === 'completed-late' }"
+            :data-todo-day-state="todoMarkers[dateFor(year, month, date)]?.state"
+            :animated-src="todoMarkers[dateFor(year, month, date)]?.animatedSrc ?? null"
+            :static-src="todoMarkers[dateFor(year, month, date)]!.staticSrc"
+            :animate="todoMarkers[dateFor(year, month, date)]?.animate ?? false"
+            :alt="todoMarkerAlt(todoMarkers[dateFor(year, month, date)]!.state)"
           />
         </span>
       </button>
@@ -513,6 +543,10 @@ function selectDate(date: string, event: MouseEvent) {
   width: 21px;
   height: 21px;
   flex: none;
+}
+
+.life-marker .life-task-marker--completed-late {
+  filter: grayscale(1);
 }
 
 .life-marker small {

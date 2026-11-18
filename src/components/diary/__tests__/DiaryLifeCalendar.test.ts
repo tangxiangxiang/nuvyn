@@ -2,7 +2,7 @@
 import { mount, enableAutoUnmount } from '@vue/test-utils'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import DiaryLifeCalendar from '../DiaryLifeCalendar.vue'
-import { alarmClockAsset } from '../../../features/diary/deadlineReminderAssets'
+import { alarmClockAsset, BOMB_ANIMATED_ASSET, BOMB_STATIC_ASSET, PARTY_POPPER_ASSET } from '../../../features/diary/deadlineReminderAssets'
 import { useI18n } from '../../../composables/useI18n'
 
 enableAutoUnmount(afterEach)
@@ -15,9 +15,11 @@ afterEach(() => {
   useI18n().setLocale('zh')
 })
 
-function mountCalendar(markers: Record<string, { source?: string; emoji?: string; count?: number; hasTasks?: boolean; taskDeadlineState?: 'normal' | 'due-soon' | 'overdue' | 'inactive' }> = {}) {
+type CalendarMarker = { source?: string; emoji?: string; count?: number; hasTasks?: boolean; todoDayState?: 'none' | 'pending' | 'due-soon' | 'overdue' | 'completed' | 'completed-late' }
+
+function mountCalendar(markers: Record<string, CalendarMarker> = {}, options: { today?: string; month?: string } = {}) {
   const wrapper = mount(DiaryLifeCalendar, {
-    props: { today: '2026-11-16', selectedDate: null, month: '2026-11-01', revision: 0, markers },
+    props: { today: options.today ?? '2026-11-16', selectedDate: null, month: options.month ?? '2026-11-01', revision: 0, markers },
   })
   const calendar = wrapper.get('.diary-life-calendar')
   let time = 0
@@ -83,8 +85,8 @@ describe('Diary calendar wheel navigation', () => {
 
   it('keeps the event emoji and one Fluent Stopwatch for unfinished tasks as separate markers', () => {
     const { wrapper } = mountCalendar({
-      '2026-11-18': { source: '/emoji/event-birthday.svg', emoji: '🎂', count: 1, hasTasks: true },
-      '2026-11-19': { hasTasks: true },
+      '2026-11-18': { source: '/emoji/event-birthday.svg', emoji: '🎂', count: 1, hasTasks: true, todoDayState: 'pending' },
+      '2026-11-19': { hasTasks: true, todoDayState: 'pending' },
     })
 
     const eventAndTask = wrapper.get('.life-date[data-date="2026-11-18"] .life-marker')
@@ -104,7 +106,7 @@ describe('Diary calendar wheel navigation', () => {
 
   it('keeps the main Event and Todo markers while exposing a compact multi-event count hook', () => {
     const { wrapper } = mountCalendar({
-      '2026-11-18': { source: '/emoji/event-birthday.svg', emoji: '🎂', count: 3, hasTasks: true, taskDeadlineState: 'due-soon' },
+      '2026-11-18': { source: '/emoji/event-birthday.svg', emoji: '🎂', count: 3, hasTasks: true, todoDayState: 'due-soon' },
     })
     const marker = wrapper.get('.life-date[data-date="2026-11-18"] .life-marker')
 
@@ -115,19 +117,61 @@ describe('Diary calendar wheel navigation', () => {
     wrapper.unmount()
   })
 
-  it('uses Alarm Clock for due-soon and overdue tasks while preserving event emoji', () => {
+  it('keeps Event Emoji and shows exactly one Todo outcome marker', () => {
     const { wrapper } = mountCalendar({
-      '2026-11-18': { source: '/emoji/event-birthday.svg', emoji: '🎂', count: 1, hasTasks: true, taskDeadlineState: 'due-soon' },
-      '2026-11-17': { hasTasks: true, taskDeadlineState: 'overdue' },
+      '2026-11-18': { source: '/emoji/event-birthday.svg', emoji: '🎂', count: 1, hasTasks: true, todoDayState: 'completed' },
+      '2026-11-17': { hasTasks: true, todoDayState: 'overdue' },
+      '2026-11-19': { hasTasks: true, todoDayState: 'due-soon' },
     })
 
-    const today = wrapper.get('.life-date[data-date="2026-11-18"] .life-task-marker')
-    expect(today.attributes('src')).toBe(alarmClockAsset(false))
-    expect(today.attributes('alt')).toBe('即将截止待办')
+    const completed = wrapper.get('.life-date[data-date="2026-11-18"] .life-task-marker')
+    expect(completed.attributes('src')).toBe(PARTY_POPPER_ASSET)
+    expect(completed.attributes('alt')).toBe('当天待办已全部完成')
     expect(wrapper.get('.life-date[data-date="2026-11-18"] .life-marker img:not(.life-task-marker)').attributes('src')).toBe('/emoji/event-birthday.svg')
-    expect(wrapper.get('.life-date[data-date="2026-11-17"] .life-task-marker').attributes('src')).toBe('/emoji/alarm-clock.svg')
-    expect(wrapper.findAll('.life-task-marker')).toHaveLength(2)
+    const overdue = wrapper.get('.life-date[data-date="2026-11-17"] .life-task-marker')
+    expect(overdue.attributes('src')).toBe(BOMB_ANIMATED_ASSET)
+    expect(overdue.attributes('data-todo-day-state')).toBe('overdue')
+    expect(wrapper.get('.life-date[data-date="2026-11-19"] .life-task-marker').attributes('src')).toBe(alarmClockAsset(false))
+    expect(wrapper.findAll('.life-task-marker')).toHaveLength(3)
     wrapper.unmount()
+  })
+
+  it('grays only the completed-late Todo Party Popper and keeps it static', () => {
+    const { wrapper } = mountCalendar({
+      '2026-10-18': { source: '/emoji/event-birthday.svg', emoji: '🎂', count: 1, hasTasks: true, todoDayState: 'completed-late' },
+    }, { month: '2026-10-01', today: '2026-11-18' })
+    const marker = wrapper.get('.life-date[data-date="2026-10-18"] .life-task-marker')
+    const eventEmoji = wrapper.get('.life-date[data-date="2026-10-18"] .life-marker img:not(.life-task-marker)')
+
+    expect(marker.attributes('src')).toBe(PARTY_POPPER_ASSET)
+    expect(marker.attributes('alt')).toBe('当天待办已全部完成（含逾期完成）')
+    expect(marker.classes()).toContain('life-task-marker--completed-late')
+    expect(marker.attributes('data-todo-day-state')).toBe('completed-late')
+    expect(eventEmoji.classes()).not.toContain('life-task-marker--completed-late')
+    expect(eventEmoji.attributes('src')).toBe('/emoji/event-birthday.svg')
+    wrapper.unmount()
+  })
+
+  it('uses static Todo Emoji in history, future, and adjacent-month cells', () => {
+    const historical = mountCalendar({
+      '2026-10-17': { hasTasks: true, todoDayState: 'overdue' },
+    }, { month: '2026-10-01', today: '2026-11-18' })
+    expect(historical.wrapper.get('.life-date[data-date="2026-10-17"] .life-task-marker').attributes('src')).toBe(BOMB_STATIC_ASSET)
+    historical.wrapper.unmount()
+
+    const future = mountCalendar({
+      '2026-12-19': { hasTasks: true, todoDayState: 'due-soon' },
+    }, { month: '2026-12-01', today: '2026-11-18' })
+    expect(future.wrapper.get('.life-date[data-date="2026-12-19"] .life-task-marker').attributes('src')).toBe('/emoji/alarm-clock.svg')
+    future.wrapper.unmount()
+
+    const adjacent = mountCalendar({
+      '2026-12-01': { hasTasks: true, todoDayState: 'overdue' },
+      '2026-11-17': { hasTasks: true, todoDayState: 'overdue' },
+    }, { month: '2026-11-01', today: '2026-11-18' })
+    expect(adjacent.wrapper.get('.life-date[data-date="2026-12-01"] .life-task-marker').attributes('src')).toBe(BOMB_STATIC_ASSET)
+    expect(adjacent.wrapper.get('.life-date[data-date="2026-11-17"] .life-task-marker').attributes('src')).toBe(BOMB_ANIMATED_ASSET)
+    adjacent.wrapper.unmount()
   })
 
   it('selects a static Alarm Clock asset when reduced motion is enabled', () => {
