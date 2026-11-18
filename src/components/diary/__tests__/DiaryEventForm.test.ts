@@ -2,6 +2,7 @@
 import { describe, expect, it, vi } from 'vitest'
 import { mount, flushPromises, type VueWrapper } from '@vue/test-utils'
 import { defineComponent, h, nextTick, ref, type Ref } from 'vue'
+import { NDatePicker, NSelect, NTimePicker } from 'naive-ui'
 import { lunarToSolar, nextLunarOccurrence, solarToLunar, type ChineseEventDateRule } from '../../../../shared/lunarCalendar'
 import { nextOccurrence, parseEvent, type EventFields } from '../../../../shared/diaryLife'
 import { useConfirm } from '../../../composables/useConfirm'
@@ -78,11 +79,19 @@ async function answerPendingConfirm(answer: boolean) {
   return request
 }
 
-function visibleControls(wrapper: VueWrapper, selector: string) {
-  return wrapper.findAll(selector).filter(({ element }) => {
+function visibleControls(wrapper: VueWrapper, component: typeof NDatePicker | typeof NTimePicker) {
+  return wrapper.findAllComponents(component).filter(({ element }) => {
     const advanced = element.closest('details')
     return !advanced || advanced.open
   })
+}
+
+function getControl(wrapper: VueWrapper, component: typeof NDatePicker | typeof NSelect | typeof NTimePicker, label: string) {
+  return wrapper.findAllComponents(component).find(control => control.attributes('aria-label') === label)!
+}
+
+function getProp(control: ReturnType<typeof getControl>, name: string) {
+  return (control.props() as Record<string, unknown>)[name]
 }
 
 describe('DiaryEventForm', () => {
@@ -92,9 +101,9 @@ describe('DiaryEventForm', () => {
     expect(wrapper.findAll('[data-testid^="event-type-"]')).toHaveLength(4)
     expect(wrapper.get('[aria-label="事件名称"]').element).toBeTruthy()
     expect(wrapper.get('[aria-label="事件备注"]').element).toBeTruthy()
-    expect(visibleControls(wrapper, 'input[type="date"]')).toHaveLength(1)
-    expect(wrapper.get('input[type="date"]').attributes('aria-label')).toBe('发生日期')
-    expect(visibleControls(wrapper, 'input[type="time"]')).toHaveLength(0)
+    expect(visibleControls(wrapper, NDatePicker)).toHaveLength(1)
+    expect(getProp(getControl(wrapper, NDatePicker, '发生日期'), 'formattedValue')).toBe('2026-07-03')
+    expect(visibleControls(wrapper, NTimePicker)).toHaveLength(0)
     expect(wrapper.find('.event-advanced').attributes('open')).toBeUndefined()
     expect(wrapper.get('.event-advanced summary').text()).toContain('更多选项')
     wrapper.unmount()
@@ -108,17 +117,18 @@ describe('DiaryEventForm', () => {
       endDate: '2026-07-05',
     })
 
-    expect(visibleControls(wrapper, 'input[type="date"]')).toHaveLength(2)
-    expect(visibleControls(wrapper, 'input[type="time"]')).toHaveLength(0)
+    expect(visibleControls(wrapper, NDatePicker)).toHaveLength(2)
+    expect(visibleControls(wrapper, NTimePicker)).toHaveLength(0)
     await wrapper.get('.event-date-section .n-checkbox').trigger('click')
     expect(fields.value.allDay).toBe(false)
     await nextTick()
-    expect(visibleControls(wrapper, 'input[type="time"]')).toHaveLength(2)
-    expect((wrapper.get('input[aria-label="开始时间"]').element as HTMLInputElement).value).toBe('')
+    expect(visibleControls(wrapper, NTimePicker)).toHaveLength(2)
+    expect(getProp(getControl(wrapper, NTimePicker, '开始时间'), 'formattedValue')).toBeNull()
     expect(wrapper.get('[aria-label="开始时间"]').attributes('required')).toBeDefined()
     expect(wrapper.get('#event-start-time-error').text()).toBe('非全天日程请填写开始时间。')
-    expect(wrapper.get('[aria-label="开始时间"]').attributes('aria-invalid')).toBe('true')
-    await wrapper.get('[aria-label="开始时间"]').setValue('09:30')
+    expect(getControl(wrapper, NTimePicker, '开始时间').props('status')).toBe('error')
+    await getControl(wrapper, NTimePicker, '开始时间').vm.$emit('update:formatted-value', '09:30')
+    expect(fields.value.startTime).toBe('09:30')
     expect(wrapper.find('[role="alert"]').exists()).toBe(false)
     expect(parseEvent(fields.value)).not.toBeNull()
     wrapper.unmount()
@@ -135,7 +145,7 @@ describe('DiaryEventForm', () => {
     }, '2026-11-16', true)
 
     expect(wrapper.get('[aria-label="开始时间"]').attributes('required')).toBeUndefined()
-    expect(wrapper.get('[aria-label="开始时间"]').attributes('aria-invalid')).toBe('false')
+    expect(getControl(wrapper, NTimePicker, '开始时间').props('status')).toBeUndefined()
     expect(wrapper.find('[role="alert"]').exists()).toBe(false)
     expect(parseEvent(fields.value)).not.toBeNull()
     fields.value.title = '旧日程已修改'
@@ -171,27 +181,27 @@ describe('DiaryEventForm', () => {
       allDay: false,
     })
 
-    await wrapper.get('input[aria-label="开始日期"]').setValue('2026-07-06')
+    await getControl(wrapper, NDatePicker, '开始日期').vm.$emit('update:formatted-value', '2026-07-06')
     expect(fields.value.startDate).toBe('2026-07-06')
     expect(fields.value.endDate).toBe('2026-07-06')
     expect(parseEvent(fields.value)).not.toBeNull()
 
-    await wrapper.get('input[aria-label="结束日期"]').setValue('2026-07-07')
-    await wrapper.get('input[aria-label="开始时间"]').setValue('23:00')
-    await wrapper.get('input[aria-label="结束时间"]').setValue('01:00')
+    await getControl(wrapper, NDatePicker, '结束日期').vm.$emit('update:formatted-value', '2026-07-07')
+    await getControl(wrapper, NTimePicker, '开始时间').vm.$emit('update:formatted-value', '23:00')
+    await getControl(wrapper, NTimePicker, '结束时间').vm.$emit('update:formatted-value', '01:00')
     expect(parseEvent(fields.value)).not.toBeNull()
     expect(wrapper.find('[role="alert"]').exists()).toBe(false)
 
-    await wrapper.get('input[aria-label="结束日期"]').setValue('2026-07-06')
+    await getControl(wrapper, NDatePicker, '结束日期').vm.$emit('update:formatted-value', '2026-07-06')
     expect(wrapper.get('[role="alert"]').text()).toContain('同一天的结束时间必须晚于开始时间')
-    expect(wrapper.get('input[aria-label="结束时间"]').attributes('aria-invalid')).toBe('true')
+    expect(getControl(wrapper, NTimePicker, '结束时间').props('status')).toBe('error')
     expect(parseEvent(fields.value)).toBeNull()
 
-    await wrapper.get('input[aria-label="结束时间"]').setValue('23:00')
+    await getControl(wrapper, NTimePicker, '结束时间').vm.$emit('update:formatted-value', '23:00')
     expect(wrapper.get('[role="alert"]').text()).toContain('同一天的结束时间必须晚于开始时间')
     expect(parseEvent(fields.value)).toBeNull()
 
-    await wrapper.get('input[aria-label="结束时间"]').setValue('23:01')
+    await getControl(wrapper, NTimePicker, '结束时间').vm.$emit('update:formatted-value', '23:01')
     expect(wrapper.find('[role="alert"]').exists()).toBe(false)
     expect(parseEvent(fields.value)).not.toBeNull()
     wrapper.unmount()
@@ -208,7 +218,7 @@ describe('DiaryEventForm', () => {
     expect(wrapper.get('[aria-label="纪念日期"]').element).toBeTruthy()
     expect(wrapper.get('[aria-label="日期类型"]').text()).toContain('公历')
     expect(wrapper.get('[aria-label="日期类型"]').text()).toContain('农历')
-    expect(visibleControls(wrapper, 'input[type="date"]')).toHaveLength(1)
+    expect(visibleControls(wrapper, NDatePicker)).toHaveLength(1)
     expect(wrapper.text()).toContain('每年重复')
     expect(wrapper.find('[aria-label="出生农历年"]').exists()).toBe(false)
     wrapper.unmount()
@@ -222,8 +232,8 @@ describe('DiaryEventForm', () => {
     expect(wrapper.get('[aria-label="农历月份"]').element).toBeTruthy()
     expect(wrapper.get('[aria-label="农历日期"]').element).toBeTruthy()
     expect(wrapper.get('[aria-label="出生月份类型"]').element).toBeTruthy()
-    expect(visibleControls(wrapper, 'input[type="date"]')).toHaveLength(0)
-    expect(visibleControls(wrapper, 'input[type="time"]')).toHaveLength(0)
+    expect(visibleControls(wrapper, NDatePicker)).toHaveLength(0)
+    expect(visibleControls(wrapper, NTimePicker)).toHaveLength(0)
     expect(wrapper.text()).not.toContain('每年重复')
     expect(wrapper.text()).toContain('下一次：')
     expect(wrapper.text()).toContain('岁生日')
@@ -338,8 +348,10 @@ describe('DiaryEventForm', () => {
       dateRule: shortRule,
       birthday: { birthLunarYear: shortBirth!.year },
     }))
-    expect((shortForm.wrapper.get('select[aria-label="农历日期"] option[value="30"]').element as HTMLOptionElement).disabled).toBe(true)
-    expect((shortForm.wrapper.get('select[aria-label="出生月份类型"] option[value="leap"]').element as HTMLOptionElement).disabled).toBe(true)
+    const shortLunarDays = getProp(getControl(shortForm.wrapper, NSelect, '农历日期'), 'options') as Array<{ value: number; disabled?: boolean }>
+    const shortMonthTypes = getProp(getControl(shortForm.wrapper, NSelect, '出生月份类型'), 'options') as Array<{ value: string; disabled?: boolean }>
+    expect(shortLunarDays.find(option => option.value === 30)?.disabled).toBe(true)
+    expect(shortMonthTypes.find(option => option.value === 'leap')?.disabled).toBe(true)
     expect(parseEvent(shortForm.fields.value)).not.toBeNull()
     shortForm.wrapper.unmount()
 
@@ -358,7 +370,8 @@ describe('DiaryEventForm', () => {
       dateRule: leapRule,
       birthday: { birthLunarYear: leapBirth!.year },
     }))
-    expect(leapForm.wrapper.findAll('select[aria-label="农历月份"] option[disabled]').length).toBeGreaterThan(0)
+    const leapMonths = getProp(getControl(leapForm.wrapper, NSelect, '农历月份'), 'options') as Array<{ disabled?: boolean }>
+    expect(leapMonths.filter(option => option.disabled).length).toBeGreaterThan(0)
     expect(parseEvent(leapForm.fields.value)).not.toBeNull()
     leapForm.wrapper.unmount()
   })
@@ -387,7 +400,7 @@ describe('DiaryEventForm', () => {
     expect(fields.value.startDate).toBe(initial.startDate)
     expect(wrapper.text()).toContain('下一次：')
 
-    await wrapper.get('select[aria-label="农历日期"]').setValue('20')
+    await getControl(wrapper, NSelect, '农历日期').vm.$emit('update:value', 20)
     const convertedDate = fields.value.dateRule?.calendar === 'chinese'
       ? nextLunarOccurrence(fields.value.dateRule, initial.startDate)
       : null
@@ -418,15 +431,15 @@ describe('DiaryEventForm', () => {
     const { wrapper, fields } = mountEventForm(initial, '2026-01-01', true)
     const advanced = wrapper.get('.event-advanced')
     expect(advanced.attributes('open')).toBeUndefined()
-    expect(visibleControls(wrapper, 'input[type="date"]')).toHaveLength(1)
-    expect(visibleControls(wrapper, 'input[type="time"]')).toHaveLength(0)
+    expect(visibleControls(wrapper, NDatePicker)).toHaveLength(1)
+    expect(visibleControls(wrapper, NTimePicker)).toHaveLength(0)
 
     await advanced.get('summary').trigger('click')
     expect(advanced.attributes('open')).toBeDefined()
-    expect(visibleControls(wrapper, 'input[type="date"]')).toHaveLength(2)
-    expect((wrapper.get('input[aria-label="结束日期"]').element as HTMLInputElement).value).toBe('2026-07-05')
-    expect((wrapper.get('input[aria-label="开始时间"]').element as HTMLInputElement).value).toBe('18:30')
-    expect((wrapper.get('input[aria-label="结束时间"]').element as HTMLInputElement).value).toBe('20:00')
+    expect(visibleControls(wrapper, NDatePicker)).toHaveLength(2)
+    expect(getProp(getControl(wrapper, NDatePicker, '结束日期'), 'formattedValue')).toBe('2026-07-05')
+    expect(getProp(getControl(wrapper, NTimePicker, '开始时间'), 'formattedValue')).toBe('18:30')
+    expect(getProp(getControl(wrapper, NTimePicker, '结束时间'), 'formattedValue')).toBe('20:00')
     expect(wrapper.get('.event-advanced').text()).toContain('每年重复')
 
     await advanced.get('summary').trigger('click')
@@ -505,7 +518,7 @@ describe('DiaryEventForm', () => {
     const { wrapper, fields } = mountEventForm(initial, '2026-11-16', true)
     const baseDate = nextOccurrence(initial, initial.startDate)
     expect(baseDate).toBe('2026-11-15')
-    expect(wrapper.find('input[type="date"]').exists()).toBe(false)
+    expect(wrapper.findComponent(NDatePicker).exists()).toBe(false)
     const targetButton = wrapper.get(`[data-testid="event-type-${target}"]`)
 
     await targetButton.trigger('click')
@@ -519,9 +532,9 @@ describe('DiaryEventForm', () => {
     expect(fields.value).toMatchObject({
       type: target, startDate: baseDate, endDate: baseDate, dateRule: { calendar: 'gregory' }, recurrence: 'yearly',
     })
-    const date = wrapper.get(`input[aria-label="${dateLabel}"]`)
-    expect((date.element as HTMLInputElement).value).toBe(baseDate)
-    await date.setValue('2026-11-14')
+    const date = getControl(wrapper, NDatePicker, dateLabel)
+    expect(getProp(date, 'formattedValue')).toBe(baseDate)
+    await date.vm.$emit('update:formatted-value', '2026-11-14')
     const saved = parseEvent(fields.value)
     expect(saved).toMatchObject({ dateRule: { calendar: 'gregory' }, startDate: '2026-11-14', endDate: '2026-11-14' })
     expect(saved && nextOccurrence(saved, '2027-01-01')).toBe('2027-11-14')
@@ -566,13 +579,13 @@ describe('DiaryEventForm', () => {
   it('edits an existing lunar schedule through lunar controls until explicitly converted', async () => {
     const { birthday: _birth, ...annual } = birthdayEvent()
     const { wrapper, fields } = mountEventForm({ ...annual, type: 'schedule' }, '2026-11-16', true)
-    expect(wrapper.find('input[type="date"]').exists()).toBe(false)
-    await wrapper.get('select[aria-label="农历日期"]').setValue('8')
+    expect(wrapper.findComponent(NDatePicker).exists()).toBe(false)
+    await getControl(wrapper, NSelect, '农历日期').vm.$emit('update:value', 8)
     expect(fields.value.dateRule).toMatchObject({ calendar: 'chinese', lunarDay: 8 })
     expect(parseEvent(fields.value)).not.toBeNull()
     await wrapper.get('.event-date-section .event-date-calendar-toggle button[aria-pressed="false"]').trigger('click')
     expect(fields.value.dateRule).toEqual({ calendar: 'gregory' })
-    expect(wrapper.find('input[aria-label="开始日期"]').exists()).toBe(true)
+    expect(getControl(wrapper, NDatePicker, '开始日期').exists()).toBe(true)
     wrapper.unmount()
   })
 

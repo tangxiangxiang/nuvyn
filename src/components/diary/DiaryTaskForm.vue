@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
-import { NInput, NSelect, type InputInst } from 'naive-ui'
+import { NDatePicker, NInput, NSelect, NTimePicker, type InputInst } from 'naive-ui'
 import { MAX_DIARY_TASK_DESCRIPTION_LENGTH, MAX_DIARY_TASK_TITLE_LENGTH, taskTimeFieldsError, type TaskEditorFields } from '../../../shared/diaryTasks'
 import type { TaskRecurrenceFrequency } from '../../../shared/diaryTaskRecurrence'
 
@@ -25,39 +25,39 @@ const emit = defineEmits<{
   'event-picker-open': []
 }>()
 const titleInput = ref<InputInst | null>(null)
-const eventPickerExpanded = ref(Boolean(props.modelValue.eventId))
 const eventSelectShown = ref(false)
 const recurrenceStartLocked = computed(() => props.modelValue.recurrence !== null && props.lockRecurrenceStart)
 const title = computed({
   get: () => props.modelValue.title,
   set: (title: string) => emit('update:modelValue', { ...props.modelValue, title }),
 })
-const date = computed({
-  get: () => props.modelValue.recurrence?.startDate ?? props.modelValue.dueDate ?? '',
-  set: (value: string) => {
+const date = computed<string | null>({
+  get: () => props.modelValue.recurrence?.startDate ?? props.modelValue.dueDate,
+  set: value => {
+    const dateValue = value ?? ''
     if (recurrenceStartLocked.value) return
     if (props.modelValue.recurrence) {
-      emit('update:modelValue', { ...props.modelValue, recurrence: { ...props.modelValue.recurrence, startDate: value } })
+      emit('update:modelValue', { ...props.modelValue, recurrence: { ...props.modelValue.recurrence, startDate: dateValue } })
     } else {
-      emit('update:modelValue', { ...props.modelValue, dueDate: value || null, dueTime: value ? props.modelValue.dueTime : null })
+      emit('update:modelValue', { ...props.modelValue, dueDate: dateValue || null, dueTime: dateValue ? props.modelValue.dueTime : null })
     }
   },
 })
-const startDate = computed({
-  get: () => props.modelValue.startDate ?? '',
-  set: (value: string) => emit('update:modelValue', {
+const startDate = computed<string | null>({
+  get: () => props.modelValue.startDate,
+  set: value => emit('update:modelValue', {
     ...props.modelValue,
     startDate: value || null,
     startTime: value ? props.modelValue.startTime : null,
   }),
 })
-const startTime = computed({
-  get: () => props.modelValue.startTime ?? '',
-  set: (value: string) => emit('update:modelValue', { ...props.modelValue, startTime: value || null }),
+const startTime = computed<string | null>({
+  get: () => props.modelValue.startTime,
+  set: value => emit('update:modelValue', { ...props.modelValue, startTime: value || null }),
 })
-const time = computed({
-  get: () => props.modelValue.dueTime ?? '',
-  set: (dueTime: string) => emit('update:modelValue', { ...props.modelValue, dueTime: dueTime || null }),
+const time = computed<string | null>({
+  get: () => props.modelValue.dueTime,
+  set: dueTime => emit('update:modelValue', { ...props.modelValue, dueTime: dueTime || null }),
 })
 const timeError = computed(() => {
   const error = taskTimeFieldsError(props.modelValue)
@@ -84,7 +84,7 @@ const frequencyOptions = computed(() => [
   { value: 'monthly' as const, label: '每月' },
   { value: 'yearly' as const, label: '每年' },
 ])
-const frequency = computed({
+const frequency = computed<TaskRecurrenceFrequency | ''>({
   get: () => props.modelValue.recurrence?.frequency ?? '',
   set: (value: TaskRecurrenceFrequency | '') => {
     if (recurrenceStartLocked.value && value === '') return
@@ -102,15 +102,23 @@ const frequency = computed({
     })
   },
 })
-const untilDate = computed({
-  get: () => props.modelValue.recurrence?.untilDate ?? '',
-  set: (untilDate: string) => {
+const untilDate = computed<string | null>({
+  get: () => props.modelValue.recurrence?.untilDate ?? null,
+  set: untilDate => {
     if (props.modelValue.recurrence) emit('update:modelValue', {
       ...props.modelValue,
       recurrence: { ...props.modelValue.recurrence, untilDate: untilDate || null },
     })
   },
 })
+const recurrenceStartTimestamp = computed(() => {
+  const recurrenceStartDate = props.modelValue.recurrence?.startDate
+  if (!recurrenceStartDate) return null
+  const [year, month, day] = recurrenceStartDate.split('-').map(Number)
+  return new Date(year!, month! - 1, day!).getTime()
+})
+const isBeforeRecurrenceStart = (timestamp: number) => recurrenceStartTimestamp.value !== null
+  && timestamp < recurrenceStartTimestamp.value
 const eventId = computed({
   get: () => props.modelValue.recurrence ? null : props.modelValue.eventId ?? null,
   set: (value: string | null) => {
@@ -122,10 +130,8 @@ function onEventPickerVisibility(visible: boolean) {
   if (visible) emit('event-picker-open')
 }
 
-function openEventPicker() {
-  eventPickerExpanded.value = true
-  eventSelectShown.value = true
-  emit('event-picker-open')
+function updateFrequency(value: string | number | null) {
+  if (typeof value === 'string') frequency.value = value as TaskRecurrenceFrequency | ''
 }
 
 defineExpose({ focusTitle: () => titleInput.value?.focus() })
@@ -134,66 +140,125 @@ defineExpose({ focusTitle: () => titleInput.value?.focus() })
 <template>
   <div class="diary-task-form">
     <label class="diary-task-form-field diary-task-form-title">
-      <span>待办名称</span>
+      <span>待办名称<span class="diary-task-required" aria-hidden="true">*</span></span>
       <NInput
         ref="titleInput"
         v-model:value="title"
         :disabled="inert"
         :maxlength="MAX_DIARY_TASK_TITLE_LENGTH"
         placeholder="要完成的事情"
-        :input-props="{ 'aria-label': '待办名称' }"
+        :input-props="{ 'aria-label': '待办名称', required: true }"
       />
     </label>
     <div v-if="modelValue.recurrence" class="diary-task-form-due">
       <label class="diary-task-form-field">
         <span>开始日期</span>
-        <input v-model="date" type="date" :aria-label="modelValue.recurrence ? '开始日期' : '截止日期'" :disabled="inert || recurrenceStartLocked">
+        <NDatePicker
+          v-model:formatted-value="date"
+          class="diary-task-date-picker"
+          type="date"
+          format="yyyy-MM-dd"
+          value-format="yyyy-MM-dd"
+          :aria-label="modelValue.recurrence ? '开始日期' : '截止日期'"
+          :disabled="inert || recurrenceStartLocked"
+        />
       </label>
       <label class="diary-task-form-field">
         <span>截止时间</span>
-        <input v-model="time" type="time" aria-label="截止时间" :disabled="inert || !date">
+        <NTimePicker
+          v-model:formatted-value="time"
+          class="diary-task-time-picker"
+          format="HH:mm"
+          value-format="HH:mm"
+          aria-label="截止时间"
+          clearable
+          :disabled="inert || !date"
+        />
       </label>
-      <button v-if="date && !recurrenceStartLocked" type="button" class="diary-task-clear-date" :disabled="inert" @click="date = ''">清除日期</button>
     </div>
     <div v-else class="diary-task-form-time-groups">
       <div class="diary-task-form-time-group">
-        <div class="diary-task-form-time-heading">开始时间 <small>可选</small></div>
+        <div class="diary-task-form-time-heading">开始时间</div>
         <div class="diary-task-form-time-inputs">
-          <input v-model="startDate" type="date" aria-label="开始日期" :disabled="inert" :aria-invalid="Boolean(timeError)">
-          <input v-model="startTime" type="time" aria-label="开始时间" :disabled="inert || !startDate" :aria-invalid="Boolean(timeError)">
-          <button v-if="startDate" type="button" class="diary-task-clear-date" :disabled="inert" @click="startDate = ''">清除开始时间</button>
+          <NDatePicker
+            v-model:formatted-value="startDate"
+            class="diary-task-date-picker"
+            type="date"
+            format="yyyy-MM-dd"
+            value-format="yyyy-MM-dd"
+            aria-label="开始日期"
+            clearable
+            :status="timeError ? 'error' : undefined"
+            :disabled="inert"
+          />
+          <NTimePicker
+            v-model:formatted-value="startTime"
+            class="diary-task-time-picker"
+            format="HH:mm"
+            value-format="HH:mm"
+            aria-label="开始时间"
+            clearable
+            :status="timeError ? 'error' : undefined"
+            :disabled="inert || !startDate"
+          />
         </div>
       </div>
       <div class="diary-task-form-time-group">
-        <div class="diary-task-form-time-heading">截止时间 <small>可选</small></div>
+        <div class="diary-task-form-time-heading">截止时间</div>
         <div class="diary-task-form-time-inputs">
-          <input v-model="date" type="date" aria-label="截止日期" :disabled="inert" :aria-invalid="Boolean(timeError)">
-          <input v-model="time" type="time" aria-label="截止时间" :disabled="inert || !date" :aria-invalid="Boolean(timeError)">
-          <button v-if="date" type="button" class="diary-task-clear-date" :disabled="inert" @click="date = ''">清除截止时间</button>
+          <NDatePicker
+            v-model:formatted-value="date"
+            class="diary-task-date-picker"
+            type="date"
+            format="yyyy-MM-dd"
+            value-format="yyyy-MM-dd"
+            aria-label="截止日期"
+            clearable
+            :status="timeError ? 'error' : undefined"
+            :disabled="inert"
+          />
+          <NTimePicker
+            v-model:formatted-value="time"
+            class="diary-task-time-picker"
+            format="HH:mm"
+            value-format="HH:mm"
+            aria-label="截止时间"
+            clearable
+            :status="timeError ? 'error' : undefined"
+            :disabled="inert || !date"
+          />
         </div>
       </div>
     </div>
     <p v-if="timeError" class="diary-task-form-time-error" role="alert">{{ timeError }}</p>
     <label v-if="allowRecurrence" class="diary-task-form-field">
       <span>重复</span>
-      <select v-model="frequency" aria-label="重复规则" :disabled="inert">
-        <option v-for="option in frequencyOptions" :key="option.value" :value="option.value">{{ option.label }}</option>
-      </select>
+      <NSelect :value="frequency" :options="frequencyOptions" aria-label="重复规则" :disabled="inert" @update:value="updateFrequency" />
     </label>
     <label v-if="modelValue.recurrence" class="diary-task-form-field">
-      <span>结束日期 <small>可选</small></span>
-      <input v-model="untilDate" type="date" aria-label="重复结束日期" :min="modelValue.recurrence.startDate" :disabled="inert">
+      <span>结束日期<span class="diary-task-required" aria-hidden="true">*</span></span>
+      <NDatePicker
+        v-model:formatted-value="untilDate"
+        class="diary-task-date-picker"
+        type="date"
+        format="yyyy-MM-dd"
+        value-format="yyyy-MM-dd"
+        aria-label="重复结束日期"
+        clearable
+        :is-date-disabled="isBeforeRecurrenceStart"
+        :disabled="inert"
+      />
     </label>
     <div v-if="allowEventLink && !modelValue.recurrence" class="diary-task-form-field">
-      <span>关联日程 <small>可选</small></span>
-      <button v-if="!eventPickerExpanded" type="button" class="diary-task-link-trigger" :disabled="inert" @click="openEventPicker">选择日程</button>
+      <span>关联日程</span>
       <NSelect
-        v-else
+        class="diary-task-event-select"
         v-model:value="eventId"
         v-model:show="eventSelectShown"
         :options="eventOptions"
         :loading="eventOptionsLoading"
         :disabled="inert"
+        bordered
         clearable
         filterable
         placeholder="不关联日程"
@@ -202,7 +267,7 @@ defineExpose({ focusTitle: () => titleInput.value?.focus() })
       />
     </div>
     <label class="diary-task-form-field diary-task-form-description">
-      <span>备注 <small>可选</small></span>
+      <span>备注</span>
       <NInput
         v-model:value="description"
         type="textarea"
@@ -221,51 +286,17 @@ defineExpose({ focusTitle: () => titleInput.value?.focus() })
 .diary-task-form-field { display: flex; min-width: 0; flex-direction: column; gap: 7px; color: var(--text); font-size: 14px; }
 .diary-task-form-field > span { color: var(--text-muted, #6b7280); }
 .diary-task-form-field > span small { font-size: 12px; font-weight: 400; }
-.diary-task-form-field select { width: 100%; min-width: 0; height: 38px; box-sizing: border-box; padding: 0 9px; border: 1px solid var(--border, #d9dce5); border-radius: 7px; background: var(--input-color, var(--bg)); color: inherit; font: inherit; }
-.diary-task-link-trigger { align-self: flex-start; min-height: 32px; padding: 2px 0; border: 0; background: transparent; color: var(--accent, #6366f1); font: inherit; font-size: 13px; cursor: pointer; }
-.diary-task-link-trigger:disabled { opacity: .55; cursor: default; }
+.diary-task-required { margin-left: 3px; color: var(--error-color, #d03050); }
+.diary-task-form :deep(.diary-task-date-picker),
+.diary-task-form :deep(.diary-task-time-picker),
+.diary-task-form :deep(.n-select) { width: 100%; min-width: 0; }
 .diary-task-form-title input { font-size: 17px; }
-.diary-task-form-due { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) auto; gap: 10px; align-items: end; min-width: 0; }
+.diary-task-form-due { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; align-items: end; min-width: 0; }
 .diary-task-form-time-groups { display: flex; min-width: 0; flex-direction: column; gap: 14px; }
 .diary-task-form-time-group { display: flex; min-width: 0; flex-direction: column; gap: 7px; }
 .diary-task-form-time-heading { color: var(--text-muted, #6b7280); font-size: 14px; }
 .diary-task-form-time-heading small { font-size: 12px; font-weight: 400; }
-.diary-task-form-time-inputs { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) auto; gap: 10px; align-items: end; min-width: 0; }
-.diary-task-form-due input {
-  width: 100%;
-  min-width: 0;
-  height: 38px;
-  box-sizing: border-box;
-  padding: 0 9px;
-  border: 1px solid var(--border, #d9dce5);
-  border-radius: 7px;
-  background: var(--input-color, var(--bg));
-  color: inherit;
-  font: inherit;
-}
-.diary-task-form-time-inputs input {
-  width: 100%;
-  min-width: 0;
-  height: 38px;
-  box-sizing: border-box;
-  padding: 0 9px;
-  border: 1px solid var(--border, #d9dce5);
-  border-radius: 7px;
-  background: var(--input-color, var(--bg));
-  color: inherit;
-  font: inherit;
-}
-.diary-task-form-time-inputs input:disabled { opacity: .55; }
-.diary-task-form-time-inputs input[aria-invalid="true"] { border-color: var(--error-color, #d03050); }
+.diary-task-form-time-inputs { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; align-items: end; min-width: 0; }
 .diary-task-form-time-error { margin: -10px 0 0; color: var(--error-color, #d03050); font-size: 12px; }
-.diary-task-form-due input:disabled { opacity: .55; }
-.diary-task-clear-date { height: 38px; padding: 0 4px; border: 0; background: transparent; color: var(--text-muted, #6b7280); font: inherit; font-size: 12px; cursor: pointer; white-space: nowrap; }
-.diary-task-clear-date:disabled { cursor: default; opacity: .55; }
 .diary-task-form-description textarea { resize: vertical; }
-@media (max-width: 420px) {
-  .diary-task-form-due { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
-  .diary-task-form-time-inputs { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
-  .diary-task-form-time-inputs .diary-task-clear-date { grid-column: 2; justify-self: end; height: 28px; }
-  .diary-task-clear-date { grid-column: 2; justify-self: end; height: 28px; }
-}
 </style>

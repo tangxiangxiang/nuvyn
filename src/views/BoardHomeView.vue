@@ -26,7 +26,6 @@ import { useToast } from '../composables/useToast'
 import { usePagePullRefresh } from '../composables/usePagePullRefresh'
 import PagePullRefreshIndicator from '../components/PagePullRefreshIndicator.vue'
 import { nuvynBoardDragMime, readDataTransfer } from '../technicalNamespace'
-import { workspaceDisplayNames } from '../lib/workspace'
 
 const route = useRoute()
 const router = useRouter()
@@ -585,7 +584,7 @@ async function removeBoard(board: BoardMetadata): Promise<void> {
     <div class="board-home-content">
       <header class="board-home-header">
         <div class="board-home-heading">
-          <p class="board-home-eyebrow">{{ workspaceDisplayNames.board }}</p>
+          <p class="board-home-eyebrow">BOARD</p>
           <h1>{{ t('board.workspace_label') }}</h1>
           <p class="board-home-subtitle">{{ t('board.subtitle') }}</p>
         </div>

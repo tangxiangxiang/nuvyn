@@ -110,7 +110,7 @@ test('Diary lock clears search results and locked search does not query private 
 
   await page.getByTestId('account-button').click()
   await page.getByTestId('account-lock-diary').click()
-  await expect(page.getByRole('button', { name: '解锁日记', exact: true })).toBeVisible()
+  await expect(page.getByRole('button', { name: '解锁日程', exact: true })).toBeVisible()
 
   let privateSearchRequests = 0
   await page.route('**/api/diary/life/search', route => {

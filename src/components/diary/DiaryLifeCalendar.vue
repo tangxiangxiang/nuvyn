@@ -532,10 +532,7 @@ function selectDate(date: string, event: MouseEvent) {
 }
 
 .life-marker .life-event-marker {
-  width: 19px;
-  height: 19px;
   flex: none;
-  font-size: 19px;
   line-height: 1;
 }
 
@@ -563,7 +560,6 @@ function selectDate(date: string, event: MouseEvent) {
 @media (max-width: 420px) {
   .life-marker { font-size: 18px; }
   .life-marker img { width: 18px; height: 18px; }
-  .life-marker .life-event-marker { width: 16px; height: 16px; font-size: 16px; }
   .life-marker .life-task-marker { width: 18px; height: 18px; }
   .life-marker--with-task small { display: none; }
 }

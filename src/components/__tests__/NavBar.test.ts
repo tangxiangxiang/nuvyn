@@ -10,7 +10,7 @@ import { useTheme } from '../../composables/useTheme'
 import { useScopeFilter } from '../../composables/vault/useScopeFilter'
 import { __resetVaultLayoutState } from '../../composables/vault/useVaultLayout'
 import { AppShellContextKey } from '../../composables/appShellContext'
-import { Calendar, CalendarEvent, Lock, MoodSmile } from '@vicons/tabler'
+import { CalendarEvent, MoodSmile } from '@vicons/tabler'
 
 function installWorkspaceMobileMediaQuery(initialMatches: boolean) {
   const originalDescriptor = Object.getOwnPropertyDescriptor(window, 'matchMedia')
@@ -256,18 +256,30 @@ describe('NavBar — scope chips', () => {
     ])
   })
 
-  it('shows a lock for a locked Diary and a calendar after unlocking', async () => {
+  it('shows Diary controls after unlocking and offers locking from the account menu', async () => {
+    const appShell = {
+      settingsRequestTick: ref(0),
+      diaryViewMode: ref<'diary' | 'events'>('diary'),
+      diaryViewToggleCommand: ref(vi.fn()),
+      diaryEventListCommand: ref(vi.fn()),
+    }
     const wrapper = mount(NavBar, {
-      props: { isVault: true, diaryUnlocked: false },
+      props: { workspaceKind: 'diary', diaryUnlocked: false },
+      global: { provide: { [AppShellContextKey as symbol]: appShell }, stubs: { transition: false } },
     })
 
-    expect(wrapper.findComponent(Lock).exists()).toBe(true)
-    expect(wrapper.findComponent(Calendar).exists()).toBe(false)
+    expect(wrapper.find('[data-testid="diary-view-toggle"]').exists()).toBe(false)
+    expect(wrapper.find('[data-testid="diary-event-list-toggle"]').exists()).toBe(false)
 
     await wrapper.setProps({ diaryUnlocked: true })
 
-    expect(wrapper.findComponent(Lock).exists()).toBe(false)
-    expect(wrapper.findComponent(Calendar).exists()).toBe(true)
+    expect(wrapper.find('[data-testid="diary-view-toggle"]').exists()).toBe(true)
+    expect(wrapper.find('[data-testid="diary-event-list-toggle"]').exists()).toBe(true)
+
+    await wrapper.get('[data-testid="account-button"]').trigger('click')
+    await wrapper.get('[data-testid="account-lock-diary"]').trigger('click')
+
+    expect(wrapper.emitted('lock-diary')).toHaveLength(1)
     wrapper.unmount()
   })
 

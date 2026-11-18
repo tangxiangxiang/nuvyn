@@ -85,6 +85,62 @@ export async function chooseDiaryAction(page: Page, trigger: Locator, action: st
   await expect(menu).toHaveCount(0)
 }
 
+export async function selectNaiveOption(page: Page, label: string, optionName: string, touch = false) {
+  const control = page.locator(`.n-select[aria-label="${label}"] .n-base-selection`)
+  if (touch) await control.tap()
+  else await control.click()
+  const menu = page.locator('.n-base-select-menu').last()
+  const option = page.getByText(optionName, { exact: true }).last()
+  for (let attempt = 0; attempt < 30 && await option.count() === 0; attempt += 1) {
+    await menu.hover()
+    await page.mouse.wheel(0, 160)
+    await page.evaluate(() => new Promise<void>(resolve => requestAnimationFrame(() => resolve())))
+  }
+  await expect(option).toHaveCount(1)
+  if (touch) await option.tap()
+  else await option.click()
+}
+
+export function diaryTaskDateInput(page: Page, label: string) {
+  return page.locator(`.diary-task-date-picker[aria-label="${label}"] input`)
+}
+
+export async function fillDiaryTaskDate(page: Page, label: string, value: string) {
+  const input = diaryTaskDateInput(page, label)
+  await input.fill(value)
+  await input.press('Tab')
+}
+
+export function diaryTaskTimeInput(page: Page, label: string) {
+  return page.locator(`.diary-task-time-picker[aria-label="${label}"] input`)
+}
+
+export async function fillDiaryTaskTime(page: Page, label: string, value: string) {
+  const input = diaryTaskTimeInput(page, label)
+  await input.fill(value)
+  await input.press('Tab')
+}
+
+export function diaryEventDateInput(page: Page, label: string) {
+  return page.locator(`.event-date-picker[aria-label="${label}"] input`)
+}
+
+export async function fillDiaryEventDate(page: Page, label: string, value: string) {
+  const input = diaryEventDateInput(page, label)
+  await input.fill(value)
+  await input.press('Tab')
+}
+
+export function diaryEventTimeInput(page: Page, label: string) {
+  return page.locator(`.event-time-picker[aria-label="${label}"] input`)
+}
+
+export async function fillDiaryEventTime(page: Page, label: string, value: string) {
+  const input = diaryEventTimeInput(page, label)
+  await input.fill(value)
+  await input.press('Tab')
+}
+
 export function chooseDiaryDayAction(page: Page, action: string, touch = false) {
   return chooseDiaryAction(page, page.getByRole('button', { name: '更多日记操作' }), action, touch)
 }

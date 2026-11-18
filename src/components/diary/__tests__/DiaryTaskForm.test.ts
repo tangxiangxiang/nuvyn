@@ -1,11 +1,60 @@
 // @vitest-environment jsdom
 import { describe, expect, it } from 'vitest'
 import { mount } from '@vue/test-utils'
+import { NDatePicker, NInput, NSelect, NTimePicker } from 'naive-ui'
 import DiaryTaskForm from '../DiaryTaskForm.vue'
 import type { TaskEditorFields } from '../../../../shared/diaryTasks'
 
+function getControl(wrapper: ReturnType<typeof mount>, component: typeof NDatePicker | typeof NSelect | typeof NTimePicker, label: string) {
+  return wrapper.findAllComponents(component).find(control => control.attributes('aria-label') === label)!
+}
+
+function getProp(control: ReturnType<typeof getControl>, name: string) {
+  return (control.props() as Record<string, unknown>)[name]
+}
+
 describe('DiaryTaskForm', () => {
-  it('clears the due time together with a cleared due date', async () => {
+  it('marks the task title and recurring end date as required', () => {
+    const initial: TaskEditorFields = {
+      title: '', description: '', startDate: null, startTime: null, dueDate: null, dueTime: null,
+      recurrence: { frequency: 'daily', startDate: '2026-11-16', untilDate: null }, eventId: null,
+    }
+    const wrapper = mount(DiaryTaskForm, { props: { modelValue: initial, today: '2026-11-16' } })
+
+    expect(wrapper.find('.diary-task-form-title').text()).toContain('待办名称*')
+    expect(wrapper.findAll('.diary-task-required')).toHaveLength(2)
+    expect(wrapper.findComponent(NInput).props('inputProps')).toMatchObject({
+      'aria-label': '待办名称',
+      required: true,
+    })
+    wrapper.unmount()
+  })
+
+  it('uses Naive pickers and clears a time without clearing its date', async () => {
+    const initial: TaskEditorFields = {
+      title: '预约体检', description: '', startDate: '2026-11-18', startTime: '09:30',
+      dueDate: '2026-11-20', dueTime: '10:30', recurrence: null, eventId: null,
+    }
+    const wrapper = mount(DiaryTaskForm, { props: { modelValue: initial, today: '2026-11-16' } })
+    const startDate = getControl(wrapper, NDatePicker, '开始日期')
+    const startTime = getControl(wrapper, NTimePicker, '开始时间')
+
+    expect(getProp(startDate, 'valueFormat')).toBe('yyyy-MM-dd')
+    expect(getProp(startDate, 'formattedValue')).toBe('2026-11-18')
+    expect(getProp(startTime, 'valueFormat')).toBe('HH:mm')
+    expect(getProp(startTime, 'formattedValue')).toBe('09:30')
+    expect(startTime.props('clearable')).toBe(true)
+
+    await startDate.vm.$emit('update:formatted-value', '2026-11-19', 0)
+    expect(wrapper.emitted('update:modelValue')?.at(-1)?.[0]).toMatchObject({ startDate: '2026-11-19' })
+    await startTime.vm.$emit('update:formatted-value', null, null)
+    expect(wrapper.emitted('update:modelValue')?.at(-1)?.[0]).toMatchObject({ startDate: '2026-11-18', startTime: null })
+    await getControl(wrapper, NTimePicker, '截止时间').vm.$emit('update:formatted-value', null, null)
+    expect(wrapper.emitted('update:modelValue')?.at(-1)?.[0]).toMatchObject({ dueDate: '2026-11-20', dueTime: null })
+    wrapper.unmount()
+  })
+
+  it('clears the due date and due time using the native date picker action', async () => {
     const initial: TaskEditorFields = {
       title: '预约体检',
       description: '',
@@ -18,7 +67,9 @@ describe('DiaryTaskForm', () => {
     }
     const wrapper = mount(DiaryTaskForm, { props: { modelValue: initial, today: '2026-11-16' } })
 
-    await wrapper.get('button.diary-task-clear-date').trigger('click')
+    const dueDate = getControl(wrapper, NDatePicker, '截止日期')
+    expect(dueDate.props('clearable')).toBe(true)
+    await dueDate.vm.$emit('update:formatted-value', null, null)
     expect(wrapper.emitted('update:modelValue')?.at(-1)?.[0]).toMatchObject({
       dueDate: null,
       dueTime: null,
@@ -26,22 +77,24 @@ describe('DiaryTaskForm', () => {
     wrapper.unmount()
   })
 
-  it('keeps optional start and due date-time pairs independent and clears matching times', async () => {
+  it('clears optional start dates with their time while keeping start and due pairs independent', async () => {
     const initial: TaskEditorFields = {
       title: '准备发布', description: '', startDate: null, startTime: null,
       dueDate: '2026-11-21', dueTime: '12:00', recurrence: null, eventId: null,
     }
     const wrapper = mount(DiaryTaskForm, { props: { modelValue: initial, today: '2026-11-16' } })
 
-    await wrapper.get('input[aria-label="开始日期"]').setValue('2026-11-19')
+    await getControl(wrapper, NDatePicker, '开始日期').vm.$emit('update:formatted-value', '2026-11-19')
     const startDateDraft = wrapper.emitted('update:modelValue')?.at(-1)?.[0] as TaskEditorFields
     expect(startDateDraft).toMatchObject({ startDate: '2026-11-19', startTime: null, dueDate: '2026-11-21', dueTime: '12:00' })
+    const startDatePicker = getControl(wrapper, NDatePicker, '开始日期')
+    expect(startDatePicker.props('clearable')).toBe(true)
     await wrapper.setProps({ modelValue: { ...startDateDraft, startTime: '09:00' } })
-    const clearStartButton = wrapper.findAll('button.diary-task-clear-date').find(button => button.text() === '清除开始时间')!
-    await clearStartButton.trigger('click')
+    await startDatePicker.vm.$emit('update:formatted-value', null, null)
     expect(wrapper.emitted('update:modelValue')?.at(-1)?.[0]).toMatchObject({
       startDate: null, startTime: null, dueDate: '2026-11-21', dueTime: '12:00',
     })
+    expect(wrapper.find('button.diary-task-clear-date').exists()).toBe(false)
     wrapper.unmount()
   })
 
@@ -69,7 +122,7 @@ describe('DiaryTaskForm', () => {
     }
     const wrapper = mount(DiaryTaskForm, { props: { modelValue: initial, today: '2026-11-16' } })
 
-    await wrapper.get('select[aria-label="重复规则"]').setValue('weekly')
+    await getControl(wrapper, NSelect, '重复规则').vm.$emit('update:value', 'weekly')
     expect(wrapper.emitted('update:modelValue')?.at(-1)?.[0]).toMatchObject({
       dueDate: '2026-11-18',
       recurrence: { frequency: 'weekly', startDate: '2026-11-18', untilDate: null },
@@ -91,7 +144,7 @@ describe('DiaryTaskForm', () => {
     }
     const wrapper = mount(DiaryTaskForm, { props: { modelValue: initial, today: '2026-11-16' } })
 
-    await wrapper.get('select[aria-label="重复规则"]').setValue('daily')
+    await getControl(wrapper, NSelect, '重复规则').vm.$emit('update:value', 'daily')
     expect(wrapper.emitted('update:modelValue')?.at(-1)?.[0]).toMatchObject({
       startDate: '2026-11-18',
       startTime: '09:00',
@@ -106,18 +159,18 @@ describe('DiaryTaskForm', () => {
       title: '每周整理笔记', description: '', startDate: null, startTime: null, dueDate: null, dueTime: null, recurrence: null, eventId: null,
     }
     const wrapper = mount(DiaryTaskForm, { props: { modelValue: initial, today: '2026-11-16' } })
-    await wrapper.get('select[aria-label="重复规则"]').setValue('daily')
+    await getControl(wrapper, NSelect, '重复规则').vm.$emit('update:value', 'daily')
     const recurringDraft = wrapper.emitted('update:modelValue')?.at(-1)?.[0] as TaskEditorFields
     expect(recurringDraft).toMatchObject({ recurrence: { frequency: 'daily', startDate: '2026-11-16' } })
     await wrapper.setProps({ modelValue: recurringDraft })
-    await wrapper.get('input[aria-label="开始日期"]').setValue('2026-11-18')
+    await getControl(wrapper, NDatePicker, '开始日期').vm.$emit('update:formatted-value', '2026-11-18')
     expect(wrapper.emitted('update:modelValue')?.at(-1)?.[0]).toMatchObject({
       recurrence: { startDate: '2026-11-18' },
     })
     wrapper.unmount()
   })
 
-  it('keeps an existing recurring start date locked and hides its clear action', async () => {
+  it('keeps an existing recurring start date required and locked', async () => {
     const initial: TaskEditorFields = {
       title: '每周整理笔记', description: '', startDate: null, startTime: null, dueDate: '2026-11-16', dueTime: null,
       recurrence: { frequency: 'daily', startDate: '2026-11-16', untilDate: null }, eventId: null,
@@ -126,10 +179,11 @@ describe('DiaryTaskForm', () => {
       props: { modelValue: initial, today: '2026-11-16', lockRecurrenceStart: true },
     })
 
-    expect(wrapper.get('input[aria-label="开始日期"]').attributes('disabled')).toBeDefined()
+    expect(getControl(wrapper, NDatePicker, '开始日期').props('disabled')).toBe(true)
+    expect(getControl(wrapper, NDatePicker, '开始日期').props('clearable')).not.toBe(true)
     expect(wrapper.find('button.diary-task-clear-date').exists()).toBe(false)
-    expect(wrapper.get('select[aria-label="重复规则"]').find('option[value=""]').exists()).toBe(false)
-    await wrapper.get('select[aria-label="重复规则"]').setValue('weekly')
+    expect(getProp(getControl(wrapper, NSelect, '重复规则'), 'options')).not.toContainEqual(expect.objectContaining({ value: '' }))
+    await getControl(wrapper, NSelect, '重复规则').vm.$emit('update:value', 'weekly')
     expect(wrapper.emitted('update:modelValue')?.at(-1)?.[0]).toMatchObject({
       recurrence: { frequency: 'weekly', startDate: '2026-11-16' },
     })
@@ -145,14 +199,18 @@ describe('DiaryTaskForm', () => {
     wrapper.unmount()
   })
 
-  it('opens the schedule selector only after the user chooses to link a task', async () => {
+  it('shows the schedule selector by default and loads options when opened', async () => {
     const initial: TaskEditorFields = {
       title: '准备证件', description: '', startDate: null, startTime: null, dueDate: '2026-11-20', dueTime: null, recurrence: null, eventId: null,
     }
     const wrapper = mount(DiaryTaskForm, { props: { modelValue: initial, today: '2026-11-16' } })
-    expect(wrapper.find('.n-select').exists()).toBe(false)
-    await wrapper.get('button.diary-task-link-trigger').trigger('click')
-    expect(wrapper.find('.n-select').exists()).toBe(true)
+    const selector = getControl(wrapper, NSelect, '关联日程')
+
+    expect(wrapper.find('.diary-task-event-select').exists()).toBe(true)
+    expect(selector.props('placeholder')).toBe('不关联日程')
+    expect(selector.props('bordered')).toBe(true)
+    expect(selector.props('clearable')).toBe(true)
+    await selector.vm.$emit('update:show', true)
     expect(wrapper.emitted('event-picker-open')).toHaveLength(1)
     wrapper.unmount()
   })

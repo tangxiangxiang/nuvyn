@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, ref } from 'vue'
-import { NCheckbox, NInput, NPopover } from 'naive-ui'
+import { NCheckbox, NDatePicker, NInput, NPopover, NSelect, NTimePicker } from 'naive-ui'
 import { lunarDayLabel, lunarMonthLabel, lunarToSolar, nextLunarOccurrence, solarToLunar, type ChineseEventDateRule, type EventDateRule } from '../../../shared/lunarCalendar'
 import { birthdayPersonName, type EventFields } from '../../../shared/diaryLife'
 import { useConfirm } from '../../composables/useConfirm'
@@ -47,6 +47,39 @@ const endTimeError = computed(() => {
 })
 const lunarMonthOptions = Array.from({ length: 12 }, (_, index) => ({ value: index + 1, label: lunarMonthLabel(index + 1) }))
 const lunarDayOptions = Array.from({ length: 30 }, (_, index) => ({ value: index + 1, label: lunarDayLabel(index + 1) }))
+const birthdayLunarMonthOptions = computed(() => lunarMonthOptions.map(option => ({
+  ...option,
+  disabled: !isValidBirthdayDate(chineseRule.value?.lunarDay ?? 1, chineseRule.value?.isLeapMonth ?? false, option.value),
+})))
+const birthdayLunarDayOptions = computed(() => lunarDayOptions.map(option => ({
+  ...option,
+  disabled: !isValidBirthdayDate(option.value),
+})))
+const birthdayMonthTypeOptions = computed(() => [
+  { value: 'regular', label: `普通${lunarMonthLabel(chineseRule.value?.lunarMonth ?? 1)}` },
+  {
+    value: 'leap',
+    label: `闰${lunarMonthLabel(chineseRule.value?.lunarMonth ?? 1)}`,
+    disabled: !isValidBirthdayDate(chineseRule.value?.lunarDay ?? 1, true),
+  },
+])
+const lunarMonthTypeOptions = computed(() => [
+  { value: 'regular', label: `普通${lunarMonthLabel(chineseRule.value?.lunarMonth ?? 1)}` },
+  { value: 'leap', label: `闰${lunarMonthLabel(chineseRule.value?.lunarMonth ?? 1)}` },
+])
+const leapMonthPolicyOptions = computed(() => [
+  { value: 'regular-month', label: `按普通${lunarMonthLabel(chineseRule.value?.lunarMonth ?? 1)}` },
+  { value: 'leap-only', label: '跳过该年，只在闰月出现' },
+])
+const shortMonthPolicyOptions = [
+  { value: 'last-day', label: '按当月最后一天' },
+  { value: 'skip', label: '跳过该年' },
+]
+const scheduleStartTimestamp = computed(() => {
+  const [year, month, day] = value.value.startDate.split('-').map(Number)
+  return new Date(year!, month! - 1, day!).getTime()
+})
+const isBeforeScheduleStart = (timestamp: number) => timestamp < scheduleStartTimestamp.value
 const eventTypes: Array<{ value: EventFields['type']; label: string; icon: string; defaultEmoji: string }> = [
   { value: 'birthday', label: '生日', icon: 'birthday', defaultEmoji: '🎂' },
   { value: 'anniversary', label: '纪念日', icon: 'ring', defaultEmoji: '💍' },
@@ -99,10 +132,39 @@ function formatGregorianDate(date: string): string {
   return year + '年' + month + '月' + day + '日'
 }
 
-function updateStartDate(date: string) {
+function updateStartDate(date: string | null) {
+  const nextDate = date ?? ''
   const wasSingleDay = value.value.startDate === value.value.endDate
-  value.value.startDate = date
-  if (date && (wasSingleDay || value.value.endDate < date)) value.value.endDate = date
+  value.value.startDate = nextDate
+  if (nextDate && (wasSingleDay || value.value.endDate < nextDate)) value.value.endDate = nextDate
+}
+
+function updateEndDate(date: string | null) {
+  value.value.endDate = date ?? ''
+}
+
+function updateLunarMonth(month: string | number | null) {
+  if (month !== null) updateChineseRule({ lunarMonth: Number(month) })
+}
+
+function updateLunarDay(day: string | number | null) {
+  if (day !== null) updateChineseRule({ lunarDay: Number(day) })
+}
+
+function updateLunarMonthType(type: string | number | null) {
+  if (type === 'regular' || type === 'leap') updateChineseRule({ isLeapMonth: type === 'leap' })
+}
+
+function updateLeapMonthPolicy(policy: string | number | null) {
+  if (policy === 'regular-month' || policy === 'leap-only') {
+    updateChineseRule({ leapMonthPolicy: policy as ChineseEventDateRule['leapMonthPolicy'] })
+  }
+}
+
+function updateShortMonthPolicy(policy: string | number | null) {
+  if (policy === 'last-day' || policy === 'skip') {
+    updateChineseRule({ shortMonthPolicy: policy as ChineseEventDateRule['shortMonthPolicy'] })
+  }
 }
 
 function typeSwitchLosses(target: EventFields['type']): string[] {
@@ -377,62 +439,90 @@ function updateChineseRule(updates: Partial<ChineseEventDateRule>) {
         </label>
         <label class="event-field">
           <span>农历月份</span>
-          <select aria-label="农历月份" :value="chineseRule.lunarMonth" @change="updateChineseRule({ lunarMonth: Number(($event.target as HTMLSelectElement).value) })">
-            <option v-for="option in lunarMonthOptions" :key="option.value" :value="option.value" :disabled="!isValidBirthdayDate(chineseRule.lunarDay, chineseRule.isLeapMonth, option.value)">{{ option.label }}</option>
-          </select>
+          <NSelect
+            :value="chineseRule.lunarMonth"
+            :options="birthdayLunarMonthOptions"
+            aria-label="农历月份"
+            @update:value="updateLunarMonth"
+          />
         </label>
         <label class="event-field">
           <span>农历日期</span>
-          <select aria-label="农历日期" :value="chineseRule.lunarDay" @change="updateChineseRule({ lunarDay: Number(($event.target as HTMLSelectElement).value) })">
-            <option v-for="option in lunarDayOptions" :key="option.value" :value="option.value" :disabled="!isValidBirthdayDate(option.value)">{{ option.label }}</option>
-          </select>
+          <NSelect
+            :value="chineseRule.lunarDay"
+            :options="birthdayLunarDayOptions"
+            aria-label="农历日期"
+            @update:value="updateLunarDay"
+          />
         </label>
         <label class="event-field">
           <span>出生月份</span>
-          <select aria-label="出生月份类型" :value="chineseRule.isLeapMonth ? 'leap' : 'regular'" @change="updateChineseRule({ isLeapMonth: ($event.target as HTMLSelectElement).value === 'leap' })">
-            <option value="regular">普通{{ lunarMonthLabel(chineseRule.lunarMonth) }}</option>
-            <option value="leap" :disabled="!isValidBirthdayDate(chineseRule.lunarDay, true)">闰{{ lunarMonthLabel(chineseRule.lunarMonth) }}</option>
-          </select>
+          <NSelect
+            :value="chineseRule.isLeapMonth ? 'leap' : 'regular'"
+            :options="birthdayMonthTypeOptions"
+            aria-label="出生月份类型"
+            @update:value="updateLunarMonthType"
+          />
         </label>
       </div>
 
       <div v-else-if="chineseRule" class="event-dates">
         <label class="event-field">
           <span>农历月份</span>
-          <select aria-label="农历月份" :value="chineseRule.lunarMonth" @change="updateChineseRule({ lunarMonth: Number(($event.target as HTMLSelectElement).value) })">
-            <option v-for="option in lunarMonthOptions" :key="option.value" :value="option.value">{{ option.label }}</option>
-          </select>
+          <NSelect :value="chineseRule.lunarMonth" :options="lunarMonthOptions" aria-label="农历月份" @update:value="updateLunarMonth" />
         </label>
         <label class="event-field">
           <span>农历日期</span>
-          <select aria-label="农历日期" :value="chineseRule.lunarDay" @change="updateChineseRule({ lunarDay: Number(($event.target as HTMLSelectElement).value) })">
-            <option v-for="option in lunarDayOptions" :key="option.value" :value="option.value">{{ option.label }}</option>
-          </select>
+          <NSelect :value="chineseRule.lunarDay" :options="lunarDayOptions" aria-label="农历日期" @update:value="updateLunarDay" />
         </label>
         <label class="event-field">
           <span>月份类型</span>
-          <select aria-label="农历月份类型" :value="chineseRule.isLeapMonth ? 'leap' : 'regular'" @change="updateChineseRule({ isLeapMonth: ($event.target as HTMLSelectElement).value === 'leap' })">
-            <option value="regular">普通{{ lunarMonthLabel(chineseRule.lunarMonth) }}</option>
-            <option value="leap">闰{{ lunarMonthLabel(chineseRule.lunarMonth) }}</option>
-          </select>
+          <NSelect :value="chineseRule.isLeapMonth ? 'leap' : 'regular'" :options="lunarMonthTypeOptions" aria-label="农历月份类型" @update:value="updateLunarMonthType" />
         </label>
       </div>
 
       <div v-else-if="isSchedule" class="event-dates">
         <label class="event-field">
           <span>开始日期</span>
-          <input :value="value.startDate" type="date" required aria-label="开始日期" :aria-invalid="Boolean(dateRangeError)" @input="updateStartDate(($event.target as HTMLInputElement).value)">
+          <NDatePicker
+            :formatted-value="value.startDate"
+            class="event-date-picker"
+            type="date"
+            format="yyyy-MM-dd"
+            value-format="yyyy-MM-dd"
+            aria-label="开始日期"
+            :status="dateRangeError ? 'error' : undefined"
+            @update:formatted-value="updateStartDate"
+          />
         </label>
         <label class="event-field">
           <span>结束日期</span>
-          <input v-model="value.endDate" :min="value.startDate" type="date" required aria-label="结束日期" :aria-invalid="Boolean(dateRangeError)" :aria-describedby="dateRangeError ? 'event-end-date-error' : undefined">
+          <NDatePicker
+            :formatted-value="value.endDate"
+            class="event-date-picker"
+            type="date"
+            format="yyyy-MM-dd"
+            value-format="yyyy-MM-dd"
+            aria-label="结束日期"
+            :status="dateRangeError ? 'error' : undefined"
+            :is-date-disabled="isBeforeScheduleStart"
+            @update:formatted-value="updateEndDate"
+          />
           <small v-if="dateRangeError" id="event-end-date-error" class="event-date-error" role="alert">{{ dateRangeError }}</small>
         </label>
       </div>
 
       <label v-else-if="!isBirthday" class="event-field">
         <span>{{ gregorianDateLabel }}</span>
-        <input :value="value.startDate" type="date" required :aria-label="gregorianDateLabel" @input="updateStartDate(($event.target as HTMLInputElement).value)">
+        <NDatePicker
+          :formatted-value="value.startDate"
+          class="event-date-picker"
+          type="date"
+          format="yyyy-MM-dd"
+          value-format="yyyy-MM-dd"
+          :aria-label="gregorianDateLabel"
+          @update:formatted-value="updateStartDate"
+        />
       </label>
 
       <p v-if="isBirthday" class="event-date-preview" aria-live="polite">
@@ -450,12 +540,31 @@ function updateChineseRule(updates: Partial<ChineseEventDateRule>) {
       <div v-if="isSchedule && !chineseRule && !value.allDay" class="event-dates">
         <label class="event-field">
           <span>开始时间</span>
-          <input :value="value.startTime ?? ''" type="time" aria-label="开始时间" :required="!isEditing" :aria-invalid="Boolean(startTimeError)" :aria-describedby="startTimeError ? 'event-start-time-error' : undefined" @input="value.startTime = ($event.target as HTMLInputElement).value || null">
+          <NTimePicker
+            :formatted-value="value.startTime"
+            class="event-time-picker"
+            format="HH:mm"
+            value-format="HH:mm"
+            aria-label="开始时间"
+            clearable
+            :required="!isEditing ? true : undefined"
+            :status="startTimeError ? 'error' : undefined"
+            @update:formatted-value="value.startTime = $event"
+          />
           <small v-if="startTimeError" id="event-start-time-error" class="event-date-error" role="alert">{{ startTimeError }}</small>
         </label>
         <label class="event-field">
           <span>结束时间</span>
-          <input :value="value.endTime ?? ''" type="time" aria-label="结束时间" :aria-invalid="Boolean(endTimeError)" :aria-describedby="endTimeError ? 'event-end-time-error' : undefined" @input="value.endTime = ($event.target as HTMLInputElement).value || null">
+          <NTimePicker
+            :formatted-value="value.endTime"
+            class="event-time-picker"
+            format="HH:mm"
+            value-format="HH:mm"
+            aria-label="结束时间"
+            clearable
+            :status="endTimeError ? 'error' : undefined"
+            @update:formatted-value="value.endTime = $event"
+          />
           <small v-if="endTimeError" id="event-end-time-error" class="event-date-error" role="alert">{{ endTimeError }}</small>
         </label>
       </div>
@@ -495,17 +604,42 @@ function updateChineseRule(updates: Partial<ChineseEventDateRule>) {
           <p class="event-date-help">保留此事件已有的持续日期和时间设置，可在这里继续编辑。</p>
           <label v-if="value.endDate !== value.startDate" class="event-field">
             <span>结束日期</span>
-            <input v-model="value.endDate" :min="value.startDate" type="date" required aria-label="结束日期">
+            <NDatePicker
+              :formatted-value="value.endDate"
+              class="event-date-picker"
+              type="date"
+              format="yyyy-MM-dd"
+              value-format="yyyy-MM-dd"
+              aria-label="结束日期"
+              :is-date-disabled="isBeforeScheduleStart"
+              @update:formatted-value="updateEndDate"
+            />
           </label>
           <NCheckbox v-if="!isSchedule" v-model:checked="value.allDay">全天</NCheckbox>
           <div v-if="!value.allDay" class="event-dates">
             <label class="event-field">
               <span>开始时间</span>
-              <input :value="value.startTime ?? ''" type="time" aria-label="开始时间" @input="value.startTime = ($event.target as HTMLInputElement).value || null">
+              <NTimePicker
+                :formatted-value="value.startTime"
+                class="event-time-picker"
+                format="HH:mm"
+                value-format="HH:mm"
+                aria-label="开始时间"
+                clearable
+                @update:formatted-value="value.startTime = $event"
+              />
             </label>
             <label class="event-field">
               <span>结束时间</span>
-              <input :value="value.endTime ?? ''" type="time" aria-label="结束时间" @input="value.endTime = ($event.target as HTMLInputElement).value || null">
+              <NTimePicker
+                :formatted-value="value.endTime"
+                class="event-time-picker"
+                format="HH:mm"
+                value-format="HH:mm"
+                aria-label="结束时间"
+                clearable
+                @update:formatted-value="value.endTime = $event"
+              />
             </label>
           </div>
         </template>
@@ -513,19 +647,23 @@ function updateChineseRule(updates: Partial<ChineseEventDateRule>) {
         <template v-if="chineseRule?.isLeapMonth">
           <label class="event-field">
             <span>目标年份没有闰月时</span>
-            <select aria-label="缺少闰月时" :value="chineseRule.leapMonthPolicy" @change="updateChineseRule({ leapMonthPolicy: ($event.target as HTMLSelectElement).value as ChineseEventDateRule['leapMonthPolicy'] })">
-              <option value="regular-month">按普通{{ lunarMonthLabel(chineseRule.lunarMonth) }}</option>
-              <option value="leap-only">跳过该年，只在闰月出现</option>
-            </select>
+            <NSelect
+              :value="chineseRule.leapMonthPolicy"
+              :options="leapMonthPolicyOptions"
+              aria-label="缺少闰月时"
+              @update:value="updateLeapMonthPolicy"
+            />
           </label>
         </template>
         <template v-if="chineseRule?.lunarDay === 30">
           <label class="event-field">
             <span>目标月份只有二十九天时</span>
-            <select aria-label="小月处理方式" :value="chineseRule.shortMonthPolicy" @change="updateChineseRule({ shortMonthPolicy: ($event.target as HTMLSelectElement).value as ChineseEventDateRule['shortMonthPolicy'] })">
-              <option value="last-day">按当月最后一天</option>
-              <option value="skip">跳过该年</option>
-            </select>
+            <NSelect
+              :value="chineseRule.shortMonthPolicy"
+              :options="shortMonthPolicyOptions"
+              aria-label="小月处理方式"
+              @update:value="updateShortMonthPolicy"
+            />
           </label>
         </template>
       </div>
@@ -618,8 +756,7 @@ function updateChineseRule(updates: Partial<ChineseEventDateRule>) {
 .event-date-calendar-toggle button[aria-pressed="true"] { background: color-mix(in srgb, var(--accent, #6366f1) 10%, transparent); color: var(--accent, #6366f1); }
 .event-date-calendar-toggle button:disabled { opacity: .45; cursor: not-allowed; }
 .event-date-calendar-toggle button:focus-visible { outline: 2px solid var(--accent, #6366f1); outline-offset: 1px; }
-.event-field input,
-.event-field select {
+.event-field input {
   box-sizing: border-box;
   width: 100%;
   min-width: 0;
@@ -631,8 +768,9 @@ function updateChineseRule(updates: Partial<ChineseEventDateRule>) {
   color: inherit;
   font: inherit;
 }
-:global(:root[data-theme='dark']) .event-field select { color-scheme: dark; }
-:global(:root[data-theme='light']) .event-field select { color-scheme: light; }
+.event-field :deep(.event-date-picker),
+.event-field :deep(.event-time-picker),
+.event-field :deep(.n-select) { width: 100%; min-width: 0; }
 .event-date-preview,
 .event-date-help,
 .event-date-error { margin: -2px 0 0; font-size: 13px; line-height: 1.5; }

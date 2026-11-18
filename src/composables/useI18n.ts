@@ -133,7 +133,7 @@ const STRINGS: Strings = {
   'mood.metadata_unavailable': { zh: '当前日记元数据版本不可用，请刷新后重试。', en: 'The current Diary metadata version is unavailable. Refresh and try again.' },
   'mood.saved': { zh: '心情已更新', en: 'Mood updated' },
   'diary_access.setup_title': { zh: '设置日记访问密码', en: 'Set up Diary access' },
-  'diary_access.unlock_title': { zh: '解锁日记', en: 'Unlock Diary' },
+  'diary_access.unlock_title': { zh: '解锁日程', en: 'Unlock Schedule' },
   'diary_access.setup_description': { zh: '为日程工作区设置独立的访问密码。', en: 'Set a separate password for the Diary workspace.' },
   'diary_access.password': { zh: '日记访问密码', en: 'Diary access password' },
   'diary_access.remember_device': { zh: '在此设备保持解锁 7 天', en: 'Keep Diary unlocked on this device for 7 days' },

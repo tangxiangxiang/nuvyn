@@ -291,7 +291,7 @@ describe('Ledger live dashboard', () => {
     const add = vi.spyOn(window, 'addEventListener')
     try {
       const eyebrow = wrapper.get('.ledger-eyebrow')
-      expect(eyebrow.text()).toBe('账本')
+      expect(eyebrow.text()).toBe('LEDGER')
       expect(eyebrow.findAll('span')).toHaveLength(0)
       expect(eyebrow.attributes()).not.toHaveProperty('title')
       expect(eyebrow.attributes()).not.toHaveProperty('tabindex')

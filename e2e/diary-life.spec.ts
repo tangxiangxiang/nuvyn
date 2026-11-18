@@ -1,6 +1,6 @@
 import type { Locator, Page, Request } from '@playwright/test'
 import { test, expect } from './fixtures/auth'
-import { chooseDiaryAction, chooseDiaryDayAction, diaryMonthLabel, openEmptyDiaryDay, saveDiaryDay, unlockDiary } from './helpers/diary-life'
+import { chooseDiaryAction, chooseDiaryDayAction, diaryEventDateInput, diaryEventTimeInput, fillDiaryEventDate, fillDiaryEventTime, diaryMonthLabel, openEmptyDiaryDay, saveDiaryDay, selectNaiveOption, unlockDiary } from './helpers/diary-life'
 
 const scrollTestImage = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAAAAAA6fptVAAAACklEQVR4nGNgAAAAAgABSK+kcQAAAABJRU5ErkJggg==', 'base64')
 const diaryLifeFixtureBaseYear = 1000 + Math.floor(Math.random() * 700)
@@ -367,8 +367,8 @@ for (const viewport of [{ width: 390, height: 844 }, { width: 430, height: 900 }
         // Locking the server session is observed by the page on its next
         // protected request, which clears the private event editor.
         await page.getByRole('button', { name: '保存', exact: true }).click()
-        await expect(page.getByRole('button', { name: '解锁日记', exact: true })).toBeVisible()
-        const unlockButton = page.getByRole('button', { name: '解锁日记', exact: true })
+        await expect(page.getByRole('button', { name: '解锁日程', exact: true })).toBeVisible()
+        const unlockButton = page.getByRole('button', { name: '解锁日程', exact: true })
         await expect(lockedDraft).toHaveCount(0)
         await unlockButton.click()
         await unlockDiary(page)
@@ -412,11 +412,11 @@ test('Diary event editor remains usable across phone, tablet, and desktop widths
   const editor = page.locator('.diary-event-edit-dialog')
   await expect(editor).toBeVisible()
   await expect(page.getByTestId('event-type-schedule')).toHaveAttribute('aria-pressed', 'true')
-  await expect(page.getByLabel('开始日期')).toHaveValue(futureDate)
-  await expect(page.getByLabel('结束日期')).toHaveValue(futureDate)
+  await expect(diaryEventDateInput(page, '开始日期')).toHaveValue(futureDate)
+  await expect(diaryEventDateInput(page, '结束日期')).toHaveValue(futureDate)
   await expect(page.getByTestId('diary-day-dialog')).toHaveCount(0)
   await page.getByRole('checkbox', { name: '全天' }).click()
-  await expect(page.getByLabel('开始时间')).toBeVisible()
+  await expect(diaryEventTimeInput(page, '开始时间')).toBeVisible()
   await page.getByLabel('事件备注').fill('家庭行程安排。'.repeat(90))
   await editor.locator('.event-advanced summary').click()
 
@@ -459,8 +459,8 @@ test('Diary event editor remains usable across phone, tablet, and desktop widths
   await expect(editor.getByText('非全天日程请填写开始时间。', { exact: true })).toBeVisible()
   expect(saveRequests).toHaveLength(0)
   page.off('request', onEventSaveRequest)
-  await page.getByLabel('开始时间').fill('10:00')
-  await page.getByLabel('结束时间').fill('12:00')
+  await fillDiaryEventTime(page, '开始时间', '10:00')
+  await fillDiaryEventTime(page, '结束时间', '12:00')
   const responsePromise = page.waitForResponse(response => response.request().method() === 'PUT'
     && new URL(response.url()).pathname.startsWith('/api/diary/life/events/'))
   await page.getByRole('button', { name: '保存', exact: true }).click()
@@ -516,8 +516,8 @@ test('keeps event calendar context aligned after date edits', async ({ page }) =
   expect(await dayEvent.evaluate(element => getComputedStyle(element).backgroundImage)).toContain('/diary-events-cloud-pattern.png')
   await dayEvent.click()
   await reader.getByRole('button', { name: '编辑事件' }).click()
-  await page.getByLabel('开始日期').fill(movedDate)
-  await page.getByLabel('结束日期').fill(movedDate)
+  await fillDiaryEventDate(page, '开始日期', movedDate)
+  await fillDiaryEventDate(page, '结束日期', movedDate)
   await page.getByRole('button', { name: '保存', exact: true }).click()
   await expect(reader.locator('.diary-event-reader-date')).toContainText('2026年12月5日')
   await reader.getByRole('button', { name: '关闭事件' }).click()
@@ -624,7 +624,7 @@ test('Diary event type changes protect range data until the user confirms', asyn
     const next = new Date(year, month - 1, day + 1)
     return `${next.getFullYear()}-${String(next.getMonth() + 1).padStart(2, '0')}-${String(next.getDate()).padStart(2, '0')}`
   }, startDate)
-  await page.getByLabel('结束日期').fill(nextDate)
+  await fillDiaryEventDate(page, '结束日期', nextDate)
 
   await page.getByTestId('event-type-anniversary').click()
   let typeChange = page.getByRole('dialog', { name: '切换事件类型？' })
@@ -632,14 +632,14 @@ test('Diary event type changes protect range data until the user confirms', asyn
   await expect(typeChange).toContainText('结束日期和持续天数')
   await typeChange.getByRole('button', { name: /^(Cancel|取消)$/ }).click()
   await expect(page.getByTestId('event-type-schedule')).toHaveAttribute('aria-pressed', 'true')
-  await expect(page.getByLabel('结束日期')).toHaveValue(nextDate)
+  await expect(diaryEventDateInput(page, '结束日期')).toHaveValue(nextDate)
 
   await page.getByTestId('event-type-anniversary').click()
   typeChange = page.getByRole('dialog', { name: '切换事件类型？' })
   await expect(typeChange).toBeVisible()
   await typeChange.getByRole('button', { name: /^(Confirm|确认|确定)$/ }).click()
   await expect(page.getByTestId('event-type-anniversary')).toHaveAttribute('aria-pressed', 'true')
-  await expect(page.getByLabel('结束日期')).toHaveCount(0)
+  await expect(diaryEventDateInput(page, '结束日期')).toHaveCount(0)
   await expect(page.getByRole('checkbox', { name: '每年重复' })).toBeChecked()
 })
 
@@ -827,8 +827,8 @@ test('lunar Events preserve their rule across countdowns, editing and calendar d
   const title = `农历生日 ${testInfo.repeatEachIndex + 1}`
   await page.getByRole('textbox', { name: '事件名称', exact: true }).fill(title)
   await page.getByRole('button', { name: '农历', exact: true }).click()
-  await page.getByLabel('农历月份', { exact: true }).selectOption('5')
-  await page.getByLabel('农历日期').selectOption('19')
+  await selectNaiveOption(page, '农历月份', '五月')
+  await selectNaiveOption(page, '农历日期', '十九')
 
   for (const width of [390, 430, 768, 1280]) {
     await page.setViewportSize({ width, height: width < 600 ? 844 : 900 })
@@ -841,7 +841,8 @@ test('lunar Events preserve their rule across countdowns, editing and calendar d
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true)
   }
   const lunarMonth = page.getByLabel('农历月份', { exact: true })
-  await expect(lunarMonth).toHaveCSS('color-scheme', 'light')
+  expect(await lunarMonth.evaluate(element => getComputedStyle(element).getPropertyValue('--n-color').trim()))
+    .toBe(await page.locator('html').evaluate(element => getComputedStyle(element).getPropertyValue('--nuvyn-surface-1').trim()))
   const createResponsePromise = page.waitForResponse(response => response.request().method() === 'PUT'
     && new URL(response.url()).pathname.startsWith('/api/diary/life/events/'))
   await page.getByRole('button', { name: '保存', exact: true }).click()
@@ -865,14 +866,14 @@ test('lunar Events preserve their rule across countdowns, editing and calendar d
   await expect(calendar.locator('.life-month-label')).toHaveText(diaryMonthLabel('2027-06'))
   await expect(calendar.locator('[aria-pressed="true"]')).toHaveCount(0)
   await reader.getByRole('button', { name: '编辑事件' }).click()
-  await expect(page.getByLabel('农历月份', { exact: true })).toHaveValue('5')
-  await expect(page.getByLabel('农历日期')).toHaveValue('19')
+  await expect(page.getByLabel('农历月份', { exact: true })).toContainText('五月')
+  await expect(page.getByLabel('农历日期')).toContainText('十九')
 
-  await page.getByLabel('农历日期').selectOption('20')
+  await selectNaiveOption(page, '农历日期', '二十')
   await page.getByRole('button', { name: '关闭事件编辑' }).click()
   const discard = page.getByRole('dialog', { name: '放弃未保存的修改？' })
   await discard.getByRole('button', { name: /^(Cancel|取消)$/ }).click()
-  await expect(page.getByLabel('农历日期')).toHaveValue('20')
+  await expect(page.getByLabel('农历日期')).toContainText('二十')
   await page.getByRole('button', { name: '取消', exact: true }).click()
   await discard.getByRole('button', { name: /^(Confirm|确认|确定)$/ }).click()
   await expect(reader.locator('h1')).toHaveText(title)
@@ -881,8 +882,8 @@ test('lunar Events preserve their rule across countdowns, editing and calendar d
 
   await listedEvent.click()
   await reader.getByRole('button', { name: '编辑事件' }).click()
-  await expect(page.getByLabel('农历日期')).toHaveValue('19')
-  await page.getByLabel('农历日期').selectOption('20')
+  await expect(page.getByLabel('农历日期')).toContainText('十九')
+  await selectNaiveOption(page, '农历日期', '二十')
   await page.getByRole('button', { name: '保存', exact: true }).click()
   await expect(reader.locator('h1')).toHaveText(title)
   await reader.getByRole('button', { name: '关闭事件' }).click()
@@ -905,19 +906,21 @@ test('lunar Events preserve their rule across countdowns, editing and calendar d
   await updatedOccurrenceCell.click()
   await updatedDayEvent.click()
   await reader.getByRole('button', { name: '编辑事件' }).click()
-  await expect(page.getByLabel('农历月份', { exact: true })).toHaveCSS('color-scheme', 'dark')
+  const darkLunarMonth = page.getByLabel('农历月份', { exact: true })
+  expect(await darkLunarMonth.evaluate(element => getComputedStyle(element).getPropertyValue('--n-color').trim()))
+    .toBe(await page.locator('html').evaluate(element => getComputedStyle(element).getPropertyValue('--nuvyn-surface-1').trim()))
 
   const milestone = page.getByTestId('event-type-milestone')
   await milestone.click()
   const typeChange = page.getByRole('dialog', { name: '切换事件类型？' })
   await expect(typeChange).toContainText('农历重复规则')
   await typeChange.getByRole('button', { name: /^(Cancel|取消)$/ }).click()
-  await expect(page.getByLabel('农历日期')).toHaveValue('20')
+  await expect(page.getByLabel('农历日期')).toContainText('二十')
   await milestone.click()
   await typeChange.getByRole('button', { name: /^(OK|Confirm|确认|确定)$/ }).click()
-  const gregorianDate = page.getByLabel('发生日期')
+  const gregorianDate = diaryEventDateInput(page, '发生日期')
   await expect(gregorianDate).toHaveValue('2027-06-24')
-  await gregorianDate.fill('2027-06-25')
+  await fillDiaryEventDate(page, '发生日期', '2027-06-25')
 
   const saveResponse = page.waitForResponse(response => response.request().method() === 'PUT'
     && new URL(response.url()).pathname.startsWith('/api/diary/life/events/'))
@@ -1134,10 +1137,10 @@ test('closes the active day dialog when a save discovers the Diary was locked', 
 
   await saveDiaryDay(page)
   await expect(dialog).toHaveCount(0)
-  const unlockButton = page.getByRole('button', { name: '解锁日记', exact: true })
+  const unlockButton = page.getByRole('button', { name: '解锁日程', exact: true })
   await expect(unlockButton).toBeVisible()
   await unlockButton.click()
-  await expect(page.getByRole('dialog', { name: /解锁日记|Unlock Diary/ })).toBeVisible()
+  await expect(page.getByRole('dialog', { name: /解锁日程|Unlock Schedule/ })).toBeVisible()
   await expect(unlockButton).toBeHidden()
   await page.getByTestId('diary-access-cancel').click()
   await expect(unlockButton).toBeFocused()

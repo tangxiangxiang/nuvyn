@@ -101,11 +101,11 @@ describe('Board Gallery Home', () => {
     wrapper.unmount()
   })
 
-  it('shows Board as the eyebrow and Idea canvas as the page title', async () => {
+  it('shows BOARD as the eyebrow and Idea canvas as the page title', async () => {
     api.listBoards.mockResolvedValue([])
     const { wrapper } = await mountHome()
 
-    expect(wrapper.get('.board-home-eyebrow').text()).toBe('白板')
+    expect(wrapper.get('.board-home-eyebrow').text()).toBe('BOARD')
     expect(wrapper.get('.board-home-header h1').text()).toBe('Idea canvas')
     wrapper.unmount()
   })
@@ -154,7 +154,7 @@ describe('Board Gallery Home', () => {
     await wrapper.get('[data-testid="board-filter-favorites"]').trigger('click')
     await flushPromises()
 
-    expect(wrapper.get('.board-home-eyebrow').text()).toBe('白板')
+    expect(wrapper.get('.board-home-eyebrow').text()).toBe('BOARD')
     expect(wrapper.find('.board-recent-section').exists()).toBe(false)
     expect(wrapper.get('[data-testid="board-filter-favorites"]').attributes('aria-pressed')).toBe('true')
     expect(wrapper.findAll('.board-all-section [data-testid="board-card-title"]').map((item) => item.text())).toEqual([

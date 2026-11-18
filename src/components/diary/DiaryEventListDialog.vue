@@ -157,7 +157,7 @@ function editTask(task: DiaryTaskListItem, keyboardActivated: boolean) {
       <NEmpty v-if="isCompletelyEmpty" description="还没有近期事项" />
 
       <section v-if="items.length || loading || error" class="diary-event-list-section">
-        <h3 v-if="tasks.length" class="diary-list-section-title">事件</h3>
+        <h3 v-if="tasks.length" class="diary-list-section-title">重要日程</h3>
         <div v-if="loading && !items.length" class="diary-event-list-status" role="status"><NSpin size="small" /><span>正在加载事件…</span></div>
         <div v-else-if="error" class="diary-event-list-status" role="alert">
           <span>{{ error }}</span>

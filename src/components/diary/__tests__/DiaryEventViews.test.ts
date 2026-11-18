@@ -135,7 +135,7 @@ describe('DiaryEventListDialog content', () => {
     })
 
     expect(wrapper.find('.diary-list-section-header h3').text()).toBe('待办事项')
-    expect(wrapper.find('.diary-event-list-section h3').text()).toBe('事件')
+    expect(wrapper.find('.diary-event-list-section h3').text()).toBe('重要日程')
     expect(wrapper.find('.diary-event-list-item').text()).toContain('爷爷75岁生日')
     expect(wrapper.get('[role="checkbox"]').attributes('aria-checked')).toBe('false')
     expect(wrapper.get('.diary-task-row').classes()).toContain('diary-cloud-card')

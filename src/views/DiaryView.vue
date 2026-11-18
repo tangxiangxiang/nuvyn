@@ -1465,6 +1465,14 @@ async function saveTask() {
   const editor = eventSurface.value?.kind === 'task-edit' ? eventSurface.value : null
   if (!editor || busy.value || !access.isUnlocked.value) return
   const isRecurring = editor.draft.recurrence !== null
+  if (!editor.draft.title.trim()) {
+    taskFormError.value = '请输入待办名称。'
+    return
+  }
+  if (isRecurring && !editor.draft.recurrence?.untilDate) {
+    taskFormError.value = '请选择结束日期。'
+    return
+  }
   const oneOffFields = isRecurring ? null : parseTaskFields(editor.draft)
   let seriesFields = isRecurring ? parseTaskSeriesFields({
     title: editor.draft.title,
@@ -1483,8 +1491,7 @@ async function saveTask() {
     }
   }
   if ((!isRecurring && !oneOffFields) || (isRecurring && !seriesFields)) {
-    if (!editor.draft.title.trim()) taskFormError.value = '请输入待办名称。'
-    else if (isRecurring) taskFormError.value = '请检查待办名称、备注和重复规则。'
+    if (isRecurring) taskFormError.value = '请检查待办名称、备注和重复规则。'
     else if (taskTimeFieldsError(editor.draft)) taskFormError.value = '请检查开始和截止时间设置。'
     else taskFormError.value = '请检查待办名称和备注。'
     return
@@ -1909,7 +1916,7 @@ onBeforeUnmount(() => {
             />
           </section>
           <section v-if="selectedEvents.length || calendarEventLoading || eventCalendarError" class="day-events">
-            <h3 v-if="selectedTasks.length || calendarTasksLoading || calendarTaskError">事件</h3>
+            <h3 v-if="selectedTasks.length || calendarTasksLoading || calendarTaskError">重要日程</h3>
             <div v-if="calendarEventLoading && !selectedEvents.length" class="diary-event-list-status" role="status"><NSpin size="small" /><span>正在加载事件…</span></div>
             <div v-if="eventCalendarError" class="diary-event-list-status" role="alert">
               <span>{{ eventCalendarError }}</span>
@@ -1929,29 +1936,29 @@ onBeforeUnmount(() => {
         <template v-if="eventSurface?.kind === 'task-edit'" #footer>
           <div class="diary-task-footer">
             <div v-if="editingTask?.kind === 'recurring'" class="diary-task-series-actions">
-              <NButton v-if="editingTask.skipped" quaternary :disabled="busy || dirty" @click="changeEditedOccurrenceState">恢复本次</NButton>
-              <NButton v-else-if="editingTask.completedAt === null" quaternary :disabled="busy || dirty" @click="changeEditedOccurrenceState">跳过本次</NButton>
-              <NButton v-if="editingTask.recurrence.untilDate !== editingTask.occurrenceDate" quaternary :disabled="busy || dirty" @click="stopEditedSeries">结束重复</NButton>
+              <NButton v-if="editingTask.skipped" quaternary size="small" :disabled="busy || dirty" @click="changeEditedOccurrenceState">恢复本次</NButton>
+              <NButton v-else-if="editingTask.completedAt === null" quaternary size="small" :disabled="busy || dirty" @click="changeEditedOccurrenceState">跳过本次</NButton>
+              <NButton v-if="editingTask.recurrence.untilDate !== editingTask.occurrenceDate" quaternary size="small" :disabled="busy || dirty" @click="stopEditedSeries">结束重复</NButton>
             </div>
             <div class="life-actions">
-              <NButton v-if="editingTask" quaternary type="error" :disabled="busy" @click="deleteTask">删除</NButton>
+              <NButton v-if="editingTask" quaternary type="error" size="medium" :disabled="busy" @click="deleteTask">删除</NButton>
               <span />
-              <NButton :disabled="busy" @click="cancelTaskEdit($event)">取消</NButton>
-              <NButton type="primary" :loading="busy" @click="saveTask">保存</NButton>
+              <NButton size="medium" :disabled="busy" @click="cancelTaskEdit($event)">取消</NButton>
+              <NButton type="primary" size="medium" :loading="busy" @click="saveTask">保存</NButton>
             </div>
           </div>
         </template>
         <template v-if="eventSurface?.kind === 'edit'" #footer>
           <div class="life-actions">
-            <NButton v-if="editing" quaternary type="error" :disabled="busy" @click="remove">删除事件</NButton>
+            <NButton v-if="editing" quaternary type="error" size="medium" :disabled="busy" @click="remove">删除事件</NButton>
             <span />
-            <NButton :disabled="busy" @click="cancelEventEdit($event)">取消</NButton>
-            <NButton type="primary" :loading="busy" @click="save($event.detail === 0)">保存</NButton>
+            <NButton size="medium" :disabled="busy" @click="cancelEventEdit($event)">取消</NButton>
+            <NButton type="primary" size="medium" :loading="busy" @click="save($event.detail === 0)">保存</NButton>
           </div>
         </template>
       </NModal>
     </template>
-    <NButton v-else v-show="!accessContext?.dialogOpen.value" class="unlock-diary" @click="accessContext?.requestAccess()">解锁日记</NButton>
+    <NButton v-else v-show="!accessContext?.dialogOpen.value" class="unlock-diary" @click="accessContext?.requestAccess()">解锁日程</NButton>
   </main>
 </template>
 
@@ -1982,6 +1989,8 @@ onBeforeUnmount(() => {
   flex-direction: column;
   gap: 12px;
 }
+.day-tasks :deep(.diary-task-row) { min-height: 48px; padding-top: 0; padding-bottom: 0; }
+.day-tasks :deep(.diary-task-edit) { min-height: 46px; padding-top: 0; padding-bottom: 0; }
 .day-tasks > h3,
 .day-events > h3 { margin: 0; color: var(--text-muted, #6b7280); font-size: 13px; font-weight: 600; }
 .day-events > button {
@@ -1996,7 +2005,7 @@ onBeforeUnmount(() => {
 .diary-event-form-error { margin: 0 0 14px; color: var(--danger, #dc2626); }
 .diary-task-reload { margin: -4px 0 12px; }
 .day-list-empty { margin: 0; padding: 12px 0; color: var(--text-muted, #6b7280); text-align: center; }
-.life-actions { display: flex; align-items: center; gap: 12px; }.life-actions > span { flex: 1; }
+.life-actions { display: flex; align-items: center; gap: 8px; }.life-actions > span { flex: 1; }
 .diary-task-footer { display: flex; flex-direction: column; gap: 8px; }
 .diary-task-series-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; }
 .event-emoji { width: 20px; height: 20px; flex: none; object-fit: contain; }
@@ -2027,6 +2036,7 @@ onBeforeUnmount(() => {
 .diary-event-edit-dialog .n-card-content::-webkit-scrollbar { display: none; width: 0; height: 0; }
 .diary-event-edit-dialog .diary-event-form-content { min-width: 0; }
 .diary-event-edit-dialog .n-card__footer {
+  padding: 12px 24px 16px;
   border-top: 1px solid var(--border, #8883);
   background: var(--card-color, var(--bg));
 }
@@ -2054,5 +2064,6 @@ onBeforeUnmount(() => {
 @media (max-width: 600px) {
   .diary-life-dialog.n-card { position: fixed; bottom: 0; left: 0; width: 100%; max-height: 90dvh; margin: 0; border-radius: 18px 18px 0 0; padding-bottom: env(safe-area-inset-bottom); }
   .diary-event-edit-dialog.n-card { max-height: 90dvh; }
+  .diary-event-edit-dialog .n-card__footer { padding-inline: 16px; }
 }
 </style>
