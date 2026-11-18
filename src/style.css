@@ -887,7 +887,6 @@ body.brand-constellation-active * {
 }
 .nav-search,
 .diary-view-toggle,
-.diary-event-list-toggle,
 .nav-diary-plan,
 .note-speech-read-all,
 .theme-toggle,
@@ -910,7 +909,6 @@ body.brand-constellation-active * {
 }
 .nav-search:hover,
 .diary-view-toggle:hover,
-.diary-event-list-toggle:hover,
 .nav-diary-plan:hover,
 .note-speech-read-all:hover,
 .theme-toggle:hover {
@@ -925,7 +923,7 @@ body.brand-constellation-active * {
   outline: 2px solid var(--accent);
   outline-offset: 1px;
 }
-.nav-actions :where(.diary-view-toggle, .diary-event-list-toggle, .nav-search, .nav-diary-plan, .note-speech-read-all, .theme-toggle, .account-menu-root .ab-btn-account, .left-panel-toggle, .right-rail-toggle, .view-toggle) .n-icon {
+.nav-actions :where(.diary-view-toggle, .nav-search, .nav-diary-plan, .note-speech-read-all, .theme-toggle, .account-menu-root .ab-btn-account, .left-panel-toggle, .right-rail-toggle, .view-toggle) .n-icon {
   display: flex;
   align-items: center;
   justify-content: center;
@@ -933,13 +931,13 @@ body.brand-constellation-active * {
   height: 18px;
   line-height: 1;
 }
-.nav-actions :where(.diary-view-toggle, .diary-event-list-toggle, .nav-search, .nav-diary-plan, .note-speech-read-all, .theme-toggle, .account-menu-root .ab-btn-account, .left-panel-toggle, .right-rail-toggle, .view-toggle) svg {
+.nav-actions :where(.diary-view-toggle, .nav-search, .nav-diary-plan, .note-speech-read-all, .theme-toggle, .account-menu-root .ab-btn-account, .left-panel-toggle, .right-rail-toggle, .view-toggle) svg {
   display: block;
   width: 18px;
   height: 18px;
 }
 .nav-actions .account-menu-root .ab-btn-account .ab-btn-icon { transform: translateY(0.5px); }
-.nav-actions :where(.diary-view-toggle, .diary-event-list-toggle, .nav-search, .nav-diary-plan, .note-speech-read-all, .theme-toggle, .account-menu-root .ab-btn-account) .n-button__content {
+.nav-actions :where(.diary-view-toggle, .nav-search, .nav-diary-plan, .note-speech-read-all, .theme-toggle, .account-menu-root .ab-btn-account) .n-button__content {
   display: flex;
   align-items: center;
   justify-content: center;

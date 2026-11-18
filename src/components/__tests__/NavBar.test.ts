@@ -261,7 +261,6 @@ describe('NavBar — scope chips', () => {
       settingsRequestTick: ref(0),
       diaryViewMode: ref<'diary' | 'events'>('diary'),
       diaryViewToggleCommand: ref(vi.fn()),
-      diaryEventListCommand: ref(vi.fn()),
     }
     const wrapper = mount(NavBar, {
       props: { workspaceKind: 'diary', diaryUnlocked: false },
@@ -274,7 +273,7 @@ describe('NavBar — scope chips', () => {
     await wrapper.setProps({ diaryUnlocked: true })
 
     expect(wrapper.find('[data-testid="diary-view-toggle"]').exists()).toBe(true)
-    expect(wrapper.find('[data-testid="diary-event-list-toggle"]').exists()).toBe(true)
+    expect(wrapper.find('[data-testid="diary-event-list-toggle"]').exists()).toBe(false)
 
     await wrapper.get('[data-testid="account-button"]').trigger('click')
     await wrapper.get('[data-testid="account-lock-diary"]').trigger('click')
@@ -283,30 +282,29 @@ describe('NavBar — scope chips', () => {
     wrapper.unmount()
   })
 
-  it('shows the icon for the current Diary view while preserving the action label', async () => {
+  it('shows the icon for the target Diary view and preserves the action label', async () => {
     const diaryViewMode = ref<'diary' | 'events'>('diary')
     const diaryViewToggleCommand = vi.fn()
     const appShell = {
       settingsRequestTick: ref(0),
       diaryViewMode,
       diaryViewToggleCommand: ref(diaryViewToggleCommand),
-      diaryEventListCommand: ref(vi.fn()),
     }
     const wrapper = mount(NavBar, {
       props: { workspaceKind: 'diary', diaryUnlocked: true },
       global: { provide: { [AppShellContextKey as symbol]: appShell }, stubs: { transition: false } },
     })
     const toggle = wrapper.get('[data-testid="diary-view-toggle"]')
-    expect(wrapper.findComponent(MoodSmile).exists()).toBe(true)
-    expect(toggle.attributes('aria-label')).toBe('切换到近期事项')
-    expect(wrapper.find('[data-testid="diary-event-list-toggle"]').exists()).toBe(true)
+    expect(wrapper.findComponent(CalendarEvent).exists()).toBe(true)
+    expect(toggle.attributes('aria-label')).toBe('切换到日程视图')
+    expect(wrapper.find('[data-testid="diary-event-list-toggle"]').exists()).toBe(false)
     await toggle.trigger('click')
     expect(diaryViewToggleCommand).toHaveBeenCalledOnce()
 
     diaryViewMode.value = 'events'
     await nextTick()
-    expect(wrapper.findComponent(CalendarEvent).exists()).toBe(true)
-    expect(toggle.attributes('aria-label')).toBe('切换到情绪日记')
+    expect(wrapper.findComponent(MoodSmile).exists()).toBe(true)
+    expect(toggle.attributes('aria-label')).toBe('切换到日记视图')
     wrapper.unmount()
   })
 

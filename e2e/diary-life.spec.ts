@@ -1,6 +1,7 @@
 import type { Locator, Page, Request } from '@playwright/test'
 import { test, expect } from './fixtures/auth'
 import { chooseDiaryAction, chooseDiaryDayAction, diaryEventDateInput, diaryEventTimeInput, fillDiaryEventDate, fillDiaryEventTime, diaryMonthLabel, openEmptyDiaryDay, saveDiaryDay, selectNaiveOption, unlockDiary } from './helpers/diary-life'
+import { lunarToSolar } from '../shared/lunarCalendar'
 
 const scrollTestImage = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAAAAAA6fptVAAAACklEQVR4nGNgAAAAAgABSK+kcQAAAABJRU5ErkJggg==', 'base64')
 const diaryLifeFixtureBaseYear = 1000 + Math.floor(Math.random() * 700)
@@ -15,6 +16,7 @@ test.beforeEach(async ({ page }, testInfo) => {
   // the calendar's child click handlers discard real clicks.
   const time = testInfo.title === 'lunar Events preserve their rule across countdowns, editing and calendar dates'
     || testInfo.title === 'keeps event calendar context aligned after date edits'
+    || testInfo.title === 'Diary selected day Event distance stays on one line across viewport widths'
     ? new Date('2026-11-16T12:00:00+08:00')
     : testInfo.title === 'uses the server day boundary and enables editing after midnight without reopening'
       ? new Date(diaryLifeFixtureYear(testInfo), 0, 29, 12)
@@ -249,18 +251,18 @@ for (const viewport of [{ width: 390, height: 844 }, { width: 430, height: 900 }
       await expect(cell.locator('img')).toHaveCount(1)
       const numberBefore = await dateNumberOffset(cell)
       const monthBefore = await calendar.locator('.n-calendar-header').innerText()
-      await page.getByRole('button', { name: '切换到近期事项' }).click()
+      await page.getByRole('button', { name: '切换到日程视图' }).click()
       await expect(cell).toHaveAttribute('aria-pressed', 'false')
       await expect(cell.locator('img')).toHaveCount(0)
       expect(await dateNumberOffset(cell)).toEqual(numberBefore)
       expect(await calendar.locator('.n-calendar-header').innerText()).toBe(monthBefore)
       await cell.click()
       await expect(cell).toHaveAttribute('aria-pressed', 'true')
-      const dayActions = page.getByRole('button', { name: '更多当天事件操作' })
-      await expect(dayActions).toBeVisible()
+      await expect(page.getByTestId('diary-add-task')).toBeVisible()
+      await expect(page.getByTestId('diary-add-event')).toBeVisible()
+      await expect(page.getByRole('button', { name: '更多当天事件操作' })).toHaveCount(0)
       await expect(page.locator('.diary-event-create')).toHaveCount(0)
-      await dayActions.click()
-      await page.getByRole('menuitem', { name: '新增事件', exact: true }).click()
+      await page.getByTestId('diary-add-event').click()
       const eventTitle = `人生事件 ${viewport.width} (${testInfo.repeatEachIndex + 1})`
       // This scenario covers the existing milestone calendar marker; future
       // dates now start as schedules, so choose the intended type explicitly.
@@ -276,17 +278,16 @@ for (const viewport of [{ width: 390, height: 844 }, { width: 430, height: 900 }
       await page.getByRole('button', { name: '保存', exact: true }).click()
       const eventModal = page.locator('.diary-life-dialog')
       await expect(eventModal).toBeVisible()
-      const reader = page.getByTestId('diary-event-reader')
-      await expect(reader.locator('h1')).toHaveText(eventTitle)
-      await expect(page.getByRole('textbox', { name: '事件名称', exact: true })).toHaveCount(0)
+      const eventTitleInput = page.getByRole('textbox', { name: '事件名称', exact: true })
+      await expect(eventTitleInput).toHaveCount(0)
       const eventModalBounds = await eventModal.boundingBox()
       expect(eventModalBounds).not.toBeNull()
       expect(eventModalBounds!.x).toBeGreaterThanOrEqual(0)
       expect(eventModalBounds!.x + eventModalBounds!.width).toBeLessThanOrEqual(viewport.width + 1)
       expect(eventModalBounds!.y + eventModalBounds!.height).toBeLessThanOrEqual(viewport.height + 1)
       expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true)
-      const eventTitleInput = page.getByRole('textbox', { name: '事件名称', exact: true })
-      await reader.getByRole('button', { name: '编辑事件' }).click()
+      const dayEvent = page.getByRole('button', { name: eventTitle, exact: true })
+      await dayEvent.click()
       await expect(eventTitleInput).toHaveValue(eventTitle)
       await eventTitleInput.fill(`${eventTitle} 草稿`)
       await page.getByRole('button', { name: '取消', exact: true }).click()
@@ -295,42 +296,18 @@ for (const viewport of [{ width: 390, height: 844 }, { width: 430, height: 900 }
       await expect(eventTitleInput).toHaveValue(`${eventTitle} 草稿`)
       await page.getByRole('button', { name: '取消', exact: true }).click()
       await page.getByRole('dialog', { name: '放弃未保存的修改？' }).getByRole('button', { name: /^(Confirm|确认|确定)$/ }).click()
-      await expect(reader.locator('h1')).toHaveText(eventTitle)
-      await reader.getByRole('button', { name: '关闭事件' }).click()
-      const dayEvent = page.getByRole('button', { name: eventTitle, exact: true })
+      await expect(eventTitleInput).toHaveCount(0)
       await dayEvent.click()
-      await expect(reader.locator('h1')).toHaveText(eventTitle)
-      await reader.getByRole('button', { name: '编辑事件' }).click()
       const updatedEventTitle = `${eventTitle} 更新`
       await eventTitleInput.fill(updatedEventTitle)
       await page.getByRole('button', { name: '保存', exact: true }).click()
-      await expect(reader.locator('h1')).toHaveText(updatedEventTitle)
-      await reader.getByRole('button', { name: '关闭事件' }).click()
+      await expect(eventTitleInput).toHaveCount(0)
+      await expect(page.getByRole('button', { name: updatedEventTitle, exact: true })).toBeVisible()
       await page.getByRole('button', { name: '关闭当天事件' }).click()
-      await page.getByTestId('diary-event-list-toggle').click()
-      const eventList = page.locator('.diary-event-list-dialog')
-      await expect(eventList).toBeVisible()
-      const listedEvent = eventList.getByRole('button').filter({ hasText: updatedEventTitle })
-      await expect(listedEvent).toBeVisible()
-      if (viewport.width === 1280) {
-        await expect(listedEvent.locator('.diary-event-list-countdown')).toBeVisible()
-        await expect(listedEvent.locator('.diary-event-list-countdown')).toHaveText(/^(\d+天后|今天|明天|后天)$/)
-      }
-      await listedEvent.click()
-      await expect(eventList).toHaveCount(0)
-      await expect(reader.locator('h1')).toHaveText(updatedEventTitle)
-      await expect(calendar.locator('.life-month-label')).toHaveText(diaryMonthLabel(eventDate!.slice(0, 7)))
-      await expect(cell).toHaveAttribute('aria-pressed', 'false')
-      await reader.getByRole('button', { name: '编辑事件' }).click()
-      await expect(eventTitleInput).toHaveValue(updatedEventTitle)
-      await page.getByRole('button', { name: '取消', exact: true }).click()
-      await expect(reader.locator('h1')).toHaveText(updatedEventTitle)
-      await reader.getByRole('button', { name: '关闭事件' }).click()
-      await expect(listedEvent).toBeVisible()
-      await page.getByRole('button', { name: '关闭事件列表' }).click()
       await page.reload()
       await unlockDiary(page)
-      await expect(page.getByRole('button', { name: '切换到情绪日记' })).toBeVisible()
+      await expect(page.getByRole('button', { name: '切换到日记视图' })).toBeVisible()
+      await expect(page.getByTestId('diary-event-list-toggle')).toHaveCount(0)
       await expect(cell.locator('img')).toHaveAttribute('src', /event-goal/)
       await page.screenshot({ path: testInfo.outputPath('diary-calendar.png') })
       expect(await page.locator('.monaco-editor').count()).toBe(0)
@@ -343,15 +320,12 @@ for (const viewport of [{ width: 390, height: 844 }, { width: 430, height: 900 }
         expect((await calendar.boundingBox())!.height).toBe(calendarHeight)
         await page.getByTestId('diary-view-toggle').click()
         await expect(countdowns).toHaveCount(0)
-        await page.getByTestId('diary-event-list-toggle').click()
-        await expect(eventList).toBeVisible()
-        await expect(eventList.locator('.diary-event-list-scroll')).toHaveCSS('overflow', 'auto')
-        await eventList.getByRole('button').filter({ hasText: updatedEventTitle }).click()
-        await expect(eventList).toHaveCount(0)
         const occurrence = calendar.locator(`[data-date="${eventDate}"]`)
-        await expect(occurrence).toHaveAttribute('aria-pressed', 'false')
-        await expect(reader.locator('h1')).toHaveText(updatedEventTitle)
-        await reader.getByRole('button', { name: '编辑事件' }).click()
+        await occurrence.click()
+        const eventOnDate = page.getByRole('button', { name: updatedEventTitle, exact: true })
+        await expect(eventOnDate).toBeVisible()
+        await eventOnDate.click()
+        await expect(occurrence).toHaveAttribute('aria-pressed', 'true')
         const lockedDraft = page.getByRole('textbox', { name: '事件名称', exact: true })
         await expect(lockedDraft).toHaveValue(updatedEventTitle)
         await lockedDraft.fill(`${updatedEventTitle} 锁定前草稿`)
@@ -373,20 +347,15 @@ for (const viewport of [{ width: 390, height: 844 }, { width: 430, height: 900 }
         await unlockButton.click()
         await unlockDiary(page)
         await expect(countdowns).toHaveCount(0)
-        await expect(eventList).toHaveCount(0)
         await expect(lockedDraft).toHaveCount(0)
-        await page.getByTestId('diary-event-list-toggle').click()
-        await expect(eventList).toBeVisible()
-        const lockedListedEvent = eventList.getByRole('button').filter({ hasText: updatedEventTitle })
-        await expect(lockedListedEvent).toBeVisible()
-        await lockedListedEvent.click()
-        await expect(occurrence).toHaveAttribute('aria-pressed', 'false')
-        await page.getByTestId('diary-event-reader').getByRole('button', { name: '编辑事件' }).click()
+        await occurrence.click()
+        const lockedEvent = page.getByRole('button', { name: updatedEventTitle, exact: true })
+        await expect(lockedEvent).toBeVisible()
+        await lockedEvent.click()
+        await expect(occurrence).toHaveAttribute('aria-pressed', 'true')
         await expect(page.getByRole('textbox', { name: '事件名称', exact: true })).toHaveValue(updatedEventTitle)
         await page.getByRole('button', { name: '删除事件', exact: true }).click()
         await page.getByRole('dialog', { name: '删除这条事件？' }).getByRole('button', { name: /^(Confirm|确认|确定)$/ }).click()
-        await expect(eventList).toBeVisible()
-        await expect(lockedListedEvent).toHaveCount(0)
         await expect(occurrence.locator('.life-marker')).toHaveCount(0)
       }
     })
@@ -406,8 +375,7 @@ test('Diary event editor remains usable across phone, tablet, and desktop widths
   })
   const futureCell = page.locator(`.diary-life-calendar [data-date="${futureDate}"]`)
   await futureCell.click()
-  await page.getByRole('button', { name: '更多当天事件操作' }).click()
-  await page.getByRole('menuitem', { name: '新增事件', exact: true }).click()
+  await page.getByTestId('diary-add-event').click()
 
   const editor = page.locator('.diary-event-edit-dialog')
   await expect(editor).toBeVisible()
@@ -448,7 +416,6 @@ test('Diary event editor remains usable across phone, tablet, and desktop widths
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true)
   }
 
-  const [year, month, day] = futureDate.split('-').map(Number)
   await page.getByRole('textbox', { name: '事件名称', exact: true }).fill('未来行程')
   const saveRequests: string[] = []
   const onEventSaveRequest = (request: Request) => {
@@ -469,13 +436,14 @@ test('Diary event editor remains usable across phone, tablet, and desktop widths
   expect(await response.json()).toMatchObject({
     event: { type: 'schedule', startDate: futureDate, endDate: futureDate, allDay: false, startTime: '10:00', endTime: '12:00' },
   })
-  const reader = page.getByTestId('diary-event-reader')
-  await expect(reader.locator('h1')).toHaveText('未来行程')
-  await expect(reader.locator('.diary-event-reader-date')).toContainText(`${year}年${month}月${day}日`)
-  await expect(reader.locator('.diary-event-reader-date')).toContainText('10:00–12:00')
   await expect(futureCell.locator('.life-marker')).toHaveCount(1)
+  await page.getByRole('button', { name: '未来行程', exact: true }).click()
+  await expect(editor).toBeVisible()
+  await expect(page.getByRole('textbox', { name: '事件名称', exact: true })).toHaveValue('未来行程')
+  await expect(diaryEventDateInput(page, '开始日期')).toHaveValue(futureDate)
+  await expect(diaryEventTimeInput(page, '开始时间')).toHaveValue('10:00')
+  await expect(diaryEventTimeInput(page, '结束时间')).toHaveValue('12:00')
 
-  const readerDialog = page.locator('.diary-event-reader-dialog')
   for (const viewport of [
     { width: 320, height: 640 },
     { width: 390, height: 844 },
@@ -484,7 +452,7 @@ test('Diary event editor remains usable across phone, tablet, and desktop widths
     { width: 1280, height: 900 },
   ]) {
     await page.setViewportSize(viewport)
-    const bounds = await readerDialog.boundingBox()
+    const bounds = await editor.boundingBox()
     expect(bounds).not.toBeNull()
     expect(bounds!.x).toBeGreaterThanOrEqual(0)
     expect(bounds!.x + bounds!.width).toBeLessThanOrEqual(viewport.width + 1)
@@ -503,24 +471,17 @@ test('keeps event calendar context aligned after date edits', async ({ page }) =
   const movedDate = '2026-12-05'
   const originalCell = calendar.locator(`[data-date="${originalDate}"]`)
   await originalCell.click()
-  await page.getByRole('button', { name: '更多当天事件操作' }).click()
-  await page.getByRole('menuitem', { name: '新增事件', exact: true }).click()
+  await page.getByTestId('diary-add-event').click()
   await page.getByRole('textbox', { name: '事件名称', exact: true }).fill('日期调整日程')
   await page.getByRole('button', { name: '保存', exact: true }).click()
-  const reader = page.getByTestId('diary-event-reader')
-  await expect(reader.locator('h1')).toHaveText('日期调整日程')
-  await reader.getByRole('button', { name: '关闭事件' }).click()
 
   const dayEvent = page.getByRole('button', { name: '日期调整日程', exact: true })
   await expect(dayEvent).toHaveClass(/diary-cloud-card/)
   expect(await dayEvent.evaluate(element => getComputedStyle(element).backgroundImage)).toContain('/diary-events-cloud-pattern.png')
   await dayEvent.click()
-  await reader.getByRole('button', { name: '编辑事件' }).click()
   await fillDiaryEventDate(page, '开始日期', movedDate)
   await fillDiaryEventDate(page, '结束日期', movedDate)
   await page.getByRole('button', { name: '保存', exact: true }).click()
-  await expect(reader.locator('.diary-event-reader-date')).toContainText('2026年12月5日')
-  await reader.getByRole('button', { name: '关闭事件' }).click()
   await expect(calendar.locator('.life-month-label')).toHaveText(diaryMonthLabel('2026-12'))
   await expect(calendar.locator(`[data-date="${movedDate}"]`)).toHaveAttribute('aria-pressed', 'true')
   await expect(page.getByRole('button', { name: '日期调整日程', exact: true })).toBeVisible()
@@ -533,14 +494,12 @@ test('keeps event calendar context aligned after date edits', async ({ page }) =
 
   const yearlyDate = '2026-11-21'
   await calendar.locator(`[data-date="${yearlyDate}"]`).click()
-  await page.getByRole('button', { name: '更多当天事件操作' }).click()
-  await page.getByRole('menuitem', { name: '新增事件', exact: true }).click()
+  await page.getByTestId('diary-add-event').click()
   await page.getByRole('textbox', { name: '事件名称', exact: true }).fill('年度日程')
   await page.locator('.event-advanced summary').click()
   await page.getByRole('checkbox', { name: '每年重复' }).click()
   await page.getByRole('button', { name: '保存', exact: true }).click()
-  await expect(reader.locator('h1')).toHaveText('年度日程')
-  await reader.getByRole('button', { name: '关闭事件' }).click()
+  await expect(page.locator('.diary-event-edit-dialog')).toHaveCount(0)
   await page.getByRole('button', { name: '关闭当天事件' }).click()
 
   for (let index = 0; index < 12; index++) await arrows.last().click()
@@ -552,16 +511,9 @@ test('keeps event calendar context aligned after date edits', async ({ page }) =
 
   await yearlyEvent.focus()
   await page.keyboard.press('Enter')
-  await expect(reader).toBeVisible()
-  await expect(reader).toBeFocused()
-  await reader.getByRole('button', { name: '编辑事件' }).focus()
-  await page.keyboard.press('Enter')
   const titleInput = page.getByRole('textbox', { name: '事件名称', exact: true })
   await expect(titleInput).toBeFocused()
   await page.getByRole('button', { name: '取消', exact: true }).focus()
-  await page.keyboard.press('Enter')
-  await expect(reader.getByRole('button', { name: '编辑事件' })).toBeFocused()
-  await page.getByRole('button', { name: '关闭事件' }).focus()
   await page.keyboard.press('Enter')
   await expect(calendar.locator('.life-month-label')).toHaveText(diaryMonthLabel('2027-11'))
   await expect(nextYearCell).toHaveAttribute('aria-pressed', 'true')
@@ -569,40 +521,35 @@ test('keeps event calendar context aligned after date edits', async ({ page }) =
 
   await yearlyEvent.focus()
   await page.keyboard.press('Enter')
-  await reader.getByRole('button', { name: '编辑事件' }).click()
   await titleInput.fill('年度日程已更新')
   await page.getByRole('button', { name: '保存', exact: true }).click()
-  await expect(reader.locator('h1')).toHaveText('年度日程已更新')
+  await expect(titleInput).toHaveCount(0)
   await expect(calendar.locator('.life-month-label')).toHaveText(diaryMonthLabel('2027-11'))
   await expect(calendar.locator('[data-date="2027-11-21"]')).toHaveAttribute('aria-pressed', 'true')
 
-  await reader.getByRole('button', { name: '关闭事件' }).click()
   await expect(yearlyEvent).toHaveCount(0)
   const updatedYearlyEvent = page.getByRole('button', { name: '年度日程已更新', exact: true })
   await expect(updatedYearlyEvent).toBeVisible()
   await page.getByRole('button', { name: '关闭当天事件' }).click()
-  await page.getByTestId('diary-event-list-toggle').click()
-  const eventList = page.locator('.diary-event-list-dialog')
-  const listedYearlyEvent = eventList.getByRole('button', { name: '年度日程已更新', exact: true })
-  await expect(listedYearlyEvent).toBeVisible()
+  await nextYearCell.click()
+  const selectedYearlyEvent = page.getByRole('button', { name: '年度日程已更新', exact: true })
+  await expect(selectedYearlyEvent).toBeVisible()
 
-  await listedYearlyEvent.focus()
+  await selectedYearlyEvent.focus()
   await page.keyboard.press('Enter')
-  await expect(reader).toBeFocused()
-  await reader.getByRole('button', { name: '关闭事件' }).focus()
+  await expect(titleInput).toBeFocused()
+  await page.getByRole('button', { name: '关闭事件编辑' }).focus()
   await page.keyboard.press('Enter')
-  await expect(listedYearlyEvent).toBeFocused()
+  await expect(selectedYearlyEvent).toBeFocused()
 
-  await page.keyboard.press('Enter')
-  await reader.getByRole('button', { name: '编辑事件' }).focus()
   await page.keyboard.press('Enter')
   await expect(titleInput).toBeFocused()
   await page.getByRole('button', { name: '删除事件', exact: true }).focus()
   await page.keyboard.press('Enter')
   const deleteDialog = page.getByRole('dialog', { name: '删除这条事件？' })
   await deleteDialog.getByRole('button', { name: /^(Confirm|确认|确定)$/ }).click()
-  await expect(listedYearlyEvent).toHaveCount(0)
-  await expect(page.getByRole('button', { name: '关闭事件列表' })).toBeFocused()
+  await expect(selectedYearlyEvent).toHaveCount(0)
+  await expect(page.getByRole('button', { name: '关闭当天事件' })).toBeFocused()
 })
 
 test('Diary event type changes protect range data until the user confirms', async ({ page }) => {
@@ -615,8 +562,7 @@ test('Diary event type changes protect range data until the user confirms', asyn
     return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`
   })
   await page.locator(`.diary-life-calendar [data-date="${startDate}"]`).click()
-  await page.getByRole('button', { name: '更多当天事件操作' }).click()
-  await page.getByRole('menuitem', { name: '新增事件', exact: true }).click()
+  await page.getByTestId('diary-add-event').click()
   await page.getByTestId('event-type-schedule').click()
 
   const nextDate = await page.evaluate(date => {
@@ -643,110 +589,59 @@ test('Diary event type changes protect range data until the user confirms', asyn
   await expect(page.getByRole('checkbox', { name: '每年重复' })).toBeChecked()
 })
 
-test.describe('Diary Event list scrolling', () => {
-  test.use({ hasTouch: true })
+test('Diary selected day Event distance stays on one line across viewport widths', async ({ page }) => {
+  const event = {
+    id: 'distance-row-event',
+    title: `响应式日程 ${'较长标题'.repeat(10)}`,
+    description: '',
+    emoji: '🎯',
+    type: 'milestone' as const,
+    startDate: '2026-11-16',
+    endDate: '2026-11-16',
+    startTime: null,
+    endTime: null,
+    allDay: true,
+    dateRule: { calendar: 'gregory' as const },
+    recurrence: 'none' as const,
+    showCountdown: false,
+    isPrimary: false,
+    version: 1,
+    createdAt: 1,
+    updatedAt: 1,
+  }
+  await page.route('**/api/diary/life/events?*', route => route.request().method() === 'GET'
+    ? route.fulfill({ json: { items: [event], next: null } })
+    : route.continue())
+  await page.setViewportSize({ width: 1280, height: 900 })
+  await page.goto('/diary')
+  await unlockDiary(page)
+  await expect(page.getByTestId('diary-event-list-toggle')).toHaveCount(0)
+  await page.getByTestId('diary-view-toggle').click()
+  await page.locator('.diary-life-calendar [data-date="2026-11-16"]').click()
 
-  test('removes the page countdown strip while keeping list countdowns and touch scrolling', async ({ page }) => {
-    await page.setViewportSize({ width: 390, height: 844 })
-    await page.goto('/diary')
-    await unlockDiary(page)
-
-    const startDate = await page.evaluate(() => {
-      const date = new Date(Date.now() + 24 * 60 * 60 * 1000)
-      const year = date.getFullYear()
-      const month = String(date.getMonth() + 1).padStart(2, '0')
-      const day = String(date.getDate()).padStart(2, '0')
-      return `${year}-${month}-${day}`
-    })
-    const items = Array.from({ length: 24 }, (_, index) => ({
-      id: `diary-scroll-event-${index}`,
-      title: `可滚动事件 ${index + 1}`,
-      description: '',
-      emoji: '🎯',
-      type: 'milestone' as const,
-      startDate,
-      endDate: startDate,
-      startTime: null,
-      endTime: null,
-      allDay: true,
-      recurrence: 'none' as const,
-      showCountdown: true,
-      isPrimary: false,
-      version: 1,
-      createdAt: index,
-      updatedAt: index,
-    }))
-    await page.route('**/api/diary/life/events/list*', route => {
-      const offset = Number(new URL(route.request().url()).searchParams.get('offset'))
-      return route.fulfill({ json: { items: items.slice(offset, offset + 12), next: offset === 0 ? 12 : null } })
-    })
-    await page.getByTestId('diary-event-list-toggle').click()
-
-    const pageCountdowns = page.locator('.countdowns')
-    await expect(pageCountdowns).toHaveCount(0)
-    const eventList = page.locator('.diary-event-list-dialog')
-    await expect(eventList).toBeVisible()
-    const scroller = eventList.locator('.diary-event-list-scroll')
-    await expect(scroller).toHaveCSS('overflow-y', 'auto')
-    await expect(scroller).toHaveCSS('scrollbar-width', 'none')
-    expect(await scroller.evaluate(node => getComputedStyle(node, '::-webkit-scrollbar').display)).toBe('none')
-    await expect.poll(() => scroller.evaluate(node => node.scrollHeight - node.clientHeight)).toBeGreaterThan(0)
-    await expect(eventList.locator('.diary-event-list-item').first().locator('.diary-event-list-primary-info')).toBeVisible()
-    await expect(page.getByTestId('diary-life')).toHaveCSS('scrollbar-width', 'none')
+  const row = page.getByRole('button', { name: event.title, exact: true })
+  const distance = row.locator('.diary-event-distance')
+  await expect(distance).toHaveText('今天')
+  const title = row.locator('.diary-event-row-title')
+  for (const width of [320, 390, 430, 768, 1280]) {
+    await page.setViewportSize({ width, height: width <= 430 ? 844 : 900 })
+    await expect(row).toBeVisible()
+    await expect(title).toHaveCSS('white-space', 'nowrap')
+    await expect(title).toHaveCSS('text-overflow', 'ellipsis')
+    await expect(distance).toHaveCSS('white-space', 'nowrap')
+    const bounds = await row.boundingBox()
+    expect(bounds).not.toBeNull()
+    expect(bounds!.x).toBeGreaterThanOrEqual(0)
+    expect(bounds!.x + bounds!.width).toBeLessThanOrEqual(width + 1)
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true)
-
-    const bounds = await scroller.boundingBox()
-    if (!bounds) throw new Error('Diary event list scroll container has no bounds')
-    const touchPoint = { x: bounds.x + Math.min(16, bounds.width / 4), y: bounds.y + bounds.height * 0.72 }
-    expect(await scroller.evaluate(node => getComputedStyle(node).touchAction)).not.toBe('none')
-    const browser = await page.context().newCDPSession(page)
-    try {
-      const points = [0, 1, 2, 3, 4, 5].map(step => ({
-        x: touchPoint.x,
-        y: touchPoint.y - step * Math.min(24, bounds.height / 16),
-        id: 1,
-      }))
-      await browser.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [points[0]] })
-      for (const point of points.slice(1)) await browser.send('Input.dispatchTouchEvent', { type: 'touchMove', touchPoints: [point] })
-      await browser.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] })
-      await expect.poll(() => scroller.evaluate(node => node.scrollTop)).toBeGreaterThan(0)
-    } finally {
-      await browser.detach()
-    }
-    await eventList.getByRole('button', { name: '加载更多' }).click()
-    await expect(eventList.locator('.diary-event-list-item')).toHaveCount(24)
-    await scroller.evaluate(node => { node.scrollTop = node.scrollHeight })
-    const lastEvent = eventList.getByRole('button', { name: '可滚动事件 24', exact: true })
-    await expect(lastEvent).toBeInViewport({ ratio: 0.99 })
-    const scrollTop = await scroller.evaluate(node => node.scrollTop)
-    expect(scrollTop).toBeGreaterThan(0)
-    await lastEvent.click()
-    const reader = page.getByTestId('diary-event-reader')
-    await expect(reader.locator('h1')).toHaveText('可滚动事件 24')
-    await reader.getByRole('button', { name: '关闭事件' }).click()
-    await expect(eventList.locator('.diary-event-list-item')).toHaveCount(24)
-    await expect.poll(() => scroller.evaluate(node => node.scrollTop)).toBeCloseTo(scrollTop, 0)
-
-    const lastItem = items[23]!
-    await page.route(`**/api/diary/life/events/${lastItem.id}`, route => {
-      expect(route.request().method()).toBe('PUT')
-      const fields = route.request().postDataJSON()
-      expect(fields.expectedVersion).toBe(1)
-      expect(fields.title).toBe('已更新的第 24 个事件')
-      lastItem.title = fields.title
-      lastItem.version += 1
-      return route.fulfill({ json: { event: lastItem } })
-    })
-    await lastEvent.click()
-    await reader.getByRole('button', { name: '编辑事件' }).click()
-    await page.getByRole('textbox', { name: '事件名称', exact: true }).fill('已更新的第 24 个事件')
-    await page.getByRole('button', { name: '保存', exact: true }).click()
-    await expect(reader.locator('h1')).toHaveText('已更新的第 24 个事件')
-    await reader.getByRole('button', { name: '关闭事件' }).click()
-    await expect(eventList.locator('.diary-event-list-item')).toHaveCount(24)
-    await expect(eventList.getByRole('button', { name: '已更新的第 24 个事件' })).toBeInViewport({ ratio: 0.99 })
-    await expect.poll(() => scroller.evaluate(node => node.scrollTop)).toBeCloseTo(scrollTop, 0)
-  })
+  }
+  await page.setViewportSize({ width: 1280, height: 900 })
+  await page.getByRole('button', { name: '关闭当天事件' }).click()
+  const viewToggle = page.getByTestId('diary-view-toggle')
+  await expect(viewToggle).toHaveAttribute('aria-label', '切换到日记视图')
+  await viewToggle.click()
+  await expect(page.locator('.diary-life-calendar [data-date="2026-11-16"]')).toHaveCount(1)
+  await expect(viewToggle).toHaveAttribute('aria-label', '切换到日程视图')
 })
 
 test('Diary NavBar icon controls share the standard size across viewport widths', async ({ page }) => {
@@ -756,7 +651,6 @@ test('Diary NavBar icon controls share the standard size across viewport widths'
   const viewportWidths = [390, 430, 768, 1024, 1280, 1440]
   const selectors = [
     '.diary-view-toggle',
-    '.diary-event-list-toggle',
     '.nav-search',
     '.theme-toggle',
     '[data-testid="account-button"]',
@@ -764,6 +658,7 @@ test('Diary NavBar icon controls share the standard size across viewport widths'
 
   for (const width of viewportWidths) {
     await page.setViewportSize({ width, height: 900 })
+    await expect(page.getByTestId('diary-event-list-toggle')).toHaveCount(0)
     const controls = selectors.map(selector => page.locator(`.navbar .nav-actions ${selector}`))
     for (const control of controls) await expect(control).toBeVisible()
 
@@ -794,10 +689,7 @@ test('Diary NavBar icon controls share the standard size across viewport widths'
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true)
   }
 
-  const diaryToggles = [
-    page.locator('.navbar .nav-actions .diary-view-toggle'),
-    page.locator('.navbar .nav-actions .diary-event-list-toggle'),
-  ]
+  const diaryToggles = [page.locator('.navbar .nav-actions .diary-view-toggle')]
   const search = page.locator('.navbar .nav-actions .nav-search')
   for (const diaryToggle of diaryToggles) {
     await diaryToggle.hover()
@@ -818,10 +710,8 @@ test('lunar Events preserve their rule across countdowns, editing and calendar d
   const calendar = page.locator('.diary-life-calendar')
   const startCell = calendar.locator('[data-date="2026-11-16"]')
   await startCell.click()
-  const dayActions = page.getByRole('button', { name: '更多当天事件操作' })
-  await expect(dayActions).toBeVisible()
-  await dayActions.click()
-  await page.getByRole('menuitem', { name: '新增事件', exact: true }).click()
+  await expect(page.getByTestId('diary-add-event')).toBeVisible()
+  await page.getByTestId('diary-add-event').click()
   await page.getByTestId('event-type-anniversary').click()
 
   const title = `农历生日 ${'标题很长'.repeat(10)} ${testInfo.repeatEachIndex + 1}`
@@ -846,42 +736,53 @@ test('lunar Events preserve their rule across countdowns, editing and calendar d
   const createResponsePromise = page.waitForResponse(response => response.request().method() === 'PUT'
     && new URL(response.url()).pathname.startsWith('/api/diary/life/events/'))
   await page.getByRole('button', { name: '保存', exact: true }).click()
-  const createdEvent = await (await createResponsePromise).json() as { event: { dateRule?: { calendar: string; lunarMonth: number; lunarDay: number } } }
+  const createdEvent = await (await createResponsePromise).json() as {
+    event: { startDate: string; dateRule?: { calendar: string; lunarMonth: number; lunarDay: number } }
+  }
   expect(createdEvent.event.dateRule).toMatchObject({ calendar: 'chinese', lunarMonth: 5, lunarDay: 19 })
 
-  const reader = page.getByTestId('diary-event-reader')
-  await expect(reader.locator('h1')).toHaveText(title)
-  await reader.getByRole('button', { name: '关闭事件' }).click()
+  await expect(page.locator('.diary-event-edit-dialog')).toHaveCount(0)
   await page.getByRole('button', { name: '关闭当天事件' }).click()
-  await page.getByTestId('diary-event-list-toggle').click()
-  const eventList = page.locator('.diary-event-list-dialog')
-  const listedEvent = eventList.getByRole('button').filter({ hasText: title })
-  await expect(listedEvent.locator('.diary-event-list-meta')).toHaveCount(0)
-  await expect(listedEvent).not.toContainText('农历五月十九')
-  const initialCountdown = listedEvent.locator('.diary-event-list-primary-info')
-  await expect(initialCountdown).toHaveText(/^\d+天后$/)
-  const nextOccurrenceCountdown = await initialCountdown.innerText()
-  const listedTitle = listedEvent.locator('.diary-event-row-title')
+  let occurrenceYear = Number(createdEvent.event.startDate.slice(0, 4))
+  let occurrenceDate = lunarToSolar({ year: occurrenceYear, month: 5, day: 19, isLeapMonth: false })!
+  if (occurrenceDate < createdEvent.event.startDate) {
+    occurrenceYear += 1
+    occurrenceDate = lunarToSolar({ year: occurrenceYear, month: 5, day: 19, isLeapMonth: false })!
+  }
+  let visibleMonth = (await calendar.locator('.life-month-label').getAttribute('data-month'))!
+  const showMonth = async (date: string) => {
+    const targetMonth = date.slice(0, 7)
+    const [visibleYear, visibleMonthNumber] = visibleMonth.split('-').map(Number)
+    const [targetYear, targetMonthNumber] = targetMonth.split('-').map(Number)
+    const monthDelta = (targetYear! - visibleYear!) * 12 + targetMonthNumber! - visibleMonthNumber!
+    const buttons = calendar.locator('.n-calendar-header').getByRole('button')
+    const button = monthDelta < 0 ? buttons.first() : buttons.last()
+    for (let index = 0; index < Math.abs(monthDelta); index++) await button.click()
+    visibleMonth = targetMonth
+    await expect(calendar.locator('.life-month-label')).toHaveText(diaryMonthLabel(targetMonth))
+  }
+  await showMonth(occurrenceDate)
+  const occurrenceCell = calendar.locator(`[data-date="${occurrenceDate}"]`)
+  await occurrenceCell.click()
+  const occurrenceEvent = page.getByRole('button', { name: title, exact: true })
+  const distance = occurrenceEvent.locator('.diary-event-distance')
+  await expect(distance).toHaveText(/^还剩\d+天$/)
+  const occurrenceTitle = occurrenceEvent.locator('.diary-event-row-title')
   for (const width of [320, 390, 430, 768, 1280]) {
     await page.setViewportSize({ width, height: width < 600 ? 844 : 900 })
-    await expect(listedEvent).toBeVisible()
-    await expect(listedTitle).toHaveCSS('white-space', 'nowrap')
-    await expect(listedTitle).toHaveCSS('text-overflow', 'ellipsis')
-    await expect(initialCountdown).toBeVisible()
-    const rowBounds = await listedEvent.boundingBox()
+    await expect(occurrenceEvent).toBeVisible()
+    await expect(occurrenceTitle).toHaveCSS('white-space', 'nowrap')
+    await expect(occurrenceTitle).toHaveCSS('text-overflow', 'ellipsis')
+    await expect(distance).toBeVisible()
+    const rowBounds = await occurrenceEvent.boundingBox()
     expect(rowBounds).not.toBeNull()
     expect(rowBounds!.x).toBeGreaterThanOrEqual(0)
     expect(rowBounds!.x + rowBounds!.width).toBeLessThanOrEqual(width + 1)
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true)
   }
   await page.setViewportSize({ width: 1280, height: 900 })
-  await listedEvent.click()
-  await expect(eventList).toHaveCount(0)
-  await expect(reader.locator('h1')).toHaveText(title)
-  await expect(reader.locator('.diary-event-reader-date')).toContainText('农历五月十九')
-  await expect(calendar.locator('.life-month-label')).toHaveText(diaryMonthLabel('2027-06'))
-  await expect(calendar.locator('[aria-pressed="true"]')).toHaveCount(0)
-  await reader.getByRole('button', { name: '编辑事件' }).click()
+  await occurrenceEvent.click()
+  await expect(page.locator('.diary-event-edit-dialog')).toBeVisible()
   await expect(page.getByLabel('农历月份', { exact: true })).toContainText('五月')
   await expect(page.getByLabel('农历日期')).toContainText('十九')
 
@@ -892,36 +793,30 @@ test('lunar Events preserve their rule across countdowns, editing and calendar d
   await expect(page.getByLabel('农历日期')).toContainText('二十')
   await page.getByRole('button', { name: '取消', exact: true }).click()
   await discard.getByRole('button', { name: /^(Confirm|确认|确定)$/ }).click()
-  await expect(reader.locator('h1')).toHaveText(title)
-  await reader.getByRole('button', { name: '关闭事件' }).click()
-  await expect(listedEvent.locator('.diary-event-list-meta')).toHaveCount(0)
+  await expect(page.locator('.diary-event-edit-dialog')).toHaveCount(0)
 
-  await listedEvent.click()
-  await reader.getByRole('button', { name: '编辑事件' }).click()
+  await occurrenceEvent.click()
   await expect(page.getByLabel('农历日期')).toContainText('十九')
   await selectNaiveOption(page, '农历日期', '二十')
   await page.getByRole('button', { name: '保存', exact: true }).click()
-  await expect(reader.locator('h1')).toHaveText(title)
-  await reader.getByRole('button', { name: '关闭事件' }).click()
-  await expect(listedEvent.locator('.diary-event-list-meta')).toHaveCount(0)
-  await expect(listedEvent.locator('.diary-event-list-primary-info')).toHaveText(/^\d+天后$/)
-  await expect(listedEvent.locator('.diary-event-list-primary-info')).not.toHaveText(nextOccurrenceCountdown)
-  await page.getByRole('button', { name: '关闭事件列表' }).click()
+  await expect(page.locator('.diary-event-edit-dialog')).toHaveCount(0)
 
-  const updatedOccurrenceCell = calendar.locator('[data-date="2027-06-24"]')
+  await page.getByRole('button', { name: '关闭当天事件' }).click()
+  const updatedOccurrence = lunarToSolar({ year: occurrenceYear, month: 5, day: 20, isLeapMonth: false })!
+  await showMonth(updatedOccurrence)
+  const updatedOccurrenceCell = calendar.locator(`[data-date="${updatedOccurrence}"]`)
   await expect(updatedOccurrenceCell.locator('.life-marker')).toHaveCount(1)
   await updatedOccurrenceCell.click()
   const updatedDayEvent = page.getByRole('button', { name: title, exact: true })
   await updatedDayEvent.click()
-  await expect(reader.locator('h1')).toHaveText(title)
-  await reader.getByRole('button', { name: '关闭事件' }).click()
+  await expect(page.locator('.diary-event-edit-dialog')).toBeVisible()
+  await page.getByRole('button', { name: '取消', exact: true }).click()
   await page.getByRole('button', { name: '关闭当天事件' }).click()
 
   await page.locator('.theme-toggle').click()
   await expect(page.locator('html')).toHaveAttribute('data-theme', 'dark')
   await updatedOccurrenceCell.click()
   await updatedDayEvent.click()
-  await reader.getByRole('button', { name: '编辑事件' }).click()
   const darkLunarMonth = page.getByLabel('农历月份', { exact: true })
   expect(await darkLunarMonth.evaluate(element => getComputedStyle(element).getPropertyValue('--n-color').trim()))
     .toBe(await page.locator('html').evaluate(element => getComputedStyle(element).getPropertyValue('--nuvyn-surface-1').trim()))
@@ -935,8 +830,10 @@ test('lunar Events preserve their rule across countdowns, editing and calendar d
   await milestone.click()
   await typeChange.getByRole('button', { name: /^(OK|Confirm|确认|确定)$/ }).click()
   const gregorianDate = diaryEventDateInput(page, '发生日期')
-  await expect(gregorianDate).toHaveValue('2027-06-24')
-  await fillDiaryEventDate(page, '发生日期', '2027-06-25')
+  const expectedGregorianDate = lunarToSolar({ year: occurrenceYear, month: 5, day: 20, isLeapMonth: false })!
+  await expect(gregorianDate).toHaveValue(expectedGregorianDate)
+  const movedGregorianDate = lunarToSolar({ year: occurrenceYear, month: 5, day: 21, isLeapMonth: false })!
+  await fillDiaryEventDate(page, '发生日期', movedGregorianDate)
 
   const saveResponse = page.waitForResponse(response => response.request().method() === 'PUT'
     && new URL(response.url()).pathname.startsWith('/api/diary/life/events/'))
@@ -944,20 +841,17 @@ test('lunar Events preserve their rule across countdowns, editing and calendar d
   const response = await saveResponse
   expect(response.ok()).toBe(true)
   expect(await response.json()).toMatchObject({
-    event: { type: 'milestone', dateRule: { calendar: 'gregory' }, startDate: '2027-06-25', endDate: '2027-06-25', recurrence: 'yearly' },
+    event: { type: 'milestone', dateRule: { calendar: 'gregory' }, startDate: movedGregorianDate, endDate: movedGregorianDate, recurrence: 'yearly' },
   })
-  const gregorianOccurrence = calendar.locator('[data-date="2027-06-25"]')
+  const gregorianOccurrence = calendar.locator(`[data-date="${movedGregorianDate}"]`)
   await expect(gregorianOccurrence).toHaveAttribute('aria-pressed', 'true')
   await expect(updatedOccurrenceCell.locator('.life-marker')).toHaveCount(0)
   await expect(gregorianOccurrence.locator('.life-marker')).toHaveCount(1)
-  await expect(reader.locator('h1')).toHaveText(title)
-  await reader.getByRole('button', { name: '关闭事件' }).click()
   await page.getByRole('button', { name: '关闭当天事件' }).click()
 
   await expect(gregorianOccurrence.locator('.life-marker')).toHaveCount(1)
   await gregorianOccurrence.click()
   await updatedDayEvent.click()
-  await reader.getByRole('button', { name: '编辑事件' }).click()
   await page.getByRole('button', { name: '删除事件', exact: true }).click()
   await page.getByRole('dialog', { name: '删除这条事件？' }).getByRole('button', { name: /^(OK|Confirm|确认|确定)$/ }).click()
   await expect(gregorianOccurrence.locator('.life-marker')).toHaveCount(0)

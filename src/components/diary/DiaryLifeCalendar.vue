@@ -292,13 +292,13 @@ function selectDate(date: string, event: MouseEvent) {
 
 .diary-life-calendar :deep(.n-calendar-header) {
   position: relative;
-  flex: 0 0 82px;
+  flex: 0 0 98px;
   padding: 0;
 }
 
 .diary-life-calendar :deep(.n-calendar-header__title) {
   display: grid;
-  grid-template-rows: 56px 26px;
+  grid-template-rows: 72px 26px;
   align-self: stretch;
   width: 100%;
   color: var(--text);
@@ -308,7 +308,7 @@ function selectDate(date: string, event: MouseEvent) {
   position: relative;
   z-index: 1;
   display: grid;
-  align-self: center;
+  align-self: start;
   justify-self: center;
   place-items: center;
   width: 250px;
@@ -393,7 +393,8 @@ function selectDate(date: string, event: MouseEvent) {
 
 .diary-life-calendar :deep(.n-calendar-header__extra .n-button-group) {
   display: grid;
-  grid-template-columns: 44px 250px 44px;
+  width: 100%;
+  grid-template-columns: repeat(7, minmax(0, 1fr));
 }
 
 .diary-life-calendar :deep(.n-calendar-header__extra .n-button) {
@@ -404,6 +405,7 @@ function selectDate(date: string, event: MouseEvent) {
   border-radius: 8px;
   background: transparent;
   color: var(--text-muted);
+  justify-self: center;
   pointer-events: auto;
 }
 
@@ -414,7 +416,7 @@ function selectDate(date: string, event: MouseEvent) {
 }
 
 .diary-life-calendar :deep(.n-calendar-header__extra .n-button:last-child) {
-  grid-column: 3;
+  grid-column: 7;
 }
 
 .diary-life-calendar :deep(.n-calendar-header__extra .n-button:hover) {
@@ -434,6 +436,7 @@ function selectDate(date: string, event: MouseEvent) {
   grid-template-rows: repeat(6, 80px);
   height: 480px;
   min-height: 480px;
+  margin-top: -8px;
   border: 0;
   border-radius: 0;
   background: transparent;
@@ -570,22 +573,20 @@ function selectDate(date: string, event: MouseEvent) {
 @media (max-width: 600px) {
   /* Two full-size markers use nearly the whole narrow date-cell track. */
   .life-marker--with-event-task { gap: 0; }
-  .diary-life-calendar :deep(.n-calendar-header) { flex-basis: 64px; }
-  .diary-life-calendar :deep(.n-calendar-header__title) { grid-template-rows: 40px 24px; }
+  .diary-life-calendar :deep(.n-calendar-header) { flex-basis: 72px; }
+  .diary-life-calendar :deep(.n-calendar-header__title) { grid-template-rows: 48px 24px; }
   .life-month-control { width: 200px; height: 40px; }
   .life-month-label { font-size: 22px; }
   .life-month-picker :deep(.n-input),
   .life-month-picker :deep(.n-input__input-el) { height: 40px; }
   .life-month-picker :deep(.n-input__input-el) { font-size: 22px; line-height: 40px; }
   .diary-life-calendar :deep(.n-calendar-header__extra) { inset: 0 0 auto; }
-  .diary-life-calendar :deep(.n-calendar-header__extra .n-button-group) {
-    grid-template-columns: 40px 200px 40px;
-  }
   .diary-life-calendar :deep(.n-calendar-header__extra .n-button) { width: 40px; height: 40px; }
   .diary-life-calendar :deep(.n-calendar-dates) {
     grid-template-rows: repeat(6, 68px);
     height: 408px;
     min-height: 408px;
+    margin-top: -4px;
   }
   .life-date { grid-template-rows: minmax(0, 1fr) 44px 22px; }
 }

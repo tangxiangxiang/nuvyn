@@ -60,7 +60,6 @@ const ledgerAnalysisExportCommand = ref<(() => Promise<void>) | null>(null)
 const vaultScopeChangeCommand = ref<((scope: 'note' | 'diary') => Promise<boolean>) | null>(null)
 const diaryViewToggleCommand = ref<(() => void) | null>(null)
 const diaryViewMode = ref<'diary' | 'events'>('diary')
-const diaryEventListCommand = ref<(() => void) | null>(null)
 const zenModeBrandEntry = ref<{ canEnter: () => boolean; enter: () => boolean } | null>(null)
 const noteSpeechReadAllCommand = ref<(() => void) | null>(null)
 const noteSpeechReadSelectionCommand = ref<(() => void) | null>(null)
@@ -98,7 +97,6 @@ provide(AppShellContextKey, {
   vaultScopeChangeCommand,
   diaryViewToggleCommand,
   diaryViewMode,
-  diaryEventListCommand,
   zenModeBrandEntry,
   noteSpeechReadAllCommand,
   noteSpeechReadSelectionCommand,

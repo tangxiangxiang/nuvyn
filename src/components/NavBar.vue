@@ -8,7 +8,6 @@ import {
   Photo,
   LayoutSidebarLeftExpand,
   LayoutSidebarRightExpand,
-  List as ListIcon,
   Moon,
   MoodSmile,
   Search,
@@ -1020,30 +1019,15 @@ onBeforeUnmount(() => {
           size="small"
           quaternary
           :bordered="false"
-          :aria-label="appShell.diaryViewMode?.value === 'diary' ? '切换到近期事项' : '切换到情绪日记'"
-          :title="appShell.diaryViewMode?.value === 'diary' ? '切换到近期事项' : '切换到情绪日记'"
+          :aria-label="appShell.diaryViewMode?.value === 'diary' ? '切换到日程视图' : '切换到日记视图'"
+          :title="appShell.diaryViewMode?.value === 'diary' ? '切换到日程视图' : '切换到日记视图'"
           data-testid="diary-view-toggle"
           @click="appShell?.diaryViewToggleCommand?.value?.()"
         >
           <NIcon aria-hidden="true">
-            <MoodSmile v-if="appShell.diaryViewMode?.value === 'diary'" />
-            <CalendarEvent v-else />
+            <CalendarEvent v-if="appShell.diaryViewMode?.value === 'diary'" />
+            <MoodSmile v-else />
           </NIcon>
-        </NButton>
-        <NButton
-          v-if="isDiary && props.diaryUnlocked && appShell?.diaryEventListCommand?.value"
-          class="diary-event-list-toggle"
-          attr-type="button"
-          size="small"
-          quaternary
-          :bordered="false"
-          aria-label="近期事项"
-          title="近期事项"
-          aria-haspopup="dialog"
-          data-testid="diary-event-list-toggle"
-          @click="appShell?.diaryEventListCommand?.value?.()"
-        >
-          <NIcon aria-hidden="true"><ListIcon /></NIcon>
         </NButton>
         <NDropdown
           v-if="isVault && appShell?.noteSpeechReadAllCommand?.value"

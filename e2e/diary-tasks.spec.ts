@@ -19,7 +19,7 @@ test('creates a dated task, completes it, restores it, and moves it to a new cal
   const cell = page.locator(`.diary-life-calendar [data-date="${date}"]`)
   await expect(cell).toBeVisible()
   await cell.click()
-  await chooseDiaryAction(page, page.getByRole('button', { name: '更多当天事件操作' }), '新增待办')
+  await page.getByTestId('diary-add-task').click()
 
   const title = `Phase 3 day task ${Math.random().toString(36).slice(2, 9)}`
   const editor = page.locator('.diary-task-edit-dialog')
@@ -45,7 +45,7 @@ test('creates a dated task, completes it, restores it, and moves it to a new cal
   await expect(marker).toHaveAttribute('src', '/emoji/alarm-clock-animated.png')
 
   const secondTitle = `${title} second`
-  await chooseDiaryAction(page, page.getByRole('button', { name: '更多当天事件操作' }), '新增待办')
+  await page.getByTestId('diary-add-task').click()
   await page.getByRole('textbox', { name: '待办名称' }).fill(secondTitle)
   await fillDiaryTaskDate(page, '截止日期', date)
   await page.getByRole('button', { name: '保存', exact: true }).click()
@@ -134,7 +134,7 @@ test('overdue Todos use Bomb and return to Party when completed late', async ({ 
   const dueDate = `${testYear}-11-15`
   const cell = page.locator(`.diary-life-calendar [data-date="${dueDate}"]`)
   await cell.click()
-  await chooseDiaryAction(page, page.getByRole('button', { name: '更多当天事件操作' }), '新增待办')
+  await page.getByTestId('diary-add-task').click()
   const title = `Overdue task ${Math.random().toString(36).slice(2, 8)}`
   await page.getByRole('textbox', { name: '待办名称' }).fill(title)
   await fillDiaryTaskDate(page, '截止日期', dueDate)
@@ -171,7 +171,7 @@ test('starts a new recurring task on its explicit start date and ignores hidden 
   const selectedCell = calendar.locator(`[data-date="${selectedDate}"]`)
   const startCell = calendar.locator(`[data-date="${startDate}"]`)
   await selectedCell.click()
-  await chooseDiaryAction(page, page.getByRole('button', { name: '更多当天事件操作' }), '新增待办')
+  await page.getByTestId('diary-add-task').click()
 
   const editor = page.locator('.diary-task-edit-dialog')
   await page.getByRole('textbox', { name: '待办名称' }).fill(title)
@@ -294,7 +294,7 @@ test('uses the static Alarm Clock when reduced motion is enabled', async ({ page
   const date = `${testYear}-11-16`
   const cell = page.locator(`.diary-life-calendar [data-date="${date}"]`)
   await cell.click()
-  await chooseDiaryAction(page, page.getByRole('button', { name: '更多当天事件操作' }), '新增待办')
+  await page.getByTestId('diary-add-task').click()
   const title = `Reduced motion ${Math.random().toString(36).slice(2, 8)}`
   await page.getByRole('textbox', { name: '待办名称' }).fill(title)
   await fillDiaryTaskDate(page, '截止日期', date)
@@ -320,7 +320,7 @@ test('keeps long task titles and due times aligned without horizontal overflow',
   const cell = page.locator(`.diary-life-calendar [data-date="${date}"]`)
   await expect(cell).toBeVisible()
   await cell.click()
-  await chooseDiaryAction(page, page.getByRole('button', { name: '更多当天事件操作' }), '新增待办')
+  await page.getByTestId('diary-add-task').click()
 
   const title = `周末需要完成的综合项目${Math.random().toString(36).slice(2, 8)}`.repeat(8)
   await page.getByRole('textbox', { name: '待办名称' }).fill(title)
@@ -366,7 +366,7 @@ test('keeps long task titles and due times aligned without horizontal overflow',
   await expect(row).toHaveCount(0)
 })
 
-test('shows a cross-day Todo only on its due date and keeps its start plan in Recent Items', async ({ page }) => {
+test('shows a cross-day Todo only on its due date and preserves its start plan', async ({ page }) => {
   await page.goto('/diary')
   await unlockDiary(page)
   await page.getByTestId('diary-view-toggle').click()
@@ -379,7 +379,7 @@ test('shows a cross-day Todo only on its due date and keeps its start plan in Re
   const middleCell = page.locator(`.diary-life-calendar [data-date="${middleDate}"]`)
   const dueCell = page.locator(`.diary-life-calendar [data-date="${dueDate}"]`)
   await startCell.click()
-  await chooseDiaryAction(page, page.getByRole('button', { name: '更多当天事件操作' }), '新增待办')
+  await page.getByTestId('diary-add-task').click()
 
   await page.getByRole('textbox', { name: '待办名称' }).fill(title)
   await expect(diaryTaskDateInput(page, '开始日期')).toHaveValue('')
@@ -432,11 +432,11 @@ test('shows a cross-day Todo only on its due date and keeps its start plan in Re
   await expect(dueCell.locator('.life-task-marker')).toHaveClass(/life-task-marker--completed-late/)
 
   await page.getByRole('button', { name: '关闭当天事件' }).click()
-  await page.getByTestId('diary-event-list-toggle').click()
-  await page.getByRole('button', { name: '查看已完成' }).click()
+  await dueCell.click()
   const completedRow = page.getByRole('button', { name: `编辑待办：${title}` })
-  await expect(completedRow).toContainText('11月21日')
+  await expect(completedRow).toBeVisible()
   await completedRow.click()
+  await expect(diaryTaskDateInput(page, '截止日期')).toHaveValue(dueDate)
   await expect(diaryTaskDateInput(page, '开始日期')).toHaveValue(startDate)
   await expect(diaryTaskTimeInput(page, '开始时间')).toHaveValue('09:00')
   await expect(diaryTaskDateInput(page, '截止日期')).toHaveValue(dueDate)
@@ -445,49 +445,41 @@ test('shows a cross-day Todo only on its due date and keeps its start plan in Re
   const confirmation = page.getByRole('dialog', { name: '删除这条待办？' })
   await confirmation.getByRole('button', { name: /^(Confirm|确认|确定)$/ }).click()
 
-  const startOnlyTitle = `Start-only task ${Math.random().toString(36).slice(2, 9)}`
-  await page.getByRole('button', { name: '新增待办' }).click()
-  await page.getByRole('textbox', { name: '待办名称' }).fill(startOnlyTitle)
-  await fillDiaryTaskDate(page, '开始日期', startDate)
-  await fillDiaryTaskTime(page, '开始时间', '09:00')
-  await expect(diaryTaskDateInput(page, '截止日期')).toHaveValue('')
-  await page.getByRole('button', { name: '保存', exact: true }).click()
-  const startOnlyRow = page.getByRole('button', { name: `编辑待办：${startOnlyTitle}` })
-  await expect(startOnlyRow).toBeVisible()
-  await expect(startOnlyRow).toContainText('11月19日开始 09:00')
-  await startOnlyRow.click()
-  await expect(diaryTaskDateInput(page, '开始日期')).toHaveValue(startDate)
-  await expect(diaryTaskDateInput(page, '截止日期')).toHaveValue('')
-  await page.getByRole('button', { name: '删除', exact: true }).click()
-  const startOnlyConfirmation = page.getByRole('dialog', { name: '删除这条待办？' })
-  await startOnlyConfirmation.getByRole('button', { name: /^(Confirm|确认|确定)$/ }).click()
 })
 
-test('creates an undated task from Recent Items and separates completed tasks', async ({ page }) => {
+test('calendar Todo actions remain available without the Recent Items list', async ({ page }) => {
   await page.goto('/diary')
   await unlockDiary(page)
-  await page.getByTestId('diary-event-list-toggle').click()
-  const list = page.locator('.diary-event-list-dialog')
-  await expect(list).toBeVisible()
-  await page.getByRole('button', { name: '新增待办' }).click()
+  await expect(page.getByTestId('diary-event-list-toggle')).toHaveCount(0)
+  await page.getByTestId('diary-view-toggle').click()
 
-  const title = `Phase 3 undated task ${Math.random().toString(36).slice(2, 9)}`
+  const date = `${testYear}-11-19`
+  const cell = page.locator(`.diary-life-calendar [data-date="${date}"]`)
+  await cell.click()
+  const closeButton = page.getByRole('button', { name: '关闭当天事件' })
+  const addTaskButton = page.getByTestId('diary-add-task')
+  await expect(closeButton).toHaveCSS('width', '32px')
+  await expect(closeButton).toHaveCSS('border-radius', '50%')
+  await expect(addTaskButton).toHaveCSS('width', '32px')
+  await expect(addTaskButton).toHaveCSS('border-radius', '50%')
+  await expect(addTaskButton).toBeVisible()
+  await expect(page.getByTestId('diary-add-event')).toBeVisible()
+  await expect(page.getByRole('button', { name: '更多当天事件操作' })).toHaveCount(0)
+  await page.getByTestId('diary-add-task').click()
+
+  const title = `Calendar task ${Math.random().toString(36).slice(2, 9)}`
   const editor = page.locator('.diary-task-edit-dialog')
   await expect(editor).toBeVisible()
   await page.getByRole('textbox', { name: '待办名称' }).fill(title)
-  await expect(diaryTaskDateInput(page, '截止日期')).toHaveValue('')
+  await expect(diaryTaskDateInput(page, '截止日期')).toHaveValue(date)
   await page.getByRole('button', { name: '保存', exact: true }).click()
   const complete = page.getByRole('checkbox', { name: `完成待办：${title}` })
   await expect(complete).toBeVisible()
-  await expect(page.getByRole('button', { name: `编辑待办：${title}` })).toContainText('无日期')
-
   await complete.click()
-  await expect(page.getByRole('checkbox', { name: `完成待办：${title}` })).toHaveCount(0)
-  await page.getByRole('button', { name: '查看已完成' }).click()
-  await expect(page.getByRole('checkbox', { name: `恢复待办：${title}` })).toBeVisible()
-  await page.getByRole('checkbox', { name: `恢复待办：${title}` }).click()
+  const restore = page.getByRole('checkbox', { name: `恢复待办：${title}` })
+  await expect(restore).toBeVisible()
+  await restore.click()
   await expect(page.getByRole('checkbox', { name: `完成待办：${title}` })).toBeVisible()
-  await expect(list.locator('.diary-list-section-header h3')).toHaveText('待办事项')
 
   await page.getByRole('button', { name: `编辑待办：${title}` }).click()
   await expect(editor).toBeVisible()
@@ -780,7 +772,7 @@ test('recurring Todo completion and skipping are scoped to one date', async ({ p
   const calendar = page.locator('.diary-life-calendar')
   const startCell = calendar.locator(`[data-date="${startDate}"]`)
   await startCell.click()
-  await chooseDiaryAction(page, page.getByRole('button', { name: '更多当天事件操作' }), '新增待办')
+  await page.getByTestId('diary-add-task').click()
 
   const editor = page.locator('.diary-task-edit-dialog')
   await page.getByRole('textbox', { name: '待办名称' }).fill(title)
@@ -862,7 +854,7 @@ test('editing a recurring Todo changes future occurrences and preserves complete
   const followingCell = calendar.locator(`[data-date="${followingDate}"]`)
 
   await firstCell.click()
-  await chooseDiaryAction(page, page.getByRole('button', { name: '更多当天事件操作' }), '新增待办')
+  await page.getByTestId('diary-add-task').click()
   await page.getByRole('textbox', { name: '待办名称' }).fill(title)
   await selectNaiveOption(page, '重复规则', '每天')
   await fillDiaryTaskDate(page, '开始日期', firstDate)
@@ -913,17 +905,20 @@ test('date-coincident Todo and Event remain independent records', async ({ page 
   const taskTitle = `Prepare ID ${Math.random().toString(36).slice(2, 8)}`
   const cell = page.locator(`.diary-life-calendar [data-date="${date}"]`)
   await cell.click()
-  await chooseDiaryAction(page, page.getByRole('button', { name: '更多当天事件操作' }), '新增事件')
+  await expect(page.getByRole('button', { name: '更多当天事件操作' })).toHaveCount(0)
+  await page.getByTestId('diary-add-event').click()
   await page.getByTestId('event-type-schedule').click()
+  await expect(diaryEventDateInput(page, '开始日期')).toHaveValue(date)
+  await expect(diaryEventDateInput(page, '结束日期')).toHaveValue(date)
   await page.getByRole('textbox', { name: '事件名称' }).fill(eventTitle)
   await fillDiaryEventDate(page, '开始日期', date)
   await fillDiaryEventDate(page, '结束日期', date)
   await page.getByRole('button', { name: '保存', exact: true }).click()
 
-  await expect(page.getByRole('heading', { name: eventTitle })).toBeVisible()
-  await page.getByRole('button', { name: '关闭事件' }).click()
-  await chooseDiaryAction(page, page.getByRole('button', { name: '更多当天事件操作' }), '新增待办')
+  await expect(page.getByRole('button', { name: eventTitle, exact: true })).toBeVisible()
+  await page.getByTestId('diary-add-task').click()
   await page.getByRole('textbox', { name: '待办名称' }).fill(taskTitle)
+  await expect(diaryTaskDateInput(page, '截止日期')).toHaveValue(date)
   await fillDiaryTaskDate(page, '截止日期', date)
   await page.getByRole('button', { name: '保存', exact: true }).click()
 
@@ -932,18 +927,13 @@ test('date-coincident Todo and Event remain independent records', async ({ page 
   await expect(page.getByRole('checkbox', { name: `完成待办：${taskTitle}`, exact: true })).toBeVisible()
 
   const dayDialog = page.locator('.diary-life-dialog')
-  const dayWidth = (await dayDialog.boundingBox())!.width
   const dayHeadingColor = await dayDialog.getByRole('heading', { name: '待办事项' }).evaluate(heading => getComputedStyle(heading).color)
   await expect(eventButton).toHaveCSS('height', '48px')
+  await expect(eventButton.locator('.diary-event-distance')).toHaveText('还剩5天')
+  await expect(eventButton.locator('.diary-event-distance')).toHaveCSS('font-size', '12px')
+  await expect(eventButton.locator('.diary-event-distance')).toHaveCSS('white-space', 'nowrap')
+  await expect(dayDialog.getByRole('heading', { name: '重要日程' })).toHaveCSS('color', dayHeadingColor)
   await page.getByRole('button', { name: '关闭当天事件' }).click()
-  await page.getByTestId('diary-event-list-toggle').click()
-  const recentDialog = page.locator('.diary-event-list-dialog')
-  const recentTask = recentDialog.locator('.diary-task-row').filter({ hasText: taskTitle })
-  await expect(recentTask).toHaveCSS('height', '48px')
-  await expect(eventButton).toHaveCSS('height', '48px')
-  await expect(recentDialog.getByRole('heading', { name: '待办事项' })).toHaveCSS('color', dayHeadingColor)
-  expect((await recentDialog.boundingBox())!.width).toBeCloseTo(dayWidth, 0)
-  await page.getByRole('button', { name: '关闭事件列表' }).click()
   await cell.click()
 
   await page.getByRole('button', { name: `编辑待办：${taskTitle}` }).click()
@@ -953,14 +943,13 @@ test('date-coincident Todo and Event remain independent records', async ({ page 
   await expect(eventButton).toBeVisible()
 
   const remainingTaskTitle = `${taskTitle} independent`
-  await chooseDiaryAction(page, page.getByRole('button', { name: '更多当天事件操作' }), '新增待办')
+  await page.getByTestId('diary-add-task').click()
   await page.getByRole('textbox', { name: '待办名称' }).fill(remainingTaskTitle)
   await fillDiaryTaskDate(page, '截止日期', date)
   await page.getByRole('button', { name: '保存', exact: true }).click()
   await expect(page.getByRole('checkbox', { name: `完成待办：${remainingTaskTitle}`, exact: true })).toBeVisible()
 
   await eventButton.click()
-  await page.getByRole('button', { name: '编辑事件' }).click()
   await page.getByRole('button', { name: '删除事件', exact: true }).click()
   const eventDeleteConfirmation = page.getByRole('dialog', { name: '删除这条事件？' })
   await eventDeleteConfirmation.getByRole('button', { name: /^(Confirm|确认|确定)$/ }).click()
