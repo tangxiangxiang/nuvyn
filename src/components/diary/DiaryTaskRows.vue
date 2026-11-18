@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import type { DiaryTaskListItem } from '../../../shared/diaryTasks'
 import { taskDueDateLabel } from '../../features/diary/diaryTaskCalendar'
+import './diaryCloudCard.css'
 
 const props = withDefaults(defineProps<{
   items: DiaryTaskListItem[]
@@ -8,10 +9,12 @@ const props = withDefaults(defineProps<{
   busyIds?: Set<string>
   showDueDate?: boolean
   editable?: boolean
+  variant?: 'card' | 'plain'
 }>(), {
   busyIds: () => new Set<string>(),
   showDueDate: true,
   editable: true,
+  variant: 'card',
 })
 
 const emit = defineEmits<{
@@ -26,8 +29,8 @@ function detail(task: DiaryTaskListItem): string {
 </script>
 
 <template>
-  <div class="diary-task-rows">
-    <div v-for="task in items" :key="task.id" class="diary-task-row" :class="{ 'is-completed': task.completedAt !== null, 'is-skipped': task.kind === 'recurring' && task.skipped }">
+  <div class="diary-task-rows" :class="{ 'diary-task-rows--plain': variant === 'plain' }">
+    <div v-for="task in items" :key="task.id" class="diary-task-row" :class="{ 'diary-cloud-card': variant === 'card', 'is-completed': task.completedAt !== null, 'is-skipped': task.kind === 'recurring' && task.skipped }">
       <button
         type="button"
         class="diary-task-toggle"
@@ -49,28 +52,40 @@ function detail(task: DiaryTaskListItem): string {
         :disabled="busyIds.has(task.id)"
         @click="emit('edit', task, $event.detail === 0)"
       >
-        <span class="diary-task-title">{{ task.title }}<span v-if="task.kind === 'recurring'" class="diary-task-repeat" aria-label="重复待办"> ↻</span></span>
-        <small v-if="detail(task)">{{ detail(task) }}</small>
-        <small v-if="task.kind === 'recurring' && task.skipped">本次已跳过</small>
+        <span class="diary-task-copy">
+          <span class="diary-task-title">{{ task.title }}<span v-if="task.kind === 'recurring'" class="diary-task-repeat" aria-label="重复待办"> ↻</span></span>
+          <small v-if="task.kind === 'recurring' && task.skipped" class="diary-task-status">本次已跳过</small>
+        </span>
+        <small v-if="detail(task)" class="diary-task-detail">{{ detail(task) }}</small>
       </button>
       <div v-else class="diary-task-edit">
-        <span class="diary-task-title">{{ task.title }}<span v-if="task.kind === 'recurring'" class="diary-task-repeat" aria-label="重复待办"> ↻</span></span>
-        <small v-if="detail(task)">{{ detail(task) }}</small>
-        <small v-if="task.kind === 'recurring' && task.skipped">本次已跳过</small>
+        <span class="diary-task-copy">
+          <span class="diary-task-title">{{ task.title }}<span v-if="task.kind === 'recurring'" class="diary-task-repeat" aria-label="重复待办"> ↻</span></span>
+          <small v-if="task.kind === 'recurring' && task.skipped" class="diary-task-status">本次已跳过</small>
+        </span>
+        <small v-if="detail(task)" class="diary-task-detail">{{ detail(task) }}</small>
       </div>
     </div>
   </div>
 </template>
 
 <style>
-.diary-task-rows { display: flex; flex-direction: column; }
+.diary-task-rows { display: flex; min-width: 0; flex-direction: column; gap: 8px; }
 .diary-task-row {
   display: grid;
   grid-template-columns: 40px minmax(0, 1fr);
   gap: 4px;
   align-items: center;
   min-width: 0;
+  box-sizing: border-box;
+  padding: 4px 8px;
+}
+.diary-task-rows--plain { gap: 0; }
+.diary-task-rows--plain .diary-task-row {
+  border: 0;
   border-bottom: 1px solid color-mix(in srgb, var(--border, #d9dce5) 55%, transparent);
+  border-radius: 0;
+  padding: 0;
 }
 .diary-task-toggle {
   position: relative;
@@ -101,14 +116,15 @@ function detail(task: DiaryTaskListItem): string {
 .diary-task-edit:focus-visible { outline: 2px solid var(--primary, #6366f1); outline-offset: -2px; border-radius: 6px; }
 .diary-task-toggle:disabled { opacity: .55; cursor: wait; }
 .diary-task-edit {
-  display: flex;
+  display: grid;
+  width: 100%;
+  box-sizing: border-box;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 8px;
   min-width: 0;
   min-height: 44px;
-  flex-direction: column;
-  align-items: flex-start;
-  justify-content: center;
-  gap: 3px;
-  padding: 5px 8px 5px 2px;
+  padding: 6px 4px 6px 2px;
   border: 0;
   background: transparent;
   color: inherit;
@@ -116,8 +132,20 @@ function detail(task: DiaryTaskListItem): string {
   text-align: left;
   cursor: pointer;
 }
-.diary-task-title { max-width: 100%; overflow-wrap: anywhere; line-height: 1.4; }
-.diary-task-edit small { color: var(--text-muted, #6b7280); font-size: 12px; }
+.diary-task-copy { display: flex; min-width: 0; flex-direction: column; justify-content: center; gap: 3px; }
+.diary-task-title { display: block; max-width: 100%; overflow-wrap: anywhere; line-height: 1.4; }
+.diary-task-repeat { white-space: nowrap; }
+.diary-task-detail,
+.diary-task-status { color: var(--text-muted, #6b7280); font-size: 12px; }
+.diary-task-detail {
+  justify-self: end;
+  padding: 3px 6px;
+  border-radius: 6px;
+  background-color: color-mix(in srgb, var(--text) 4%, transparent);
+  font-variant-numeric: tabular-nums;
+  line-height: 1.4;
+  white-space: nowrap;
+}
 .diary-task-row.is-completed .diary-task-title { color: var(--text-muted, #6b7280); text-decoration: line-through; }
 .diary-task-row.is-completed .diary-task-edit small { opacity: .72; }
 </style>

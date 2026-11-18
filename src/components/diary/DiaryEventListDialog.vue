@@ -6,6 +6,7 @@ import type { DiaryTaskListItem, DiaryTaskListStatus } from '../../../shared/dia
 import { formatLunarRule } from '../../../shared/lunarCalendar'
 import { eventEmojiSource } from '../../features/diary/eventEmoji'
 import DiaryTaskRows from './DiaryTaskRows.vue'
+import './diaryCloudCard.css'
 
 const props = withDefaults(defineProps<{
   items: DiaryEvent[]
@@ -161,7 +162,7 @@ function editTask(task: DiaryTaskListItem, keyboardActivated: boolean) {
           v-for="event in items"
           :key="event.id"
           type="button"
-          class="diary-event-list-item"
+          class="diary-event-list-item diary-cloud-card"
           :data-event-id="event.id"
           :aria-label="eventTitle(event)"
           @click="emit('select', event, scroller?.scrollTop ?? 0, $event.detail === 0)"
@@ -219,21 +220,12 @@ function editTask(task: DiaryTaskListItem, keyboardActivated: boolean) {
   gap: 12px;
   align-items: center;
   padding: 13px 12px;
-  border: 0;
-  border-bottom: 1px solid var(--border, #d9dce5);
-  border-radius: 12px;
-  background-color: var(--bg);
-  background-image: url('/diary-events-cloud-pattern.png');
-  background-position: center;
-  background-size: cover;
-  background-blend-mode: multiply;
   color: inherit;
   font: inherit;
   text-align: left;
   cursor: pointer;
 }
-.diary-event-list-item:hover,
-.diary-event-list-item:focus-visible { outline: none; background-color: color-mix(in srgb, var(--bg) 96%, var(--text) 4%); }
+.diary-event-list-item:focus-visible { outline: none; }
 .diary-event-list-emoji { width: 32px; height: 32px; display: grid; place-items: center; font-size: 22px; }
 .diary-event-list-emoji img { width: 26px; height: 26px; object-fit: contain; }
 .diary-event-list-copy { min-width: 0; display: flex; flex-direction: column; gap: 4px; }

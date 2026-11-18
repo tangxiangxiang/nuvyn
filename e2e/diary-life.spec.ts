@@ -512,6 +512,8 @@ test('keeps event calendar context aligned after date edits', async ({ page }) =
   await reader.getByRole('button', { name: '关闭事件' }).click()
 
   const dayEvent = page.getByRole('button', { name: '日期调整日程', exact: true })
+  await expect(dayEvent).toHaveClass(/diary-cloud-card/)
+  expect(await dayEvent.evaluate(element => getComputedStyle(element).backgroundImage)).toContain('/diary-events-cloud-pattern.png')
   await dayEvent.click()
   await reader.getByRole('button', { name: '编辑事件' }).click()
   await page.getByLabel('开始日期').fill(movedDate)

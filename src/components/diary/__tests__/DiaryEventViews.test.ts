@@ -59,6 +59,7 @@ describe('DiaryEventListDialog content', () => {
 
     const rows = wrapper.findAll('.diary-event-list-item')
     expect(rows.map(row => row.attributes('aria-label'))).toEqual(['较早显示', '优先事件'])
+    expect(rows[0]!.classes()).toContain('diary-cloud-card')
     expect(rows[0]!.text()).toContain('6 月 19 日')
     expect(rows[0]!.text()).toContain('较早显示')
     expect(rows[0]!.text()).not.toContain('周年')
@@ -102,6 +103,7 @@ describe('DiaryEventListDialog content', () => {
     expect(wrapper.find('.diary-event-list-section h3').text()).toBe('事件')
     expect(wrapper.find('.diary-event-list-item').text()).toContain('爷爷75岁生日')
     expect(wrapper.get('[role="checkbox"]').attributes('aria-checked')).toBe('false')
+    expect(wrapper.get('.diary-task-row').classes()).toContain('diary-cloud-card')
     expect(wrapper.text()).toContain('11月18日')
 
     await wrapper.get('[role="checkbox"]').trigger('click')

@@ -131,6 +131,7 @@ const accessibleName = computed(() => title.value)
         :busy-ids="busyTaskIds"
         :show-due-date="false"
         :editable="false"
+        variant="plain"
         @toggle="emit('toggle-task', $event)"
       />
     </section>

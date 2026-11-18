@@ -88,6 +88,61 @@ test('creates a dated task, completes it, restores it, and moves it to a new cal
   await expect(nextCell.locator('.life-task-marker')).toHaveCount(0)
 })
 
+test('keeps long task titles and due times aligned without horizontal overflow', async ({ page }) => {
+  await page.goto('/diary')
+  await unlockDiary(page)
+  await page.getByTestId('diary-view-toggle').click()
+
+  const date = `${testYear}-11-16`
+  const cell = page.locator(`.diary-life-calendar [data-date="${date}"]`)
+  await expect(cell).toBeVisible()
+  await cell.click()
+  await chooseDiaryAction(page, page.getByRole('button', { name: '更多当天事件操作' }), '新增待办')
+
+  const title = `周末需要完成的综合项目${Math.random().toString(36).slice(2, 8)}`.repeat(8)
+  await page.getByRole('textbox', { name: '待办名称' }).fill(title)
+  await page.getByLabel('截止日期').fill(date)
+  await page.getByLabel('截止时间').fill('12:00')
+  await page.getByRole('button', { name: '保存', exact: true }).click()
+
+  const row = page.locator('.diary-life-dialog .diary-task-row').filter({ has: page.locator('.diary-task-title', { hasText: title }) })
+  await expect(row).toBeVisible()
+  await expect(row).toHaveClass(/diary-cloud-card/)
+  await expect(row.locator('.diary-task-detail')).toHaveText('12:00')
+  expect(await row.evaluate(element => getComputedStyle(element).backgroundImage)).toContain('/diary-events-cloud-pattern.png')
+
+  for (const viewport of [
+    { width: 320, height: 720 },
+    { width: 390, height: 844 },
+    { width: 430, height: 900 },
+    { width: 768, height: 1024 },
+    { width: 1280, height: 900 },
+  ]) {
+    await page.setViewportSize(viewport)
+    const layout = await row.evaluate(element => {
+      const titleElement = element.querySelector<HTMLElement>('.diary-task-title')!
+      const detailElement = element.querySelector<HTMLElement>('.diary-task-detail')!
+      const titleBounds = titleElement.getBoundingClientRect()
+      const detailBounds = detailElement.getBoundingClientRect()
+      return {
+        titleFits: titleElement.scrollWidth <= titleElement.clientWidth + 1,
+        titleEndsBeforeDetail: titleBounds.right <= detailBounds.left + 1,
+        detailFitsInRow: detailBounds.right <= element.getBoundingClientRect().right + 1,
+      }
+    })
+    expect(layout.titleFits).toBe(true)
+    expect(layout.titleEndsBeforeDetail).toBe(true)
+    expect(layout.detailFitsInRow).toBe(true)
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true)
+  }
+
+  await page.getByRole('button', { name: `编辑待办：${title}` }).click()
+  await page.getByRole('button', { name: '删除', exact: true }).click()
+  const confirmation = page.getByRole('dialog', { name: '删除这条待办？' })
+  await confirmation.getByRole('button', { name: /^(Confirm|确认|确定)$/ }).click()
+  await expect(row).toHaveCount(0)
+})
+
 test('creates an undated task from Recent Items and separates completed tasks', async ({ page }) => {
   await page.goto('/diary')
   await unlockDiary(page)

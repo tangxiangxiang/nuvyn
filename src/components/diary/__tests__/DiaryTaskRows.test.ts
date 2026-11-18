@@ -1,9 +1,59 @@
 // @vitest-environment jsdom
 import { describe, expect, it } from 'vitest'
 import { mount } from '@vue/test-utils'
+import type { DiaryTaskListItem } from '../../../../shared/diaryTasks'
 import DiaryTaskRows from '../DiaryTaskRows.vue'
 
+type OneOffTask = Extract<DiaryTaskListItem, { kind?: 'one-off' }>
+
+function makeTask(overrides: Partial<OneOffTask> = {}): OneOffTask {
+  return {
+    id: 'task-1',
+    title: 'OEE报表开发',
+    description: '',
+    dueDate: '2026-11-18',
+    dueTime: null,
+    completedAt: null,
+    version: 1,
+    createdAt: 1,
+    updatedAt: 1,
+    ...overrides,
+  }
+}
+
 describe('DiaryTaskRows', () => {
+  it('places the task detail beside the title in a cloud card', () => {
+    const task = makeTask({ dueTime: '12:00' })
+    const wrapper = mount(DiaryTaskRows, { props: { items: [task], today: '2026-11-18', showDueDate: false } })
+
+    expect(wrapper.get('.diary-task-row').classes()).toContain('diary-cloud-card')
+    expect(wrapper.get('.diary-task-edit').element.children[0]?.className).toBe('diary-task-copy')
+    expect(wrapper.get('.diary-task-detail').text()).toBe('12:00')
+    expect(wrapper.get('.diary-task-edit').element.children[1]?.className).toBe('diary-task-detail')
+    wrapper.unmount()
+  })
+
+  it('does not render a placeholder when a task has no time detail', () => {
+    const wrapper = mount(DiaryTaskRows, { props: { items: [makeTask()], today: '2026-11-18', showDueDate: false } })
+
+    expect(wrapper.find('.diary-task-detail').exists()).toBe(false)
+    expect(wrapper.get('.diary-task-title').text()).toBe('OEE报表开发')
+    wrapper.unmount()
+  })
+
+  it('keeps task completion and title editing on separate controls', async () => {
+    const task = makeTask()
+    const wrapper = mount(DiaryTaskRows, { props: { items: [task], today: '2026-11-18' } })
+
+    await wrapper.get('.diary-task-toggle').trigger('click')
+    expect(wrapper.emitted('toggle')?.[0]?.[0]).toEqual(task)
+    expect(wrapper.emitted('edit')).toBeUndefined()
+
+    await wrapper.get('.diary-task-edit').trigger('click')
+    expect(wrapper.emitted('edit')?.[0]?.[0]).toEqual(task)
+    wrapper.unmount()
+  })
+
   it('shows skipped status without labeling the task overdue', () => {
     const task = {
       kind: 'recurring' as const,
@@ -27,8 +77,39 @@ describe('DiaryTaskRows', () => {
     const wrapper = mount(DiaryTaskRows, { props: { items: [task], today: '2026-11-18' } })
 
     expect(wrapper.get('.diary-task-row').classes()).toContain('is-skipped')
+    expect(wrapper.get('.diary-task-row').classes()).toContain('diary-cloud-card')
     expect(wrapper.text()).toContain('本次已跳过')
     expect(wrapper.text()).not.toContain('已逾期')
+    wrapper.unmount()
+  })
+
+  it('retains repeat and completed presentation in embedded rows without nested cards', () => {
+    const task: DiaryTaskListItem = {
+      kind: 'recurring',
+      id: 'series:2026-11-14',
+      seriesId: 'series',
+      occurrenceDate: '2026-11-14',
+      effectiveFrom: '2026-11-14',
+      recurrence: { frequency: 'daily' as const, startDate: '2026-11-14', untilDate: null },
+      seriesVersion: 1,
+      occurrenceVersion: 1,
+      title: 'OEE报表开发',
+      description: '',
+      dueDate: '2026-11-18',
+      dueTime: null,
+      completedAt: 100,
+      skipped: false,
+      version: 1,
+      createdAt: 1,
+      updatedAt: 1,
+    }
+    const wrapper = mount(DiaryTaskRows, { props: { items: [task], today: '2026-11-18', editable: false, variant: 'plain' } })
+
+    expect(wrapper.get('.diary-task-rows').classes()).toContain('diary-task-rows--plain')
+    expect(wrapper.get('.diary-task-row').classes()).toContain('is-completed')
+    expect(wrapper.find('.diary-cloud-card').exists()).toBe(false)
+    expect(wrapper.get('.diary-task-repeat').text()).toBe('↻')
+    expect(wrapper.get('.diary-task-title').element.closest('.diary-task-edit')?.tagName).toBe('DIV')
     wrapper.unmount()
   })
 })

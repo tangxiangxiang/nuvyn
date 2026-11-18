@@ -26,6 +26,7 @@ import DiaryEventReader from '../components/diary/DiaryEventReader.vue'
 import DiaryEventListDialog from '../components/diary/DiaryEventListDialog.vue'
 import DiaryTaskForm from '../components/diary/DiaryTaskForm.vue'
 import DiaryTaskRows from '../components/diary/DiaryTaskRows.vue'
+import '../components/diary/diaryCloudCard.css'
 import { DiaryTaskConflictError, DiaryTaskHistoryProtectedError, DiaryTaskListChangedError, diaryTasksApi } from '../lib/diary-tasks-api'
 import { groupTasksByDueDate, listDiaryTasksInRange } from '../features/diary/diaryTaskCalendar'
 import { eventEmojiSource } from '../features/diary/eventEmoji'
@@ -1907,7 +1908,7 @@ onBeforeUnmount(() => {
               <span>{{ eventCalendarError }}</span>
               <NButton text type="primary" @click="reloadCalendarEvents">重试</NButton>
             </div>
-            <button v-for="event in selectedEvents" :key="event.id" type="button" :data-event-id="event.id" :aria-label="dayEventLabel(event)" @click="selectEventFromDay(event, $event)">
+            <button v-for="event in selectedEvents" :key="event.id" type="button" class="diary-cloud-card" :data-event-id="event.id" :aria-label="dayEventLabel(event)" @click="selectEventFromDay(event, $event)">
               <strong>
                 <img v-if="eventEmojiSource(event.emoji)" :src="eventEmojiSource(event.emoji)" class="event-emoji" alt="">
                 <span v-else class="day-event-emoji" aria-hidden="true">{{ event.emoji }}</span>
@@ -1966,7 +1967,7 @@ onBeforeUnmount(() => {
   min-height: 100%;
 }
 .diary-life-error { margin-top: 8px; padding: 8px 0; }
-.day-events > button { text-align: left; background: transparent; color: inherit; border: 0; font: inherit; cursor: pointer; display: flex; flex-direction: column; gap: 6px; padding: 8px; }
+.day-events > button { text-align: left; color: inherit; font: inherit; cursor: pointer; display: flex; flex-direction: column; gap: 6px; padding: 8px; }
 .day-list-content { display: flex; flex-direction: column; gap: 14px; }
 .day-tasks,
 .day-events {
@@ -1980,19 +1981,8 @@ onBeforeUnmount(() => {
   width: 100%;
   align-items: flex-start;
   padding: 13px 12px;
-  border-bottom: 1px solid var(--border, #d9dce5);
-  border-radius: 12px;
-  background-color: var(--bg);
-  background-image: url('/diary-events-cloud-pattern.png');
-  background-position: center;
-  background-size: cover;
-  background-blend-mode: multiply;
 }
-.day-events > button:hover,
-.day-events > button:focus-visible {
-  outline: none;
-  background-color: color-mix(in srgb, var(--bg) 96%, var(--text) 4%);
-}
+.day-events > button:focus-visible { outline: none; }
 .day-events > button strong { display: flex; max-width: 100%; align-items: center; gap: 6px; font-size: 16px; font-weight: 600; }
 .day-event-emoji { flex: none; font-size: 20px; line-height: 1; }
 .day-event-title-text { min-width: 0; line-height: 20px; overflow-wrap: anywhere; }

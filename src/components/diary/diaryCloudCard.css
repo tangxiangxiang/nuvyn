@@ -1,0 +1,15 @@
+.diary-cloud-card {
+  border: 1px solid var(--border, #d9dce5);
+  border-radius: 12px;
+  background-color: var(--bg);
+  background-image: url('/diary-events-cloud-pattern.png');
+  background-position: center;
+  background-size: cover;
+  background-blend-mode: multiply;
+}
+
+.diary-cloud-card:hover,
+.diary-cloud-card:focus-visible,
+.diary-cloud-card:focus-within {
+  background-color: color-mix(in srgb, var(--bg) 96%, var(--text) 4%);
+}
