@@ -565,11 +565,11 @@ function selectDate(date: string, event: MouseEvent) {
   .life-marker img { width: 18px; height: 18px; }
   .life-marker .life-task-marker { width: 18px; height: 18px; }
   .life-marker--with-task small { display: none; }
-  /* The two 18px icons already fill the narrow date-cell track. */
-  .life-marker--with-event-task { gap: 0; }
 }
 
 @media (max-width: 600px) {
+  /* Two full-size markers use nearly the whole narrow date-cell track. */
+  .life-marker--with-event-task { gap: 0; }
   .diary-life-calendar :deep(.n-calendar-header) { flex-basis: 64px; }
   .diary-life-calendar :deep(.n-calendar-header__title) { grid-template-rows: 40px 24px; }
   .life-month-control { width: 200px; height: 40px; }
