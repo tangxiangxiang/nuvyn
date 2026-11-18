@@ -47,15 +47,17 @@ describe('DiaryTaskRows', () => {
   it('shows deadline Alarm Clock only in reminder lists for open urgent tasks', () => {
     const urgent = makeTask({ dueDate: '2026-11-18' })
     const future = makeTask({ id: 'future', dueDate: '2026-11-21' })
+    const overdue = makeTask({ id: 'overdue', dueDate: '2026-11-17' })
     const completed = makeTask({ id: 'completed', dueDate: '2026-11-18', completedAt: 1 })
     const wrapper = mount(DiaryTaskRows, {
-      props: { items: [urgent, future, completed], today: '2026-11-18', showDeadlineReminder: true },
+      props: { items: [urgent, future, overdue, completed], today: '2026-11-18', showDeadlineReminder: true },
     })
 
     const rows = wrapper.findAll('.diary-task-row')
     expect(rows[0]!.find('.diary-task-deadline-reminder').attributes('src')).toBe('/emoji/alarm-clock-animated.png')
     expect(rows[1]!.find('.diary-task-deadline-reminder').exists()).toBe(false)
-    expect(rows[2]!.find('.diary-task-deadline-reminder').exists()).toBe(false)
+    expect(rows[2]!.find('.diary-task-deadline-reminder').attributes('src')).toBe('/emoji/alarm-clock.svg')
+    expect(rows[3]!.find('.diary-task-deadline-reminder').exists()).toBe(false)
     wrapper.unmount()
   })
 

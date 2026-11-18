@@ -36,6 +36,10 @@ test('creates a dated task, completes it, restores it, and moves it to a new cal
   await expect(marker).toBeVisible()
   await expect(marker).toHaveAttribute('src', '/emoji/alarm-clock-animated.png')
   await expect(marker).toHaveJSProperty('naturalWidth', 256)
+  await page.emulateMedia({ reducedMotion: 'reduce' })
+  await expect(marker).toHaveAttribute('src', '/emoji/alarm-clock.svg')
+  await page.emulateMedia({ reducedMotion: 'no-preference' })
+  await expect(marker).toHaveAttribute('src', '/emoji/alarm-clock-animated.png')
 
   const secondTitle = `${title} second`
   await chooseDiaryAction(page, page.getByRole('button', { name: '更多当天事件操作' }), '新增待办')
@@ -115,6 +119,129 @@ test('creates a dated task, completes it, restores it, and moves it to a new cal
   await page.getByRole('button', { name: '删除', exact: true }).click()
   await page.getByRole('dialog', { name: '删除这条待办？' }).getByRole('button', { name: /^(Confirm|确认|确定)$/ }).click()
   await expect(nextCell.locator('.life-task-marker')).toHaveCount(0)
+})
+
+test('starts a new recurring task on its explicit start date and ignores hidden one-off time validation', async ({ page }) => {
+  await page.goto('/diary')
+  await unlockDiary(page)
+  await page.getByTestId('diary-view-toggle').click()
+
+  const selectedDate = `${testYear}-11-16`
+  const startDate = `${testYear}-11-18`
+  const title = `Start date recurrence ${Math.random().toString(36).slice(2, 8)}`
+  const calendar = page.locator('.diary-life-calendar')
+  const selectedCell = calendar.locator(`[data-date="${selectedDate}"]`)
+  const startCell = calendar.locator(`[data-date="${startDate}"]`)
+  await selectedCell.click()
+  await chooseDiaryAction(page, page.getByRole('button', { name: '更多当天事件操作' }), '新增待办')
+
+  const editor = page.locator('.diary-task-edit-dialog')
+  await page.getByRole('textbox', { name: '待办名称' }).fill(title)
+  await page.getByLabel('开始日期').fill(startDate)
+  await page.getByLabel('开始时间').fill('09:00')
+  await expect(editor.getByRole('alert')).toContainText('开始日期不能晚于截止日期')
+  await page.getByRole('button', { name: '保存', exact: true }).click()
+  await expect(editor.locator('.diary-event-form-error')).toContainText('请检查开始和截止时间设置')
+  await page.getByLabel('重复规则').selectOption('daily')
+  await expect(page.getByLabel('开始日期')).toHaveValue(startDate)
+  await page.getByRole('button', { name: '保存', exact: true }).click()
+
+  await expect(editor).toBeHidden()
+  await expect(selectedCell.locator('.life-task-marker')).toHaveCount(0)
+  await expect(startCell.locator('.life-task-marker')).toBeVisible()
+  await page.getByRole('button', { name: '关闭当天事件' }).click()
+  await startCell.click()
+  await expect(page.getByRole('checkbox', { name: `完成待办：${title}` })).toBeVisible()
+  await expect(page.locator('.diary-task-title').filter({ hasText: title })).toContainText('↻')
+  await page.getByRole('button', { name: `编辑待办：${title}` }).click()
+  await page.getByRole('button', { name: '删除', exact: true }).click()
+  await page.getByRole('dialog', { name: '删除整个重复任务及已记录的完成、跳过状态？' })
+    .getByRole('button', { name: /^(Confirm|确认|确定)$/ }).click()
+  await expect(startCell.locator('.life-task-marker')).toHaveCount(0)
+})
+
+test('lays out an Event, event count and deadline icon within one calendar date on all viewport sizes', async ({ page }) => {
+  await page.goto('/diary')
+  await unlockDiary(page)
+  const date = `${testYear}-11-16`
+  const event = (id: string, title: string, type: 'birthday' | 'schedule', isPrimary = false) => ({
+    id,
+    title,
+    description: '',
+    emoji: type === 'birthday' ? '🎂' : '💼',
+    type,
+    startDate: date,
+    endDate: date,
+    startTime: null,
+    endTime: null,
+    allDay: true,
+    recurrence: 'none',
+    showCountdown: false,
+    isPrimary,
+    version: 1,
+    createdAt: 1,
+    updatedAt: 1,
+  })
+  await page.route('**/api/diary/life/**', async route => {
+    const request = route.request()
+    const pathname = new URL(request.url()).pathname
+    if (request.method() === 'GET' && pathname === '/api/diary/life/events') {
+      await route.fulfill({ json: { items: [
+        event('birthday', '生日', 'birthday', true),
+        event('schedule-1', '日程一', 'schedule'),
+        event('schedule-2', '日程二', 'schedule'),
+      ], next: null } })
+      return
+    }
+    if (request.method() === 'GET' && pathname === '/api/diary/life/task-occurrences') {
+      await route.fulfill({ json: { items: [{
+        id: 'deadline-task',
+        title: '临期待办',
+        description: '',
+        startDate: null,
+        startTime: null,
+        dueDate: date,
+        dueTime: null,
+        completedAt: null,
+        version: 1,
+        createdAt: 1,
+        updatedAt: 1,
+      }], nextCursor: null } })
+      return
+    }
+    await route.continue()
+  })
+
+  await page.getByTestId('diary-view-toggle').click()
+  const calendar = page.locator('.diary-life-calendar')
+  const cell = calendar.locator(`[data-date="${date}"]`)
+  const marker = cell.locator('.life-marker')
+  await expect(marker.locator('.life-event-marker')).toHaveAttribute('src', '/emoji/event-birthday.svg')
+  await expect(marker.locator('.life-task-marker')).toHaveAttribute('src', '/emoji/alarm-clock-animated.png')
+  await expect(marker.locator('small')).toHaveText('+2')
+
+  const originalViewport = page.viewportSize()
+  for (const width of [320, 390, 430, 768, 1280]) {
+    await page.setViewportSize({ width, height: 900 })
+    const cellBounds = await cell.boundingBox()
+    const eventBounds = await marker.locator('.life-event-marker').boundingBox()
+    const taskBounds = await marker.locator('.life-task-marker').boundingBox()
+    expect(cellBounds).not.toBeNull()
+    expect(eventBounds).not.toBeNull()
+    expect(taskBounds).not.toBeNull()
+    expect(eventBounds!.width).toBe(width <= 420 ? 16 : 19)
+    expect(eventBounds!.height).toBe(width <= 420 ? 16 : 19)
+    expect(taskBounds!.width).toBe(width <= 420 ? 18 : 21)
+    expect(taskBounds!.height).toBe(width <= 420 ? 18 : 21)
+    expect(eventBounds!.x).toBeGreaterThanOrEqual(cellBounds!.x)
+    expect(taskBounds!.x + taskBounds!.width).toBeLessThanOrEqual(cellBounds!.x + cellBounds!.width + 1)
+    expect(eventBounds!.x + eventBounds!.width).toBeLessThanOrEqual(taskBounds!.x)
+    expect(Math.abs((eventBounds!.y + eventBounds!.height / 2) - (taskBounds!.y + taskBounds!.height / 2))).toBeLessThanOrEqual(1)
+    if (width <= 420) await expect(marker.locator('small')).toBeHidden()
+    else await expect(marker.locator('small')).toBeVisible()
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true)
+  }
+  if (originalViewport) await page.setViewportSize(originalViewport)
 })
 
 test('uses the static Alarm Clock when reduced motion is enabled', async ({ page }) => {

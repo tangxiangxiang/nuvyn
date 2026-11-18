@@ -6,6 +6,7 @@ import { usePrefersReducedMotion } from '../../composables/usePrefersReducedMoti
 import { diaryCalendarMonthFromFields, diaryDateFromCalendarFields, naiveCalendarValueForMonth } from './diaryCalendarAdapter'
 import { taskDeadlineAsset } from '../../features/diary/deadlineReminderAssets'
 import type { DeadlineVisualState } from '../../features/diary/deadlineVisualState'
+import DiaryAlarmClockIcon from './DiaryAlarmClockIcon.vue'
 
 const PIXEL_WHEEL_MONTH_THRESHOLD = 220
 const LINE_WHEEL_MONTH_THRESHOLD = 6
@@ -212,18 +213,22 @@ function selectDate(date: string, event: MouseEvent) {
         :data-date="dateFor(year, month, date)" :aria-label="dateFor(year, month, date)" :aria-pressed="selectedDate === dateFor(year, month, date)"
         @click.stop="selectDate(dateFor(year, month, date), $event)">
         <span class="life-date-badge"><span class="life-date-number">{{ date }}</span></span>
-        <span v-if="markers[dateFor(year, month, date)]" class="life-marker">
-          <img v-if="markers[dateFor(year, month, date)]?.source" :src="markers[dateFor(year, month, date)]?.source" alt="">
-          <span v-else-if="markers[dateFor(year, month, date)]?.emoji">{{ markers[dateFor(year, month, date)]?.emoji }}</span>
+        <span
+          v-if="markers[dateFor(year, month, date)]"
+          class="life-marker"
+          :class="{ 'life-marker--with-task': markers[dateFor(year, month, date)]?.hasTasks }"
+        >
+          <img v-if="markers[dateFor(year, month, date)]?.source" :class="{ 'life-event-marker': Boolean(markers[dateFor(year, month, date)]?.emoji) }" :src="markers[dateFor(year, month, date)]?.source" alt="">
+          <span v-else-if="markers[dateFor(year, month, date)]?.emoji" class="life-event-marker">{{ markers[dateFor(year, month, date)]?.emoji }}</span>
           <span v-else-if="markers[dateFor(year, month, date)]?.hasEntries || markers[dateFor(year, month, date)]?.hasAttachments" class="life-entry-marker" aria-label="有日记内容">•</span>
           <small v-if="(markers[dateFor(year, month, date)]?.count ?? 0) > 1">+{{ markers[dateFor(year, month, date)]!.count! - 1 }}</small>
-          <img
+          <DiaryAlarmClockIcon
             v-if="markers[dateFor(year, month, date)]?.hasTasks"
             class="life-task-marker"
             :data-deadline-state="markers[dateFor(year, month, date)]?.taskDeadlineState ?? 'normal'"
             :src="taskDeadlineAsset(markers[dateFor(year, month, date)]?.taskDeadlineState ?? 'normal', prefersReducedMotion)"
             :alt="markers[dateFor(year, month, date)]?.taskDeadlineState === 'overdue' ? '逾期待办' : markers[dateFor(year, month, date)]?.taskDeadlineState === 'due-soon' ? '即将截止待办' : '有未完成待办'"
-          >
+          />
         </span>
       </button>
     </template>
@@ -469,6 +474,8 @@ function selectDate(date: string, event: MouseEvent) {
 .life-marker {
   grid-row: 3;
   display: flex;
+  min-width: 0;
+  max-width: 100%;
   align-items: center;
   justify-content: center;
   gap: 2px;
@@ -479,6 +486,20 @@ function selectDate(date: string, event: MouseEvent) {
   width: 21px;
   height: 21px;
   object-fit: contain;
+}
+
+.life-marker .life-event-marker {
+  width: 19px;
+  height: 19px;
+  flex: none;
+  font-size: 19px;
+  line-height: 1;
+}
+
+.life-marker .life-task-marker {
+  width: 21px;
+  height: 21px;
+  flex: none;
 }
 
 .life-marker small {
@@ -495,5 +516,8 @@ function selectDate(date: string, event: MouseEvent) {
 @media (max-width: 420px) {
   .life-marker { font-size: 18px; }
   .life-marker img { width: 18px; height: 18px; }
+  .life-marker .life-event-marker { width: 16px; height: 16px; font-size: 16px; }
+  .life-marker .life-task-marker { width: 18px; height: 18px; }
+  .life-marker--with-task small { display: none; }
 }
 </style>

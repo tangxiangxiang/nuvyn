@@ -1464,13 +1464,14 @@ function updateEventDraft(next: EventFields) {
 async function saveTask() {
   const editor = eventSurface.value?.kind === 'task-edit' ? eventSurface.value : null
   if (!editor || busy.value || !access.isUnlocked.value) return
-  const oneOffFields = parseTaskFields(editor.draft)
-  let seriesFields = parseTaskSeriesFields({
+  const isRecurring = editor.draft.recurrence !== null
+  const oneOffFields = isRecurring ? null : parseTaskFields(editor.draft)
+  let seriesFields = isRecurring ? parseTaskSeriesFields({
     title: editor.draft.title,
     description: editor.draft.description,
     dueTime: editor.draft.dueTime,
     recurrence: editor.draft.recurrence,
-  })
+  }) : null
   if (seriesFields && editor.task?.kind === 'recurring') {
     const frequencyChanged = editor.draft.recurrence?.frequency !== editor.task.recurrence.frequency
     seriesFields = {
@@ -1481,11 +1482,11 @@ async function saveTask() {
       },
     }
   }
-  if (!oneOffFields || (editor.draft.recurrence && !seriesFields)) {
-    const hasTimeError = taskTimeFieldsError(editor.draft) !== null
-    taskFormError.value = editor.draft.title.trim()
-      ? (hasTimeError ? '' : '请检查待办名称和备注。')
-      : '请输入待办名称。'
+  if ((!isRecurring && !oneOffFields) || (isRecurring && !seriesFields)) {
+    if (!editor.draft.title.trim()) taskFormError.value = '请输入待办名称。'
+    else if (isRecurring) taskFormError.value = '请检查待办名称、备注和重复规则。'
+    else if (taskTimeFieldsError(editor.draft)) taskFormError.value = '请检查开始和截止时间设置。'
+    else taskFormError.value = '请检查待办名称和备注。'
     return
   }
   if (editor.task?.kind === 'one-off' && editor.draft.recurrence) {

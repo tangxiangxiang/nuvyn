@@ -2,8 +2,9 @@
 import type { DiaryTaskListItem } from '../../../shared/diaryTasks'
 import { taskDueDateLabel } from '../../features/diary/diaryTaskCalendar'
 import { taskDeadlineVisualState } from '../../features/diary/deadlineVisualState'
-import { alarmClockAsset } from '../../features/diary/deadlineReminderAssets'
+import { taskDeadlineReminderAsset } from '../../features/diary/deadlineReminderAssets'
 import { usePrefersReducedMotion } from '../../composables/usePrefersReducedMotion'
+import DiaryAlarmClockIcon from './DiaryAlarmClockIcon.vue'
 import './diaryCloudCard.css'
 
 const props = withDefaults(defineProps<{
@@ -39,6 +40,10 @@ function hasDeadlineReminder(task: DiaryTaskListItem): boolean {
   const state = taskDeadlineVisualState(task, props.today)
   return state === 'due-soon' || state === 'overdue'
 }
+
+function deadlineReminderSource(task: DiaryTaskListItem): string {
+  return taskDeadlineReminderAsset(taskDeadlineVisualState(task, props.today), prefersReducedMotion.value) ?? ''
+}
 </script>
 
 <template>
@@ -71,7 +76,7 @@ function hasDeadlineReminder(task: DiaryTaskListItem): boolean {
         </span>
         <span v-if="detail(task) || hasDeadlineReminder(task)" class="diary-task-trailing">
           <small v-if="detail(task)" class="diary-task-detail">{{ detail(task) }}</small>
-          <img v-if="hasDeadlineReminder(task)" class="diary-task-deadline-reminder" :src="alarmClockAsset(prefersReducedMotion)" alt="" aria-hidden="true">
+          <DiaryAlarmClockIcon v-if="hasDeadlineReminder(task)" class="diary-task-deadline-reminder" :src="deadlineReminderSource(task)" alt="" aria-hidden="true" />
         </span>
       </button>
       <div v-else class="diary-task-edit">
@@ -81,7 +86,7 @@ function hasDeadlineReminder(task: DiaryTaskListItem): boolean {
         </span>
         <span v-if="detail(task) || hasDeadlineReminder(task)" class="diary-task-trailing">
           <small v-if="detail(task)" class="diary-task-detail">{{ detail(task) }}</small>
-          <img v-if="hasDeadlineReminder(task)" class="diary-task-deadline-reminder" :src="alarmClockAsset(prefersReducedMotion)" alt="" aria-hidden="true">
+          <DiaryAlarmClockIcon v-if="hasDeadlineReminder(task)" class="diary-task-deadline-reminder" :src="deadlineReminderSource(task)" alt="" aria-hidden="true" />
         </span>
       </div>
     </div>

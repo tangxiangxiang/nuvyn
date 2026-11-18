@@ -78,6 +78,29 @@ describe('DiaryTaskForm', () => {
     wrapper.unmount()
   })
 
+  it('prefers an explicitly selected start date when switching to a recurrence', async () => {
+    const initial: TaskEditorFields = {
+      title: '从开始日重复',
+      description: '',
+      startDate: '2026-11-18',
+      startTime: '09:00',
+      dueDate: '2026-11-16',
+      dueTime: null,
+      recurrence: null,
+      eventId: null,
+    }
+    const wrapper = mount(DiaryTaskForm, { props: { modelValue: initial, today: '2026-11-16' } })
+
+    await wrapper.get('select[aria-label="重复规则"]').setValue('daily')
+    expect(wrapper.emitted('update:modelValue')?.at(-1)?.[0]).toMatchObject({
+      startDate: '2026-11-18',
+      startTime: '09:00',
+      dueDate: '2026-11-18',
+      recurrence: { frequency: 'daily', startDate: '2026-11-18', untilDate: null },
+    })
+    wrapper.unmount()
+  })
+
   it('allows a new recurring task start date to be selected', async () => {
     const initial: TaskEditorFields = {
       title: '每周整理笔记', description: '', startDate: null, startTime: null, dueDate: null, dueTime: null, recurrence: null, eventId: null,

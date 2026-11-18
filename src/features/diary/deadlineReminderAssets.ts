@@ -9,7 +9,13 @@ export function alarmClockAsset(prefersReducedMotion: boolean): string {
 }
 
 export function taskDeadlineAsset(state: DeadlineVisualState, prefersReducedMotion: boolean): string {
-  return state === 'due-soon' || state === 'overdue'
-    ? alarmClockAsset(prefersReducedMotion)
-    : STOPWATCH_ASSET
+  if (state === 'due-soon') return alarmClockAsset(prefersReducedMotion)
+  if (state === 'overdue') return ALARM_CLOCK_STATIC_ASSET
+  return STOPWATCH_ASSET
+}
+
+export function taskDeadlineReminderAsset(state: DeadlineVisualState, prefersReducedMotion: boolean): string | null {
+  if (state === 'due-soon') return alarmClockAsset(prefersReducedMotion)
+  if (state === 'overdue') return ALARM_CLOCK_STATIC_ASSET
+  return null
 }

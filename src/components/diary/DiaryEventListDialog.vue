@@ -8,6 +8,7 @@ import { eventEmojiSource } from '../../features/diary/eventEmoji'
 import { shouldShowEventDeadlineReminder } from '../../features/diary/deadlineVisualState'
 import { alarmClockAsset } from '../../features/diary/deadlineReminderAssets'
 import { usePrefersReducedMotion } from '../../composables/usePrefersReducedMotion'
+import DiaryAlarmClockIcon from './DiaryAlarmClockIcon.vue'
 import DiaryTaskRows from './DiaryTaskRows.vue'
 import './diaryCloudCard.css'
 
@@ -180,7 +181,7 @@ function editTask(task: DiaryTaskListItem, keyboardActivated: boolean) {
             <span class="diary-event-list-meta">{{ secondaryLabel(event) }}</span>
           </span>
           <span v-if="countdowns.get(event.id) !== null && countdowns.get(event.id) !== undefined || shouldShowEventDeadlineReminder(event, today)" class="diary-event-list-trailing">
-            <img v-if="shouldShowEventDeadlineReminder(event, today)" class="diary-event-deadline-reminder" :src="alarmClockAsset(prefersReducedMotion)" alt="" aria-hidden="true" data-testid="event-deadline-reminder">
+            <DiaryAlarmClockIcon v-if="shouldShowEventDeadlineReminder(event, today)" class="diary-event-deadline-reminder" :src="alarmClockAsset(prefersReducedMotion)" alt="" aria-hidden="true" data-testid="event-deadline-reminder" />
             <span v-if="countdowns.get(event.id) !== null && countdowns.get(event.id) !== undefined" class="diary-event-list-countdown">
               <strong>{{ countdowns.get(event.id) === 0 ? '今天' : countdowns.get(event.id) }}</strong>
               <small>{{ countdowns.get(event.id) === 0 ? '就是今天' : '天后' }}</small>

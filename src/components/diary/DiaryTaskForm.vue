@@ -88,7 +88,7 @@ const frequency = computed({
   get: () => props.modelValue.recurrence?.frequency ?? '',
   set: (value: TaskRecurrenceFrequency | '') => {
     if (recurrenceStartLocked.value && value === '') return
-    const previousDate = props.modelValue.recurrence?.startDate ?? props.modelValue.dueDate
+    const previousDate = props.modelValue.recurrence?.startDate ?? props.modelValue.startDate ?? props.modelValue.dueDate
     const recurrence = value ? {
       frequency: value,
       startDate: previousDate ?? props.today,

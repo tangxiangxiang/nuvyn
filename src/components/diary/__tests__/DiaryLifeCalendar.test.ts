@@ -69,6 +69,7 @@ describe('Diary calendar wheel navigation', () => {
 
     const eventAndTask = wrapper.get('.life-date[data-date="2026-11-18"] .life-marker')
     expect(eventAndTask.find('img:not(.life-task-marker)').attributes('src')).toBe('/emoji/event-birthday.svg')
+    expect(eventAndTask.find('img:not(.life-task-marker)').classes()).toContain('life-event-marker')
     expect(eventAndTask.find('.life-task-marker').attributes('src')).toBe('/emoji/stopwatch.svg')
     expect(eventAndTask.find('.life-task-marker').attributes('alt')).toBe('有未完成待办')
     expect(eventAndTask.findAll('img')).toHaveLength(2)
@@ -78,6 +79,19 @@ describe('Diary calendar wheel navigation', () => {
     expect(taskOnly.find('.life-entry-marker').exists()).toBe(false)
     expect(taskOnly.text()).not.toContain('⏱️')
     expect(taskOnly.text()).not.toContain('⏰')
+    wrapper.unmount()
+  })
+
+  it('keeps the main Event and Todo markers while exposing a compact multi-event count hook', () => {
+    const { wrapper } = mountCalendar({
+      '2026-11-18': { source: '/emoji/event-birthday.svg', emoji: '🎂', count: 3, hasTasks: true, taskDeadlineState: 'due-soon' },
+    })
+    const marker = wrapper.get('.life-date[data-date="2026-11-18"] .life-marker')
+
+    expect(marker.classes()).toContain('life-marker--with-task')
+    expect(marker.find('.life-event-marker').attributes('src')).toBe('/emoji/event-birthday.svg')
+    expect(marker.find('.life-task-marker').attributes('src')).toBe(alarmClockAsset(false))
+    expect(marker.find('small').text()).toBe('+2')
     wrapper.unmount()
   })
 
@@ -91,7 +105,7 @@ describe('Diary calendar wheel navigation', () => {
     expect(today.attributes('src')).toBe(alarmClockAsset(false))
     expect(today.attributes('alt')).toBe('即将截止待办')
     expect(wrapper.get('.life-date[data-date="2026-11-18"] .life-marker img:not(.life-task-marker)').attributes('src')).toBe('/emoji/event-birthday.svg')
-    expect(wrapper.get('.life-date[data-date="2026-11-17"] .life-task-marker').attributes('src')).toBe(alarmClockAsset(false))
+    expect(wrapper.get('.life-date[data-date="2026-11-17"] .life-task-marker').attributes('src')).toBe('/emoji/alarm-clock.svg')
     expect(wrapper.findAll('.life-task-marker')).toHaveLength(2)
     wrapper.unmount()
   })
