@@ -24,7 +24,8 @@ const emit = defineEmits<{
 
 function detail(task: DiaryTaskListItem): string {
   if (props.showDueDate) return taskDueDateLabel(task, props.today)
-  return task.dueTime ?? ''
+  if (!task.dueTime) return ''
+  return task.kind === 'recurring' ? task.dueTime : `截止 ${task.dueTime}`
 }
 </script>
 

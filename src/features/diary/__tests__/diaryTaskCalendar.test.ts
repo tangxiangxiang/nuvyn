@@ -9,6 +9,8 @@ function makeTask(overrides: Partial<DiaryTask> = {}): DiaryTaskListItem {
     id: '00000000-0000-4000-8000-000000000001',
     title: 'Task',
     description: '',
+    startDate: null,
+    startTime: null,
     dueDate: '2026-11-17',
     dueTime: null,
     completedAt: null,
@@ -51,6 +53,8 @@ describe('Diary task calendar helpers', () => {
     expect(taskDueDateLabel(overdue, '2026-11-16')).toBe('已逾期 2 天')
     expect(taskDueDateLabel(completed, '2026-11-16')).toBe('11月14日')
     expect(taskDueDateLabel(undated, '2026-11-16')).toBe('无日期')
+    expect(taskDueDateLabel(makeTask({ startDate: '2026-11-19', startTime: '09:00', dueDate: null }), '2026-11-16'))
+      .toBe('11月19日开始 09:00')
     expect(taskDueDateLabel(makeTask({ dueDate: '2026-11-17', dueTime: '09:30' }), '2026-11-16'))
       .toBe('明天 09:30')
     expect(taskDueDateLabel({ ...overdue, skipped: true }, '2026-11-16')).toBe('11月14日')

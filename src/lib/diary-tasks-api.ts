@@ -1,5 +1,5 @@
 import { diaryAuthFetch } from './auth-session'
-import type { DiaryRecurringTaskOccurrence, DiaryTask, DiaryTaskItemPage, DiaryTaskListItem, DiaryTaskListStatus, DiaryTaskPage, DiaryTaskSeries, TaskFields, TaskSeriesFields } from '../../shared/diaryTasks'
+import type { DiaryRecurringTaskOccurrence, DiaryTask, DiaryTaskItemPage, DiaryTaskListItem, DiaryTaskListStatus, DiaryTaskPage, DiaryTaskSeries, OneOffTaskFields, TaskSeriesFields } from '../../shared/diaryTasks'
 export type { DiaryTaskPage } from '../../shared/diaryTasks'
 
 export class DiaryTaskApiError extends Error {
@@ -64,7 +64,7 @@ async function request<T>(path: string, method = 'GET', body?: unknown, signal?:
 }
 
 export const diaryTasksApi = {
-  createTask(fields: TaskFields, eventId?: string | null): Promise<{ task: DiaryTask }> {
+  createTask(fields: OneOffTaskFields, eventId?: string | null): Promise<{ task: DiaryTask }> {
     return request(`/tasks/${createDiaryTaskId()}`, 'PUT', { ...fields, ...(eventId === undefined ? {} : { eventId }), expectedVersion: 0 })
   },
   getTask(id: string, signal?: AbortSignal): Promise<{ task: DiaryTask }> {
@@ -81,7 +81,7 @@ export const diaryTasksApi = {
     if (cursor !== undefined) query.set('cursor', cursor)
     return request(`/tasks?${query}`, 'GET', undefined, signal)
   },
-  updateTask(id: string, fields: TaskFields, expectedVersion: number, eventId?: string | null): Promise<{ task: DiaryTask }> {
+  updateTask(id: string, fields: OneOffTaskFields, expectedVersion: number, eventId?: string | null): Promise<{ task: DiaryTask }> {
     return request(`/tasks/${encodeURIComponent(id)}`, 'PUT', { ...fields, ...(eventId === undefined ? {} : { eventId }), expectedVersion })
   },
   completeTask(id: string, expectedVersion: number): Promise<{ task: DiaryTask }> {

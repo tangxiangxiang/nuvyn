@@ -11,6 +11,8 @@ function makeTask(overrides: Partial<OneOffTask> = {}): OneOffTask {
     id: 'task-1',
     title: 'OEE报表开发',
     description: '',
+    startDate: null,
+    startTime: null,
     dueDate: '2026-11-18',
     dueTime: null,
     completedAt: null,
@@ -28,7 +30,7 @@ describe('DiaryTaskRows', () => {
 
     expect(wrapper.get('.diary-task-row').classes()).toContain('diary-cloud-card')
     expect(wrapper.get('.diary-task-edit').element.children[0]?.className).toBe('diary-task-copy')
-    expect(wrapper.get('.diary-task-detail').text()).toBe('12:00')
+    expect(wrapper.get('.diary-task-detail').text()).toBe('截止 12:00')
     expect(wrapper.get('.diary-task-edit').element.children[1]?.className).toBe('diary-task-detail')
     wrapper.unmount()
   })

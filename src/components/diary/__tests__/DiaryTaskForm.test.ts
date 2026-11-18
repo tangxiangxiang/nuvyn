@@ -9,6 +9,8 @@ describe('DiaryTaskForm', () => {
     const initial: TaskEditorFields = {
       title: '预约体检',
       description: '',
+      startDate: null,
+      startTime: null,
       dueDate: '2026-11-18',
       dueTime: '09:30',
       recurrence: null,
@@ -24,10 +26,42 @@ describe('DiaryTaskForm', () => {
     wrapper.unmount()
   })
 
+  it('keeps optional start and due date-time pairs independent and clears matching times', async () => {
+    const initial: TaskEditorFields = {
+      title: '准备发布', description: '', startDate: null, startTime: null,
+      dueDate: '2026-11-21', dueTime: '12:00', recurrence: null, eventId: null,
+    }
+    const wrapper = mount(DiaryTaskForm, { props: { modelValue: initial, today: '2026-11-16' } })
+
+    await wrapper.get('input[aria-label="开始日期"]').setValue('2026-11-19')
+    const startDateDraft = wrapper.emitted('update:modelValue')?.at(-1)?.[0] as TaskEditorFields
+    expect(startDateDraft).toMatchObject({ startDate: '2026-11-19', startTime: null, dueDate: '2026-11-21', dueTime: '12:00' })
+    await wrapper.setProps({ modelValue: { ...startDateDraft, startTime: '09:00' } })
+    const clearStartButton = wrapper.findAll('button.diary-task-clear-date').find(button => button.text() === '清除开始时间')!
+    await clearStartButton.trigger('click')
+    expect(wrapper.emitted('update:modelValue')?.at(-1)?.[0]).toMatchObject({
+      startDate: null, startTime: null, dueDate: '2026-11-21', dueTime: '12:00',
+    })
+    wrapper.unmount()
+  })
+
+  it('shows a concise error for invalid same-day start and due times', () => {
+    const initial: TaskEditorFields = {
+      title: '准备发布', description: '', startDate: '2026-11-19', startTime: '15:00',
+      dueDate: '2026-11-19', dueTime: '12:00', recurrence: null, eventId: null,
+    }
+    const wrapper = mount(DiaryTaskForm, { props: { modelValue: initial, today: '2026-11-16' } })
+
+    expect(wrapper.get('[role="alert"]').text()).toBe('同一天的开始时间不能晚于截止时间。')
+    wrapper.unmount()
+  })
+
   it('starts a recurrence on the selected due date and removes an Event link', async () => {
     const initial: TaskEditorFields = {
       title: '每周整理笔记',
       description: '',
+      startDate: null,
+      startTime: null,
       dueDate: '2026-11-18',
       dueTime: null,
       recurrence: null,
@@ -46,7 +80,7 @@ describe('DiaryTaskForm', () => {
 
   it('allows a new recurring task start date to be selected', async () => {
     const initial: TaskEditorFields = {
-      title: '每周整理笔记', description: '', dueDate: null, dueTime: null, recurrence: null, eventId: null,
+      title: '每周整理笔记', description: '', startDate: null, startTime: null, dueDate: null, dueTime: null, recurrence: null, eventId: null,
     }
     const wrapper = mount(DiaryTaskForm, { props: { modelValue: initial, today: '2026-11-16' } })
     await wrapper.get('select[aria-label="重复规则"]').setValue('daily')
@@ -62,7 +96,7 @@ describe('DiaryTaskForm', () => {
 
   it('keeps an existing recurring start date locked and hides its clear action', async () => {
     const initial: TaskEditorFields = {
-      title: '每周整理笔记', description: '', dueDate: '2026-11-16', dueTime: null,
+      title: '每周整理笔记', description: '', startDate: null, startTime: null, dueDate: '2026-11-16', dueTime: null,
       recurrence: { frequency: 'daily', startDate: '2026-11-16', untilDate: null }, eventId: null,
     }
     const wrapper = mount(DiaryTaskForm, {
@@ -81,7 +115,7 @@ describe('DiaryTaskForm', () => {
 
   it('can hide recurrence for an existing one-off task', () => {
     const initial: TaskEditorFields = {
-      title: '预约体检', description: '', dueDate: null, dueTime: null, recurrence: null, eventId: null,
+      title: '预约体检', description: '', startDate: null, startTime: null, dueDate: null, dueTime: null, recurrence: null, eventId: null,
     }
     const wrapper = mount(DiaryTaskForm, { props: { modelValue: initial, today: '2026-11-16', allowRecurrence: false } })
     expect(wrapper.find('[aria-label="重复规则"]').exists()).toBe(false)
@@ -90,7 +124,7 @@ describe('DiaryTaskForm', () => {
 
   it('opens the schedule selector only after the user chooses to link a task', async () => {
     const initial: TaskEditorFields = {
-      title: '准备证件', description: '', dueDate: '2026-11-20', dueTime: null, recurrence: null, eventId: null,
+      title: '准备证件', description: '', startDate: null, startTime: null, dueDate: '2026-11-20', dueTime: null, recurrence: null, eventId: null,
     }
     const wrapper = mount(DiaryTaskForm, { props: { modelValue: initial, today: '2026-11-16' } })
     expect(wrapper.find('.n-select').exists()).toBe(false)

@@ -16,7 +16,7 @@ import { createDiaryEntryId, createDiaryEventId, diaryLifeApi } from '../lib/dia
 import { createDiaryAttachmentClientId, diaryAttachmentsApi } from '../lib/diary-attachments-api'
 import { DiaryAttachmentPreviewUrls } from '../lib/diaryAttachmentPreviewUrls'
 import { addDays, compareEvents, displayEventTitle, localToday, MAX_DIARY_IMAGE_GROUP_SIZE, nextOccurrence, occursOn, parseDay, parseEvent, type DiaryDay, type DiaryDaySummary, type DiaryEvent, type DayFields, type DiaryImageGroup, type EventFields } from '../../shared/diaryLife'
-import { parseTaskFields, parseTaskSeriesFields, type DiaryRecurringTaskOccurrence, type DiaryTaskListItem, type DiaryTaskListStatus, type TaskEditorFields } from '../../shared/diaryTasks'
+import { parseTaskFields, parseTaskSeriesFields, taskTimeFieldsError, type DiaryRecurringTaskOccurrence, type DiaryTaskListItem, type DiaryTaskListStatus, type TaskEditorFields } from '../../shared/diaryTasks'
 import { DIARY_ATTACHMENT_STAGE_HEARTBEAT_INTERVAL_MS, MAX_DIARY_ATTACHMENT_BYTES, MAX_DIARY_DAY_ATTACHMENTS, type DiaryAttachment } from '../../shared/diaryAttachments'
 import { NUVYN_BROWSER_STORAGE_KEYS, ownerScopedStorageKey, readStorageKey, writeStorageKey } from '../technicalNamespace'
 import DiaryLifeCalendar from '../components/diary/DiaryLifeCalendar.vue'
@@ -774,14 +774,16 @@ function taskFields(task: DiaryTaskListItem | null, dueDate: string | null): Tas
   if (task?.kind === 'recurring') return {
     title: task.title,
     description: task.description,
+    startDate: null,
+    startTime: null,
     dueDate: task.occurrenceDate,
     dueTime: task.dueTime,
     recurrence: { ...task.recurrence, startDate: task.occurrenceDate },
     eventId: null,
   }
   return task
-    ? { title: task.title, description: task.description, dueDate: task.dueDate, dueTime: task.dueTime, recurrence: null, eventId: task.eventId ?? null }
-    : { title: '', description: '', dueDate, dueTime: null, recurrence: null, eventId: null }
+    ? { title: task.title, description: task.description, startDate: task.startDate, startTime: task.startTime, dueDate: task.dueDate, dueTime: task.dueTime, recurrence: null, eventId: task.eventId ?? null }
+    : { title: '', description: '', startDate: null, startTime: null, dueDate, dueTime: null, recurrence: null, eventId: null }
 }
 
 function startTaskEdit(task: DiaryTaskListItem | null, returnTo: TaskReturnContext) {
@@ -1479,7 +1481,10 @@ async function saveTask() {
     }
   }
   if (!oneOffFields || (editor.draft.recurrence && !seriesFields)) {
-    taskFormError.value = editor.draft.title.trim() ? '请检查待办名称、截止日期和时间。' : '请输入待办名称。'
+    const hasTimeError = taskTimeFieldsError(editor.draft) !== null
+    taskFormError.value = editor.draft.title.trim()
+      ? (hasTimeError ? '' : '请检查待办名称和备注。')
+      : '请输入待办名称。'
     return
   }
   if (editor.task?.kind === 'one-off' && editor.draft.recurrence) {

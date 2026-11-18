@@ -36,7 +36,7 @@ function taskListRevision(): number {
 }
 
 function fields(overrides: Record<string, unknown> = {}) {
-  return { title: 'Buy groceries', description: 'Milk\nBread', dueDate: '2026-11-17', dueTime: '09:30', ...overrides }
+  return { title: 'Buy groceries', description: 'Milk\nBread', startDate: null, startTime: null, dueDate: '2026-11-17', dueTime: '09:30', ...overrides }
 }
 
 function seriesFields(overrides: Record<string, unknown> = {}) {
@@ -84,6 +84,9 @@ describe('Diary task API', () => {
       { title: 'Valid', dueDate: '2026-02-29' },
       { title: 'Valid', dueDate: '2026-11-17', dueTime: '9:30' },
       { title: 'Valid', dueDate: null, dueTime: '09:30' },
+      { title: 'Valid', startDate: '2026-11-21', dueDate: '2026-11-19' },
+      { title: 'Valid', startDate: '2026-11-19', startTime: '15:00', dueDate: '2026-11-19', dueTime: '12:00' },
+      { title: 'Valid', startTime: '09:00' },
       { title: 'Valid', completedAt: 1 },
     ]
     for (const body of invalid) {
@@ -92,7 +95,7 @@ describe('Diary task API', () => {
 
     const undated = await request('PUT', `/tasks/${id}`, { title: '  Undated  ', expectedVersion: 0 })
     expect(undated.status).toBe(200)
-    expect((await undated.json()).task).toMatchObject({ title: 'Undated', description: '', dueDate: null, dueTime: null, completedAt: null, version: 1 })
+    expect((await undated.json()).task).toMatchObject({ title: 'Undated', description: '', startDate: null, startTime: null, dueDate: null, dueTime: null, completedAt: null, version: 1 })
     const validDateOnly = await request('PUT', `/tasks/${randomUUID()}`, { ...fields({ dueTime: null }), expectedVersion: 0 })
     expect(validDateOnly.status).toBe(200)
     expect((await validDateOnly.json()).task).toMatchObject({ dueDate: '2026-11-17', dueTime: null })
@@ -100,10 +103,11 @@ describe('Diary task API', () => {
 
   it('supports encrypted CRUD, completion, reopening, and completed-state-preserving edits with CAS versions', async () => {
     const id = randomUUID()
-    const createdResponse = await request('PUT', `/tasks/${id}`, { ...fields(), expectedVersion: 0 })
+    const initialFields = fields({ startDate: '2026-11-16', startTime: '08:15' })
+    const createdResponse = await request('PUT', `/tasks/${id}`, { ...initialFields, expectedVersion: 0 })
     expect(createdResponse.status).toBe(200)
     const created = (await createdResponse.json()).task
-    expect(created).toMatchObject({ ...fields(), id, completedAt: null, version: 1 })
+    expect(created).toMatchObject({ ...initialFields, id, completedAt: null, version: 1 })
     expect(created.createdAt).toBe(Date.now())
 
     const row = db.prepare('SELECT due_date, encrypted_fields FROM diary_tasks WHERE owner_user_id = ? AND id = ?').get(auth.userId, id) as { due_date: string; encrypted_fields: Buffer }
@@ -118,10 +122,10 @@ describe('Diary task API', () => {
     expect((await request('POST', `/tasks/${id}/complete`, { expectedVersion: 2 })).status).toBe(409)
     expect((await request('PUT', `/tasks/${id}`, { ...fields({ title: 'Updated task' }), expectedVersion: 1 })).status).toBe(409)
 
-    const edited = await request('PUT', `/tasks/${id}`, { ...fields({ title: 'Updated task' }), expectedVersion: 2 })
+    const edited = await request('PUT', `/tasks/${id}`, { ...fields({ ...initialFields, title: 'Updated task' }), expectedVersion: 2 })
     expect(edited.status).toBe(200)
     const editedTask = (await edited.json()).task
-    expect(editedTask).toMatchObject({ title: 'Updated task', description: 'Milk\nBread', dueDate: '2026-11-17', dueTime: '09:30', completedAt: Date.now(), version: 3 })
+    expect(editedTask).toMatchObject({ title: 'Updated task', description: 'Milk\nBread', startDate: '2026-11-16', startTime: '08:15', dueDate: '2026-11-17', dueTime: '09:30', completedAt: Date.now(), version: 3 })
 
     const reopened = await request('POST', `/tasks/${id}/reopen`, { expectedVersion: 3 })
     expect(reopened.status).toBe(200)
@@ -130,6 +134,88 @@ describe('Diary task API', () => {
     expect((await request('POST', `/tasks/${id}/reopen`, { expectedVersion: 4 })).status).toBe(409)
     const completedAgain = await request('POST', `/tasks/${id}/complete`, { expectedVersion: 4 })
     expect((await completedAgain.json()).task).toMatchObject({ ...editedTask, completedAt: Date.now(), version: 5 })
+  })
+
+  it('normalizes legacy encrypted tasks without requiring a rewrite', async () => {
+    const id = randomUUID()
+    const now = Date.now()
+    await auth.runtime.diaryAccess.withBodyOperation(auth.session.id, capability, operation => {
+      const legacyPayload = { title: 'Legacy task', description: '', dueDate: '2026-11-21', dueTime: '12:00', completedAt: null }
+      const encrypted = operation.life!.encrypt(legacyPayload, JSON.stringify([auth.userId, 'task', id, 1]))
+      db.prepare(`INSERT INTO diary_tasks (owner_user_id, id, due_date, encrypted_fields, created_at, updated_at, version)
+        VALUES (?, ?, ?, ?, ?, ?, 1)`).run(auth.userId, id, legacyPayload.dueDate, encrypted, now, now)
+
+      expect(diaryTaskStore(db, auth.userId, operation).getTask(id)).toMatchObject({
+        id, startDate: null, startTime: null, dueDate: '2026-11-21', dueTime: '12:00',
+      })
+    })
+  })
+
+  it('keeps start fields encrypted and intact through completion and Event link transitions', async () => {
+    const taskId = randomUUID()
+    const eventId = randomUUID()
+    const taskFields = fields({
+      title: '跨天准备',
+      startDate: '2026-11-19',
+      startTime: '09:00',
+      dueDate: '2026-11-21',
+      dueTime: '12:00',
+    })
+    expect((await request('PUT', `/events/${eventId}`, { ...scheduleFields(), expectedVersion: 0 })).status).toBe(200)
+    expect((await request('PUT', `/tasks/${taskId}`, { ...taskFields, expectedVersion: 0 })).status).toBe(200)
+
+    const encryptedRow = db.prepare('SELECT encrypted_fields FROM diary_tasks WHERE owner_user_id = ? AND id = ?')
+      .get(auth.userId, taskId) as { encrypted_fields: Buffer }
+    expect(encryptedRow.encrypted_fields.toString()).not.toContain('2026-11-19')
+
+    const completed = await request('POST', `/tasks/${taskId}/complete`, { expectedVersion: 1 })
+    expect(completed.status).toBe(200)
+    expect((await (await request('GET', `/tasks/${taskId}`)).json()).task).toMatchObject(taskFields)
+    expect((await request('POST', `/tasks/${taskId}/reopen`, { expectedVersion: 2 })).status).toBe(200)
+    const linked = await request('PUT', `/tasks/${taskId}/event-link`, { eventId, expectedVersion: 3 })
+    expect(linked.status).toBe(200)
+    expect((await linked.json()).task).toMatchObject({ ...taskFields, eventId, version: 4 })
+    const unlinked = await request('DELETE', `/tasks/${taskId}/event-link`, { expectedVersion: 4 })
+    expect(unlinked.status).toBe(200)
+    expect((await unlinked.json()).task).toMatchObject({ ...taskFields, startDate: '2026-11-19', startTime: '09:00', eventId: null, version: 5 })
+  })
+
+  it('includes far-future and start-only open tasks in paginated recent items but not calendar ranges', async () => {
+    const total = 203
+    const ids: string[] = []
+    await auth.runtime.diaryAccess.withBodyOperation(auth.session.id, capability, operation => {
+      const store = diaryTaskStore(db, auth.userId, operation)
+      for (let index = 0; index < total; index += 1) {
+        const id = randomUUID()
+        ids.push(id)
+        store.putTask(id, {
+          title: `Planned task ${index}`,
+          description: '',
+          startDate: index === 0 ? '2026-11-19' : null,
+          startTime: index === 0 ? '09:00' : null,
+          dueDate: index === 0 ? null : '2035-01-01',
+          dueTime: index === 0 ? null : '12:00',
+        }, 0)
+      }
+    })
+
+    const query = 'start=2026-10-17&end=2027-02-14&status=open'
+    const first = await (await request('GET', `/task-items?${query}`)).json()
+    expect(first.items).toHaveLength(200)
+    expect(first.nextCursor).toEqual(expect.any(String))
+    const second = await (await request('GET', `/task-items?${query}&cursor=${encodeURIComponent(first.nextCursor)}`)).json()
+    const allItems = [...first.items, ...second.items]
+    expect(allItems).toHaveLength(total)
+    expect(new Set(allItems.map((item: { id: string }) => item.id)).size).toBe(total)
+    expect(allItems.find((item: { id: string }) => item.id === ids[0])).toMatchObject({
+      startDate: '2026-11-19', startTime: '09:00', dueDate: null,
+    })
+    expect(second.nextCursor).toBeNull()
+    expect(allItems.some((item: { dueDate: string | null }) => item.dueDate === '2035-01-01')).toBe(true)
+    expect(allItems.every((item: { completedAt: number | null }) => item.completedAt === null)).toBe(true)
+
+    const calendarItems = await (await request('GET', '/task-occurrences?start=2026-11-19&end=2026-11-21')).json()
+    expect(calendarItems.items).toEqual([])
   })
 
   it('stores recurring rules and per-date completion and skip state independently', async () => {
@@ -549,7 +635,7 @@ describe('Diary task API', () => {
       ...fields({ title: '整理检查报告', dueDate: '2026-11-20' }), eventId, expectedVersion: 0,
     })).status).toBe(200)
     expect((await request('PUT', `/tasks/${secondTaskId}`, {
-      ...fields({ title: '准备身份证', dueDate: '2026-11-20' }), eventId, expectedVersion: 0,
+      ...fields({ title: '准备身份证', startDate: '2026-11-19', startTime: '09:00', dueDate: '2026-11-20' }), eventId, expectedVersion: 0,
     })).status).toBe(200)
     const linkedTasks = (await (await request('GET', `/events/${eventId}/tasks`)).json()).tasks
     expect(linkedTasks.map((task: { id: string }) => task.id).sort()).toEqual([firstTaskId, secondTaskId].sort())
@@ -563,14 +649,16 @@ describe('Diary task API', () => {
     await auth.runtime.diaryAccess.withBodyOperation(auth.session.id, capability, operation => {
       const otherStore = diaryTaskStore(db, otherOwner, operation)
       const otherTaskId = randomUUID()
-      otherStore.putTask(otherTaskId, { title: 'Private owner task', description: '', dueDate: null, dueTime: null }, 0)
+      otherStore.putTask(otherTaskId, { title: 'Private owner task', description: '', startDate: null, startTime: null, dueDate: null, dueTime: null }, 0)
       expect(() => otherStore.linkTaskToEvent(otherTaskId, eventId, 1)).toThrow(DiaryTaskAssociationError)
       expect(() => otherStore.eventTasks(eventId)).toThrow(DiaryTaskAssociationError)
     })
 
     const changedEvent = await request('PUT', `/events/${eventId}`, { ...scheduleFields({ startDate: '2026-11-22', endDate: '2026-11-22' }), expectedVersion: 1 })
     expect(changedEvent.status).toBe(200)
-    expect((await (await request('GET', `/tasks/${secondTaskId}`)).json()).task).toMatchObject({ dueDate: '2026-11-20', eventId })
+    expect((await (await request('GET', `/tasks/${secondTaskId}`)).json()).task).toMatchObject({
+      dueDate: '2026-11-20', startDate: '2026-11-19', startTime: '09:00', eventId,
+    })
 
     const anniversaryId = randomUUID()
     expect((await request('PUT', `/events/${anniversaryId}`, {
@@ -593,7 +681,9 @@ describe('Diary task API', () => {
     expect((await unlinked.json()).task).toMatchObject({ eventId: null, version: 2 })
     expect((await (await request('GET', `/events/${eventId}/tasks`)).json()).tasks.map((task: { id: string }) => task.id)).toEqual([secondTaskId])
     expect((await request('DELETE', `/events/${eventId}`, { expectedVersion: 2 })).status).toBe(200)
-    expect((await (await request('GET', `/tasks/${secondTaskId}`)).json()).task).toMatchObject({ id: secondTaskId, eventId: null, dueDate: '2026-11-20' })
+    expect((await (await request('GET', `/tasks/${secondTaskId}`)).json()).task).toMatchObject({
+      id: secondTaskId, eventId: null, dueDate: '2026-11-20', startDate: '2026-11-19', startTime: '09:00',
+    })
     expect(db.prepare('SELECT COUNT(*) AS count FROM diary_task_event_links WHERE owner_user_id = ? AND event_id = ?').get(auth.userId, eventId))
       .toMatchObject({ count: 0 })
   })
@@ -622,6 +712,8 @@ describe('Diary task API', () => {
         store.putTask(randomUUID(), {
           title: `Task ${index}`,
           description: '',
+          startDate: index === 0 ? '2026-11-19' : null,
+          startTime: index === 0 ? '09:00' : null,
           dueDate: index === 0 ? null : `2026-11-${String(1 + (index % 17)).padStart(2, '0')}`,
           dueTime: null,
         }, 0)
@@ -676,7 +768,7 @@ describe('Diary task API', () => {
       for (let index = 0; index < total; index += 1) {
         const id = randomUUID()
         ids.push(id)
-        store.putTask(id, { title: `Status ${index}`, description: '', dueDate: '2026-11-18', dueTime: null }, 0)
+        store.putTask(id, { title: `Status ${index}`, description: '', startDate: null, startTime: null, dueDate: '2026-11-18', dueTime: null }, 0)
         if (index % 2 === 1) store.completeTask(id, 1)
       }
     })
@@ -737,7 +829,7 @@ describe('Diary task API', () => {
     await auth.runtime.diaryAccess.withBodyOperation(auth.session.id, capability, operation => {
       const store = diaryTaskStore(db, auth.userId, operation)
       for (const [index, id] of ids.entries()) {
-        store.putTask(id, { title: `Revision ${index}`, description: '', dueDate: '2026-12-01', dueTime: null }, 0)
+        store.putTask(id, { title: `Revision ${index}`, description: '', startDate: null, startTime: null, dueDate: '2026-12-01', dueTime: null }, 0)
       }
     })
     const readRevision = (owner = auth.userId) => Number((db.prepare(
@@ -751,7 +843,7 @@ describe('Diary task API', () => {
       VALUES (?, ?, ?, 0, ?, ?)`).run('task-revision-owner-b', 'task-revision-owner-b', 'test', Date.now(), Date.now()).lastInsertRowid)
     await auth.runtime.diaryAccess.withBodyOperation(auth.session.id, capability, operation => {
       diaryTaskStore(db, ownerB, operation).putTask(randomUUID(), {
-        title: 'Other owner task', description: '', dueDate: '2026-12-01', dueTime: null,
+        title: 'Other owner task', description: '', startDate: null, startTime: null, dueDate: '2026-12-01', dueTime: null,
       }, 0)
     })
     expect(readRevision(ownerB)).toBe(1)
@@ -838,10 +930,10 @@ describe('Diary task API', () => {
       expect(owner2Store.getTask(id)).toBeNull()
       const otherOnlyId = randomUUID()
       owner2Store.putTask(otherOnlyId, {
-        title: 'Private to other owner', description: '', dueDate: '2026-11-17', dueTime: null,
+        title: 'Private to other owner', description: '', startDate: null, startTime: null, dueDate: '2026-11-17', dueTime: null,
       }, 0)
       const other = owner2Store.putTask(id, {
-        title: 'Other owner task', description: '', dueDate: '2026-11-17', dueTime: null,
+        title: 'Other owner task', description: '', startDate: null, startTime: null, dueDate: '2026-11-17', dueTime: null,
       }, 0)
       expect(other.title).toBe('Other owner task')
       expect(diaryTaskStore(db, auth.userId, operation).getTask(id)?.title).toBe('Buy groceries')

@@ -30,18 +30,46 @@ test('creates a dated task, completes it, restores it, and moves it to a new cal
   await page.getByLabel('截止日期').fill(date)
   await page.getByRole('button', { name: '保存', exact: true }).click()
 
-  const complete = page.getByRole('checkbox', { name: `完成待办：${title}` })
+  const complete = page.getByRole('checkbox', { name: `完成待办：${title}`, exact: true })
   await expect(complete).toBeVisible()
-  await expect(cell.locator('.life-task-marker')).toBeVisible()
+  const marker = cell.locator('.life-task-marker')
+  await expect(marker).toBeVisible()
+  await expect(marker).toHaveAttribute('src', '/emoji/stopwatch.svg')
+  await expect(marker).toHaveJSProperty('naturalWidth', 32)
+
+  const secondTitle = `${title} second`
+  await chooseDiaryAction(page, page.getByRole('button', { name: '更多当天事件操作' }), '新增待办')
+  await page.getByRole('textbox', { name: '待办名称' }).fill(secondTitle)
+  await page.getByLabel('截止日期').fill(date)
+  await page.getByRole('button', { name: '保存', exact: true }).click()
+  await expect(page.getByRole('checkbox', { name: `完成待办：${secondTitle}` })).toBeVisible()
+  await expect(marker).toHaveCount(1)
+
+  const originalViewport = page.viewportSize()
+  for (const width of [320, 390, 430, 768, 1280]) {
+    await page.setViewportSize({ width, height: originalViewport?.height ?? 900 })
+    const bounds = await marker.boundingBox()
+    expect(bounds).not.toBeNull()
+    expect(bounds!.width).toBeGreaterThan(0)
+    expect(bounds!.width).toBeLessThanOrEqual(21)
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true)
+  }
+  if (originalViewport) await page.setViewportSize(originalViewport)
+
+  await page.getByRole('button', { name: `编辑待办：${secondTitle}`, exact: true }).click()
+  await page.getByRole('button', { name: '删除', exact: true }).click()
+  await page.getByRole('dialog', { name: '删除这条待办？' }).getByRole('button', { name: /^(Confirm|确认|确定)$/ }).click()
+  await expect(marker).toHaveCount(1)
+
   await complete.click()
   await expect(page.locator('.diary-task-row.is-completed')).toContainText(title)
-  await expect(cell.locator('.life-task-marker')).toHaveCount(0)
+  await expect(marker).toHaveCount(0)
 
-  await page.getByRole('checkbox', { name: `恢复待办：${title}` }).click()
-  await expect(page.getByRole('checkbox', { name: `完成待办：${title}` })).toBeVisible()
-  await expect(cell.locator('.life-task-marker')).toBeVisible()
+  await page.getByRole('checkbox', { name: `恢复待办：${title}`, exact: true }).click()
+  await expect(page.getByRole('checkbox', { name: `完成待办：${title}`, exact: true })).toBeVisible()
+  await expect(marker).toBeVisible()
 
-  await page.getByRole('button', { name: `编辑待办：${title}` }).click()
+  await page.getByRole('button', { name: `编辑待办：${title}`, exact: true }).click()
   await page.getByRole('textbox', { name: '待办名称' }).fill(`${title} 草稿`)
   await page.route('**/api/diary/life/tasks/*', route => route.request().method() === 'PUT'
     ? route.fulfill({ status: 409, json: { code: 'diary-conflict' } })
@@ -62,7 +90,7 @@ test('creates a dated task, completes it, restores it, and moves it to a new cal
     { width: 1280, height: 900 },
   ]) {
     await page.setViewportSize(viewport)
-    await page.getByRole('button', { name: `编辑待办：${title}` }).click()
+    await page.getByRole('button', { name: `编辑待办：${title}`, exact: true }).click()
     const form = page.locator('.diary-task-edit-dialog')
     const bounds = await form.boundingBox()
     expect(bounds).not.toBeNull()
@@ -73,16 +101,16 @@ test('creates a dated task, completes it, restores it, and moves it to a new cal
     await expect(form).toBeHidden()
   }
 
-  await page.getByRole('button', { name: `编辑待办：${title}` }).click()
+  await page.getByRole('button', { name: `编辑待办：${title}`, exact: true }).click()
   await expect(editor).toBeVisible()
   await page.getByLabel('截止日期').fill(nextDate)
   await page.getByRole('button', { name: '保存', exact: true }).click()
-  await expect(page.getByRole('checkbox', { name: `完成待办：${title}` })).toHaveCount(0)
+  await expect(page.getByRole('checkbox', { name: `完成待办：${title}`, exact: true })).toHaveCount(0)
   const nextCell = page.locator(`.diary-life-calendar [data-date="${nextDate}"]`)
   await expect(nextCell.locator('.life-task-marker')).toBeVisible()
   await page.getByRole('button', { name: '关闭当天事件' }).click()
   await nextCell.click()
-  await page.getByRole('button', { name: `编辑待办：${title}` }).click()
+  await page.getByRole('button', { name: `编辑待办：${title}`, exact: true }).click()
   await page.getByRole('button', { name: '删除', exact: true }).click()
   await page.getByRole('dialog', { name: '删除这条待办？' }).getByRole('button', { name: /^(Confirm|确认|确定)$/ }).click()
   await expect(nextCell.locator('.life-task-marker')).toHaveCount(0)
@@ -108,7 +136,7 @@ test('keeps long task titles and due times aligned without horizontal overflow',
   const row = page.locator('.diary-life-dialog .diary-task-row').filter({ has: page.locator('.diary-task-title', { hasText: title }) })
   await expect(row).toBeVisible()
   await expect(row).toHaveClass(/diary-cloud-card/)
-  await expect(row.locator('.diary-task-detail')).toHaveText('12:00')
+  await expect(row.locator('.diary-task-detail')).toHaveText('截止 12:00')
   expect(await row.evaluate(element => getComputedStyle(element).backgroundImage)).toContain('/diary-events-cloud-pattern.png')
 
   for (const viewport of [
@@ -141,6 +169,101 @@ test('keeps long task titles and due times aligned without horizontal overflow',
   const confirmation = page.getByRole('dialog', { name: '删除这条待办？' })
   await confirmation.getByRole('button', { name: /^(Confirm|确认|确定)$/ }).click()
   await expect(row).toHaveCount(0)
+})
+
+test('shows a cross-day Todo only on its due date and keeps its start plan in Recent Items', async ({ page }) => {
+  await page.goto('/diary')
+  await unlockDiary(page)
+  await page.getByTestId('diary-view-toggle').click()
+
+  const startDate = `${testYear}-11-19`
+  const middleDate = `${testYear}-11-20`
+  const dueDate = `${testYear}-11-21`
+  const title = `Cross-day task ${Math.random().toString(36).slice(2, 9)}`
+  const startCell = page.locator(`.diary-life-calendar [data-date="${startDate}"]`)
+  const middleCell = page.locator(`.diary-life-calendar [data-date="${middleDate}"]`)
+  const dueCell = page.locator(`.diary-life-calendar [data-date="${dueDate}"]`)
+  await startCell.click()
+  await chooseDiaryAction(page, page.getByRole('button', { name: '更多当天事件操作' }), '新增待办')
+
+  await page.getByRole('textbox', { name: '待办名称' }).fill(title)
+  await expect(page.getByLabel('开始日期')).toHaveValue('')
+  await expect(page.getByLabel('截止日期')).toHaveValue(startDate)
+  await page.getByLabel('开始日期').fill(startDate)
+  await page.getByLabel('开始时间').fill('09:00')
+  await page.getByLabel('截止日期').fill(dueDate)
+  await page.getByLabel('截止时间').fill('12:00')
+
+  for (const viewport of [
+    { width: 320, height: 720 },
+    { width: 390, height: 844 },
+    { width: 430, height: 900 },
+    { width: 768, height: 1024 },
+    { width: 1280, height: 900 },
+  ]) {
+    await page.setViewportSize(viewport)
+    const inputBounds = await page.locator('.diary-task-form-time-groups').evaluate(container => {
+      const selectors = [
+        '.diary-task-form-time-group:nth-child(1) input[aria-label="开始日期"]',
+        '.diary-task-form-time-group:nth-child(1) input[aria-label="开始时间"]',
+        '.diary-task-form-time-group:nth-child(2) input[aria-label="截止日期"]',
+        '.diary-task-form-time-group:nth-child(2) input[aria-label="截止时间"]',
+      ]
+      return selectors.map(selector => {
+        const input = container.querySelector<HTMLElement>(selector)!
+        const bounds = input.getBoundingClientRect()
+        return { left: bounds.left, right: bounds.right }
+      })
+    })
+    expect(inputBounds[0]!.right).toBeLessThanOrEqual(inputBounds[1]!.left + 1)
+    expect(inputBounds[2]!.right).toBeLessThanOrEqual(inputBounds[3]!.left + 1)
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true)
+  }
+  await page.setViewportSize({ width: 1280, height: 900 })
+  await page.getByRole('button', { name: '保存', exact: true }).click()
+
+  await expect(startCell.locator('.life-task-marker')).toHaveCount(0)
+  await page.getByRole('button', { name: '关闭当天事件' }).click()
+  await middleCell.click()
+  await expect(middleCell.locator('.life-task-marker')).toHaveCount(0)
+  await page.getByRole('button', { name: '关闭当天事件' }).click()
+  await dueCell.click()
+  const checkbox = page.getByRole('checkbox', { name: `完成待办：${title}` })
+  await expect(checkbox).toBeVisible()
+  await expect(dueCell.locator('.life-task-marker')).toBeVisible()
+  await checkbox.click()
+  await expect(dueCell.locator('.life-task-marker')).toHaveCount(0)
+
+  await page.getByRole('button', { name: '关闭当天事件' }).click()
+  await page.getByTestId('diary-event-list-toggle').click()
+  await page.getByRole('button', { name: '查看已完成' }).click()
+  const completedRow = page.getByRole('button', { name: `编辑待办：${title}` })
+  await expect(completedRow).toContainText('11月21日')
+  await completedRow.click()
+  await expect(page.getByLabel('开始日期')).toHaveValue(startDate)
+  await expect(page.getByLabel('开始时间')).toHaveValue('09:00')
+  await expect(page.getByLabel('截止日期')).toHaveValue(dueDate)
+  await expect(page.getByLabel('截止时间')).toHaveValue('12:00')
+  await page.getByRole('button', { name: '删除', exact: true }).click()
+  const confirmation = page.getByRole('dialog', { name: '删除这条待办？' })
+  await confirmation.getByRole('button', { name: /^(Confirm|确认|确定)$/ }).click()
+
+  const startOnlyTitle = `Start-only task ${Math.random().toString(36).slice(2, 9)}`
+  await page.getByRole('button', { name: '新增待办' }).click()
+  await page.getByRole('textbox', { name: '待办名称' }).fill(startOnlyTitle)
+  await page.getByLabel('开始日期').fill(startDate)
+  await page.getByLabel('开始时间').fill('09:00')
+  await expect(page.getByLabel('截止日期')).toHaveValue('')
+  await page.getByRole('button', { name: '保存', exact: true }).click()
+  const startOnlyRow = page.getByRole('button', { name: `编辑待办：${startOnlyTitle}` })
+  await expect(startOnlyRow).toBeVisible()
+  await expect(startOnlyRow).toContainText('11月19日开始 09:00')
+  await startOnlyRow.click()
+  await expect(page.getByLabel('开始日期')).toHaveValue(startDate)
+  await expect(page.getByLabel('截止日期')).toHaveValue('')
+  await page.getByRole('button', { name: '删除', exact: true }).click()
+  const startOnlyConfirmation = page.getByRole('dialog', { name: '删除这条待办？' })
+  await startOnlyConfirmation.getByRole('button', { name: /^(Confirm|确认|确定)$/ }).click()
 })
 
 test('creates an undated task from Recent Items and separates completed tasks', async ({ page }) => {
@@ -273,7 +396,7 @@ test('a failed calendar Event request preserves interactive Todos and retries on
     if (request.method() === 'GET' && url.pathname === '/api/diary/life/task-occurrences') {
       taskRequests += 1
       await route.fulfill({ json: {
-        items: [{ id: taskId, title: 'Events 失败时仍可勾选', description: '', dueDate: date, dueTime: null, completedAt, version: taskVersion, createdAt: 1, updatedAt: taskVersion }],
+        items: [{ id: taskId, title: 'Events 失败时仍可勾选', description: '', startDate: null, startTime: null, dueDate: date, dueTime: null, completedAt, version: taskVersion, createdAt: 1, updatedAt: taskVersion }],
         nextCursor: null,
       } })
       return
@@ -281,7 +404,7 @@ test('a failed calendar Event request preserves interactive Todos and retries on
     if (request.method() === 'POST' && url.pathname === `/api/diary/life/tasks/${taskId}/complete`) {
       completedAt = Date.now()
       taskVersion += 1
-      await route.fulfill({ json: { task: { id: taskId, title: 'Events 失败时仍可勾选', description: '', dueDate: date, dueTime: null, completedAt, version: taskVersion, createdAt: 1, updatedAt: taskVersion } } })
+      await route.fulfill({ json: { task: { id: taskId, title: 'Events 失败时仍可勾选', description: '', startDate: null, startTime: null, dueDate: date, dueTime: null, completedAt, version: taskVersion, createdAt: 1, updatedAt: taskVersion } } })
       return
     }
     await route.continue()

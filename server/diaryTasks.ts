@@ -3,7 +3,7 @@ import { createHmac, timingSafeEqual } from 'node:crypto'
 import { Temporal } from '@js-temporal/polyfill'
 import type { DiaryBodyOperation } from './diaryAccess/service.js'
 import { civilDate, parseEvent } from '../shared/diaryLife.js'
-import { parseTaskFields, parseTaskOccurrenceState, parseTaskSeriesFields, type DiaryRecurringTaskOccurrence, type DiaryTask, type DiaryTaskItemPage, type DiaryTaskListItem, type DiaryTaskPage, type DiaryTaskSeries, type TaskFields, type TaskOccurrenceState, type TaskSeriesFields } from '../shared/diaryTasks.js'
+import { parseTaskFields, parseTaskOccurrenceState, parseTaskSeriesFields, type DiaryRecurringTaskOccurrence, type DiaryTask, type DiaryTaskItemPage, type DiaryTaskListItem, type DiaryTaskPage, type DiaryTaskSeries, type OneOffTaskFields, type TaskOccurrenceState, type TaskSeriesFields } from '../shared/diaryTasks.js'
 import { taskRecurrenceDates, taskRecurrenceOccursOn } from '../shared/diaryTaskRecurrence.js'
 import { DiaryConflict } from './diaryLife.js'
 
@@ -563,6 +563,8 @@ export function diaryTaskStore(db: Database, owner: number, operation: DiaryBody
     const encrypted = crypto!.encrypt({
       title: current.title,
       description: current.description,
+      startDate: current.startDate,
+      startTime: current.startTime,
       dueDate: current.dueDate,
       dueTime: current.dueTime,
       completedAt: current.completedAt,
@@ -611,6 +613,8 @@ export function diaryTaskStore(db: Database, owner: number, operation: DiaryBody
       const encrypted = crypto!.encrypt({
         title: current.title,
         description: current.description,
+        startDate: current.startDate,
+        startTime: current.startTime,
         dueDate: current.dueDate,
         dueTime: current.dueTime,
         completedAt,
@@ -638,7 +642,7 @@ export function diaryTaskStore(db: Database, owner: number, operation: DiaryBody
     tasksInRange(start: string, end: string, cursor?: string): DiaryTaskPage {
       return listPage({ type: 'range', start, end }, cursor)
     },
-    putTask(id: string, fields: TaskFields, expected: number, requestedEventId?: string | null): DiaryTask {
+    putTask(id: string, fields: OneOffTaskFields, expected: number, requestedEventId?: string | null): DiaryTask {
       operation.assertCurrent()
       const now = Date.now()
       const rowBefore = readTaskRow(id)

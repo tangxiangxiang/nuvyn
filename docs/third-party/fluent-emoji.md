@@ -105,6 +105,12 @@ license. They are separate from the configurable Mood catalog.
 | `public/emoji/plan-clipboard.svg` | `assets/Clipboard/Color/clipboard_color.svg` |
 | `public/emoji/plan-completed.svg` | `assets/Check mark button/Color/check_mark_button_color.svg` |
 
+The Diary Todo calendar marker uses the same pinned source and license.
+
+| Nuvyn bundled asset | Microsoft Fluent Emoji upstream Color SVG |
+| --- | --- |
+| `public/emoji/stopwatch.svg` | `assets/Stopwatch/Color/stopwatch_color.svg` |
+
 Diary Reborn event presets use unchanged SVGs from the same pinned revision
 and MIT license. Presets never determine an event's category. Other user-entered
 Emoji use the platform glyph renderer without loading remote resources.

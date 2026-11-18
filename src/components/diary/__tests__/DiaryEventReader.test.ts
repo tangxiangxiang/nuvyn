@@ -63,6 +63,8 @@ describe('DiaryEventReader', () => {
       id: 'task-1',
       title: '准备身份证',
       description: '',
+      startDate: null,
+      startTime: null,
       dueDate: '2026-11-20',
       dueTime: null,
       completedAt: null,

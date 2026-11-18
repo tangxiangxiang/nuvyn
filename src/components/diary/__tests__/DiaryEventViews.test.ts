@@ -10,6 +10,8 @@ function makeTask(overrides: Partial<DiaryTask> = {}): DiaryTask {
     id: 'task-1',
     title: '给爷爷打电话',
     description: '',
+    startDate: null,
+    startTime: null,
     dueDate: '2026-11-18',
     dueTime: null,
     completedAt: null,

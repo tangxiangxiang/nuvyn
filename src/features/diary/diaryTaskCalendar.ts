@@ -42,9 +42,18 @@ export function groupTasksByDueDate(tasks: DiaryTaskListItem[]): Map<string, Dia
   return grouped
 }
 
-export function taskDueDateLabel(task: Pick<DiaryTaskListItem, 'dueDate' | 'dueTime' | 'completedAt'> & { skipped?: boolean }, today: string): string {
+export function taskDueDateLabel(
+  task: Pick<DiaryTaskListItem, 'dueDate' | 'dueTime' | 'completedAt'> & { startDate?: string | null; startTime?: string | null; skipped?: boolean },
+  today: string,
+): string {
   const { dueDate, dueTime } = task
-  if (!dueDate) return '无日期'
+  if (!dueDate) {
+    const startDate = task.startDate
+    if (!startDate) return '无日期'
+    const [year, month, day] = startDate.split('-').map(Number)
+    const label = year === Number(today.slice(0, 4)) ? `${month}月${day}日开始` : `${year}年${month}月${day}日开始`
+    return task.startTime ? `${label} ${task.startTime}` : label
+  }
   const nextDay = addDays(today, 1)
   let label: string
   if (isTaskOverdue(task, today)) {

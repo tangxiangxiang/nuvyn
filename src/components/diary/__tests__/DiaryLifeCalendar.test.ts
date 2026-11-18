@@ -60,18 +60,23 @@ describe('Diary calendar wheel navigation', () => {
     expect(months()).toEqual(['2026-12-01', '2027-01-01'])
   })
 
-  it('keeps the event emoji and the unfinished task dot as separate calendar markers', () => {
+  it('keeps the event emoji and one Fluent Stopwatch for unfinished tasks as separate markers', () => {
     const { wrapper } = mountCalendar({
-      '2026-11-18': { emoji: '🎂', count: 1, hasTasks: true },
+      '2026-11-18': { source: '/emoji/event-birthday.svg', emoji: '🎂', count: 1, hasTasks: true },
       '2026-11-19': { hasTasks: true },
     })
 
     const eventAndTask = wrapper.get('.life-date[data-date="2026-11-18"] .life-marker')
-    expect(eventAndTask.text()).toContain('🎂')
-    expect(eventAndTask.find('.life-task-marker').exists()).toBe(true)
+    expect(eventAndTask.find('img:not(.life-task-marker)').attributes('src')).toBe('/emoji/event-birthday.svg')
+    expect(eventAndTask.find('.life-task-marker').attributes('src')).toBe('/emoji/stopwatch.svg')
+    expect(eventAndTask.find('.life-task-marker').attributes('alt')).toBe('有未完成待办')
+    expect(eventAndTask.findAll('img')).toHaveLength(2)
     const taskOnly = wrapper.get('.life-date[data-date="2026-11-19"] .life-marker')
-    expect(taskOnly.find('.life-task-marker').exists()).toBe(true)
+    expect(taskOnly.findAll('.life-task-marker')).toHaveLength(1)
+    expect(taskOnly.find('.life-task-marker').attributes('src')).toBe('/emoji/stopwatch.svg')
     expect(taskOnly.find('.life-entry-marker').exists()).toBe(false)
+    expect(taskOnly.text()).not.toContain('⏱️')
+    expect(taskOnly.text()).not.toContain('⏰')
     wrapper.unmount()
   })
 })

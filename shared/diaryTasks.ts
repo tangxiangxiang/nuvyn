@@ -8,7 +8,12 @@ export interface TaskFields {
   dueTime: string | null
 }
 
-export interface DiaryTask extends TaskFields {
+export interface OneOffTaskFields extends TaskFields {
+  startDate: string | null
+  startTime: string | null
+}
+
+export interface DiaryTask extends OneOffTaskFields {
   id: string
   completedAt: number | null
   version: number
@@ -66,7 +71,7 @@ export interface DiaryTaskItemPage {
   nextCursor: string | null
 }
 
-export interface TaskEditorFields extends TaskFields {
+export interface TaskEditorFields extends OneOffTaskFields {
   recurrence: TaskRecurrenceRule | null
   eventId: string | null
 }
@@ -77,7 +82,41 @@ export const MAX_DIARY_TASK_TITLE_LENGTH = 160
 export const MAX_DIARY_TASK_DESCRIPTION_LENGTH = 4000
 
 /** Parse and normalize the client-editable fields of a one-off Diary task. */
-export function parseTaskFields(value: unknown): TaskFields | null {
+export type TaskTimeValidationError =
+  | 'invalid-start-date'
+  | 'invalid-start-time'
+  | 'start-time-without-date'
+  | 'invalid-due-date'
+  | 'invalid-due-time'
+  | 'due-time-without-date'
+  | 'start-after-due-date'
+  | 'start-time-after-due-time'
+
+/** Validate and normalize the civil start and due fields used by one-off tasks. */
+export function taskTimeFieldsError(value: unknown): TaskTimeValidationError | null {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return 'invalid-start-date'
+  const fields = value as Record<string, unknown>
+  const startDate = fields.startDate === undefined ? null : fields.startDate
+  const startTime = fields.startTime === undefined ? null : fields.startTime
+  const dueDate = fields.dueDate === undefined ? null : fields.dueDate
+  const dueTime = fields.dueTime === undefined ? null : fields.dueTime
+  const validTime = (time: unknown): time is string => typeof time === 'string' && /^([01]\d|2[0-3]):[0-5]\d$/.test(time)
+
+  if (startDate !== null && (typeof startDate !== 'string' || !civilDate(startDate))) return 'invalid-start-date'
+  if (startTime !== null && !validTime(startTime)) return 'invalid-start-time'
+  if (startDate === null && startTime !== null) return 'start-time-without-date'
+  if (dueDate !== null && (typeof dueDate !== 'string' || !civilDate(dueDate))) return 'invalid-due-date'
+  if (dueTime !== null && !validTime(dueTime)) return 'invalid-due-time'
+  if (dueDate === null && dueTime !== null) return 'due-time-without-date'
+  if (startDate !== null && dueDate !== null && startDate > dueDate) return 'start-after-due-date'
+  if (startDate !== null && startDate === dueDate && startTime !== null && dueTime !== null && startTime > dueTime) {
+    return 'start-time-after-due-time'
+  }
+  return null
+}
+
+/** Parse the client-editable fields of a one-off Diary task. */
+export function parseTaskFields(value: unknown): OneOffTaskFields | null {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return null
   const fields = value as Record<string, unknown>
   if (typeof fields.title !== 'string') return null
@@ -87,13 +126,16 @@ export function parseTaskFields(value: unknown): TaskFields | null {
   const description = fields.description === undefined ? '' : fields.description
   if (typeof description !== 'string' || description.length > MAX_DIARY_TASK_DESCRIPTION_LENGTH) return null
 
-  const dueDate = fields.dueDate === undefined ? null : fields.dueDate
-  const dueTime = fields.dueTime === undefined ? null : fields.dueTime
-  if (dueDate !== null && !civilDate(dueDate)) return null
-  if (dueTime !== null && (typeof dueTime !== 'string' || !/^([01]\d|2[0-3]):[0-5]\d$/.test(dueTime))) return null
-  if (dueDate === null && dueTime !== null) return null
-
-  return { title, description, dueDate, dueTime } as TaskFields
+  const timeError = taskTimeFieldsError(fields)
+  if (timeError) return null
+  return {
+    title,
+    description,
+    startDate: (fields.startDate === undefined ? null : fields.startDate) as string | null,
+    startTime: (fields.startTime === undefined ? null : fields.startTime) as string | null,
+    dueDate: (fields.dueDate === undefined ? null : fields.dueDate) as string | null,
+    dueTime: (fields.dueTime === undefined ? null : fields.dueTime) as string | null,
+  }
 }
 
 export function parseTaskSeriesFields(value: unknown): TaskSeriesFields | null {
