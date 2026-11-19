@@ -12,6 +12,8 @@ import { diaryLifeStore } from '../diaryLife'
 import { diaryToday } from '../diaryDate'
 import * as database from '../db'
 import { DiaryAttachmentStorage } from '../diaryAttachments/storage'
+import { birthdayAgeAt, displayEventTitle } from '../../shared/diaryLife'
+import { lunarOccurrenceInYear, lunarToSolar } from '../../shared/lunarCalendar'
 
 let db: Database.Database
 let auth: AuthenticatedTestContext
@@ -93,6 +95,9 @@ describe('Diary database API', () => {
     const privateSearch = await request('POST', '/search', { query: '私密内容' }, false)
     expect(privateSearch.status).toBe(423)
     expect(privateSearch.headers.get('cache-control')).toBe('no-store')
+    const privateEventSearch = await request('POST', '/events/search', { query: '私密内容' }, false)
+    expect(privateEventSearch.status).toBe(423)
+    expect(privateEventSearch.headers.get('cache-control')).toBe('no-store')
     expect((await request('GET', '/events/list', undefined, false)).status).toBe(423)
   })
   it('searches only unlocked encrypted Diary entries and returns one hit per day', async () => {
@@ -131,6 +136,80 @@ describe('Diary database API', () => {
     expect(second.items.map((item: { date: string }) => item.date)).toEqual(dates.slice(20))
     expect(second.nextCursor).toBeNull()
   })
+  it('searches encrypted Events by title and description and resolves one useful occurrence', async () => {
+    const oldId = '00000000-0000-4000-8000-000000000011'
+    const anniversaryId = '00000000-0000-4000-8000-000000000012'
+    const birthdayId = '00000000-0000-4000-8000-000000000013'
+    const historical = await request('PUT', `/events/${oldId}`, {
+      ...event, title: '买下人生第一套房', type: 'milestone', startDate: '2025-08-16', endDate: '2025-08-16', recurrence: 'none',
+      description: 'searchable private keepsake note', expectedVersion: 0,
+    })
+    expect(historical.status).toBe(200)
+    expect((await request('PUT', `/events/${anniversaryId}`, {
+      ...event, title: '爷爷纪念日', startDate: '2024-11-16', endDate: '2024-11-16', expectedVersion: 0,
+    })).status).toBe(200)
+
+    const dateRule = {
+      calendar: 'chinese' as const,
+      lunarMonth: 10,
+      lunarDay: 7,
+      isLeapMonth: false,
+      leapMonthPolicy: 'regular-month' as const,
+      shortMonthPolicy: 'last-day' as const,
+    }
+    const birthdayStart = lunarToSolar({ year: 1951, month: 10, day: 7, isLeapMonth: false })!
+    const birthdayFields = {
+      ...event,
+      title: '爷爷生日',
+      type: 'birthday',
+      startDate: birthdayStart,
+      endDate: birthdayStart,
+      recurrence: 'yearly',
+      dateRule,
+      birthday: { birthLunarYear: 1951 },
+    }
+    expect((await request('PUT', `/events/${birthdayId}`, { ...birthdayFields, expectedVersion: 0 })).status).toBe(200)
+
+    const titleResult = await (await request('POST', '/events/search', { query: '爷爷', limit: 20 })).json()
+    const birthday = titleResult.items.find((item: { id: string }) => item.id === birthdayId)
+    const thisYear = lunarOccurrenceInYear(dateRule, 2026)
+    const nextYear = lunarOccurrenceInYear(dateRule, 2027)
+    const expectedDate = thisYear && thisYear >= '2026-11-16' ? thisYear : nextYear
+    expect(birthday).toMatchObject({
+      id: birthdayId,
+      title: displayEventTitle({ ...birthdayFields, dateRule, type: 'birthday' }, expectedDate),
+      emoji: '🎂',
+      type: 'birthday',
+      targetDate: expectedDate,
+      subtitle: expect.stringContaining('农历十月初七'),
+      match: 'title',
+    })
+    expect(birthday.title).toContain(`${birthdayAgeAt({ ...birthdayFields, dateRule, type: 'birthday' }, expectedDate)}岁生日`)
+
+    const descriptionResult = await (await request('POST', '/events/search', { query: 'PRIVATE KEEPSAKE' })).json()
+    expect(descriptionResult).toMatchObject({ items: [{
+      id: oldId, title: '买下人生第一套房', targetDate: '2025-08-16',
+      snippet: 'searchable private keepsake note', match: 'description',
+    }] })
+    expect(descriptionResult.items).toHaveLength(1)
+
+    const encrypted = db.prepare('SELECT encrypted_fields FROM diary_events WHERE owner_user_id = ? AND id = ?').get(auth.userId, oldId) as { encrypted_fields: Buffer }
+    expect(encrypted.encrypted_fields.toString()).not.toContain('searchable private keepsake note')
+  })
+  it('paginates Event search with a stable, non-repeating cursor', async () => {
+    const ids = Array.from({ length: 23 }, (_, index) => `00000000-0000-4000-8000-${String(index + 100).padStart(12, '0')}`)
+    for (const id of ids) {
+      const saved = await request('PUT', `/events/${id}`, { ...event, title: 'shared event page marker', expectedVersion: 0 })
+      expect(saved.status).toBe(200)
+    }
+    const first = await (await request('POST', '/events/search', { query: 'shared event page marker', limit: 20 })).json()
+    const second = await (await request('POST', '/events/search', { query: 'shared event page marker', limit: 20, cursor: first.nextCursor })).json()
+    expect(first.items).toHaveLength(20)
+    expect(second.items).toHaveLength(3)
+    expect(first.nextCursor).toEqual(expect.any(String))
+    expect(second.nextCursor).toBeNull()
+    expect(new Set([...first.items, ...second.items].map((item: { id: string }) => item.id))).toHaveProperty('size', 23)
+  })
   it('scopes Diary search to the authenticated owner and validates the query', async () => {
     expect((await request('POST', '/search', { query: '   ' })).status).toBe(400)
     expect((await request('POST', '/search', { query: 'x'.repeat(121) })).status).toBe(400)
@@ -144,10 +223,11 @@ describe('Diary database API', () => {
     })
   })
   it('limits search requests per unlocked session and resets the window', async () => {
+    const paths = ['/search', '/events/search', '/tasks/search']
     for (let index = 0; index < 8; index += 1) {
-      expect((await request('POST', '/search', { query: 'missing' })).status).toBe(200)
+      for (const path of paths) expect((await request('POST', path, { query: 'missing' })).status).toBe(200)
     }
-    expect((await request('POST', '/search', { query: 'missing' })).status).toBe(429)
+    expect((await request('POST', '/events/search', { query: 'missing' })).status).toBe(429)
     vi.setSystemTime(new Date('2026-11-16T08:00:01Z'))
     expect((await request('POST', '/search', { query: 'missing' })).status).toBe(200)
   })

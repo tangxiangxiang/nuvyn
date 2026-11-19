@@ -5893,6 +5893,7 @@ body:has(.ledger-detail-sheet-card) .n-modal-mask {
 }
 .palette-input input { font-size: 1rem; }
 .palette-list { list-style: none; margin: 0; padding: 0; max-height: 50vh; overflow-y: auto; }
+.palette-section-label { padding: 8px 19px 2px; color: var(--text-muted); font-size: 0.72rem; font-weight: 600; line-height: 1.3; }
 .palette-item {
   position: relative;
   padding: 8px 16px;
@@ -5905,6 +5906,10 @@ body:has(.ledger-detail-sheet-card) .n-modal-mask {
 }
 .palette-row { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
 .palette-title { font-size: 0.9rem; color: var(--text-h); }
+.palette-record-title-line { display: flex; flex: 1 1 auto; min-width: 0; align-items: center; gap: 7px; }
+.palette-record-icon { display: grid; width: 20px; height: 20px; flex: 0 0 20px; place-items: center; color: var(--text-muted); font-size: 0.9rem; line-height: 1; }
+.palette-record-icon img { display: block; width: 20px; height: 20px; object-fit: contain; }
+.palette-record-title { display: block; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .palette-snippet { font-size: 0.78rem; color: var(--text-muted); margin-top: 2px; }
 .palette-note-row { min-width: 0; }
 .palette-note-title { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -5913,6 +5918,9 @@ body:has(.ledger-detail-sheet-card) .n-modal-mask {
 .palette-note-highlight { color: var(--text-h); background: transparent; font-weight: 600; }
 .palette-search-error, .palette-search-status { padding: 8px 16px; color: var(--text-muted); font-size: 0.78rem; }
 .palette-search-error button { margin-left: 6px; border: 0; padding: 0; background: transparent; color: var(--accent); font: inherit; cursor: pointer; }
+.palette-search-more { display: flex; justify-content: center; padding: 8px 16px; }
+.palette-search-more button { border: 0; padding: 4px 8px; background: transparent; color: var(--accent); font: inherit; font-size: 0.78rem; cursor: pointer; }
+.palette-search-more-button { margin-top: 12px; }
 .palette-path { font-size: 0.72rem; font-family: var(--mono); color: var(--text-muted); margin-top: 2px; }
 .palette-badge {
   font-size: 0.7rem;

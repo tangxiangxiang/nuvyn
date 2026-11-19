@@ -166,6 +166,75 @@ describe('Diary task API', () => {
     expect((await request('GET', `/tasks/${deletedId}`)).status).toBe(404)
   })
 
+  it('searches encrypted Todos by title and description, including completed and undated history', async () => {
+    const completedId = randomUUID()
+    const descriptionId = randomUUID()
+    const undatedId = randomUUID()
+    expect((await request('PUT', `/tasks/${completedId}`, {
+      ...fields({ title: 'Call grandpa', description: 'Discuss tea and family photos', dueDate: '2026-11-20' }), expectedVersion: 0,
+    })).status).toBe(200)
+    expect((await request('POST', `/tasks/${completedId}/complete`, { expectedVersion: 1 })).status).toBe(200)
+    expect((await request('PUT', `/tasks/${descriptionId}`, {
+      ...fields({ title: 'Prepare a gift', description: 'grandpa tea checklist', dueDate: '2026-11-21' }), expectedVersion: 0,
+    })).status).toBe(200)
+    await seedLegacyUndatedTask(undatedId, 'Legacy grandpa call without a date')
+
+    const titleResult = await (await request('POST', '/tasks/search', { query: 'CALL GRANDPA' })).json()
+    expect(titleResult).toMatchObject({ items: [{
+      id: completedId, kind: 'one-off', title: 'Call grandpa', targetDate: '2026-11-20',
+      completedAt: Date.now(), match: 'title',
+    }] })
+    const descriptionResult = await (await request('POST', '/tasks/search', { query: 'grandpa tea' })).json()
+    expect(descriptionResult.items).toContainEqual(expect.objectContaining({
+      id: descriptionId, snippet: 'grandpa tea checklist', match: 'description',
+    }))
+    const legacyResult = await (await request('POST', '/tasks/search', { query: 'Legacy grandpa call' })).json()
+    expect(legacyResult.items).toMatchObject([{ id: undatedId, targetDate: null, title: 'Legacy grandpa call without a date' }])
+
+    const encrypted = db.prepare('SELECT encrypted_fields FROM diary_tasks WHERE owner_user_id = ? AND id = ?')
+      .get(auth.userId, descriptionId) as { encrypted_fields: Buffer }
+    expect(encrypted.encrypted_fields.toString()).not.toContain('grandpa tea checklist')
+  })
+
+  it('deduplicates recurring Todos by series and chooses an effective non-skipped occurrence', async () => {
+    const upcomingId = randomUUID()
+    expect((await request('PUT', `/task-series/${upcomingId}`, {
+      ...seriesFields({ title: 'Read vocabulary daily', description: 'words to remember', recurrence: { frequency: 'daily', startDate: '2026-11-16', untilDate: '2026-11-18' } }),
+      expectedVersion: 0,
+    })).status).toBe(200)
+    expect((await request('POST', `/task-series/${upcomingId}/occurrences/2026-11-16/skip`, { expectedVersion: 0 })).status).toBe(200)
+
+    const endedId = randomUUID()
+    expect((await request('PUT', `/task-series/${endedId}`, {
+      ...seriesFields({ title: 'Archived weekly review', recurrence: { frequency: 'weekly', startDate: '2026-10-01', untilDate: '2026-10-15' } }),
+      expectedVersion: 0,
+    })).status).toBe(200)
+
+    const upcoming = await (await request('POST', '/tasks/search', { query: 'Read vocabulary daily' })).json()
+    expect(upcoming.items).toMatchObject([{ id: upcomingId, seriesId: upcomingId, kind: 'recurring', targetDate: '2026-11-17' }])
+    expect(upcoming.items).toHaveLength(1)
+    const ended = await (await request('POST', '/tasks/search', { query: 'Archived weekly review' })).json()
+    expect(ended.items).toMatchObject([{ id: endedId, targetDate: '2026-10-15' }])
+    expect((await request('GET', `/task-series/${upcomingId}/search-target`)).status).toBe(200)
+  })
+
+  it('paginates Todo series and one-off search hits without duplicate identities', async () => {
+    const ids = Array.from({ length: 23 }, (_, index) => `00000000-0000-4000-8000-${String(index + 300).padStart(12, '0')}`)
+    for (const id of ids) {
+      const saved = await request('PUT', `/tasks/${id}`, {
+        ...fields({ title: 'shared task page marker', description: '', dueDate: '2026-11-20', dueTime: null }), expectedVersion: 0,
+      })
+      expect(saved.status).toBe(200)
+    }
+    const first = await (await request('POST', '/tasks/search', { query: 'shared task page marker', limit: 20 })).json()
+    const second = await (await request('POST', '/tasks/search', { query: 'shared task page marker', limit: 20, cursor: first.nextCursor })).json()
+    expect(first.items).toHaveLength(20)
+    expect(second.items).toHaveLength(3)
+    expect(second.nextCursor).toBeNull()
+    expect(new Set([...first.items, ...second.items].map((item: { id: string }) => item.id)).size).toBe(23)
+    expect((await request('POST', '/tasks/search', { query: 'valid', cursor: 'invalid' })).status).toBe(400)
+  })
+
   it('supports encrypted CRUD, completion, reopening, and completed-state-preserving edits with CAS versions', async () => {
     const id = randomUUID()
     const initialFields = fields({ startDate: '2026-11-16', startTime: '08:15' })
@@ -1040,9 +1109,11 @@ describe('Diary task API', () => {
     const lockedRequests: Array<[string, string, unknown?]> = [
       ['GET', '/tasks/list'],
       ['GET', '/tasks/undated'],
+      ['POST', '/tasks/search', { query: 'private' }],
       ['GET', '/tasks?start=2026-11-01&end=2026-11-30'],
       ['GET', `/tasks/${id}`],
       ['GET', `/task-series/${id}`],
+      ['GET', `/task-series/${id}/search-target`],
       ['GET', `/task-series/${id}/occurrences/2026-11-17`],
       ['GET', '/task-occurrences?start=2026-11-01&end=2026-11-30'],
       ['GET', '/task-items?start=2026-11-01&end=2026-11-30'],

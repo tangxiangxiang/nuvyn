@@ -11,7 +11,7 @@ import { useDiaryMoodIconPreferences } from '../composables/diary/useDiaryMoodIc
 import { useAuth } from '../composables/useAuth'
 import { useConfirm } from '../composables/useConfirm'
 import { useToast } from '../composables/useToast'
-import { createDiaryEntryId, createDiaryEventId, diaryLifeApi } from '../lib/diary-life-api'
+import { createDiaryEntryId, createDiaryEventId, diaryLifeApi, DiaryLifeApiError } from '../lib/diary-life-api'
 import { createDiaryAttachmentClientId, diaryAttachmentsApi } from '../lib/diary-attachments-api'
 import { DiaryAttachmentPreviewUrls } from '../lib/diaryAttachmentPreviewUrls'
 import { addDays, compareEvents, displayEventTitle, eventOccurrenceStart, localToday, MAX_DIARY_IMAGE_GROUP_SIZE, nextOccurrence, occursOn, parseDay, parseEvent, type DiaryDay, type DiaryDaySummary, type DiaryEvent, type DayFields, type DiaryImageGroup, type EventFields } from '../../shared/diaryLife'
@@ -25,12 +25,12 @@ import DiaryEventRow from '../components/diary/DiaryEventRow.vue'
 import DiaryTaskForm from '../components/diary/DiaryTaskForm.vue'
 import DiaryTaskRows from '../components/diary/DiaryTaskRows.vue'
 import '../components/diary/diaryDayList.css'
-import { DiaryTaskConflictError, DiaryTaskHistoryProtectedError, diaryTasksApi } from '../lib/diary-tasks-api'
+import { DiaryTaskApiError, DiaryTaskConflictError, DiaryTaskHistoryProtectedError, diaryTasksApi } from '../lib/diary-tasks-api'
 import { groupTasksByDueDate, listDiaryTasksInRange } from '../features/diary/diaryTaskCalendar'
 import { eventEmojiSource } from '../features/diary/eventEmoji'
 import { eventDistanceLabel } from '../features/diary/eventDistance'
 import { todoDayVisualState, type TodoDayVisualState } from '../features/diary/deadlineVisualState'
-import { clearDiarySearchOpen, consumeDiarySearchOpen, diarySearchOpenIntent, type DiarySearchOpenIntent } from '../composables/diary/useDiarySearchNavigation'
+import { clearDiarySearchOpen, consumeDiarySearchOpen, diarySearchOpenIntent, type DiaryDiarySearchOpenIntent, type DiaryEventSearchOpenIntent, type DiaryTaskSearchOpenIntent } from '../composables/diary/useDiarySearchNavigation'
 
 const access = useDiaryAccessSession()
 const accessContext = inject(DiaryAccessContextKey, null)
@@ -78,6 +78,7 @@ const attachmentBusy = ref(false)
 const attachmentError = ref('')
 const dayReadFailed = ref(false)
 const searchReveal = ref<{ entryId?: string; entryIndex?: number } | null>(null)
+const searchHighlight = ref<{ kind: 'event' | 'task'; id: string } | null>(null)
 const diaryCalendarError = ref('')
 const eventCalendarError = ref('')
 const calendarTaskError = ref('')
@@ -188,6 +189,8 @@ let eventCalendarRequest: CalendarLoadRequest | null = null
 let calendarTaskRequest: CalendarLoadRequest | null = null
 let detailRequest: AbortController | null = null
 let searchNavigationSequence = 0
+let searchNavigationRequest: AbortController | null = null
+let searchHighlightTimer: ReturnType<typeof setTimeout> | undefined
 let attachmentUploadRequest: AbortController | null = null
 let attachmentLeaseRequest: AbortController | null = null
 let attachmentLeaseTimer: ReturnType<typeof setInterval> | undefined
@@ -421,11 +424,27 @@ function resetForm() {
   formError.value = ''
   taskFormError.value = ''
   taskConflictNeedsReload.value = false
+  clearSearchHighlight()
+}
+
+function clearSearchHighlight() {
+  if (searchHighlightTimer) clearTimeout(searchHighlightTimer)
+  searchHighlightTimer = undefined
+  searchHighlight.value = null
+}
+
+function highlightSearchRecord(kind: 'event' | 'task', id: string) {
+  clearSearchHighlight()
+  searchHighlight.value = { kind, id }
+  searchHighlightTimer = setTimeout(clearSearchHighlight, 1600)
 }
 
 function clearPrivateData() {
   clearDiarySearchOpen()
   searchNavigationSequence += 1
+  searchNavigationRequest?.abort()
+  searchNavigationRequest = null
+  clearSearchHighlight()
   taskContextSequence += 1
   diaryCalendarRequest?.controller.abort()
   eventCalendarRequest?.controller.abort()
@@ -1042,8 +1061,10 @@ async function open(date: string, options: { skipLeaveCheck?: boolean; searchRes
   return true
 }
 
-async function openDiarySearchIntent(intent: DiarySearchOpenIntent) {
+async function openDiarySearchIntent(intent: DiaryDiarySearchOpenIntent) {
   const sequence = ++searchNavigationSequence
+  searchNavigationRequest?.abort()
+  searchNavigationRequest = null
   const isCurrent = () => searchNavigationSequence === sequence && diarySearchOpenIntent.value?.id === intent.id
   if (!access.isUnlocked.value) {
     consumeDiarySearchOpen(intent.id)
@@ -1076,8 +1097,135 @@ async function openDiarySearchIntent(intent: DiarySearchOpenIntent) {
   consumeDiarySearchOpen(intent.id)
 }
 
+async function openDiaryRecordSearchIntent(intent: DiaryEventSearchOpenIntent | DiaryTaskSearchOpenIntent) {
+  const sequence = ++searchNavigationSequence
+  searchNavigationRequest?.abort()
+  const controller = new AbortController()
+  searchNavigationRequest = controller
+  const isCurrent = () => searchNavigationSequence === sequence
+    && diarySearchOpenIntent.value?.id === intent.id
+    && !controller.signal.aborted
+    && access.isUnlocked.value
+  if (!isCurrent()) {
+    consumeDiarySearchOpen(intent.id)
+    return
+  }
+  if (!(await canLeave())) {
+    consumeDiarySearchOpen(intent.id)
+    return
+  }
+  if (!isCurrent()) return
+  await discardPendingAttachments()
+  if (!isCurrent()) return
+
+  try {
+    let targetDate: string | null = null
+    let highlightKind: 'event' | 'task'
+    let highlightId: string
+
+    if (intent.kind === 'event') {
+      const current = (await diaryLifeApi.event(intent.eventId, controller.signal)).event
+      if (!isCurrent()) return
+      highlightKind = 'event'
+      highlightId = current.id
+      targetDate = current.recurrence === 'none'
+        ? current.startDate
+        : occursOn(current, today.value)
+          ? today.value
+          : nextOccurrence(current, today.value)
+      if (!targetDate) {
+        toast.error('这条事件暂无可定位的发生日期。')
+        consumeDiarySearchOpen(intent.id)
+        return
+      }
+    } else if (intent.seriesId) {
+      const occurrence = (await diaryTasksApi.searchTarget(intent.seriesId, controller.signal)).occurrence
+      if (!isCurrent()) return
+      targetDate = occurrence.occurrenceDate
+      highlightKind = 'task'
+      highlightId = occurrence.id
+    } else if (intent.taskId) {
+      const current = (await diaryTasksApi.getTask(intent.taskId, controller.signal)).task
+      if (!isCurrent()) return
+      highlightKind = 'task'
+      highlightId = current.id
+      if (!current.dueDate) {
+        const date = today.value
+        resetForm()
+        mode.value = 'events'
+        syncCalendarToDate(date)
+        selected.value = date
+        eventSurface.value = { kind: 'day-list', date }
+        await nextTick()
+        if (!isCurrent()) return
+        startTaskEdit({ ...current, kind: 'one-off' }, { kind: 'day-list', date, taskId: current.id, restoreFocus: false })
+        consumeDiarySearchOpen(intent.id)
+        return
+      }
+      targetDate = current.dueDate
+    } else {
+      consumeDiarySearchOpen(intent.id)
+      return
+    }
+
+    if (!targetDate) {
+      toast.error('这条待办暂无可定位的有效日期。')
+      consumeDiarySearchOpen(intent.id)
+      return
+    }
+
+    resetForm()
+    mode.value = 'events'
+    syncCalendarToDate(targetDate)
+    await nextTick()
+    if (!isCurrent()) return
+    await load()
+    if (!isCurrent()) return
+
+    if (calendarTaskError.value || eventCalendarError.value) {
+      toast.error('加载日程失败，请重试。')
+      consumeDiarySearchOpen(intent.id)
+      return
+    }
+
+    if (intent.kind === 'event') {
+      const event = events.value.find(item => item.id === highlightId)
+      if (!event || !occursOn(event, targetDate)) {
+        toast.error('这条事件已更新，请重新搜索。')
+        consumeDiarySearchOpen(intent.id)
+        return
+      }
+    } else if (intent.seriesId) {
+      if (!calendarTasks.value.some(item => item.kind === 'recurring' && item.id === highlightId && !item.skipped)) {
+        toast.error('这条重复待办已更新，请重新搜索。')
+        consumeDiarySearchOpen(intent.id)
+        return
+      }
+    } else if (!calendarTasks.value.some(item => item.id === highlightId && item.dueDate === targetDate)) {
+      toast.error('这条待办已更新，请重新搜索。')
+      consumeDiarySearchOpen(intent.id)
+      return
+    }
+
+    const opened = await open(targetDate, { skipLeaveCheck: true })
+    if (!opened || !isCurrent()) return
+    highlightSearchRecord(highlightKind, highlightId)
+    consumeDiarySearchOpen(intent.id)
+  } catch (error) {
+    if (controller.signal.aborted || !isCurrent()) return
+    if (error instanceof DiaryLifeApiError && error.status === 404) toast.error('这条事件已不存在。')
+    else if (error instanceof DiaryTaskApiError && error.status === 404) toast.error('这条待办已不存在或没有有效实例。')
+    else toast.error('定位日程失败，请重试。')
+    consumeDiarySearchOpen(intent.id)
+  } finally {
+    if (searchNavigationRequest === controller) searchNavigationRequest = null
+  }
+}
+
 watch(diarySearchOpenIntent, intent => {
-  if (intent) void openDiarySearchIntent(intent)
+  if (!intent) return
+  if (intent.kind === 'diary') void openDiarySearchIntent(intent)
+  else void openDiaryRecordSearchIntent(intent)
 })
 async function refreshDayPolicy() {
   const signal = detailRequest?.signal
@@ -1491,6 +1639,7 @@ onBeforeUnmount(() => {
             :today="today"
             :allow-recurrence="!editingTask || editingTask.kind === 'recurring'"
             :lock-recurrence-start="editingTask?.kind === 'recurring'"
+            :completion="editingTask && editingTask.completedAt !== null ? editingTask : null"
             @update:model-value="updateTaskDraft"
           />
         </div>
@@ -1511,6 +1660,7 @@ onBeforeUnmount(() => {
               :items="selectedTasks"
               :today="today"
               :busy-ids="busyTaskIds"
+              :highlighted-id="searchHighlight?.kind === 'task' ? searchHighlight.id : null"
               :show-due-date="false"
               @toggle="toggleTask($event, { kind: 'day-list', date: selected ?? '', taskId: $event.id, restoreFocus: true })"
               @edit="editTaskFromDay"
@@ -1534,6 +1684,7 @@ onBeforeUnmount(() => {
               :title="displayEventTitle(event, selected)"
               :emoji="event.emoji"
               :single-line="true"
+              :search-highlighted="searchHighlight?.kind === 'event' && searchHighlight.id === event.id"
               :data-event-id="event.id"
               :aria-label="dayEventLabel(event)"
               @click="selectEventFromDay(event, $event)"

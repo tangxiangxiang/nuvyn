@@ -744,6 +744,7 @@ const STRINGS: Strings = {
   'search.loading': { zh: '正在搜索…', en: 'Searching…' },
   'search.failed': { zh: '搜索失败，请重试。', en: 'Search failed. Try again.' },
   'search.retry': { zh: '重试', en: 'Retry' },
+  'search.more': { zh: '继续搜索', en: 'Search more' },
   'search.start_prompt': { zh: '输入关键词开始搜索', en: 'Start typing to search' },
   'search.create': { zh: '新建“{query}”', en: 'Create “{query}”' },
   'search.navigate': { zh: '↑↓ 切换', en: '↑↓ Navigate' },

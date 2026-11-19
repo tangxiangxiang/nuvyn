@@ -7,7 +7,10 @@ import { useFocusTrap } from '../../composables/useFocusTrap'
 import { useI18n } from '../../composables/useI18n'
 import { isNuvynShortcutBlocked } from '../../lib/keyboard'
 import type { DiarySearchPayload } from '../../features/diary/diarySearchProvider'
+import type { DiaryEventSearchPayload } from '../../features/diary/diaryEventSearchProvider'
+import type { DiaryTaskSearchPayload } from '../../features/diary/diaryTaskSearchProvider'
 import type { BoardSearchPayload } from '../../features/board/searchProvider'
+import { eventEmojiSource } from '../../features/diary/eventEmoji'
 
 const props = withDefaults(defineProps<{
   posts?: PostSummary[]
@@ -28,6 +31,7 @@ const open = ref(false)
 const query = ref('')
 const sections = ref<SearchResultSection[]>([])
 const hits = computed(() => sections.value.flatMap((section) => section.results))
+const hasMoreSearchResults = computed(() => sections.value.some(section => section.hasMore))
 const activeIdx = ref(0)
 const keyboardNavigated = ref(false)
 const searching = ref(false)
@@ -110,7 +114,7 @@ function hide() {
 function commit(hit: SearchResult) {
   emit('commit', hit)
   if (hit.type === 'file') emit('select', (hit.payload as { path: string }).path)
-  else if (hit.type !== 'board' && hit.type !== 'diary-day') return
+  else if (hit.type !== 'board' && hit.type !== 'diary-day' && hit.type !== 'diary-event' && hit.type !== 'diary-task') return
   hide()
 }
 function commitNew() {
@@ -172,11 +176,13 @@ async function loadMore() {
       if (!page) continue
       const index = sections.value.findIndex(section => section.id === page.id)
       if (index < 0) {
-        if (page.results.length || page.error) sections.value = [...sections.value, page]
+        if (page.results.length || page.error || page.hasMore) sections.value = [...sections.value, page]
       } else {
         const next = [...sections.value]
         const prior = next[index]!
-        next[index] = { ...prior, results: [...prior.results, ...page.results], error: page.error }
+        const existingIds = new Set(prior.results.map(result => result.id))
+        const additions = page.results.filter(result => !existingIds.has(result.id))
+        next[index] = { ...prior, results: [...prior.results, ...additions], error: page.error, hasMore: page.hasMore }
         sections.value = next
       }
     }
@@ -191,7 +197,7 @@ function onListScroll(event: Event) {
 }
 
 function retrySearch() {
-  if (hits.value.length && (props.providers ?? []).some(provider => provider.loadMore)) void loadMore()
+  if (hasMoreSearchResults.value && (props.providers ?? []).some(provider => provider.loadMore)) void loadMore()
   else void refresh()
 }
 
@@ -231,6 +237,22 @@ function boardBodySnippetMatch(hit: SearchResult) {
 }
 function boardBodyMatch(hit: SearchResult): boolean {
   return hit.type === 'board' && (hit.payload as Partial<BoardSearchPayload>).match === 'body'
+}
+function diaryRecordTitleMatch(hit: SearchResult) {
+  return hit.type === 'diary-event' || hit.type === 'diary-task'
+    ? exactMatchParts(hit.title, query.value)
+    : null
+}
+function diaryRecordSnippetMatch(hit: SearchResult) {
+  if (hit.type !== 'diary-event' && hit.type !== 'diary-task') return null
+  const payload = hit.payload as DiaryEventSearchPayload | DiaryTaskSearchPayload
+  return payload.snippet ? exactMatchParts(payload.snippet, query.value) : null
+}
+function recordIconSource(hit: SearchResult): string {
+  return hit.type === 'diary-event' && hit.icon ? eventEmojiSource(hit.icon) ?? '' : ''
+}
+function isDiaryRecord(hit: SearchResult): boolean {
+  return hit.type === 'diary-event' || hit.type === 'diary-task'
 }
 function optionDomId(hit: SearchResult): string {
   return `palette-option-${encodeURIComponent(hit.id)}`
@@ -274,9 +296,18 @@ defineExpose({ show, hide, refresh })
         />
         <div v-if="hits.length" class="palette-list" role="listbox" @scroll.passive="onListScroll">
           <section v-for="section in sections" :key="section.id" class="palette-section">
+            <div v-if="section.showLabel && section.results.length" class="palette-section-label">{{ section.label }}</div>
             <div v-for="hit in section.results" :id="optionDomId(hit)" :key="hit.id" :class="['palette-item', { active: hits.indexOf(hit) === activeIdx, 'keyboard-focus': keyboardNavigated && hits.indexOf(hit) === activeIdx }]" role="option" :aria-selected="hits.indexOf(hit) === activeIdx" @mouseenter="activeIdx = hits.indexOf(hit); keyboardNavigated = false" @click="commit(hit)">
               <div :class="['palette-row', { 'palette-note-row': hit.type === 'file' }]">
-                <span :class="['palette-title', { 'palette-note-title': hit.type === 'file' }]">
+                <div v-if="isDiaryRecord(hit)" class="palette-record-title-line">
+                  <span v-if="hit.type === 'diary-event' && recordIconSource(hit)" class="palette-record-icon"><img :src="recordIconSource(hit)" alt=""></span>
+                  <span v-else class="palette-record-icon" aria-hidden="true">{{ hit.icon }}</span>
+                  <span class="palette-title palette-record-title">
+                    <template v-if="diaryRecordTitleMatch(hit)"><span>{{ diaryRecordTitleMatch(hit)?.before }}</span><mark>{{ diaryRecordTitleMatch(hit)?.match }}</mark><span>{{ diaryRecordTitleMatch(hit)?.after }}</span></template>
+                    <template v-else>{{ hit.title }}</template>
+                  </span>
+                </div>
+                <span v-else :class="['palette-title', { 'palette-note-title': hit.type === 'file' }]">
                   <template v-if="noteTitleMatch(hit)"><span>{{ noteTitleMatch(hit)?.before }}</span><mark class="palette-note-highlight">{{ noteTitleMatch(hit)?.match }}</mark><span>{{ noteTitleMatch(hit)?.after }}</span></template>
                   <template v-else>{{ hit.title }}</template>
                 </span>
@@ -291,13 +322,15 @@ defineExpose({ show, hide, refresh })
                 <span>{{ boardBodySnippetMatch(hit)?.before }}</span><mark class="palette-note-highlight">{{ boardBodySnippetMatch(hit)?.match }}</mark><span>{{ boardBodySnippetMatch(hit)?.after }}</span>
               </div>
               <div v-if="diarySnippet(hit)" class="palette-snippet"><span>{{ diarySnippet(hit)?.before }}</span><mark>{{ diarySnippet(hit)?.match }}</mark><span>{{ diarySnippet(hit)?.after }}</span></div>
+              <div v-if="diaryRecordSnippetMatch(hit)" class="palette-snippet"><span>{{ diaryRecordSnippetMatch(hit)?.before }}</span><mark>{{ diaryRecordSnippetMatch(hit)?.match }}</mark><span>{{ diaryRecordSnippetMatch(hit)?.after }}</span></div>
               <div v-if="hit.subtitle && hit.type !== 'file'" class="palette-path">{{ hit.subtitle }}</div>
             </div>
             <div v-if="section.error" class="palette-search-error" role="alert">{{ t('search.failed') }} <button type="button" @click="retrySearch">{{ t('search.retry') }}</button></div>
           </section>
           <div v-if="loadingMore" class="palette-search-status" role="status">{{ t('search.loading') }}</div>
+          <div v-else-if="hasMoreSearchResults" class="palette-search-more"><button type="button" @click="loadMore">{{ t('search.more') }}</button></div>
         </div>
-        <div v-else class="palette-empty"><div role="status">{{ searching ? t('search.loading') : searchFailed ? t('search.failed') : query.trim() ? t('search.no_results') : t('search.start_prompt') }}</div><NButton v-if="searchFailed" attr-type="button" class="palette-new" @click="retrySearch">{{ t('search.retry') }}</NButton><NButton v-if="query.trim() && props.allowCreate !== false" attr-type="button" type="primary" class="palette-new" @click="commitNew">{{ t('search.create', { query: query.trim() }) }}</NButton></div>
+        <div v-else class="palette-empty"><div role="status">{{ searching ? t('search.loading') : searchFailed ? t('search.failed') : query.trim() ? t('search.no_results') : t('search.start_prompt') }}</div><NButton v-if="hasMoreSearchResults" attr-type="button" class="palette-search-more-button" :disabled="loadingMore" @click="loadMore">{{ t('search.more') }}</NButton><NButton v-if="searchFailed" attr-type="button" class="palette-new" @click="retrySearch">{{ t('search.retry') }}</NButton><NButton v-if="query.trim() && props.allowCreate !== false" attr-type="button" type="primary" class="palette-new" @click="commitNew">{{ t('search.create', { query: query.trim() }) }}</NButton></div>
         <div class="palette-foot"><span>{{ t('search.navigate') }}</span><span>{{ t('search.open') }}</span><span>{{ t('search.close') }}</span></div>
       </div>
     </div>

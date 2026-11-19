@@ -45,7 +45,7 @@ describe('DiaryTaskRows', () => {
   })
 
   it('shows completed status instead of the deadline and restores the deadline when reopened', async () => {
-    const completed = makeTask({ dueTime: '12:00', completedAt: 1 })
+    const completed = makeTask({ dueTime: '12:00', completedAt: new Date(2026, 10, 18, 12).getTime() })
     const wrapper = mount(DiaryTaskRows, { props: { items: [completed], today: '2026-11-18', showDueDate: false } })
 
     expect(wrapper.get('.diary-task-row').classes()).toContain('is-completed')
@@ -74,6 +74,14 @@ describe('DiaryTaskRows', () => {
     expect(rows[2]!.find('.diary-task-deadline-reminder').attributes('src')).toBe('/emoji/alarm-clock.svg')
     expect(rows[3]!.find('.diary-task-deadline-reminder').exists()).toBe(false)
     expect(rows[3]!.find('.diary-task-detail').text()).toBe('已完成')
+    wrapper.unmount()
+  })
+
+  it('labels a task completed after its deadline as overdue completion', () => {
+    const completed = makeTask({ dueDate: '2026-11-18', dueTime: '12:00', completedAt: new Date(2026, 10, 18, 13, 26).getTime() })
+    const wrapper = mount(DiaryTaskRows, { props: { items: [completed], today: '2026-11-18', showDueDate: false } })
+
+    expect(wrapper.get('.diary-task-detail').text()).toBe('逾期完成')
     wrapper.unmount()
   })
 

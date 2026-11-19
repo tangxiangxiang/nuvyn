@@ -3,9 +3,11 @@ import { computed, ref } from 'vue'
 import { NDatePicker, NInput, NSelect, NTimePicker, type InputInst } from 'naive-ui'
 import { MAX_DIARY_TASK_DESCRIPTION_LENGTH, MAX_DIARY_TASK_TITLE_LENGTH, taskTimeFieldsError, type TaskEditorFields } from '../../../shared/diaryTasks'
 import type { TaskRecurrenceFrequency } from '../../../shared/diaryTaskRecurrence'
+import { taskCompletionInfo, type TaskCompletionRecord } from '../../features/diary/taskCompletion'
 
 const props = withDefaults(defineProps<{
   modelValue: TaskEditorFields
+  completion?: TaskCompletionRecord | null
   inert?: boolean
   today: string
   allowRecurrence?: boolean
@@ -19,6 +21,7 @@ const emit = defineEmits<{
 }>()
 const titleInput = ref<InputInst | null>(null)
 const recurrenceStartLocked = computed(() => props.modelValue.recurrence !== null && props.lockRecurrenceStart)
+const completionInfo = computed(() => props.completion ? taskCompletionInfo(props.completion) : null)
 const title = computed({
   get: () => props.modelValue.title,
   set: (title: string) => emit('update:modelValue', { ...props.modelValue, title }),
@@ -213,6 +216,13 @@ defineExpose({ focusTitle: () => titleInput.value?.focus() })
       </div>
     </div>
     <p v-if="timeError" class="diary-task-form-time-error" role="alert">{{ timeError }}</p>
+    <div v-if="completionInfo" class="diary-task-form-completion" data-testid="diary-task-completion">
+      <span class="diary-task-form-completion-label">完成时间</span>
+      <div class="diary-task-form-completion-value">
+        <time :datetime="new Date(completionInfo.completedAt).toISOString()">{{ completionInfo.completedAtLabel }}</time>
+        <small v-if="completionInfo.overdueLabel" class="diary-task-form-completion-overdue">{{ completionInfo.overdueLabel }}</small>
+      </div>
+    </div>
     <label v-if="allowRecurrence" class="diary-task-form-field">
       <span>重复</span>
       <NSelect :value="frequency" :options="frequencyOptions" aria-label="重复规则" :disabled="inert" @update:value="updateFrequency" />
@@ -263,5 +273,8 @@ defineExpose({ focusTitle: () => titleInput.value?.focus() })
 .diary-task-form-time-heading small { font-size: 12px; font-weight: 400; }
 .diary-task-form-time-inputs { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; align-items: end; min-width: 0; }
 .diary-task-form-time-error { margin: -10px 0 0; color: var(--error-color, #d03050); font-size: 12px; }
+.diary-task-form-completion { display: flex; min-width: 0; flex-direction: column; gap: 7px; color: var(--text-muted, #6b7280); font-size: 14px; }
+.diary-task-form-completion-value { display: flex; min-width: 0; flex-wrap: wrap; align-items: baseline; gap: 8px; color: var(--text); font-variant-numeric: tabular-nums; }
+.diary-task-form-completion-overdue { color: var(--error-color, #d03050); font-size: 12px; }
 .diary-task-form-description textarea { resize: vertical; }
 </style>

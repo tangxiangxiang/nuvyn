@@ -29,19 +29,19 @@ export function createDiarySearchProvider(): SearchProvider {
     generation += 1
     activeQuery = query
     nextCursor = null
-    if (!query) return { id: 'diary', label: '日记', results: [] }
+    if (!query) return { id: 'diary', label: '日记', results: [], showLabel: true }
     const requestController = new AbortController()
     controller = requestController
     const requestGeneration = generation
     try {
       const page = await diaryLifeApi.search(query, 20, null, requestController.signal)
-      if (requestController.signal.aborted || requestGeneration !== generation) return { id: 'diary', label: '日记', results: [] }
+      if (requestController.signal.aborted || requestGeneration !== generation) return { id: 'diary', label: '日记', results: [], showLabel: true }
       nextCursor = page.nextCursor
-      return { id: 'diary', label: '日记', results: page.items.map(item => makeResult(item, query)) }
+      return { id: 'diary', label: '日记', results: page.items.map(item => makeResult(item, query)), showLabel: true, hasMore: nextCursor !== null }
     } catch {
-      if (requestController.signal.aborted || requestGeneration !== generation) return { id: 'diary', label: '日记', results: [] }
+      if (requestController.signal.aborted || requestGeneration !== generation) return { id: 'diary', label: '日记', results: [], showLabel: true }
       nextCursor = null
-      return { id: 'diary', label: '日记', results: [], error: true }
+      return { id: 'diary', label: '日记', results: [], error: true, showLabel: true }
     } finally {
       if (controller === requestController) controller = null
     }
@@ -59,11 +59,11 @@ export function createDiarySearchProvider(): SearchProvider {
       const page = await diaryLifeApi.search(query, 20, cursor, requestController.signal)
       if (requestController.signal.aborted || requestGeneration !== generation || query !== activeQuery) return null
       nextCursor = page.nextCursor
-      return { id: 'diary', label: '日记', results: page.items.map(item => makeResult(item, query)) }
+      return { id: 'diary', label: '日记', results: page.items.map(item => makeResult(item, query)), showLabel: true, hasMore: nextCursor !== null }
     } catch {
       if (requestController.signal.aborted || requestGeneration !== generation) return null
       nextCursor = cursor
-      return { id: 'diary', label: '日记', results: [], error: true }
+      return { id: 'diary', label: '日记', results: [], error: true, showLabel: true }
     } finally {
       if (controller === requestController) controller = null
     }

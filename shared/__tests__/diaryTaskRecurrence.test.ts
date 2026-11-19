@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { parseTaskRecurrenceRule, taskRecurrenceDates, taskRecurrenceOccursOn } from '../diaryTaskRecurrence'
+import { parseTaskRecurrenceRule, taskRecurrenceDates, taskRecurrenceOccursOn, taskSearchOccurrenceDate } from '../diaryTaskRecurrence'
 
 describe('Diary task recurrence', () => {
   it('validates bounded Gregorian recurrence rules', () => {
@@ -70,5 +70,17 @@ describe('Diary task recurrence', () => {
     expect(maximum.at(-1)).toBe('2024-12-31')
     expect(() => taskRecurrenceDates(daily, '2024-01-01', '2025-01-01', daily.startDate, 366)).toThrow(RangeError)
     expect(taskRecurrenceDates(daily, '2024-02-01', '2024-01-31')).toEqual([])
+  })
+
+  it('chooses the nearest non-skipped series occurrence and falls back to ended history', () => {
+    const upcoming = { frequency: 'daily' as const, startDate: '2026-11-17', untilDate: '2026-11-20' }
+    expect(taskSearchOccurrenceDate(upcoming, upcoming.startDate, '2026-11-16', new Set(['2026-11-17'])))
+      .toBe('2026-11-18')
+
+    const ended = { frequency: 'weekly' as const, startDate: '2026-10-01', untilDate: '2026-10-15' }
+    expect(taskSearchOccurrenceDate(ended, ended.startDate, '2026-11-16', new Set(['2026-10-15'])))
+      .toBe('2026-10-08')
+    expect(taskSearchOccurrenceDate(ended, ended.startDate, '2026-11-16', new Set(['2026-10-01', '2026-10-08', '2026-10-15'])))
+      .toBeNull()
   })
 })

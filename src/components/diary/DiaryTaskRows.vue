@@ -3,6 +3,7 @@ import type { DiaryTaskListItem } from '../../../shared/diaryTasks'
 import { taskDueDateLabel } from '../../features/diary/diaryTaskCalendar'
 import { taskDeadlineVisualState } from '../../features/diary/deadlineVisualState'
 import { taskDeadlineReminderAsset } from '../../features/diary/deadlineReminderAssets'
+import { taskCompletionInfo } from '../../features/diary/taskCompletion'
 import { usePrefersReducedMotion } from '../../composables/usePrefersReducedMotion'
 import DiaryAlarmClockIcon from './DiaryAlarmClockIcon.vue'
 import './diaryCloudCard.css'
@@ -15,6 +16,7 @@ const props = withDefaults(defineProps<{
   editable?: boolean
   variant?: 'card' | 'plain'
   showDeadlineReminder?: boolean
+  highlightedId?: string | null
 }>(), {
   busyIds: () => new Set<string>(),
   showDueDate: true,
@@ -34,7 +36,7 @@ function detail(task: DiaryTaskListItem): string {
     if (props.showDueDate) return taskDueDateLabel(task, props.today)
     return task.dueTime ?? ''
   }
-  if (task.completedAt !== null) return '已完成'
+  if (task.completedAt !== null) return taskCompletionInfo(task)?.statusLabel ?? '已完成'
   if (props.showDueDate) return taskDueDateLabel(task, props.today)
   if (!task.dueTime) return ''
   return task.kind === 'recurring' ? task.dueTime : `截止 ${task.dueTime}`
@@ -53,7 +55,7 @@ function deadlineReminderSource(task: DiaryTaskListItem): string {
 
 <template>
   <div class="diary-task-rows" :class="{ 'diary-task-rows--plain': variant === 'plain' }">
-    <div v-for="task in items" :key="task.id" class="diary-task-row" :class="{ 'diary-cloud-card': variant === 'card', 'is-completed': task.completedAt !== null, 'is-skipped': task.kind === 'recurring' && task.skipped }">
+    <div v-for="task in items" :key="task.id" class="diary-task-row" :class="{ 'diary-cloud-card': variant === 'card', 'is-completed': task.completedAt !== null, 'is-skipped': task.kind === 'recurring' && task.skipped, 'is-search-highlight': highlightedId === task.id }" :data-search-highlight="highlightedId === task.id ? 'task' : undefined">
       <button
         type="button"
         class="diary-task-toggle"
@@ -178,4 +180,5 @@ function deadlineReminderSource(task: DiaryTaskListItem): string {
 }
 .diary-task-row.is-completed .diary-task-title { color: var(--text-muted, #6b7280); text-decoration: line-through; }
 .diary-task-row.is-completed .diary-task-edit small { opacity: .72; }
+.diary-task-row.is-search-highlight { border-color: color-mix(in srgb, var(--primary, #6366f1) 36%, var(--border, #d9dce5)); background-color: color-mix(in srgb, var(--primary, #6366f1) 13%, var(--bg)); }
 </style>

@@ -1,6 +1,18 @@
 import { diaryAuthFetch } from './auth-session'
-import type { DiaryDay, DiaryDaySummary, DiaryEvent, DiarySearchPage, DayFields, EventFields } from '../../shared/diaryLife'
+import type { DiaryDay, DiaryDaySummary, DiaryEvent, DiaryEventSearchPage, DiarySearchPage, DayFields, EventFields } from '../../shared/diaryLife'
 import type { DiaryAttachment } from '../../shared/diaryAttachments'
+
+export class DiaryLifeApiError extends Error {
+  readonly status: number
+  readonly code: string | null
+
+  constructor(status: number, code: string | null, message: string) {
+    super(message)
+    this.name = 'DiaryLifeApiError'
+    this.status = status
+    this.code = code
+  }
+}
 
 function createDiaryId(): string {
   if (typeof crypto.randomUUID === 'function') return crypto.randomUUID()
@@ -22,9 +34,10 @@ async function request<T>(path: string, method = 'GET', body?: unknown, signal?:
   if (!response.ok) {
     const payload = await response.json().catch(() => null) as { code?: unknown } | null
     if (response.status === 403 && payload?.code === 'diary-future-date') {
-      throw new Error('未来日期的日记只能查看。')
+      throw new DiaryLifeApiError(response.status, 'diary-future-date', '未来日期的日记只能查看。')
     }
-    throw new Error(response.status === 409 ? '记录已更新，请重新打开后再编辑。' : '操作失败，请重试。')
+    const code = typeof payload?.code === 'string' ? payload.code : null
+    throw new DiaryLifeApiError(response.status, code, response.status === 409 ? '记录已更新，请重新打开后再编辑。' : '操作失败，请重试。')
   }
   return response.json()
 }
@@ -43,6 +56,7 @@ export const diaryLifeApi = {
   dayPolicy: (signal: AbortSignal) => request<{ today: string }>('/day-policy', 'GET', undefined, signal),
   day: (date: string, signal?: AbortSignal) => request<{ day: DiaryDay | null; version: number; attachments: DiaryAttachment[]; today: string }>(`/days/${date}`, 'GET', undefined, signal),
   search: (query: string, limit = 20, cursor: string | null = null, signal?: AbortSignal) => request<DiarySearchPage>('/search', 'POST', { query, limit, cursor }, signal),
+  searchEvents: (query: string, limit = 20, cursor: string | null = null, signal?: AbortSignal) => request<DiaryEventSearchPage>('/events/search', 'POST', { query, limit, cursor }, signal),
   saveDay: (date: string, fields: DayFields, expectedVersion: number, attachments?: string[]) => request<{ day: DiaryDay; version: number; attachments: DiaryAttachment[] }>(`/days/${date}`, 'PUT', { ...fields, expectedVersion, ...(attachments === undefined ? {} : { attachments }) }),
   deleteDay: (date: string, expectedVersion: number) => request(`/days/${date}`, 'DELETE', { expectedVersion }),
   async events(start: string, end: string, signal?: AbortSignal): Promise<DiaryEvent[]> {

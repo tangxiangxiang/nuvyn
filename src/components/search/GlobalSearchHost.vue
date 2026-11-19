@@ -11,8 +11,10 @@ import { workspaceKindForPath, type WorkspaceKind } from '../../lib/workspace'
 import { clearSearchReveal, requestSearchReveal } from '../../composables/useSearchReveal'
 import { clearLinkNavigation } from '../../composables/useLinkNavigation'
 import { subscribeDiaryTeardown, useDiaryAccessSession } from '../../composables/diary/useDiaryAccessSession'
-import { clearDiarySearchOpen, requestDiarySearchOpen } from '../../composables/diary/useDiarySearchNavigation'
+import { clearDiarySearchOpen, requestDiaryEventSearchOpen, requestDiarySearchOpen, requestDiaryTaskSearchOpen } from '../../composables/diary/useDiarySearchNavigation'
 import { createDiarySearchProvider, type DiarySearchPayload } from '../../features/diary/diarySearchProvider'
+import { createDiaryEventSearchProvider, type DiaryEventSearchPayload } from '../../features/diary/diaryEventSearchProvider'
+import { createDiaryTaskSearchProvider, type DiaryTaskSearchPayload } from '../../features/diary/diaryTaskSearchProvider'
 
 const router = useRouter()
 const route = useRoute()
@@ -21,6 +23,8 @@ const diaryAccess = useDiaryAccessSession()
 const documentProvider = createDocumentSearchProvider(documentSearchSource)
 const boardProvider = createBoardSearchProvider()
 const diaryProvider = createDiarySearchProvider()
+const diaryEventProvider = createDiaryEventSearchProvider()
+const diaryTaskProvider = createDiaryTaskSearchProvider()
 const workspaceKind = computed<WorkspaceKind>(() => (
   route.meta.workspaceKind !== undefined
     ? route.meta.workspaceKind
@@ -29,7 +33,7 @@ const workspaceKind = computed<WorkspaceKind>(() => (
 const providers = computed(() => {
   if (workspaceKind.value === 'board') return [boardProvider]
   if (workspaceKind.value === 'vault') return [documentProvider]
-  if (workspaceKind.value === 'diary' && diaryAccess.isUnlocked.value) return [diaryProvider]
+  if (workspaceKind.value === 'diary' && diaryAccess.isUnlocked.value) return [diaryProvider, diaryEventProvider, diaryTaskProvider]
   return []
 })
 const canOpen = computed(() => (
@@ -54,6 +58,8 @@ watch(canOpen, (allowed) => {
 watch([workspaceKind, diaryAccess.isUnlocked], ([kind, unlocked], [previousKind]) => {
   if (kind !== 'diary' || !unlocked) {
     diaryProvider.clear?.()
+    diaryEventProvider.clear?.()
+    diaryTaskProvider.clear?.()
     if (kind === 'diary' || previousKind === 'diary') {
       clearDiarySearchOpen()
       hide()
@@ -63,6 +69,8 @@ watch([workspaceKind, diaryAccess.isUnlocked], ([kind, unlocked], [previousKind]
 
 const stopDiaryTeardown = subscribeDiaryTeardown(() => {
   diaryProvider.clear?.()
+  diaryEventProvider.clear?.()
+  diaryTaskProvider.clear?.()
   if (workspaceKind.value === 'diary') {
     clearDiarySearchOpen()
     hide()
@@ -83,6 +91,30 @@ function commit(result: SearchResult): void {
       ...(typeof payload.entryId === 'string' ? { entryId: payload.entryId } : {}),
       ...(typeof payload.entryIndex === 'number' ? { entryIndex: payload.entryIndex } : {}),
     })
+    return
+  }
+  if (result.type === 'diary-event') {
+    const payload = result.payload as Partial<DiaryEventSearchPayload>
+    if (!diaryAccess.isUnlocked.value || workspaceKind.value !== 'diary' || typeof payload.id !== 'string') {
+      clearDiarySearchOpen()
+      return
+    }
+    clearLinkNavigation()
+    clearSearchReveal()
+    requestDiaryEventSearchOpen({ eventId: payload.id, date: typeof payload.targetDate === 'string' ? payload.targetDate : null })
+    return
+  }
+  if (result.type === 'diary-task') {
+    const payload = result.payload as Partial<DiaryTaskSearchPayload>
+    if (!diaryAccess.isUnlocked.value || workspaceKind.value !== 'diary' || typeof payload.id !== 'string') {
+      clearDiarySearchOpen()
+      return
+    }
+    clearLinkNavigation()
+    clearSearchReveal()
+    requestDiaryTaskSearchOpen(payload.kind === 'recurring' && typeof payload.seriesId === 'string'
+      ? { seriesId: payload.seriesId, date: typeof payload.targetDate === 'string' ? payload.targetDate : null }
+      : { taskId: payload.id, date: typeof payload.targetDate === 'string' ? payload.targetDate : null })
     return
   }
   if (result.type === 'file') {
@@ -126,6 +158,8 @@ onBeforeUnmount(() => {
   document.removeEventListener('keydown', onKeydown)
   stopDiaryTeardown()
   diaryProvider.clear?.()
+  diaryEventProvider.clear?.()
+  diaryTaskProvider.clear?.()
 })
 
 defineExpose({ show, hide })

@@ -198,5 +198,37 @@ describe('DiaryTaskForm', () => {
     wrapper.unmount()
   })
 
+  it('shows a completed task time as read-only above the remarks', () => {
+    const initial: TaskEditorFields = {
+      title: '性能稼动率接口开发', description: '备注内容', startDate: null, startTime: null,
+      dueDate: '2026-11-15', dueTime: '02:00', recurrence: null,
+    }
+    const completion = {
+      completedAt: new Date(2026, 10, 15, 3, 26).getTime(),
+      dueDate: initial.dueDate,
+      dueTime: initial.dueTime,
+    }
+    const wrapper = mount(DiaryTaskForm, { props: { modelValue: initial, today: '2026-11-16', completion } })
+
+    const completed = wrapper.get('[data-testid="diary-task-completion"]')
+    expect(completed.text()).toContain('完成时间')
+    expect(completed.text()).toContain('2026-11-15 03:26')
+    expect(completed.text()).toContain('逾期 1小时26分')
+    expect(wrapper.find('[aria-label="完成时间"]').exists()).toBe(false)
+    expect(completed.element.compareDocumentPosition(wrapper.get('.diary-task-form-description').element)
+      & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+    wrapper.unmount()
+  })
+
+  it('does not show a completion time for an unfinished task', () => {
+    const initial: TaskEditorFields = {
+      title: '未完成待办', description: '', startDate: null, startTime: null,
+      dueDate: '2026-11-15', dueTime: '02:00', recurrence: null,
+    }
+    const wrapper = mount(DiaryTaskForm, { props: { modelValue: initial, today: '2026-11-16' } })
+
+    expect(wrapper.find('[data-testid="diary-task-completion"]').exists()).toBe(false)
+    wrapper.unmount()
+  })
 
 })

@@ -83,15 +83,29 @@ test('creates a dated task, completes it, restores it, and moves it to a new cal
   await page.getByRole('dialog', { name: '删除这条待办？' }).getByRole('button', { name: /^(Confirm|确认|确定)$/ }).click()
   await expect(marker).toHaveCount(1)
 
+  const completionResponsePromise = page.waitForResponse(response => response.request().method() === 'POST' && response.url().includes('/complete'))
   await complete.click()
+  const completedTask = (await (await completionResponsePromise).json()).task as { completedAt: number }
   const completedRow = page.locator('.diary-task-row.is-completed').filter({ has: page.locator('.diary-task-title', { hasText: title }) })
   await expect(completedRow).toContainText(title)
   await expect(completedRow.locator('.diary-task-title')).toHaveCSS('text-decoration-line', 'line-through')
-  await expect(completedRow.locator('.diary-task-detail')).toHaveText('已完成')
+  await expect(completedRow.locator('.diary-task-detail')).toHaveText('逾期完成')
   await expect(completedRow.locator('.diary-task-detail')).not.toContainText('截止')
   await expect(marker).toHaveAttribute('src', '/emoji/party-popper.svg')
   await expect(marker).toHaveAttribute('data-todo-day-state', 'completed-late')
   await expect(marker).toHaveClass(/life-task-marker--completed-late/)
+
+  await page.getByRole('button', { name: `编辑待办：${title}`, exact: true }).click()
+  const completionDetails = editor.locator('[data-testid="diary-task-completion"]')
+  await expect(completionDetails).toBeVisible()
+  const completedAtLabel = await page.evaluate(timestamp => {
+    const date = new Date(timestamp)
+    const pad = (value: number) => value.toString().padStart(2, '0')
+    return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())} ${pad(date.getHours())}:${pad(date.getMinutes())}`
+  }, completedTask.completedAt)
+  await expect(completionDetails).toContainText(completedAtLabel)
+  await expect(completionDetails).toContainText('逾期')
+  await page.getByRole('button', { name: '取消', exact: true }).click()
 
   await page.getByRole('checkbox', { name: `恢复待办：${title}`, exact: true }).click()
   await expect(page.getByRole('checkbox', { name: `完成待办：${title}`, exact: true })).toBeVisible()
@@ -880,9 +894,16 @@ test('recurring Todo completion and skipping are scoped to one date', async ({ p
   await expect(page.locator('.diary-task-row').filter({ has: page.locator('.diary-task-title', { hasText: title }) }).locator('.diary-task-detail')).toHaveText('12:00')
   await page.getByRole('checkbox', { name: `完成待办：${title}` }).click()
   await expect(page.locator('.diary-task-row.is-completed')).toContainText(title)
-  await expect(page.locator('.diary-task-row.is-completed').locator('.diary-task-detail')).toHaveText('已完成')
+  await expect(page.locator('.diary-task-row.is-completed').locator('.diary-task-detail')).toHaveText('逾期完成')
   await expect(startCell.locator('.life-task-marker')).toHaveAttribute('src', '/emoji/party-popper.svg')
   await expect(startCell.locator('.life-task-marker')).toHaveAttribute('data-todo-day-state', 'completed-late')
+
+  await page.getByRole('button', { name: `编辑待办：${title}` }).click()
+  const completedOccurrence = editor.locator('[data-testid="diary-task-completion"]')
+  await expect(completedOccurrence).toBeVisible()
+  await expect(completedOccurrence).toContainText(/\d{4}-\d{2}-\d{2} \d{2}:\d{2}/)
+  await expect(completedOccurrence).toContainText('逾期')
+  await page.getByRole('button', { name: '取消', exact: true }).click()
 
   await page.getByRole('button', { name: '关闭当天事件' }).click()
   const skippedCell = calendar.locator(`[data-date="${skippedDate}"]`)

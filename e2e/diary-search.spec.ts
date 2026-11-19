@@ -113,14 +113,26 @@ test('Diary lock clears search results and locked search does not query private 
   await expect(page.getByRole('button', { name: '解锁日程', exact: true })).toBeVisible()
 
   let privateSearchRequests = 0
+  let privateEventSearchRequests = 0
+  let privateTaskSearchRequests = 0
   await page.route('**/api/diary/life/search', route => {
     privateSearchRequests += 1
+    return route.continue()
+  })
+  await page.route('**/api/diary/life/events/search', route => {
+    privateEventSearchRequests += 1
+    return route.continue()
+  })
+  await page.route('**/api/diary/life/tasks/search', route => {
+    privateTaskSearchRequests += 1
     return route.continue()
   })
   await page.locator('.nav-search').click()
   await page.locator('.palette-input input').fill('Private lock search phrase')
   await expect(page.getByRole('status')).toContainText(/No matching results|没有匹配结果/)
   expect(privateSearchRequests).toBe(0)
+  expect(privateEventSearchRequests).toBe(0)
+  expect(privateTaskSearchRequests).toBe(0)
   await expect(page.locator('.palette')).not.toContainText('Private lock search phrase')
 })
 
@@ -192,4 +204,110 @@ test('Diary search does not open an empty editor when a result is deleted', asyn
   await expect(page.getByText('这条日记已不存在。', { exact: true })).toBeVisible()
   await expect(page.getByTestId('diary-day-dialog')).toHaveCount(0)
   await expect(page.getByTestId('diary-bullet-editor')).toHaveCount(0)
+})
+
+test('Event and Todo search navigate across years to the exact calendar rows', async ({ page }) => {
+  await page.clock.install({ time: new Date('2024-06-10T12:00:00') })
+  await page.setViewportSize({ width: 1280, height: 900 })
+  await page.goto('/diary')
+  await unlockDiary(page)
+
+  const seeded = await page.evaluate(async () => {
+    const life = await import(new URL('/src/lib/diary-life-api.ts', location.href).href)
+    const tasks = await import(new URL('/src/lib/diary-tasks-api.ts', location.href).href)
+    const eventId = '99999999-9999-4999-8999-999999999901'
+    await life.diaryLifeApi.saveEvent(eventId, {
+      title: '买下山景公寓', description: '', emoji: '🏠', type: 'milestone',
+      startDate: '2023-10-12', endDate: '2023-10-12', startTime: null, endTime: null,
+      allDay: true, dateRule: { calendar: 'gregory' }, recurrence: 'none', showCountdown: false, isPrimary: false,
+    }, 0)
+    const task = await tasks.diaryTasksApi.createTask({
+      title: '联系装修师傅', description: '确认厨房报价', startDate: null, startTime: null,
+      dueDate: '2023-10-13', dueTime: null,
+    })
+    return { eventId, taskId: task.task.id }
+  })
+
+  await page.locator('.nav-search').click()
+  const search = page.locator('.palette-input input')
+  await search.fill('山景公寓')
+  const eventResult = page.getByRole('option').filter({ hasText: '买下山景公寓' })
+  await expect(eventResult).toBeVisible()
+  await expect(eventResult.locator('mark')).toContainText('山景公寓')
+  await expect(page.locator('.palette-section-label')).toHaveText('事件')
+  await eventResult.click()
+
+  const eventDialog = page.locator('.diary-life-dialog')
+  await expect(eventDialog).toBeVisible()
+  await expect(page.locator('.life-month-label')).toHaveText(diaryMonthLabel('2023-10'))
+  const eventRow = eventDialog.locator(`[data-event-id="${seeded.eventId}"]`)
+  await expect(eventRow).toBeVisible()
+  await expect(eventRow).toHaveAttribute('data-search-highlight', 'event')
+  await expect(eventDialog.locator('.diary-event-form-content')).toHaveCount(0)
+  await page.getByRole('button', { name: '关闭当天事件' }).click()
+
+  await page.setViewportSize({ width: 390, height: 844 })
+  await page.locator('.nav-search').click()
+  await search.fill('联系装修师傅')
+  const taskResult = page.getByRole('option').filter({ hasText: '联系装修师傅' })
+  await expect(taskResult).toBeVisible()
+  await expect(taskResult).toContainText('截止 2023-10-13 · 未完成')
+  await expect(page.locator('.palette-section-label')).toHaveText('待办')
+  await taskResult.click()
+
+  const taskDialog = page.locator('.diary-life-dialog')
+  await expect(taskDialog).toBeVisible()
+  await expect(page.locator('.life-month-label')).toHaveText(diaryMonthLabel('2023-10'))
+  const taskRow = taskDialog.locator(`[data-task-id="${seeded.taskId}"]`).locator('xpath=..')
+  await expect(taskRow).toBeVisible()
+  await expect(taskRow).toHaveAttribute('data-search-highlight', 'task')
+  await expect(taskDialog.locator('.diary-task-edit-dialog')).toHaveCount(0)
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true)
+})
+
+test('deleted Event and Todo search results fail safely without opening a dialog', async ({ page }) => {
+  await page.clock.install({ time: new Date('2024-06-10T12:00:00') })
+  await page.goto('/diary')
+  await unlockDiary(page)
+
+  const seeded = await page.evaluate(async () => {
+    const life = await import(new URL('/src/lib/diary-life-api.ts', location.href).href)
+    const tasks = await import(new URL('/src/lib/diary-tasks-api.ts', location.href).href)
+    const eventId = '99999999-9999-4999-8999-999999999902'
+    const event = await life.diaryLifeApi.saveEvent(eventId, {
+      title: '删除保护事件标记', description: '', emoji: '🎯', type: 'milestone',
+      startDate: '2023-11-12', endDate: '2023-11-12', startTime: null, endTime: null,
+      allDay: true, dateRule: { calendar: 'gregory' }, recurrence: 'none', showCountdown: false, isPrimary: false,
+    }, 0)
+    const task = await tasks.diaryTasksApi.createTask({
+      title: '删除保护待办标记', description: '', startDate: null, startTime: null,
+      dueDate: '2023-11-13', dueTime: null,
+    })
+    return { eventId, eventVersion: event.event.version, taskId: task.task.id, taskVersion: task.task.version }
+  })
+
+  await page.locator('.nav-search').click()
+  const search = page.locator('.palette-input input')
+  await search.fill('删除保护事件标记')
+  const eventResult = page.getByRole('option').filter({ hasText: '删除保护事件标记' })
+  await expect(eventResult).toBeVisible()
+  await page.evaluate(async ({ id, version }) => {
+    const life = await import(new URL('/src/lib/diary-life-api.ts', location.href).href)
+    await life.diaryLifeApi.deleteEvent(id, version)
+  }, { id: seeded.eventId, version: seeded.eventVersion })
+  await eventResult.click()
+  await expect(page.getByText('这条事件已不存在。', { exact: true })).toBeVisible()
+  await expect(page.locator('.diary-life-dialog')).toHaveCount(0)
+
+  await page.locator('.nav-search').click()
+  await search.fill('删除保护待办标记')
+  const taskResult = page.getByRole('option').filter({ hasText: '删除保护待办标记' })
+  await expect(taskResult).toBeVisible()
+  await page.evaluate(async ({ id, version }) => {
+    const tasks = await import(new URL('/src/lib/diary-tasks-api.ts', location.href).href)
+    await tasks.diaryTasksApi.deleteTask(id, version)
+  }, { id: seeded.taskId, version: seeded.taskVersion })
+  await taskResult.click()
+  await expect(page.getByText('这条待办已不存在或没有有效实例。', { exact: true })).toBeVisible()
+  await expect(page.locator('.diary-life-dialog')).toHaveCount(0)
 })

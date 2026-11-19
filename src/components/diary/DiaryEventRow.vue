@@ -6,11 +6,12 @@ defineProps<{
   title: string
   emoji: string
   singleLine?: boolean
+  searchHighlighted?: boolean
 }>()
 </script>
 
 <template>
-  <button type="button" class="diary-event-row diary-cloud-card" :class="{ 'diary-event-row--single-line': singleLine }">
+  <button type="button" class="diary-event-row diary-cloud-card" :class="{ 'diary-event-row--single-line': singleLine, 'diary-event-row--search-highlight': searchHighlighted }" :data-search-highlight="searchHighlighted ? 'event' : undefined">
     <strong class="diary-event-row-heading">
       <span class="diary-event-row-emoji" aria-hidden="true">
         <img v-if="eventEmojiSource(emoji)" :src="eventEmojiSource(emoji)" alt="">
@@ -36,6 +37,7 @@ defineProps<{
   cursor: pointer;
 }
 .diary-event-row:focus-visible { outline: none; }
+.diary-event-row--search-highlight { border-color: color-mix(in srgb, var(--primary, #6366f1) 36%, var(--border, #d9dce5)); background-color: color-mix(in srgb, var(--primary, #6366f1) 13%, var(--bg)); }
 .diary-event-row-heading {
   display: flex;
   min-width: 0;

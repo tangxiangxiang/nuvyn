@@ -1,5 +1,5 @@
 import { diaryAuthFetch } from './auth-session'
-import type { DiaryRecurringTaskOccurrence, DiaryTask, DiaryTaskItemPage, DiaryTaskListItem, DiaryTaskListStatus, DiaryTaskPage, DiaryTaskSeries, TaskSeriesFields, WritableOneOffTaskFields } from '../../shared/diaryTasks'
+import type { DiaryRecurringTaskOccurrence, DiaryTask, DiaryTaskItemPage, DiaryTaskListItem, DiaryTaskListStatus, DiaryTaskPage, DiaryTaskSearchPage, DiaryTaskSeries, TaskSeriesFields, WritableOneOffTaskFields } from '../../shared/diaryTasks'
 export type { DiaryTaskPage } from '../../shared/diaryTasks'
 
 export class DiaryTaskApiError extends Error {
@@ -76,6 +76,9 @@ export const diaryTasksApi = {
   undatedTaskSummary(signal?: AbortSignal): Promise<{ task: DiaryTask | null; count: number }> {
     return request('/tasks/undated', 'GET', undefined, signal)
   },
+  searchTasks(query: string, limit = 20, cursor: string | null = null, signal?: AbortSignal): Promise<DiaryTaskSearchPage> {
+    return request('/tasks/search', 'POST', { query, limit, cursor }, signal)
+  },
   listTasks(cursor?: string, signal?: AbortSignal, status?: DiaryTaskListStatus): Promise<DiaryTaskPage> {
     const query = new URLSearchParams()
     if (status) query.set('status', status)
@@ -121,6 +124,9 @@ export const diaryTasksApi = {
   },
   getSeries(seriesId: string, signal?: AbortSignal): Promise<{ series: DiaryTaskSeries }> {
     return request(`/task-series/${encodeURIComponent(seriesId)}`, 'GET', undefined, signal)
+  },
+  searchTarget(seriesId: string, signal?: AbortSignal): Promise<{ occurrence: DiaryRecurringTaskOccurrence }> {
+    return request(`/task-series/${encodeURIComponent(seriesId)}/search-target`, 'GET', undefined, signal)
   },
   getOccurrence(seriesId: string, date: string, signal?: AbortSignal): Promise<{ occurrence: DiaryRecurringTaskOccurrence }> {
     return request(`/task-series/${encodeURIComponent(seriesId)}/occurrences/${encodeURIComponent(date)}`, 'GET', undefined, signal)

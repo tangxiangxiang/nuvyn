@@ -1,11 +1,32 @@
 import type { Database } from 'better-sqlite3'
 import type { DiaryBodyOperation } from './diaryAccess/service.js'
-import { parseDay, parseEvent, type DiaryDay, type DiaryEvent, type DiarySearchItem, type DiarySearchPage, type DayFields, type EventFields } from '../shared/diaryLife.js'
+import { displayEventTitle, nextOccurrence, occursOn, parseDay, parseEvent, type DiaryDay, type DiaryEvent, type DiaryEventSearchItem, type DiaryEventSearchPage, type DiarySearchItem, type DiarySearchPage, type DayFields, type EventFields } from '../shared/diaryLife.js'
+import { formatLunarRule } from '../shared/lunarCalendar.js'
 import { isDiaryAttachmentMimeType, MAX_DIARY_DAY_ATTACHMENTS } from '../shared/diaryAttachments.js'
 import { DiaryAttachmentError, listDiaryDayAttachments } from './diaryAttachments/service.js'
+import { decodeDiarySearchCursor, diarySearchSnippet, encodeDiarySearchCursor, type DiarySearchCursor } from './diarySearch.js'
 
 export class DiaryConflict extends Error {}
 type Row = { id: string; date: string; start_date: string; end_date: string; recurrence: string; encrypted_fields: Buffer; version: number; created_at: number; updated_at: number }
+const SEARCH_SCAN_LIMIT = 1000
+const EVENT_TYPE_LABEL: Record<EventFields['type'], string> = {
+  birthday: '生日',
+  anniversary: '纪念日',
+  milestone: '人生时刻',
+  schedule: '重要日程',
+}
+
+function eventSearchTargetDate(value: DiaryEvent, today: string): string | null {
+  if (value.recurrence === 'none') return value.startDate
+  if (occursOn(value, today)) return today
+  return nextOccurrence(value, today)
+}
+
+function eventSearchSubtitle(value: DiaryEvent, targetDate: string | null): string {
+  if (!targetDate) return `${EVENT_TYPE_LABEL[value.type]} · 暂无可定位日期`
+  const lunar = value.dateRule?.calendar === 'chinese' ? formatLunarRule(value.dateRule) : null
+  return [EVENT_TYPE_LABEL[value.type], lunar, targetDate].filter(Boolean).join(' · ')
+}
 export function diaryLifeStore(db: Database, owner: number, operation: DiaryBodyOperation) {
   const crypto = operation.life
   if (!crypto) throw new Error('Diary crypto unavailable')
@@ -79,6 +100,89 @@ export function diaryLifeStore(db: Database, owner: number, operation: DiaryBody
         }
       }
       return { items, nextCursor: lastReturnedDate }
+    },
+    async searchEvents(query: string, limit: number, cursor: string | null, today: string, signal?: AbortSignal): Promise<DiaryEventSearchPage> {
+      operation.assertCurrent()
+      if (signal?.aborted) return { items: [], nextCursor: null }
+      const normalizedQuery = query.trim().toLowerCase()
+      let phase: DiarySearchCursor['phase'] = 'title'
+      let afterId: string | null = null
+      if (cursor !== null) {
+        const parsed = decodeDiarySearchCursor(db, cursor, { owner, scope: 'events', query })
+        phase = parsed.phase
+        afterId = parsed.afterId
+      }
+      const items: DiaryEventSearchItem[] = []
+      let scanned = 0
+      let exhausted = false
+
+      while (items.length < limit && scanned < SEARCH_SCAN_LIMIT && !exhausted) {
+        const batchLimit = Math.min(100, SEARCH_SCAN_LIMIT - scanned)
+        const rows = (afterId === null
+          ? db.prepare('SELECT * FROM diary_events WHERE owner_user_id = ? ORDER BY id DESC LIMIT ?').all(owner, batchLimit)
+          : db.prepare('SELECT * FROM diary_events WHERE owner_user_id = ? AND id < ? ORDER BY id DESC LIMIT ?').all(owner, afterId, batchLimit)) as Row[]
+
+        if (!rows.length) {
+          if (phase === 'title') {
+            phase = 'description'
+            afterId = null
+            continue
+          }
+          exhausted = true
+          break
+        }
+
+        for (const row of rows) {
+          operation.assertCurrent()
+          if (signal?.aborted) return { items: [], nextCursor: null }
+          const value = event(row)
+          const targetDate = eventSearchTargetDate(value, today)
+          const title = displayEventTitle(value, targetDate)
+          const titleMatch = title.toLowerCase().includes(normalizedQuery) || value.title.toLowerCase().includes(normalizedQuery)
+          const descriptionMatch = value.description.toLowerCase().includes(normalizedQuery)
+          const match = phase === 'title' ? titleMatch : !titleMatch && descriptionMatch
+          afterId = row.id
+          scanned += 1
+          if (match) {
+            items.push({
+              id: value.id,
+              title,
+              emoji: value.emoji,
+              type: value.type,
+              targetDate,
+              subtitle: eventSearchSubtitle(value, targetDate),
+              snippet: phase === 'description' ? diarySearchSnippet(value.description, query) : '',
+              match: phase,
+            })
+            if (items.length >= limit) break
+          }
+          if (scanned % 100 === 0) {
+            await new Promise<void>(resolve => setImmediate(resolve))
+            operation.assertCurrent()
+            if (signal?.aborted) return { items: [], nextCursor: null }
+          }
+        }
+
+        if (items.length >= limit) break
+        if (rows.length < batchLimit || scanned >= SEARCH_SCAN_LIMIT) {
+          if (phase === 'title' && rows.length < batchLimit) {
+            phase = 'description'
+            afterId = null
+          } else if (phase === 'description' && rows.length < batchLimit) {
+            exhausted = true
+          }
+        }
+      }
+
+      const nextCursor = exhausted ? null : encodeDiarySearchCursor(db, {
+        v: 1,
+        owner,
+        scope: 'events',
+        query,
+        phase,
+        afterId,
+      })
+      return { items, nextCursor }
     },
     dayAttachments(date: string) {
       return listDiaryDayAttachments(db, owner, date, operation)

@@ -155,6 +155,70 @@ describe('CommandPalette Chinese copy', () => {
     wrapper.unmount()
   })
 
+  it('renders labeled Diary Event and Todo groups with title and excerpt highlights', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
+    const eventHit: SearchResult = {
+      id: 'diary-event:event-id', type: 'diary-event', title: '爷爷75岁生日', subtitle: '生日 · 农历十月初七 · 2026-11-15', icon: '🎂', score: 2,
+      payload: { id: 'event-id', query: '爷爷', snippet: '', match: 'title' },
+    }
+    const taskHit: SearchResult = {
+      id: 'diary-task:task-id', type: 'diary-task', title: '给爷爷打电话', subtitle: '截止 2026-11-20 · 未完成', icon: '○', score: 1,
+      payload: { id: 'task-id', query: '爷爷', snippet: '今天要给爷爷打电话。', match: 'description' },
+    }
+    const eventProvider = vi.fn(async (query: string): Promise<SearchResultSection> => ({
+      id: 'diary-events', label: '事件', showLabel: true, results: query ? [eventHit] : [],
+    })) as SearchProvider
+    const taskProvider = vi.fn(async (query: string): Promise<SearchResultSection> => ({
+      id: 'diary-tasks', label: '待办', showLabel: true, results: query ? [taskHit] : [],
+    })) as SearchProvider
+    const emptyDiaryProvider = vi.fn(async (): Promise<SearchResultSection> => ({ id: 'diary', label: '日记', showLabel: true, results: [] })) as SearchProvider
+    const wrapper = mount(CommandPalette, { props: { providers: [emptyDiaryProvider, eventProvider, taskProvider], allowCreate: false } })
+    ;(wrapper.vm as unknown as { show: () => void }).show()
+    await flushPromises()
+
+    const input = document.body.querySelector<HTMLInputElement>('.palette-input input')!
+    input.value = '爷爷'
+    input.dispatchEvent(new Event('input', { bubbles: true }))
+    await vi.advanceTimersByTimeAsync(250)
+    await flushPromises()
+
+    expect([...document.body.querySelectorAll('.palette-section-label')].map(label => label.textContent)).toEqual(['事件', '待办'])
+    expect(document.body.querySelectorAll('[role="option"]')).toHaveLength(2)
+    expect(document.body.querySelector('.palette-record-title mark')?.textContent).toBe('爷爷')
+    expect(document.body.querySelectorAll('.palette-snippet mark')[0]?.textContent).toBe('爷爷')
+    expect(document.body.querySelector('.palette-empty')).toBeNull()
+    wrapper.unmount()
+  })
+
+  it('allows continuing a bounded Diary search when the first page has no matches', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
+    const hit: SearchResult = {
+      id: 'diary-event:milestone:event-id', type: 'diary-event', title: 'A later matching event', score: 2,
+      payload: { id: 'event-id', query: 'later', match: 'title' },
+    }
+    const provider = vi.fn(async (query: string): Promise<SearchResultSection> => ({
+      id: 'diary-events', label: '事件', showLabel: true, results: [], hasMore: Boolean(query),
+    })) as SearchProvider
+    provider.loadMore = vi.fn(async () => ({
+      id: 'diary-events', label: '事件', showLabel: true, results: [hit], hasMore: false,
+    }))
+    const wrapper = mount(CommandPalette, { props: { providers: [provider], allowCreate: false } })
+    ;(wrapper.vm as unknown as { show: () => void }).show()
+    await flushPromises()
+    const input = document.body.querySelector<HTMLInputElement>('.palette-input input')!
+    input.value = 'later'
+    input.dispatchEvent(new Event('input', { bubbles: true }))
+    await vi.advanceTimersByTimeAsync(250)
+    await flushPromises()
+    expect(document.body.querySelector('.palette-empty [role="status"]')?.textContent).toContain('没有找到相关内容')
+
+    document.body.querySelector<HTMLButtonElement>('.palette-search-more-button')?.click()
+    await flushPromises()
+    expect(document.body.querySelector('[role="option"]')?.textContent).toContain('A later matching event')
+    expect(provider.loadMore).toHaveBeenCalledWith('later')
+    wrapper.unmount()
+  })
+
   it('renders saved Board body matches with one safe highlighted snippet and no path line', async () => {
     vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
     const hit: SearchResult = {

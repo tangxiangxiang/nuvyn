@@ -72,6 +72,19 @@ export interface DiaryTaskItemPage {
   nextCursor: string | null
 }
 
+export interface DiaryTaskSearchItem {
+  id: string
+  kind: 'one-off' | 'recurring'
+  seriesId?: string
+  targetDate: string | null
+  title: string
+  completedAt: number | null
+  snippet: string
+  match: 'title' | 'description'
+}
+
+export interface DiaryTaskSearchPage { items: DiaryTaskSearchItem[]; nextCursor: string | null }
+
 export interface TaskEditorFields extends OneOffTaskFields {
   recurrence: TaskRecurrenceRule | null
 }

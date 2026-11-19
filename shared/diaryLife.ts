@@ -21,6 +21,17 @@ export interface DiarySearchItem {
   match: 'entry' | 'date'
 }
 export interface DiarySearchPage { items: DiarySearchItem[]; nextCursor: string | null }
+export interface DiaryEventSearchItem {
+  id: string
+  title: string
+  emoji: string
+  type: EventFields['type']
+  targetDate: string | null
+  subtitle: string
+  snippet: string
+  match: 'title' | 'description'
+}
+export interface DiaryEventSearchPage { items: DiaryEventSearchItem[]; nextCursor: string | null }
 export interface EventFields {
   title: string
   description: string

@@ -9,10 +9,13 @@ import { clearSearchReveal, requestSearchReveal, searchRevealIntent } from '../.
 import { clearDiarySearchOpen, diarySearchOpenIntent } from '../../../composables/diary/useDiarySearchNavigation'
 const api = vi.hoisted(() => ({ searchBoardContent: vi.fn(), listBoards: vi.fn(), listPosts: vi.fn() }))
 const diarySearch = vi.hoisted(() => vi.fn())
+const diaryEventSearch = vi.hoisted(() => vi.fn())
+const diaryTaskSearch = vi.hoisted(() => vi.fn())
 const diarySessionState = vi.hoisted(() => ({ unlocked: true, accessRef: null as null | { value: boolean }, teardown: null as null | (() => void) }))
 vi.mock('../../../features/board/api', () => api)
 vi.mock('../../../lib/api', () => ({ listPosts: api.listPosts }))
-vi.mock('../../../lib/diary-life-api', () => ({ diaryLifeApi: { search: diarySearch } }))
+vi.mock('../../../lib/diary-life-api', () => ({ diaryLifeApi: { search: diarySearch, searchEvents: diaryEventSearch } }))
+vi.mock('../../../lib/diary-tasks-api', () => ({ diaryTasksApi: { searchTasks: diaryTaskSearch } }))
 vi.mock('../../../composables/diary/useDiaryAccessSession', async () => {
   const { ref } = await import('vue')
   const isUnlocked = ref(diarySessionState.unlocked)
@@ -50,6 +53,8 @@ describe('App-level GlobalSearchHost', () => {
     documentSearchSource.invalidate()
     clearDiarySearchOpen()
     diarySearch.mockReset()
+    diaryEventSearch.mockReset()
+    diaryTaskSearch.mockReset()
     diarySessionState.unlocked = true
     if (diarySessionState.accessRef) diarySessionState.accessRef.value = true
   })
@@ -329,6 +334,40 @@ describe('App-level GlobalSearchHost', () => {
     expect(document.body.querySelector('.palette')).toBeNull()
     expect(document.body.textContent).not.toContain('private diary snippet')
     expect(diarySearchOpenIntent.value).toBeNull()
+    unmountHost(wrapper)
+  })
+
+  it('groups Event and Todo hits and creates precise Diary navigation intents', async () => {
+    diarySearch.mockResolvedValue({ items: [], nextCursor: null })
+    diaryEventSearch.mockResolvedValue({ items: [{
+      id: 'event-uuid', title: '买下第一套房', emoji: '🏠', type: 'milestone', targetDate: '2025-08-16',
+      subtitle: '人生时刻 · 2025-08-16', snippet: '', match: 'title',
+    }], nextCursor: null })
+    diaryTaskSearch.mockResolvedValue({ items: [{
+      id: 'task-uuid', kind: 'one-off', targetDate: '2025-08-20', title: '联系中介', completedAt: null,
+      snippet: '', match: 'title',
+    }], nextCursor: null })
+    const router = createRouter({
+      history: createMemoryHistory(),
+      routes: [{ path: '/diary', name: 'diary', component: { template: '<div />' }, meta: { workspace: true, workspaceKind: 'diary', chromeStyle: 'workspace' } }],
+    })
+    await router.push('/diary')
+    await router.isReady()
+    const wrapper = mountHost(router)
+    ;(wrapper.vm as unknown as { show: () => void }).show()
+    await flushPromises()
+    const input = document.body.querySelector<HTMLInputElement>('.palette-input input')!
+    input.value = '买房'
+    input.dispatchEvent(new Event('input', { bubbles: true }))
+    await flushSearchDebounce()
+    expect([...document.body.querySelectorAll('.palette-section-label')].map(label => label.textContent)).toEqual(['事件', '待办'])
+    expect(diaryEventSearch).toHaveBeenLastCalledWith('买房', 20, null, expect.any(AbortSignal))
+    expect(diaryTaskSearch).toHaveBeenLastCalledWith('买房', 20, null, expect.any(AbortSignal))
+
+    document.body.querySelector<HTMLElement>('[role="option"]')?.click()
+    await flushPromises()
+    expect(diarySearchOpenIntent.value).toMatchObject({ kind: 'event', eventId: 'event-uuid', date: '2025-08-16' })
+    expect(document.body.querySelector('.palette')).toBeNull()
     unmountHost(wrapper)
   })
 })

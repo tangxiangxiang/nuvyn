@@ -75,3 +75,43 @@ export function taskRecurrenceDates(
   }
   return dates
 }
+
+const SEARCH_WINDOW_DAYS = 3660
+
+function shiftedDate(date: string, days: number): string {
+  try {
+    return Temporal.PlainDate.from(date).add({ days }).toString()
+  } catch {
+    return days < 0 ? '0001-01-01' : '9999-12-31'
+  }
+}
+
+/**
+ * Picks one useful occurrence for a series-level search result. It prefers
+ * the nearest non-skipped occurrence from today, and only searches backward
+ * when the series has ended. The bounded window is longer than the maximum
+ * gap between supported yearly occurrences.
+ */
+export function taskSearchOccurrenceDate(
+  rule: TaskRecurrenceRule,
+  effectiveFrom: string,
+  today: string,
+  skippedDates: ReadonlySet<string> | ((date: string) => boolean) = new Set(),
+): string | null {
+  if (!civilDate(effectiveFrom) || !civilDate(today)) return null
+  const isSkipped = typeof skippedDates === 'function' ? skippedDates : (date: string) => skippedDates.has(date)
+  const futureStart = [rule.startDate, effectiveFrom, today].sort().at(-1)!
+  const futureEnd = [rule.untilDate ?? '9999-12-31', shiftedDate(futureStart, SEARCH_WINDOW_DAYS)].sort()[0]!
+  if (futureEnd >= futureStart) {
+    const futureDates = taskRecurrenceDates(rule, futureStart, futureEnd, effectiveFrom, SEARCH_WINDOW_DAYS + 1)
+    const target = futureDates.find(date => !isSkipped(date))
+    if (target) return target
+  }
+
+  if (rule.untilDate === null || rule.untilDate > today) return null
+  const pastEnd = rule.untilDate
+  const pastStart = [rule.startDate, effectiveFrom, shiftedDate(pastEnd, -SEARCH_WINDOW_DAYS)].sort().at(-1)!
+  if (pastEnd < pastStart) return null
+  const pastDates = taskRecurrenceDates(rule, pastStart, pastEnd, effectiveFrom, SEARCH_WINDOW_DAYS + 1)
+  return [...pastDates].reverse().find(date => !isSkipped(date)) ?? null
+}

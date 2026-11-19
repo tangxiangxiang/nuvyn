@@ -8,6 +8,7 @@ import { DiaryAccessServiceError } from '../diaryAccess/service.js'
 import { diaryLifeStore, DiaryConflict } from '../diaryLife.js'
 import { diaryTaskStore, DiaryTaskCursorError, DiaryTaskExpansionLimit, DiaryTaskHistoryProtectedError, DiaryTaskListChanged, DiaryTaskNotFound, DiaryTaskRecurrenceError, DiaryTaskValidationError } from '../diaryTasks.js'
 import { diaryToday } from '../diaryDate.js'
+import { DiarySearchCursorError } from '../diarySearch.js'
 import { DiaryAttachmentError } from '../diaryAttachments/service.js'
 import { cleanupDiaryAttachmentStorage, DiaryAttachmentStorage, ensureDiaryAttachmentStorage } from '../diaryAttachments/storage.js'
 import { MAX_DIARY_DAY_ATTACHMENTS } from '../../shared/diaryAttachments.js'
@@ -34,6 +35,7 @@ async function guarded(c: Context<Env>, run: (store: Store, db: Database, tasks:
     }) ?? c.json({ code: 'diary-locked' }, 423)
   } catch (error) {
     if (error instanceof DiaryAccessServiceError) return c.json({ code: 'diary-locked' }, 423)
+    if (error instanceof DiarySearchCursorError) return c.json({ code: 'invalid-diary-search' }, 400)
     if (error instanceof DiaryTaskCursorError) return c.json({ code: 'invalid-diary-task-cursor' }, 400)
     if (error instanceof DiaryTaskListChanged) return c.json({ code: 'diary-task-list-changed' }, 409)
     if (error instanceof DiaryConflict) return c.json({ code: 'diary-conflict' }, 409)
@@ -67,7 +69,9 @@ function allowDiarySearch(db: Database, sessionId: number): boolean {
     requests.set(sessionId, { startedAt: now, count: 1 })
     return true
   }
-  if (current.count >= 8) return false
+  // Diary search fans out to three private result providers. Keep the existing
+  // effective limit of eight user searches per second across those requests.
+  if (current.count >= 24) return false
   current.count += 1
   return true
 }
@@ -83,6 +87,22 @@ routes.post('/search', async c => {
     if (!query || query.length > 120 || !Number.isSafeInteger(limit) || limit < 1 || limit > 20
       || (cursor !== null && !civilDate(cursor))) return c.json({ code: 'invalid-diary-search' }, 400)
     return c.json(await store.searchDays(query, limit, cursor, c.req.raw.signal))
+  })
+})
+routes.post('/events/search', async c => {
+  const sessionId = c.get('authSessionId')
+  if (typeof sessionId !== 'number') return c.json({ code: 'auth-session-required' }, 401)
+  return guarded(c, async (store, db) => {
+    const body = await c.req.json().catch(() => null)
+    const query = typeof body?.query === 'string' ? body.query.trim() : ''
+    const limit = body?.limit ?? 20
+    const cursor = body?.cursor ?? null
+    if (!query || query.length > 120 || !Number.isSafeInteger(limit) || limit < 1 || limit > 20
+      || !(cursor === null || (typeof cursor === 'string' && cursor.length <= 1024))) {
+      return c.json({ code: 'invalid-diary-search' }, 400)
+    }
+    if (!allowDiarySearch(db, sessionId)) return c.json({ code: 'diary-search-rate-limited' }, 429)
+    return c.json(await store.searchEvents(query, limit, cursor, diaryToday(), c.req.raw.signal))
   })
 })
 routes.get('/days', c => guarded(c, store => {
@@ -132,6 +152,22 @@ routes.get('/events/list', c => guarded(c, store => {
   if (!/^\d{1,7}$/.test(offset)) return c.json({ code: 'invalid-diary-event-list-query' }, 400)
   return c.json(store.allEvents(Number(offset)))
 }))
+routes.post('/tasks/search', async c => {
+  const sessionId = c.get('authSessionId')
+  if (typeof sessionId !== 'number') return c.json({ code: 'auth-session-required' }, 401)
+  return guarded(c, async (_store, db, tasks) => {
+    const body = await c.req.json().catch(() => null)
+    const query = typeof body?.query === 'string' ? body.query.trim() : ''
+    const limit = body?.limit ?? 20
+    const cursor = body?.cursor ?? null
+    if (!query || query.length > 120 || !Number.isSafeInteger(limit) || limit < 1 || limit > 20
+      || !(cursor === null || (typeof cursor === 'string' && cursor.length <= 1024))) {
+      return c.json({ code: 'invalid-diary-search' }, 400)
+    }
+    if (!allowDiarySearch(db, sessionId)) return c.json({ code: 'diary-search-rate-limited' }, 429)
+    return c.json(await tasks.searchTasks(query, limit, cursor, diaryToday(), c.req.raw.signal))
+  })
+})
 routes.get('/events/:id', c => guarded(c, store => {
   const event = store.getEvent(c.req.param('id'))
   return event ? c.json({ event }) : c.json({ code: 'diary-not-found' }, 404)
@@ -189,6 +225,12 @@ routes.get('/task-series/:id/occurrences/:date', c => guarded(c, (_store, _db, t
   const { id, date } = c.req.param()
   if (!idValid(id) || !civilDate(date)) return c.json({ code: 'invalid-diary-task-occurrence' }, 400)
   const occurrence = tasks.occurrence(id, date)
+  return occurrence ? c.json({ occurrence }) : c.json({ code: 'diary-not-found' }, 404)
+}))
+routes.get('/task-series/:id/search-target', c => guarded(c, (_store, _db, tasks) => {
+  const id = c.req.param('id')
+  if (!idValid(id)) return c.json({ code: 'invalid-diary-task-series-id' }, 400)
+  const occurrence = tasks.searchTarget(id, diaryToday())
   return occurrence ? c.json({ occurrence }) : c.json({ code: 'diary-not-found' }, 404)
 }))
 routes.put('/task-series/:id', c => guarded(c, async (_store, _db, tasks) => {

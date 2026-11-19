@@ -3,9 +3,10 @@ import { createHmac, timingSafeEqual } from 'node:crypto'
 import { Temporal } from '@js-temporal/polyfill'
 import type { DiaryBodyOperation } from './diaryAccess/service.js'
 import { civilDate } from '../shared/diaryLife.js'
-import { parseTaskFields, parseTaskOccurrenceState, parseTaskSeriesFields, parseWritableTaskFields, type DiaryRecurringTaskOccurrence, type DiaryTask, type DiaryTaskItemPage, type DiaryTaskListItem, type DiaryTaskPage, type DiaryTaskSeries, type OneOffTaskFields, type TaskOccurrenceState, type TaskSeriesFields } from '../shared/diaryTasks.js'
-import { taskRecurrenceDates, taskRecurrenceOccursOn } from '../shared/diaryTaskRecurrence.js'
+import { parseTaskFields, parseTaskOccurrenceState, parseTaskSeriesFields, parseWritableTaskFields, type DiaryRecurringTaskOccurrence, type DiaryTask, type DiaryTaskItemPage, type DiaryTaskListItem, type DiaryTaskPage, type DiaryTaskSearchItem, type DiaryTaskSearchPage, type DiaryTaskSeries, type OneOffTaskFields, type TaskOccurrenceState, type TaskSeriesFields } from '../shared/diaryTasks.js'
+import { taskRecurrenceDates, taskRecurrenceOccursOn, taskSearchOccurrenceDate } from '../shared/diaryTaskRecurrence.js'
 import { DiaryConflict } from './diaryLife.js'
+import { decodeDiarySearchCursor, diarySearchSnippet, encodeDiarySearchCursor, type DiarySearchCursor } from './diarySearch.js'
 
 export class DiaryTaskNotFound extends Error {}
 export class DiaryTaskCursorError extends Error {}
@@ -18,6 +19,7 @@ export class DiaryTaskValidationError extends Error {}
 const PAGE_SIZE = 200
 const MAX_CURSOR_LENGTH = 1024
 const MAX_REVISION = Number.MAX_SAFE_INTEGER
+const SEARCH_SCAN_LIMIT = 1000
 const TASK_ID_PATTERN = /^[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/
 
 type TaskListQuery =
@@ -161,6 +163,16 @@ export function diaryTaskStore(db: Database, owner: number, operation: DiaryBody
       createdAt: row.created_at,
       updatedAt: currentOccurrence.updatedAt || row.updated_at,
     }
+  }
+
+  function searchTargetForSeries(row: TaskSeriesRow, today: string): DiaryRecurringTaskOccurrence | null {
+    const current = series(row)
+    const states = new Map<string, TaskOccurrenceRow | undefined>()
+    const targetDate = taskSearchOccurrenceDate(current.recurrence, row.effective_from, today, date => {
+      if (!states.has(date)) states.set(date, readOccurrenceRow(row.id, date))
+      return occurrenceState(states.get(date), row.id, date).state.status === 'skipped'
+    })
+    return targetDate ? recurringOccurrence(row, targetDate, states.get(targetDate)) : null
   }
 
   function listRevision(): number {
@@ -311,6 +323,139 @@ export function diaryTaskStore(db: Database, owner: number, operation: DiaryBody
         ORDER BY created_at, id LIMIT 1`).get(owner) as TaskRow | undefined
       return { task: row ? task(row) : null, count: result.count }
     })()
+  }
+
+  async function searchTasks(query: string, limit: number, cursor: string | null, today: string, signal?: AbortSignal): Promise<DiaryTaskSearchPage> {
+    operation.assertCurrent()
+    if (signal?.aborted) return { items: [], nextCursor: null }
+    const normalizedQuery = query.trim().toLowerCase()
+    let phase: DiarySearchCursor['phase'] = 'title'
+    let afterId: string | null = null
+    let afterKind: DiarySearchCursor['afterKind'] = null
+    const revision = listRevision()
+    if (cursor !== null) {
+      const parsed = decodeDiarySearchCursor(db, cursor, { owner, scope: 'tasks', query })
+      if (parsed.revision !== revision) throw new DiaryTaskListChanged()
+      phase = parsed.phase
+      afterId = parsed.afterId
+      afterKind = parsed.afterKind ?? null
+    }
+
+    const items: DiaryTaskSearchItem[] = []
+    let scanned = 0
+    let exhausted = false
+    while (items.length < limit && scanned < SEARCH_SCAN_LIMIT && !exhausted) {
+      const batchLimit = Math.min(100, SEARCH_SCAN_LIMIT - scanned)
+      const rows = (afterId === null
+        ? db.prepare(`SELECT id, kind FROM (
+            SELECT id, 'one-off' AS kind FROM diary_tasks WHERE owner_user_id = ?
+            UNION ALL SELECT id, 'series' AS kind FROM diary_task_series WHERE owner_user_id = ?
+          ) ORDER BY id, kind LIMIT ?`).all(owner, owner, batchLimit)
+        : db.prepare(`SELECT id, kind FROM (
+            SELECT id, 'one-off' AS kind FROM diary_tasks WHERE owner_user_id = ?
+            UNION ALL SELECT id, 'series' AS kind FROM diary_task_series WHERE owner_user_id = ?
+          ) WHERE id > ? OR (id = ? AND kind > ?) ORDER BY id, kind LIMIT ?`)
+          .all(owner, owner, afterId, afterId, afterKind ?? '', batchLimit)) as Array<{ id: string; kind: 'one-off' | 'series' }>
+
+      if (!rows.length) {
+        if (phase === 'title') {
+          phase = 'description'
+          afterId = null
+          afterKind = null
+          continue
+        }
+        exhausted = true
+        break
+      }
+
+      for (const row of rows) {
+        operation.assertCurrent()
+        if (signal?.aborted) return { items: [], nextCursor: null }
+        afterId = row.id
+        afterKind = row.kind
+        scanned += 1
+        let title: string
+        let description: string
+        let taskId: string
+        let seriesId: string | undefined
+        let targetDate: string | null = null
+        let completedAt: number | null
+
+        if (row.kind === 'one-off') {
+          const currentRow = readTaskRow(row.id)
+          if (!currentRow) continue
+          const current = task(currentRow)
+          title = current.title
+          description = current.description
+          taskId = current.id
+          targetDate = current.dueDate
+          completedAt = current.completedAt
+        } else {
+          const currentRow = readSeriesRow(row.id)
+          if (!currentRow) continue
+          const current = series(currentRow)
+          title = current.title
+          description = current.description
+          taskId = current.id
+          seriesId = current.id
+          completedAt = null
+        }
+
+        const titleMatch = title.toLowerCase().includes(normalizedQuery)
+        const descriptionMatch = description.toLowerCase().includes(normalizedQuery)
+        const match = phase === 'title' ? titleMatch : !titleMatch && descriptionMatch
+        if (match) {
+          if (row.kind === 'series') {
+            const currentRow = readSeriesRow(row.id)
+            if (!currentRow) continue
+            const occurrence = searchTargetForSeries(currentRow, today)
+            targetDate = occurrence?.occurrenceDate ?? null
+            completedAt = occurrence?.completedAt ?? null
+          }
+          items.push({
+            id: taskId,
+            kind: row.kind === 'one-off' ? 'one-off' : 'recurring',
+            ...(seriesId ? { seriesId } : {}),
+            targetDate,
+            title,
+            completedAt,
+            snippet: phase === 'description' ? diarySearchSnippet(description, query) : '',
+            match: phase,
+          })
+          if (items.length >= limit) break
+        }
+        if (scanned % 100 === 0) {
+          await new Promise<void>(resolve => setImmediate(resolve))
+          operation.assertCurrent()
+          if (signal?.aborted) return { items: [], nextCursor: null }
+        }
+      }
+
+      if (items.length >= limit) break
+      if (rows.length < batchLimit || scanned >= SEARCH_SCAN_LIMIT) {
+        if (phase === 'title' && rows.length < batchLimit) {
+          phase = 'description'
+          afterId = null
+          afterKind = null
+        } else if (phase === 'description' && rows.length < batchLimit) {
+          exhausted = true
+        }
+      }
+    }
+
+    operation.assertCurrent()
+    if (listRevision() !== revision) throw new DiaryTaskListChanged()
+    const nextCursor = exhausted ? null : encodeDiarySearchCursor(db, {
+      v: 1,
+      owner,
+      scope: 'tasks',
+      query,
+      phase,
+      afterId,
+      afterKind,
+      revision,
+    })
+    return { items, nextCursor }
   }
 
   function cursorMatchesItemQuery(value: unknown, query: TaskItemQuery): boolean {
@@ -598,6 +743,12 @@ export function diaryTaskStore(db: Database, owner: number, operation: DiaryBody
       return row ? task(row) : null
     },
     undatedTaskSummary,
+    searchTasks,
+    searchTarget(id: string, today: string): DiaryRecurringTaskOccurrence | null {
+      operation.assertCurrent()
+      const row = readSeriesRow(id)
+      return row ? searchTargetForSeries(row, today) : null
+    },
     listTasks(cursor?: string, completed?: boolean): DiaryTaskPage {
       return listPage({ type: 'list', ...(completed === undefined ? {} : { completed }) }, cursor)
     },

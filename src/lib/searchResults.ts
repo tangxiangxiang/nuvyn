@@ -3,9 +3,9 @@ import type { DocumentSearchSource } from './documentSearchSource'
 import { buildIndex, captureSearchEpoch, invalidateSearchState, needsBodyPrime, primeBody, rebuildIndex, search } from './search'
 import { isManagedDiaryPath } from '../../shared/diaryProtocol'
 
-export type SearchResultType = 'file' | 'heading' | 'tag' | 'alias' | 'command' | 'ai' | 'recent-file' | 'board' | 'diary-day'
+export type SearchResultType = 'file' | 'heading' | 'tag' | 'alias' | 'command' | 'ai' | 'recent-file' | 'board' | 'diary-day' | 'diary-event' | 'diary-task'
 export interface SearchResult<T = unknown> { id: string; type: SearchResultType; title: string; subtitle?: string; icon?: string; score: number; payload: T }
-export interface SearchResultSection { id: string; label: string; results: SearchResult[]; error?: boolean }
+export interface SearchResultSection { id: string; label: string; results: SearchResult[]; error?: boolean; showLabel?: boolean; hasMore?: boolean }
 export type SearchProvider = ((query: string) => SearchResultSection | Promise<SearchResultSection>) & {
   subscribe?: (listener: () => void) => () => void
   loadMore?: (query: string) => Promise<SearchResultSection | null>
@@ -97,7 +97,7 @@ export async function searchEverywhere(query: string, providers: SearchProvider[
   return results
     .filter((result): result is PromiseFulfilledResult<SearchResultSection> => result.status === 'fulfilled')
     .map((result) => result.value)
-    .filter((section) => section.results.length > 0 || section.error === true)
+    .filter((section) => section.results.length > 0 || section.error === true || section.hasMore === true)
 }
 
 export function createLatestSearchRunner(
