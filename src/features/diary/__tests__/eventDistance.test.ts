@@ -47,7 +47,7 @@ describe('eventDistanceLabel', () => {
       endDate: '1951-11-15',
       recurrence: 'yearly',
       dateRule: { calendar: 'gregory' },
-      birthday: { birthLunarYear: 1951 },
+      birthday: { birthGregorianYear: 1951 },
       showCountdown: false,
     })
 

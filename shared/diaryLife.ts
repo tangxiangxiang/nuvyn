@@ -37,8 +37,8 @@ export interface EventFields {
   description: string
   emoji: string
   type: 'milestone' | 'anniversary' | 'schedule' | 'birthday'
-  /** Birth lunar year for age-aware annual lunar birthday events. */
-  birthday?: { birthLunarYear: number }
+  /** The source calendar and year used for age-aware annual birthday events. */
+  birthday?: { birthLunarYear: number } | { birthGregorianYear: number }
   startDate: string
   endDate: string
   startTime: string | null
@@ -134,7 +134,23 @@ export function parseDay(value: unknown): DayFields | null {
 export function parseEvent(value: unknown): EventFields | null {
   if (!value || typeof value !== 'object') return null
   const v = value as EventFields & { dateRule?: unknown; birthday?: unknown }
-  const dateRule = parseEventDateRule(v.dateRule)
+  let dateRule = parseEventDateRule(v.dateRule)
+  // Older encrypted birthday records may not contain dateRule. Their birthLunarYear
+  // is the authoritative signal that these dates were lunar, so preserve that meaning.
+  if (v.type === 'birthday' && v.dateRule === undefined && v.birthday && typeof v.birthday === 'object'
+    && !Array.isArray(v.birthday) && Number.isInteger((v.birthday as Record<string, unknown>).birthLunarYear)) {
+    const lunarBirthDate = solarToLunar(v.startDate)
+    if (lunarBirthDate && lunarBirthDate.year === (v.birthday as Record<string, unknown>).birthLunarYear) {
+      dateRule = {
+        calendar: 'chinese',
+        lunarMonth: lunarBirthDate.month,
+        lunarDay: lunarBirthDate.day,
+        isLeapMonth: lunarBirthDate.isLeapMonth,
+        leapMonthPolicy: 'regular-month',
+        shortMonthPolicy: 'last-day',
+      }
+    }
+  }
   if (!dateRule) return null
   if (typeof v.title !== 'string' || !v.title.trim() || v.title.length > 160
     || typeof v.description !== 'string' || v.description.length > 4000
@@ -156,18 +172,28 @@ export function parseEvent(value: unknown): EventFields | null {
   let birthday: EventFields['birthday']
   if (v.type === 'birthday') {
     if (!v.birthday || typeof v.birthday !== 'object' || Array.isArray(v.birthday)
-      || dateRule.calendar !== 'chinese' || v.recurrence !== 'yearly' || !v.allDay
+      || v.recurrence !== 'yearly' || !v.allDay
       || v.startDate !== v.endDate || v.startTime !== null || v.endTime !== null) return null
-    const birthLunarYear = (v.birthday as Record<string, unknown>).birthLunarYear
-    if (!Number.isInteger(birthLunarYear) || (birthLunarYear as number) < 1901 || (birthLunarYear as number) > 2100) return null
-    const birthDate = lunarToSolar({
-      year: birthLunarYear as number,
-      month: dateRule.lunarMonth,
-      day: dateRule.lunarDay,
-      isLeapMonth: dateRule.isLeapMonth,
-    })
-    if (!birthDate || birthDate !== v.startDate) return null
-    birthday = { birthLunarYear: birthLunarYear as number }
+    const birthdayFields = v.birthday as Record<string, unknown>
+    if (dateRule.calendar === 'chinese') {
+      const birthLunarYear = birthdayFields.birthLunarYear
+      if (Object.keys(birthdayFields).length !== 1 || !Number.isInteger(birthLunarYear)
+        || (birthLunarYear as number) < 1901 || (birthLunarYear as number) > 2100) return null
+      const birthDate = lunarToSolar({
+        year: birthLunarYear as number,
+        month: dateRule.lunarMonth,
+        day: dateRule.lunarDay,
+        isLeapMonth: dateRule.isLeapMonth,
+      })
+      if (!birthDate || birthDate !== v.startDate) return null
+      birthday = { birthLunarYear: birthLunarYear as number }
+    } else {
+      const birthGregorianYear = birthdayFields.birthGregorianYear
+      if (Object.keys(birthdayFields).length !== 1 || !Number.isInteger(birthGregorianYear)
+        || (birthGregorianYear as number) < 1 || (birthGregorianYear as number) > 9999
+        || Number(v.startDate.slice(0, 4)) !== birthGregorianYear) return null
+      birthday = { birthGregorianYear: birthGregorianYear as number }
+    }
     if (!birthdayPersonName(v.title)) return null
   } else if (v.birthday !== undefined) {
     return null
@@ -244,13 +270,21 @@ export function nextOccurrence(event: EventFields, today: string): string | null
   }
   return next
 }
-/** Returns the age reached on this exact lunar birthday occurrence. */
+/** Returns the age reached on this exact birthday occurrence in its source calendar. */
 export function birthdayAgeAt(event: EventFields, date: string): number | null {
-  if (event.type !== 'birthday' || !event.birthday || event.dateRule?.calendar !== 'chinese') return null
-  const lunarDate = solarToLunar(date)
-  if (!lunarDate || lunarDate.year < event.birthday.birthLunarYear
-    || lunarOccurrenceInYear(event.dateRule, lunarDate.year) !== date) return null
-  return lunarDate.year - event.birthday.birthLunarYear
+  if (event.type !== 'birthday' || !event.birthday) return null
+  if (event.dateRule?.calendar === 'chinese' && 'birthLunarYear' in event.birthday) {
+    const lunarDate = solarToLunar(date)
+    if (!lunarDate || lunarDate.year < event.birthday.birthLunarYear
+      || lunarOccurrenceInYear(event.dateRule, lunarDate.year) !== date) return null
+    return lunarDate.year - event.birthday.birthLunarYear
+  }
+  if (event.dateRule?.calendar !== 'chinese' && 'birthGregorianYear' in event.birthday) {
+    const gregorianYear = Number(date.slice(0, 4))
+    if (gregorianYear < event.birthday.birthGregorianYear || occurrenceInYear(event, gregorianYear) !== date) return null
+    return gregorianYear - event.birthday.birthGregorianYear
+  }
+  return null
 }
 /** Removes generated birthday suffixes from titles saved by older UI versions. */
 export function birthdayPersonName(title: string): string {

@@ -220,7 +220,7 @@ describe('DiaryEventForm', () => {
     expect(wrapper.get('[aria-label="日期类型"]').text()).toContain('农历')
     expect(visibleControls(wrapper, NDatePicker)).toHaveLength(1)
     expect(wrapper.text()).toContain('每年重复')
-    expect(wrapper.find('[aria-label="出生农历年"]').exists()).toBe(false)
+    expect(wrapper.find('[aria-label="出生年份"]').exists()).toBe(false)
     wrapper.unmount()
   })
 
@@ -228,12 +228,14 @@ describe('DiaryEventForm', () => {
     const { wrapper, fields } = mountEventForm(birthdayEvent())
 
     expect(wrapper.get('[aria-label="生日称呼"]').element).toBeTruthy()
-    expect(wrapper.get('[aria-label="出生农历年"]').element).toBeTruthy()
+    expect(wrapper.get('[aria-label="出生年份"]').element).toBeTruthy()
     expect(wrapper.get('[aria-label="农历月份"]').element).toBeTruthy()
     expect(wrapper.get('[aria-label="农历日期"]').element).toBeTruthy()
-    expect(wrapper.get('[aria-label="出生月份类型"]').element).toBeTruthy()
+    expect(wrapper.find('[aria-label="出生月份类型"]').exists()).toBe(false)
+    expect(wrapper.get('[aria-label="生日历法"]').text()).toContain('公历')
     expect(visibleControls(wrapper, NDatePicker)).toHaveLength(0)
     expect(visibleControls(wrapper, NTimePicker)).toHaveLength(0)
+    expect(wrapper.find('[aria-label="农历月份类型"]').exists()).toBe(false)
     expect(wrapper.text()).not.toContain('每年重复')
     expect(wrapper.text()).toContain('下一次：')
     expect(wrapper.text()).toContain('岁生日')
@@ -243,7 +245,7 @@ describe('DiaryEventForm', () => {
 
   it('validates birthday years and keeps the generated occurrence valid', async () => {
     const { wrapper, fields } = mountEventForm(birthdayEvent())
-    const birthYear = wrapper.get('[aria-label="出生农历年"]')
+    const birthYear = wrapper.get('[aria-label="出生年份"]')
 
     await birthYear.setValue('1800')
     expect(wrapper.get('[role="alert"]').text()).toContain('1901—2100')
@@ -251,7 +253,7 @@ describe('DiaryEventForm', () => {
 
     await birthYear.setValue('1952')
     expect(wrapper.find('[role="alert"]').exists()).toBe(false)
-    expect(fields.value.birthday?.birthLunarYear).toBe(1952)
+    expect(fields.value.birthday && 'birthLunarYear' in fields.value.birthday && fields.value.birthday.birthLunarYear).toBe(1952)
     expect(fields.value.startDate).toBe(lunarToSolar({ year: 1952, month: 10, day: 7, isLeapMonth: false }))
     expect(fields.value.recurrence).toBe('yearly')
     expect(fields.value.allDay).toBe(true)
@@ -349,9 +351,14 @@ describe('DiaryEventForm', () => {
       birthday: { birthLunarYear: shortBirth!.year },
     }))
     const shortLunarDays = getProp(getControl(shortForm.wrapper, NSelect, '农历日期'), 'options') as Array<{ value: number; disabled?: boolean }>
-    const shortMonthTypes = getProp(getControl(shortForm.wrapper, NSelect, '出生月份类型'), 'options') as Array<{ value: string; disabled?: boolean }>
+    const birthdayMonths = getProp(getControl(shortForm.wrapper, NSelect, '农历月份'), 'options') as Array<{ value: string; disabled?: boolean }>
     expect(shortLunarDays.find(option => option.value === 30)?.disabled).toBe(true)
-    expect(shortMonthTypes.find(option => option.value === 'leap')?.disabled).toBe(true)
+    const listedLeapMonths = birthdayMonths.filter(option => option.value.startsWith('leap:'))
+    expect(listedLeapMonths.length).toBeLessThanOrEqual(1)
+    expect(listedLeapMonths.every(option => {
+      const month = Number(option.value.split(':')[1])
+      return lunarToSolar({ year: shortBirth!.year, month, day: 1, isLeapMonth: true }) !== null
+    })).toBe(true)
     expect(parseEvent(shortForm.fields.value)).not.toBeNull()
     shortForm.wrapper.unmount()
 
@@ -370,8 +377,10 @@ describe('DiaryEventForm', () => {
       dateRule: leapRule,
       birthday: { birthLunarYear: leapBirth!.year },
     }))
-    const leapMonths = getProp(getControl(leapForm.wrapper, NSelect, '农历月份'), 'options') as Array<{ disabled?: boolean }>
-    expect(leapMonths.filter(option => option.disabled).length).toBeGreaterThan(0)
+    const leapMonths = getProp(getControl(leapForm.wrapper, NSelect, '农历月份'), 'options') as Array<{ value: string; label: string; disabled?: boolean }>
+    expect(leapMonths.filter(option => option.value.startsWith('leap:'))).toEqual([
+      expect.objectContaining({ value: `leap:${leapBirth!.month}`, label: expect.stringContaining('闰') }),
+    ])
     expect(parseEvent(leapForm.fields.value)).not.toBeNull()
     leapForm.wrapper.unmount()
   })
@@ -412,6 +421,57 @@ describe('DiaryEventForm', () => {
     expect(fields.value.description).toBe(initial.description)
     expect(fields.value.showCountdown).toBe(initial.showCountdown)
     expect(parseEvent(fields.value)).not.toBeNull()
+    wrapper.unmount()
+  })
+
+  it('switches a birthday between calendars without changing its actual birth date', async () => {
+    const initial = birthdayEvent()
+    const { wrapper, fields } = mountEventForm(initial)
+    const calendar = wrapper.get('[aria-label="生日历法"]')
+
+    await calendar.findAll('button').find(button => button.text() === '公历')!.trigger('click')
+    expect(fields.value.dateRule).toEqual({ calendar: 'gregory' })
+    expect(fields.value.startDate).toBe(initial.startDate)
+    expect(fields.value.birthday).toEqual({ birthGregorianYear: Number(initial.startDate.slice(0, 4)) })
+    expect(getProp(getControl(wrapper, NDatePicker, '出生日期'), 'formattedValue')).toBe(initial.startDate)
+    expect(parseEvent(fields.value)).not.toBeNull()
+
+    await calendar.findAll('button').find(button => button.text() === '农历')!.trigger('click')
+    expect(fields.value.startDate).toBe(initial.startDate)
+    expect(fields.value.dateRule).toEqual(initial.dateRule)
+    expect(fields.value.birthday).toEqual(initial.birthday)
+    expect(parseEvent(fields.value)).not.toBeNull()
+    wrapper.unmount()
+  })
+
+  it('uses the Gregorian date picker for leap-day birthdays and previews the constrained annual date', async () => {
+    const { wrapper, fields } = mountEventForm({
+      ...gregorianEvent,
+      title: '小明',
+      type: 'birthday',
+      startDate: '2000-02-29',
+      endDate: '2000-02-29',
+      recurrence: 'yearly',
+      dateRule: { calendar: 'gregory' },
+      birthday: { birthGregorianYear: 2000 },
+    }, '2026-01-01')
+
+    expect(visibleControls(wrapper, NDatePicker)).toHaveLength(1)
+    expect(wrapper.text()).toContain('下一次：2026年2月28日 · 小明26岁生日')
+    expect(parseEvent(fields.value)).not.toBeNull()
+    wrapper.unmount()
+  })
+
+  it('leaves a new birthday birth year blank instead of inferring it from the selected calendar date', async () => {
+    const { wrapper, fields } = mountEventForm({ ...gregorianEvent, startDate: '2026-11-19', endDate: '2026-11-19' })
+    await wrapper.get('[data-testid="event-type-birthday"]').trigger('click')
+
+    expect(wrapper.get('[aria-label="出生年份"]').element).toBeTruthy()
+    expect((wrapper.get('[aria-label="出生年份"]').element as HTMLInputElement).value).toBe('')
+    expect(fields.value.birthday).toBeUndefined()
+    expect(wrapper.text()).toContain('填写出生日期后显示下一次生日')
+    expect(fields.value.startDate).not.toBe('')
+    expect(parseEvent(fields.value)).toBeNull()
     wrapper.unmount()
   })
 
@@ -490,7 +550,7 @@ describe('DiaryEventForm', () => {
     await answerPendingConfirm(true)
 
     expect(fields.value.type).toBe('birthday')
-    expect(fields.value.birthday?.birthLunarYear).toBe(1951)
+    expect(fields.value.birthday).toBeUndefined()
     expect(fields.value.startDate).toBe('1951-11-04')
     expect(fields.value.endDate).toBe(fields.value.startDate)
     expect(fields.value.startTime).toBeNull()
@@ -499,6 +559,9 @@ describe('DiaryEventForm', () => {
     expect(fields.value.recurrence).toBe('yearly')
     expect(fields.value.emoji).toBe('💼')
     expect(fields.value.showCountdown).toBe(false)
+    expect(parseEvent(fields.value)).toBeNull()
+    await wrapper.get('[aria-label="出生年份"]').setValue('1951')
+    expect(fields.value.birthday).toEqual({ birthLunarYear: 1951 })
     expect(parseEvent(fields.value)).not.toBeNull()
     wrapper.unmount()
   })
@@ -547,7 +610,7 @@ describe('DiaryEventForm', () => {
     const button = wrapper.get('[data-testid="event-type-anniversary"]')
     await button.trigger('click')
     const request = await answerPendingConfirm(true)
-    expect(request.detail).toContain('出生农历年和生日年龄信息')
+    expect(request.detail).toContain('出生年份和生日年龄信息')
     expect(request.detail).not.toContain('农历年度规则')
     expect(fields.value.birthday).toBeUndefined()
     expect(fields.value).toMatchObject({
@@ -557,7 +620,7 @@ describe('DiaryEventForm', () => {
     wrapper.unmount()
   })
 
-  it('derives the birth year and leap month from the actual civil date', async () => {
+  it('does not infer the birth year and preserves the selected lunar leap month', async () => {
     const birth = { year: 2023, month: 2, day: 1, isLeapMonth: true }
     const date = lunarToSolar(birth)!
     expect(solarToLunar(date)).toEqual(birth)
@@ -565,12 +628,10 @@ describe('DiaryEventForm', () => {
       ...gregorianEvent, title: '小明', startDate: date, endDate: date,
     }, '2026-01-01', true)
     await wrapper.get('[data-testid="event-type-birthday"]').trigger('click')
-    await answerPendingConfirm(true)
-    expect(fields.value).toMatchObject({
-      startDate: date,
-      birthday: { birthLunarYear: 2023 },
-      dateRule: { calendar: 'chinese', lunarMonth: 2, lunarDay: 1, isLeapMonth: true },
-    })
+    expect(fields.value).toMatchObject({ startDate: date, dateRule: { calendar: 'chinese', lunarMonth: 2, lunarDay: 1, isLeapMonth: true } })
+    expect(fields.value.birthday).toBeUndefined()
+    await wrapper.get('[aria-label="出生年份"]').setValue('2023')
+    expect(fields.value.birthday).toEqual({ birthLunarYear: 2023 })
     expect(wrapper.text()).toContain('小明3岁生日')
     expect(parseEvent(fields.value)).not.toBeNull()
     wrapper.unmount()
@@ -606,7 +667,7 @@ describe('DiaryEventForm', () => {
 
     await wrapper.get('[data-testid="event-type-milestone"]').trigger('click')
     const request = await answerPendingConfirm(false)
-    expect(request.detail).toContain('出生农历年和生日年龄信息')
+    expect(request.detail).toContain('出生年份和生日年龄信息')
     expect(request.detail).toContain('生日对应的农历年度规则')
     expect(fields.value).toEqual(initial)
 

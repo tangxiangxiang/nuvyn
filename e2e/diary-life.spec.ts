@@ -15,6 +15,7 @@ test.beforeEach(async ({ page }, testInfo) => {
   // whether a bubbling event predates a listener; a frozen timestamp can make
   // the calendar's child click handlers discard real clicks.
   const time = testInfo.title === 'lunar Events preserve their rule across countdowns, editing and calendar dates'
+    || testInfo.title === 'creates lunar and Gregorian birthdays without guessing the birth year'
     || testInfo.title === 'keeps event calendar context aligned after date edits'
     || testInfo.title === 'Diary selected day Event distance stays on one line across viewport widths'
     ? new Date('2026-11-16T12:00:00+08:00')
@@ -909,6 +910,62 @@ test('lunar Events preserve their rule across countdowns, editing and calendar d
   await page.getByRole('button', { name: '删除事件', exact: true }).click()
   await page.getByRole('dialog', { name: '删除这条事件？' }).getByRole('button', { name: /^(OK|Confirm|确认|确定)$/ }).click()
   await expect(gregorianOccurrence.locator('.life-marker')).toHaveCount(0)
+})
+
+test('creates lunar and Gregorian birthdays without guessing the birth year', async ({ page }) => {
+  await page.setViewportSize({ width: 430, height: 900 })
+  await page.goto('/diary')
+  await unlockDiary(page)
+  await page.getByTestId('diary-view-toggle').click()
+  const calendar = page.locator('.diary-life-calendar')
+  await calendar.locator('[data-date="2026-11-16"]').click()
+  await page.getByTestId('diary-add-event').click()
+  await page.getByTestId('event-type-birthday').click()
+
+  await page.getByRole('textbox', { name: '生日称呼', exact: true }).fill('爷爷')
+  const birthYear = page.getByLabel('出生年份', { exact: true })
+  await expect(birthYear).toHaveValue('')
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true)
+  await birthYear.fill('1951')
+  await expect(page.locator('.event-date-preview')).toContainText('岁生日')
+
+  const birthdayCalendar = page.getByRole('group', { name: '生日历法' })
+  await birthdayCalendar.getByRole('button', { name: '公历' }).click()
+  const convertedBirthDate = diaryEventDateInput(page, '出生日期')
+  const lunarBirthDate = await convertedBirthDate.inputValue()
+  expect(lunarBirthDate).toMatch(/^1951-/)
+  await birthdayCalendar.getByRole('button', { name: '农历' }).click()
+  await expect(birthYear).toHaveValue('1951')
+
+  const lunarSave = page.waitForResponse(response => response.request().method() === 'PUT'
+    && new URL(response.url()).pathname.startsWith('/api/diary/life/events/'))
+  await page.getByRole('button', { name: '保存', exact: true }).click()
+  const lunarResponse = await lunarSave
+  expect(lunarResponse.ok()).toBe(true)
+  expect(await lunarResponse.json()).toMatchObject({
+    event: { type: 'birthday', startDate: lunarBirthDate, dateRule: { calendar: 'chinese' }, birthday: { birthLunarYear: 1951 } },
+  })
+
+  await page.getByTestId('diary-add-event').click()
+  await page.getByTestId('event-type-birthday').click()
+  await page.getByRole('textbox', { name: '生日称呼', exact: true }).fill('小明')
+  const gregorianCalendar = page.getByRole('group', { name: '生日历法' })
+  await gregorianCalendar.getByRole('button', { name: '公历' }).click()
+  await fillDiaryEventDate(page, '出生日期', '2000-02-29')
+  await expect(page.locator('.event-date-preview')).toContainText('27岁生日')
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true)
+
+  const gregorianSave = page.waitForResponse(response => response.request().method() === 'PUT'
+    && new URL(response.url()).pathname.startsWith('/api/diary/life/events/'))
+  await page.getByRole('button', { name: '保存', exact: true }).click()
+  const gregorianResponse = await gregorianSave
+  expect(gregorianResponse.ok()).toBe(true)
+  expect(await gregorianResponse.json()).toMatchObject({
+    event: {
+      type: 'birthday', startDate: '2000-02-29', dateRule: { calendar: 'gregory' },
+      birthday: { birthGregorianYear: 2000 }, recurrence: 'yearly',
+    },
+  })
 })
 
 test('text-only Diary days have a calendar marker and preserve bullet editing interactions', async ({ page }) => {

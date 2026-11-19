@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
-import { civilDate, dayDistance, eventOccurrenceStart, nextOccurrence, occurrenceInYear, occursOn, parseDay, parseEvent, type EventFields } from '../diaryLife'
+import { lunarToSolar } from '../lunarCalendar'
+import { birthdayAgeAt, civilDate, dayDistance, displayEventTitle, eventOccurrenceStart, nextOccurrence, occurrenceInYear, occursOn, parseDay, parseEvent, type EventFields } from '../diaryLife'
 
 const event: EventFields = { title: '生日', description: '', emoji: '🎂', type: 'anniversary', startDate: '2024-02-29', endDate: '2024-02-29', startTime: null, endTime: null, allDay: true, recurrence: 'yearly', showCountdown: true, isPrimary: false }
 describe('Diary natural days', () => {
@@ -104,5 +105,38 @@ describe('Diary natural days', () => {
     expect(parseEvent({ ...lunarEvent, endDate: '2026-11-17' })).toBeNull()
     expect(parseEvent({ ...lunarEvent, dateRule: { ...lunarRule, lunarDay: 31 } })).toBeNull()
     expect(parseEvent({ ...lunarEvent, startDate: '2101-01-01', endDate: '2101-01-01' })).toBeNull()
+  })
+
+  it('keeps legacy lunar birthdays lunar when the encrypted record omitted dateRule', () => {
+    const lunarBirthday: EventFields = {
+      title: '爷爷', description: '', emoji: '🎂', type: 'birthday',
+      startDate: lunarToSolar({ year: 1951, month: 10, day: 7, isLeapMonth: false })!,
+      endDate: lunarToSolar({ year: 1951, month: 10, day: 7, isLeapMonth: false })!, startTime: null, endTime: null,
+      allDay: true, dateRule: {
+        calendar: 'chinese', lunarMonth: 10, lunarDay: 7, isLeapMonth: false,
+        leapMonthPolicy: 'regular-month', shortMonthPolicy: 'last-day',
+      }, recurrence: 'yearly', birthday: { birthLunarYear: 1951 }, showCountdown: true, isPrimary: false,
+    }
+    const parsed = parseEvent({ ...lunarBirthday, dateRule: undefined })
+    expect(parsed?.dateRule).toMatchObject({ calendar: 'chinese', lunarMonth: 10, lunarDay: 7 })
+    expect(parsed?.birthday).toEqual({ birthLunarYear: 1951 })
+  })
+
+  it('validates Gregorian birthdays and uses the Gregorian anniversary year for age', () => {
+    const gregorianBirthday: EventFields = {
+      title: '小明生日', description: '', emoji: '🎂', type: 'birthday',
+      startDate: '2000-02-29', endDate: '2000-02-29', startTime: null, endTime: null,
+      allDay: true, dateRule: { calendar: 'gregory' }, recurrence: 'yearly',
+      birthday: { birthGregorianYear: 2000 }, showCountdown: true, isPrimary: false,
+    }
+    const parsed = parseEvent(gregorianBirthday)
+    expect(parsed?.birthday).toEqual({ birthGregorianYear: 2000 })
+    expect(occurrenceInYear(gregorianBirthday, 2025)).toBe('2025-02-28')
+    expect(nextOccurrence(gregorianBirthday, '2026-01-01')).toBe('2026-02-28')
+    expect(birthdayAgeAt(gregorianBirthday, '2026-02-28')).toBe(26)
+    expect(displayEventTitle(gregorianBirthday, '2026-02-28')).toBe('小明26岁生日')
+    expect(occursOn(gregorianBirthday, '2026-02-28')).toBe(true)
+    expect(occursOn(gregorianBirthday, '2026-03-01')).toBe(false)
+    expect(parseEvent({ ...gregorianBirthday, birthday: { birthGregorianYear: 2001 } })).toBeNull()
   })
 })
