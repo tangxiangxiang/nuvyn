@@ -2,11 +2,11 @@ import { Hono, type Context } from 'hono'
 import type { Database } from 'better-sqlite3'
 import { bodyLimit } from 'hono/body-limit'
 import { civilDate, dayDistance, parseDay, parseEvent, occursOn, nextOccurrence } from '../../shared/diaryLife.js'
-import { parseTaskFields, parseTaskSeriesFields } from '../../shared/diaryTasks.js'
+import { parseTaskSeriesFields, parseWritableTaskFields } from '../../shared/diaryTasks.js'
 import { withDiaryBodyOperation } from '../diaryAccess/guard.js'
 import { DiaryAccessServiceError } from '../diaryAccess/service.js'
 import { diaryLifeStore, DiaryConflict } from '../diaryLife.js'
-import { diaryTaskStore, DiaryTaskCursorError, DiaryTaskExpansionLimit, DiaryTaskHistoryProtectedError, DiaryTaskListChanged, DiaryTaskNotFound, DiaryTaskRecurrenceError } from '../diaryTasks.js'
+import { diaryTaskStore, DiaryTaskCursorError, DiaryTaskExpansionLimit, DiaryTaskHistoryProtectedError, DiaryTaskListChanged, DiaryTaskNotFound, DiaryTaskRecurrenceError, DiaryTaskValidationError } from '../diaryTasks.js'
 import { diaryToday } from '../diaryDate.js'
 import { DiaryAttachmentError } from '../diaryAttachments/service.js'
 import { cleanupDiaryAttachmentStorage, DiaryAttachmentStorage, ensureDiaryAttachmentStorage } from '../diaryAttachments/storage.js'
@@ -40,6 +40,7 @@ async function guarded(c: Context<Env>, run: (store: Store, db: Database, tasks:
     if (error instanceof DiaryTaskNotFound) return c.json({ code: 'diary-not-found' }, 404)
     if (error instanceof DiaryTaskHistoryProtectedError) return c.json({ code: 'diary-task-history-protected' }, 409)
     if (error instanceof DiaryTaskRecurrenceError) return c.json({ code: 'invalid-diary-task-occurrence' }, 400)
+    if (error instanceof DiaryTaskValidationError) return c.json({ code: 'invalid-diary-task' }, 400)
     if (error instanceof DiaryTaskExpansionLimit) return c.json({ code: 'diary-task-range-too-large' }, 413)
     if (error instanceof DiaryAttachmentError) return c.json({ code: `diary-attachment-${error.code}` }, error.status)
     return c.json({ code: 'diary-unavailable' }, 503)
@@ -152,6 +153,7 @@ routes.get('/tasks/list', c => guarded(c, (_store, _db, tasks) => {
   }
   return c.json(tasks.listTasks(query.cursor, query.status === undefined ? undefined : query.status === 'completed'))
 }))
+routes.get('/tasks/undated', c => guarded(c, (_store, _db, tasks) => c.json(tasks.undatedTaskSummary())))
 routes.get('/tasks', c => guarded(c, (_store, _db, tasks) => {
   const query = c.req.query()
   const { start, end, cursor } = query
@@ -237,7 +239,7 @@ routes.put('/tasks/:id', c => guarded(c, async (_store, _db, tasks) => {
   const body = await c.req.json().catch(() => null)
   if (!idValid(id) || !body || typeof body !== 'object' || Array.isArray(body)
     || Object.prototype.hasOwnProperty.call(body, 'completedAt')) return c.json({ code: 'invalid-diary-task' }, 400)
-  const fields = parseTaskFields(body)
+  const fields = parseWritableTaskFields(body)
   if (!fields || !version(body.expectedVersion) || hasLegacyTaskEventAssociation(body)) {
     return c.json({ code: 'invalid-diary-task' }, 400)
   }

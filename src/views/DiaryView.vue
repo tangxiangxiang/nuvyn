@@ -15,7 +15,7 @@ import { createDiaryEntryId, createDiaryEventId, diaryLifeApi } from '../lib/dia
 import { createDiaryAttachmentClientId, diaryAttachmentsApi } from '../lib/diary-attachments-api'
 import { DiaryAttachmentPreviewUrls } from '../lib/diaryAttachmentPreviewUrls'
 import { addDays, compareEvents, displayEventTitle, eventOccurrenceStart, localToday, MAX_DIARY_IMAGE_GROUP_SIZE, nextOccurrence, occursOn, parseDay, parseEvent, type DiaryDay, type DiaryDaySummary, type DiaryEvent, type DayFields, type DiaryImageGroup, type EventFields } from '../../shared/diaryLife'
-import { parseTaskFields, parseTaskSeriesFields, taskTimeFieldsError, type DiaryRecurringTaskOccurrence, type DiaryTaskListItem, type TaskEditorFields } from '../../shared/diaryTasks'
+import { parseTaskSeriesFields, parseWritableTaskFields, taskTimeFieldsError, type DiaryRecurringTaskOccurrence, type DiaryTask, type DiaryTaskListItem, type TaskEditorFields } from '../../shared/diaryTasks'
 import { DIARY_ATTACHMENT_STAGE_HEARTBEAT_INTERVAL_MS, MAX_DIARY_ATTACHMENT_BYTES, MAX_DIARY_DAY_ATTACHMENTS, type DiaryAttachment } from '../../shared/diaryAttachments'
 import { NUVYN_BROWSER_STORAGE_KEYS, ownerScopedStorageKey, readStorageKey, writeStorageKey } from '../technicalNamespace'
 import DiaryLifeCalendar from '../components/diary/DiaryLifeCalendar.vue'
@@ -96,6 +96,11 @@ const eventSurfaceVisible = computed(() => access.isUnlocked.value && eventSurfa
 const calendarTasks = ref<DiaryTaskListItem[]>([])
 const calendarTasksLoading = ref(false)
 const calendarTasksByDate = computed(() => groupTasksByDueDate(calendarTasks.value))
+const undatedTaskCount = ref(0)
+const undatedTaskCandidate = ref<DiaryTask | null>(null)
+const undatedTaskLoading = ref(false)
+const undatedTaskOpening = ref(false)
+const undatedTaskError = ref('')
 const calendarError = computed(() => mode.value === 'diary' ? diaryCalendarError.value : eventCalendarError.value)
 const busyTaskIds = ref(new Set<string>())
 const taskFormError = ref('')
@@ -189,6 +194,7 @@ let attachmentLeaseTimer: ReturnType<typeof setInterval> | undefined
 const attachmentSessionId = ref<string | null>(null)
 const attachmentPreviewUrls = new DiaryAttachmentPreviewUrls()
 let taskDetailRequest: AbortController | null = null
+let undatedTaskRequest: AbortController | null = null
 let taskContextSequence = 0
 let timer: ReturnType<typeof setInterval> | undefined
 let disposed = false
@@ -424,6 +430,8 @@ function clearPrivateData() {
   diaryCalendarRequest?.controller.abort()
   eventCalendarRequest?.controller.abort()
   calendarTaskRequest?.controller.abort()
+  undatedTaskRequest?.abort()
+  undatedTaskRequest = null
   diaryCalendarRequest = null
   eventCalendarRequest = null
   calendarTaskRequest = null
@@ -437,6 +445,11 @@ function clearPrivateData() {
   days.value = []
   events.value = []
   calendarTasks.value = []
+  undatedTaskCount.value = 0
+  undatedTaskCandidate.value = null
+  undatedTaskLoading.value = false
+  undatedTaskOpening.value = false
+  undatedTaskError.value = ''
   diaryCalendarError.value = ''
   eventCalendarError.value = ''
   calendarTaskError.value = ''
@@ -451,6 +464,40 @@ function capturePrivateOperation() {
   const generation = captureDiarySessionGeneration()
   const owner = storageKey.value
   return () => !disposed && isDiarySessionGenerationCurrent(generation) && storageKey.value === owner && access.isUnlocked.value
+}
+
+async function refreshUndatedTaskSummary() {
+  if (!access.isUnlocked.value || !storageKey.value) {
+    undatedTaskRequest?.abort()
+    undatedTaskRequest = null
+    undatedTaskCount.value = 0
+    undatedTaskCandidate.value = null
+    undatedTaskLoading.value = false
+    undatedTaskError.value = ''
+    return
+  }
+  undatedTaskRequest?.abort()
+  const controller = new AbortController()
+  undatedTaskRequest = controller
+  const generation = captureDiarySessionGeneration()
+  const owner = storageKey.value
+  const isCurrent = () => !disposed && undatedTaskRequest === controller && !controller.signal.aborted
+    && isDiarySessionGenerationCurrent(generation) && storageKey.value === owner && access.isUnlocked.value
+  undatedTaskLoading.value = true
+  undatedTaskError.value = ''
+  try {
+    const result = await diaryTasksApi.undatedTaskSummary(controller.signal)
+    if (!isCurrent()) return
+    undatedTaskCount.value = result.count
+    undatedTaskCandidate.value = result.task
+  } catch {
+    if (isCurrent()) undatedTaskError.value = '检查历史待办失败，请重试。'
+  } finally {
+    if (undatedTaskRequest === controller) {
+      undatedTaskRequest = null
+      undatedTaskLoading.value = false
+    }
+  }
 }
 
 function registerShellCommands() {
@@ -565,6 +612,43 @@ function startTaskEdit(task: DiaryTaskListItem | null, returnTo: TaskReturnConte
     void nextTick(() => {
       if (isCurrent() && eventSurface.value?.kind === 'task-edit') taskForm.value?.focusTitle()
     })
+  }
+}
+
+async function openUndatedTaskRepair() {
+  if (undatedTaskOpening.value || undatedTaskLoading.value || busy.value || attachmentBusy.value || !access.isUnlocked.value) return
+  const candidate = undatedTaskCandidate.value
+  if (!candidate) {
+    await refreshUndatedTaskSummary()
+    return
+  }
+  const isCurrent = capturePrivateOperation()
+  taskDetailRequest?.abort()
+  const controller = new AbortController()
+  taskDetailRequest = controller
+  undatedTaskOpening.value = true
+  undatedTaskError.value = ''
+  try {
+    const currentTask = (await diaryTasksApi.getTask(candidate.id, controller.signal)).task
+    if (controller.signal.aborted || !isCurrent()) return
+    if (currentTask.dueDate !== null) {
+      await refreshUndatedTaskSummary()
+      return
+    }
+    const date = today.value
+    const returnTo: TaskReturnContext = { kind: 'day-list', date, taskId: currentTask.id, restoreFocus: false }
+    mode.value = 'events'
+    syncCalendarToDate(date)
+    selected.value = date
+    eventSurface.value = { kind: 'day-list', date }
+    await nextTick()
+    if (!isCurrent()) return
+    startTaskEdit({ ...currentTask, kind: 'one-off' }, returnTo)
+  } catch {
+    if (!controller.signal.aborted && isCurrent()) undatedTaskError.value = '加载历史待办失败，请重试。'
+  } finally {
+    if (taskDetailRequest === controller) taskDetailRequest = null
+    if (isCurrent()) undatedTaskOpening.value = false
   }
 }
 
@@ -771,9 +855,11 @@ watch([month, mode, access.isUnlocked, access.epoch, storageKey], () => {
   if (access.isUnlocked.value && storageKey.value) void load()
   else clearPrivateData()
 }, { immediate: true })
-watch([access.isUnlocked, storageKey], ([unlocked, owner]) => {
-  if (unlocked && owner) registerShellCommands()
-  else clearShellCommands()
+watch([access.isUnlocked, storageKey, access.epoch], ([unlocked, owner]) => {
+  if (unlocked && owner) {
+    registerShellCommands()
+    void refreshUndatedTaskSummary()
+  } else clearShellCommands()
 }, { immediate: true })
 async function canLeave() {
   return !busy.value && !attachmentBusy.value && (!dirty.value || await confirm('放弃未保存的修改？'))
@@ -1046,7 +1132,7 @@ async function saveTask() {
     taskFormError.value = '请选择结束日期。'
     return
   }
-  const oneOffFields = isRecurring ? null : parseTaskFields(editor.draft)
+  const oneOffFields = isRecurring ? null : parseWritableTaskFields(editor.draft)
   let seriesFields = isRecurring ? parseTaskSeriesFields({
     title: editor.draft.title,
     description: editor.draft.description,
@@ -1065,7 +1151,8 @@ async function saveTask() {
   }
   if ((!isRecurring && !oneOffFields) || (isRecurring && !seriesFields)) {
     if (isRecurring) taskFormError.value = '请检查待办名称、备注和重复规则。'
-    else if (taskTimeFieldsError(editor.draft)) taskFormError.value = '请检查开始和截止时间设置。'
+    else if (taskTimeFieldsError(editor.draft, true) === 'missing-due-date') taskFormError.value = '请选择截止日期。'
+    else if (taskTimeFieldsError(editor.draft, true)) taskFormError.value = '请检查开始和截止时间设置。'
     else taskFormError.value = '请检查待办名称和备注。'
     return
   }
@@ -1092,7 +1179,12 @@ async function saveTask() {
       focusTaskId = result.task.id
     }
     if (!isCurrent() || eventSurface.value !== editor) return
-    await refreshTaskContext({ ...editor.returnTo, taskId: focusTaskId, restoreFocus: true })
+    const repairedUndatedTask = editor.task?.kind === 'one-off' && editor.task.dueDate === null
+    if (repairedUndatedTask) await refreshUndatedTaskSummary()
+    const returnTo = repairedUndatedTask && editor.draft.dueDate
+      ? { ...editor.returnTo, date: editor.draft.dueDate }
+      : editor.returnTo
+    await refreshTaskContext({ ...returnTo, taskId: focusTaskId, restoreFocus: true })
   } catch (cause) {
     if (!isCurrent() || eventSurface.value !== editor) return
     if (cause instanceof DiaryTaskHistoryProtectedError) {
@@ -1122,6 +1214,7 @@ async function deleteTask() {
     else await diaryTasksApi.deleteTask(editor.task.id, editor.task.version)
     if (!isCurrent() || eventSurface.value !== editor) return
     updateCalendarTask(null, editor.task.id)
+    if (editor.task.kind === 'one-off' && editor.task.dueDate === null) await refreshUndatedTaskSummary()
     await refreshTaskContext(editor.returnTo)
   } catch (cause) {
     if (!isCurrent() || eventSurface.value !== editor) return
@@ -1313,6 +1406,16 @@ onBeforeUnmount(() => {
         <div v-if="calendarError" class="diary-life-error" role="alert">{{ calendarError }} <NButton text @click="retryCalendarStage()">重试</NButton></div>
         <DiaryLifeCalendar :markers="markers" :today="today" :selected-date="selected" :month="month" :revision="calendarRevision" @select="open" @month="month = $event" />
       </div>
+      <div v-if="undatedTaskCount > 0" class="diary-undated-task-notice" data-testid="diary-undated-task-notice" role="status">
+        <span>发现 {{ undatedTaskCount }} 条历史待办缺少截止日期，补充后会显示在日历中。</span>
+        <span class="diary-undated-task-actions">
+          <NButton text type="primary" :disabled="undatedTaskLoading || undatedTaskOpening" @click="openUndatedTaskRepair">补充截止日期</NButton>
+          <NButton v-if="undatedTaskError" text @click="refreshUndatedTaskSummary">重试</NButton>
+        </span>
+      </div>
+      <div v-else-if="undatedTaskError" class="diary-life-error" role="alert">
+        {{ undatedTaskError }} <NButton text @click="refreshUndatedTaskSummary">重试</NButton>
+      </div>
       <DiaryDayDialog
         v-if="selected !== null && mode === 'diary' && !eventDraft"
         :show="selected !== null && mode === 'diary' && !eventDraft"
@@ -1489,6 +1592,8 @@ onBeforeUnmount(() => {
   min-height: 100%;
 }
 .diary-life-error { margin-top: 8px; padding: 8px 0; }
+.diary-undated-task-notice { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin: 0 auto 12px; padding: 10px 14px; max-width: 1100px; border: 1px solid var(--border, #e5e7eb); border-radius: 12px; background: var(--surface-muted, #f9fafb); color: var(--text-muted, #6b7280); font-size: 13px; }
+.diary-undated-task-actions { display: flex; flex: 0 0 auto; align-items: center; gap: 8px; }
 .diary-event-form-error { margin: 0 0 14px; color: var(--danger, #dc2626); }
 .diary-task-reload { margin: -4px 0 12px; }
 .day-list-empty { margin: 0; padding: 12px 0; color: var(--text-muted, #6b7280); text-align: center; }
@@ -1506,6 +1611,9 @@ onBeforeUnmount(() => {
 .diary-day-status { display: flex; align-items: center; gap: 8px; padding: 4px 0; color: var(--text-muted, #6b7280); }
 .diary-event-distance { min-width: 0; color: var(--text-muted, #6b7280); font-size: 12px; font-weight: 400; line-height: 20px; text-align: right; white-space: nowrap; }
 .unlock-diary { display: block; margin: 20vh auto; }
+@media (max-width: 520px) {
+  .diary-undated-task-notice { align-items: flex-start; flex-direction: column; gap: 4px; }
+}
 @media (hover: hover) and (pointer: fine) and (not (any-pointer: coarse)) {
   .day-list-section-action { opacity: 0; transition: opacity 140ms ease; }
   .day-list-section:hover .day-list-section-action,

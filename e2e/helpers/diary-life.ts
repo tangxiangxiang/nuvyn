@@ -111,6 +111,12 @@ export async function fillDiaryTaskDate(page: Page, label: string, value: string
   await input.press('Tab')
 }
 
+export async function clearDiaryTaskDate(page: Page, label: string) {
+  const picker = page.locator(`.diary-task-date-picker[aria-label="${label}"]`)
+  await picker.hover()
+  await picker.locator('.n-base-clear').click()
+}
+
 export function diaryTaskTimeInput(page: Page, label: string) {
   return page.locator(`.diary-task-time-picker[aria-label="${label}"] input`)
 }

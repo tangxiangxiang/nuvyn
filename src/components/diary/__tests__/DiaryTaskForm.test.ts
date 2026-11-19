@@ -73,6 +73,9 @@ describe('DiaryTaskForm', () => {
       dueDate: null,
       dueTime: null,
     })
+    await wrapper.setProps({ modelValue: { ...initial, dueDate: null, dueTime: null } })
+    expect(wrapper.findAll('.diary-task-form-time-heading').find(heading => heading.text().includes('截止日期'))?.text()).toContain('截止日期*')
+    expect(wrapper.get('[role="alert"]').text()).toBe('请选择截止日期。')
     wrapper.unmount()
   })
 

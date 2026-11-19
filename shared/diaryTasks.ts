@@ -13,6 +13,8 @@ export interface OneOffTaskFields extends TaskFields {
   startTime: string | null
 }
 
+export type WritableOneOffTaskFields = Omit<OneOffTaskFields, 'dueDate'> & { dueDate: string }
+
 export interface DiaryTask extends OneOffTaskFields {
   id: string
   completedAt: number | null
@@ -84,6 +86,7 @@ export type TaskTimeValidationError =
   | 'invalid-start-date'
   | 'invalid-start-time'
   | 'start-time-without-date'
+  | 'missing-due-date'
   | 'invalid-due-date'
   | 'invalid-due-time'
   | 'due-time-without-date'
@@ -91,7 +94,7 @@ export type TaskTimeValidationError =
   | 'start-time-after-due-time'
 
 /** Validate and normalize the civil start and due fields used by one-off tasks. */
-export function taskTimeFieldsError(value: unknown): TaskTimeValidationError | null {
+export function taskTimeFieldsError(value: unknown, requireDueDate = false): TaskTimeValidationError | null {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return 'invalid-start-date'
   const fields = value as Record<string, unknown>
   const startDate = fields.startDate === undefined ? null : fields.startDate
@@ -106,6 +109,7 @@ export function taskTimeFieldsError(value: unknown): TaskTimeValidationError | n
   if (dueDate !== null && (typeof dueDate !== 'string' || !civilDate(dueDate))) return 'invalid-due-date'
   if (dueTime !== null && !validTime(dueTime)) return 'invalid-due-time'
   if (dueDate === null && dueTime !== null) return 'due-time-without-date'
+  if (requireDueDate && dueDate === null) return 'missing-due-date'
   if (startDate !== null && dueDate !== null && startDate > dueDate) return 'start-after-due-date'
   if (startDate !== null && startDate === dueDate && startTime !== null && dueTime !== null && startTime > dueTime) {
     return 'start-time-after-due-time'
@@ -134,6 +138,13 @@ export function parseTaskFields(value: unknown): OneOffTaskFields | null {
     dueDate: (fields.dueDate === undefined ? null : fields.dueDate) as string | null,
     dueTime: (fields.dueTime === undefined ? null : fields.dueTime) as string | null,
   }
+}
+
+/** Parse fields for new or updated one-off tasks. Legacy reads use parseTaskFields instead. */
+export function parseWritableTaskFields(value: unknown): WritableOneOffTaskFields | null {
+  const fields = parseTaskFields(value)
+  if (!fields || taskTimeFieldsError(value, true)) return null
+  return fields as WritableOneOffTaskFields
 }
 
 export function parseTaskSeriesFields(value: unknown): TaskSeriesFields | null {

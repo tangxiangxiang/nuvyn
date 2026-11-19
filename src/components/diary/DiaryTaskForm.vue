@@ -52,11 +52,12 @@ const time = computed<string | null>({
   set: dueTime => emit('update:modelValue', { ...props.modelValue, dueTime: dueTime || null }),
 })
 const timeError = computed(() => {
-  const error = taskTimeFieldsError(props.modelValue)
+  const error = taskTimeFieldsError(props.modelValue, props.modelValue.recurrence === null)
   switch (error) {
     case 'invalid-start-date': return '开始日期无效。'
     case 'invalid-start-time': return '开始时间无效。'
     case 'start-time-without-date': return '请先设置开始日期。'
+    case 'missing-due-date': return '请选择截止日期。'
     case 'invalid-due-date': return '截止日期无效。'
     case 'invalid-due-time': return '截止时间无效。'
     case 'due-time-without-date': return '请先设置截止日期。'
@@ -184,7 +185,7 @@ defineExpose({ focusTitle: () => titleInput.value?.focus() })
         </div>
       </div>
       <div class="diary-task-form-time-group">
-        <div class="diary-task-form-time-heading">截止时间</div>
+        <div class="diary-task-form-time-heading">截止日期<span class="diary-task-required" aria-hidden="true">*</span></div>
         <div class="diary-task-form-time-inputs">
           <NDatePicker
             v-model:formatted-value="date"
@@ -193,6 +194,7 @@ defineExpose({ focusTitle: () => titleInput.value?.focus() })
             format="yyyy-MM-dd"
             value-format="yyyy-MM-dd"
             aria-label="截止日期"
+            aria-required="true"
             clearable
             :status="timeError ? 'error' : undefined"
             :disabled="inert"

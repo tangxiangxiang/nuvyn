@@ -1,5 +1,5 @@
 import { test, expect } from './fixtures/auth'
-import { chooseDiaryAction, diaryEventDateInput, diaryMonthLabel, diaryTaskDateInput, diaryTaskTimeInput, fillDiaryEventDate, fillDiaryTaskDate, fillDiaryTaskTime, selectNaiveOption, unlockDiary } from './helpers/diary-life'
+import { chooseDiaryAction, clearDiaryTaskDate, diaryEventDateInput, diaryMonthLabel, diaryTaskDateInput, diaryTaskTimeInput, fillDiaryEventDate, fillDiaryTaskDate, fillDiaryTaskTime, selectNaiveOption, unlockDiary } from './helpers/diary-life'
 
 const fixtureYear = 1900 + Math.floor(Math.random() * 100)
 let testYear = fixtureYear
@@ -30,6 +30,11 @@ test('creates a dated task, completes it, restores it, and moves it to a new cal
   await page.getByRole('button', { name: '保存', exact: true }).click()
   await expect(editor.getByRole('alert')).toContainText('请输入待办名称')
   await titleInput.fill(title)
+  await clearDiaryTaskDate(page, '截止日期')
+  await page.getByRole('button', { name: '保存', exact: true }).click()
+  await expect(editor.locator('.diary-event-form-error')).toContainText('请选择截止日期。')
+  await expect(titleInput).toHaveValue(title)
+  await expect(editor).toBeVisible()
   await fillDiaryTaskDate(page, '截止日期', date)
   await page.getByRole('button', { name: '保存', exact: true }).click()
 
@@ -62,6 +67,15 @@ test('creates a dated task, completes it, restores it, and moves it to a new cal
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true)
   }
   if (originalViewport) await page.setViewportSize(originalViewport)
+
+  await page.getByRole('button', { name: `编辑待办：${secondTitle}`, exact: true }).click()
+  await clearDiaryTaskDate(page, '截止日期')
+  await page.getByRole('button', { name: '保存', exact: true }).click()
+  await expect(editor.locator('.diary-event-form-error')).toContainText('请选择截止日期。')
+  await expect(page.getByRole('textbox', { name: '待办名称' })).toHaveValue(secondTitle)
+  await fillDiaryTaskDate(page, '截止日期', date)
+  await page.getByRole('button', { name: '保存', exact: true }).click()
+  await expect(editor).toBeHidden()
 
   await page.getByRole('button', { name: `编辑待办：${secondTitle}`, exact: true }).click()
   await page.getByRole('button', { name: '删除', exact: true }).click()
@@ -124,6 +138,78 @@ test('creates a dated task, completes it, restores it, and moves it to a new cal
   await page.getByRole('button', { name: '删除', exact: true }).click()
   await page.getByRole('dialog', { name: '删除这条待办？' }).getByRole('button', { name: /^(Confirm|确认|确定)$/ }).click()
   await expect(nextCell.locator('.life-task-marker')).toHaveCount(0)
+})
+
+test('repairs a legacy undated task from the conditional notice without inferring a due date', async ({ page }) => {
+  const taskId = '11111111-1111-4111-8111-111111111111'
+  const dueDate = `${testYear}-11-21`
+  const legacyTask = {
+    id: taskId,
+    title: '历史无日期待办',
+    description: '保留原备注',
+    startDate: `${testYear}-11-19`,
+    startTime: '09:00',
+    dueDate: null,
+    dueTime: null,
+    completedAt: null,
+    version: 1,
+    createdAt: 1,
+    updatedAt: 1,
+  }
+  let savedTask: typeof legacyTask | null = null
+  let savedBody: Record<string, unknown> | null = null
+  await page.route('**/api/diary/life/**', async route => {
+    const request = route.request()
+    const pathname = new URL(request.url()).pathname
+    if (request.method() === 'GET' && pathname === '/api/diary/life/tasks/undated') {
+      await route.fulfill({ json: savedTask ? { task: null, count: 0 } : { task: legacyTask, count: 1 } })
+      return
+    }
+    if (request.method() === 'GET' && pathname === `/api/diary/life/tasks/${taskId}`) {
+      await route.fulfill({ json: { task: savedTask ?? legacyTask } })
+      return
+    }
+    if (request.method() === 'PUT' && pathname === `/api/diary/life/tasks/${taskId}`) {
+      savedBody = request.postDataJSON() as Record<string, unknown>
+      savedTask = { ...legacyTask, ...savedBody, dueDate: savedBody.dueDate as string, version: 2 } as typeof legacyTask
+      await route.fulfill({ json: { task: savedTask } })
+      return
+    }
+    if (request.method() === 'GET' && pathname === '/api/diary/life/task-occurrences') {
+      await route.fulfill({ json: {
+        items: savedTask?.dueDate ? [{ ...savedTask, kind: 'one-off' }] : [],
+        nextCursor: null,
+      } })
+      return
+    }
+    if (request.method() === 'GET' && pathname === '/api/diary/life/events') {
+      await route.fulfill({ json: { items: [], next: null } })
+      return
+    }
+    await route.continue()
+  })
+
+  await page.goto('/diary')
+  await unlockDiary(page)
+  const notice = page.getByTestId('diary-undated-task-notice')
+  await expect(notice).toContainText('1 条历史待办缺少截止日期')
+  await notice.getByRole('button', { name: '补充截止日期' }).click()
+
+  const editor = page.locator('.diary-task-edit-dialog')
+  await expect(editor).toBeVisible()
+  await expect(page.getByRole('textbox', { name: '待办名称' })).toHaveValue('历史无日期待办')
+  await expect(diaryTaskDateInput(page, '截止日期')).toHaveValue('')
+  await expect(diaryTaskDateInput(page, '开始日期')).toHaveValue(`${testYear}-11-19`)
+  await page.getByRole('button', { name: '保存', exact: true }).click()
+  await expect(editor.locator('.diary-event-form-error')).toContainText('请选择截止日期。')
+  expect(savedBody).toBeNull()
+
+  await fillDiaryTaskDate(page, '截止日期', dueDate)
+  await page.getByRole('button', { name: '保存', exact: true }).click()
+  await expect(editor).toBeHidden()
+  expect(savedBody).toMatchObject({ dueDate, dueTime: null, startDate: `${testYear}-11-19`, startTime: '09:00' })
+  await expect(notice).toHaveCount(0)
+  await expect(page.getByRole('checkbox', { name: '完成待办：历史无日期待办', exact: true })).toBeVisible()
 })
 
 test('overdue Todos use Bomb and return to Party when completed late', async ({ page }) => {

@@ -1,5 +1,5 @@
 import { diaryAuthFetch } from './auth-session'
-import type { DiaryRecurringTaskOccurrence, DiaryTask, DiaryTaskItemPage, DiaryTaskListItem, DiaryTaskListStatus, DiaryTaskPage, DiaryTaskSeries, OneOffTaskFields, TaskSeriesFields } from '../../shared/diaryTasks'
+import type { DiaryRecurringTaskOccurrence, DiaryTask, DiaryTaskItemPage, DiaryTaskListItem, DiaryTaskListStatus, DiaryTaskPage, DiaryTaskSeries, TaskSeriesFields, WritableOneOffTaskFields } from '../../shared/diaryTasks'
 export type { DiaryTaskPage } from '../../shared/diaryTasks'
 
 export class DiaryTaskApiError extends Error {
@@ -64,7 +64,7 @@ async function request<T>(path: string, method = 'GET', body?: unknown, signal?:
 }
 
 export const diaryTasksApi = {
-  createTask(fields: OneOffTaskFields): Promise<{ task: DiaryTask }> {
+  createTask(fields: WritableOneOffTaskFields): Promise<{ task: DiaryTask }> {
     return request(`/tasks/${createDiaryTaskId()}`, 'PUT', {
       ...fields,
       expectedVersion: 0,
@@ -72,6 +72,9 @@ export const diaryTasksApi = {
   },
   getTask(id: string, signal?: AbortSignal): Promise<{ task: DiaryTask }> {
     return request(`/tasks/${encodeURIComponent(id)}`, 'GET', undefined, signal)
+  },
+  undatedTaskSummary(signal?: AbortSignal): Promise<{ task: DiaryTask | null; count: number }> {
+    return request('/tasks/undated', 'GET', undefined, signal)
   },
   listTasks(cursor?: string, signal?: AbortSignal, status?: DiaryTaskListStatus): Promise<DiaryTaskPage> {
     const query = new URLSearchParams()
@@ -84,7 +87,7 @@ export const diaryTasksApi = {
     if (cursor !== undefined) query.set('cursor', cursor)
     return request(`/tasks?${query}`, 'GET', undefined, signal)
   },
-  updateTask(id: string, fields: OneOffTaskFields, expectedVersion: number): Promise<{ task: DiaryTask }> {
+  updateTask(id: string, fields: WritableOneOffTaskFields, expectedVersion: number): Promise<{ task: DiaryTask }> {
     return request(`/tasks/${encodeURIComponent(id)}`, 'PUT', {
       ...fields,
       expectedVersion,

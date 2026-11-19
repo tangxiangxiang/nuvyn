@@ -3,7 +3,7 @@ import { createHmac, timingSafeEqual } from 'node:crypto'
 import { Temporal } from '@js-temporal/polyfill'
 import type { DiaryBodyOperation } from './diaryAccess/service.js'
 import { civilDate } from '../shared/diaryLife.js'
-import { parseTaskFields, parseTaskOccurrenceState, parseTaskSeriesFields, type DiaryRecurringTaskOccurrence, type DiaryTask, type DiaryTaskItemPage, type DiaryTaskListItem, type DiaryTaskPage, type DiaryTaskSeries, type OneOffTaskFields, type TaskOccurrenceState, type TaskSeriesFields } from '../shared/diaryTasks.js'
+import { parseTaskFields, parseTaskOccurrenceState, parseTaskSeriesFields, parseWritableTaskFields, type DiaryRecurringTaskOccurrence, type DiaryTask, type DiaryTaskItemPage, type DiaryTaskListItem, type DiaryTaskPage, type DiaryTaskSeries, type OneOffTaskFields, type TaskOccurrenceState, type TaskSeriesFields } from '../shared/diaryTasks.js'
 import { taskRecurrenceDates, taskRecurrenceOccursOn } from '../shared/diaryTaskRecurrence.js'
 import { DiaryConflict } from './diaryLife.js'
 
@@ -13,6 +13,7 @@ export class DiaryTaskListChanged extends Error {}
 export class DiaryTaskExpansionLimit extends Error {}
 export class DiaryTaskRecurrenceError extends Error {}
 export class DiaryTaskHistoryProtectedError extends Error {}
+export class DiaryTaskValidationError extends Error {}
 
 const PAGE_SIZE = 200
 const MAX_CURSOR_LENGTH = 1024
@@ -301,6 +302,17 @@ export function diaryTaskStore(db: Database, owner: number, operation: DiaryBody
     })()
   }
 
+  function undatedTaskSummary(): { task: DiaryTask | null; count: number } {
+    operation.assertCurrent()
+    return db.transaction(() => {
+      const result = db.prepare('SELECT COUNT(*) AS count FROM diary_tasks WHERE owner_user_id = ? AND due_date IS NULL')
+        .get(owner) as { count: number }
+      const row = db.prepare(`SELECT * FROM diary_tasks WHERE owner_user_id = ? AND due_date IS NULL
+        ORDER BY created_at, id LIMIT 1`).get(owner) as TaskRow | undefined
+      return { task: row ? task(row) : null, count: result.count }
+    })()
+  }
+
   function cursorMatchesItemQuery(value: unknown, query: TaskItemQuery): boolean {
     if (query.type === 'range') {
       return hasExactKeys(value, ['type', 'start', 'end']) && value.type === 'range'
@@ -585,6 +597,7 @@ export function diaryTaskStore(db: Database, owner: number, operation: DiaryBody
       const row = readTaskRow(id)
       return row ? task(row) : null
     },
+    undatedTaskSummary,
     listTasks(cursor?: string, completed?: boolean): DiaryTaskPage {
       return listPage({ type: 'list', ...(completed === undefined ? {} : { completed }) }, cursor)
     },
@@ -593,18 +606,20 @@ export function diaryTaskStore(db: Database, owner: number, operation: DiaryBody
     },
     putTask(id: string, fields: OneOffTaskFields, expected: number): DiaryTask {
       operation.assertCurrent()
+      const writableFields = parseWritableTaskFields(fields)
+      if (!writableFields) throw new DiaryTaskValidationError()
       const now = Date.now()
       db.transaction(() => {
         const row = readTaskRow(id)
         if ((row?.version ?? deletedVersion(id)) !== expected) throw new DiaryConflict()
         const completedAt = row ? task(row).completedAt : null
         const nextVersion = expected + 1
-        const encrypted = crypto!.encrypt({ ...fields, completedAt }, identity(id, nextVersion))
+        const encrypted = crypto!.encrypt({ ...writableFields, completedAt }, identity(id, nextVersion))
         db.prepare(`INSERT INTO diary_tasks (owner_user_id, id, due_date, encrypted_fields, created_at, updated_at, version)
           VALUES (?, ?, ?, ?, ?, ?, ?)
           ON CONFLICT(owner_user_id, id) DO UPDATE SET due_date = excluded.due_date,
             encrypted_fields = excluded.encrypted_fields, updated_at = excluded.updated_at, version = excluded.version`)
-          .run(owner, id, fields.dueDate, encrypted, row?.created_at ?? now, now, nextVersion)
+          .run(owner, id, writableFields.dueDate, encrypted, row?.created_at ?? now, now, nextVersion)
         db.prepare('DELETE FROM diary_task_deleted_records WHERE owner_user_id = ? AND id = ?').run(owner, id)
         advanceListRevision()
       })()

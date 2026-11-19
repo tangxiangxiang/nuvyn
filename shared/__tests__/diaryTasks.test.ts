@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { isTaskOverdue, MAX_DIARY_TASK_DESCRIPTION_LENGTH, MAX_DIARY_TASK_TITLE_LENGTH, parseTaskFields } from '../diaryTasks.js'
+import { isTaskOverdue, MAX_DIARY_TASK_DESCRIPTION_LENGTH, MAX_DIARY_TASK_TITLE_LENGTH, parseTaskFields, parseWritableTaskFields, taskTimeFieldsError } from '../diaryTasks.js'
 
 describe('Diary task fields', () => {
   it('normalizes the title and supplies optional defaults while preserving description line breaks', () => {
@@ -51,6 +51,15 @@ describe('Diary task fields', () => {
     expect(parseTaskFields({ title: 'Time order', startDate: '2026-11-19', startTime: '15:00', dueDate: '2026-11-19', dueTime: '12:00' })).toBeNull()
     expect(parseTaskFields({ title: 'Start time without date', startTime: '09:00' })).toBeNull()
     expect(parseTaskFields({ title: 'Due time without date', dueTime: '12:00' })).toBeNull()
+  })
+
+  it('keeps legacy reads nullable but requires a valid due date for one-off writes', () => {
+    expect(parseTaskFields({ title: 'Legacy task', dueDate: null })).toMatchObject({ dueDate: null })
+    expect(parseWritableTaskFields({ title: 'Legacy task', dueDate: null })).toBeNull()
+    expect(parseWritableTaskFields({ title: 'Missing task date' })).toBeNull()
+    expect(taskTimeFieldsError({ title: 'Missing task date', dueDate: null }, true)).toBe('missing-due-date')
+    expect(parseWritableTaskFields({ title: 'Dated task', dueDate: '2026-11-20' })).toMatchObject({ dueDate: '2026-11-20' })
+    expect(parseWritableTaskFields({ title: 'Start after due', startDate: '2026-11-21', dueDate: '2026-11-20' })).toBeNull()
   })
 })
 

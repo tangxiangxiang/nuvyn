@@ -17,13 +17,13 @@ describe('Diary task API client', () => {
       return Response.json({ task: { id: 'server-task' } })
     }))
 
-    await diaryTasksApi.createTask({ title: '  Task  ', description: '', startDate: null, startTime: null, dueDate: null, dueTime: null })
+    await diaryTasksApi.createTask({ title: '  Task  ', description: '', startDate: null, startTime: null, dueDate: '2026-11-17', dueTime: null })
 
     const call = calls[0]!
     expect(String(call.input)).toMatch(/^\/api\/diary\/life\/tasks\/[0-9a-f-]{36}$/)
     expect(call.init).toMatchObject({ method: 'PUT', cache: 'no-store' })
     expect(new Headers(call.init?.headers).get('X-Nuvyn-Diary-Capability')).toBe('test-diary-capability')
-    expect(JSON.parse(String(call.init?.body))).toEqual({ title: '  Task  ', description: '', startDate: null, startTime: null, dueDate: null, dueTime: null, expectedVersion: 0 })
+    expect(JSON.parse(String(call.init?.body))).toEqual({ title: '  Task  ', description: '', startDate: null, startTime: null, dueDate: '2026-11-17', dueTime: null, expectedVersion: 0 })
   })
 
   it('passes AbortSignal for list reads and exposes every CRUD and lifecycle endpoint', async () => {
@@ -35,9 +35,10 @@ describe('Diary task API client', () => {
     const controller = new AbortController()
     await diaryTasksApi.listTasks('list-cursor', controller.signal)
     await diaryTasksApi.listTasks('filtered-cursor', controller.signal, 'completed')
+    await diaryTasksApi.undatedTaskSummary(controller.signal)
     await diaryTasksApi.tasksInRange('2026-01-01', '2026-01-31', 'range-cursor', controller.signal)
     await diaryTasksApi.getTask('task-id', controller.signal)
-    await diaryTasksApi.updateTask('task-id', { title: 'Task', description: '', startDate: null, startTime: null, dueDate: null, dueTime: null }, 1)
+    await diaryTasksApi.updateTask('task-id', { title: 'Task', description: '', startDate: null, startTime: null, dueDate: '2026-01-02', dueTime: null }, 1)
     await diaryTasksApi.completeTask('task-id', 2)
     await diaryTasksApi.reopenTask('task-id', 3)
     await diaryTasksApi.deleteTask('task-id', 4)
@@ -45,6 +46,7 @@ describe('Diary task API client', () => {
     expect(calls.map(call => `${call.init?.method ?? 'GET'} ${call.input}`)).toEqual([
       'GET /api/diary/life/tasks/list?cursor=list-cursor',
       'GET /api/diary/life/tasks/list?status=completed&cursor=filtered-cursor',
+      'GET /api/diary/life/tasks/undated',
       'GET /api/diary/life/tasks?start=2026-01-01&end=2026-01-31&cursor=range-cursor',
       'GET /api/diary/life/tasks/task-id',
       'PUT /api/diary/life/tasks/task-id',
@@ -56,6 +58,7 @@ describe('Diary task API client', () => {
     expect(calls[1]?.init?.signal).toBe(controller.signal)
     expect(calls[2]?.init?.signal).toBe(controller.signal)
     expect(calls[3]?.init?.signal).toBe(controller.signal)
+    expect(calls[4]?.init?.signal).toBe(controller.signal)
     expect(calls.every(call => call.init?.cache === 'no-store')).toBe(true)
   })
 
