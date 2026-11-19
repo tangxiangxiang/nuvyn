@@ -5,6 +5,7 @@ import type { DiaryTaskListItem } from '../../../../shared/diaryTasks'
 import DiaryTaskRows from '../DiaryTaskRows.vue'
 
 type OneOffTask = Extract<DiaryTaskListItem, { kind?: 'one-off' }>
+const now = new Date(2026, 10, 18, 12).getTime()
 
 function makeTask(overrides: Partial<OneOffTask> = {}): OneOffTask {
   return {
@@ -26,7 +27,7 @@ function makeTask(overrides: Partial<OneOffTask> = {}): OneOffTask {
 describe('DiaryTaskRows', () => {
   it('places the task detail beside the title in a cloud card', () => {
     const task = makeTask({ dueTime: '12:00' })
-    const wrapper = mount(DiaryTaskRows, { props: { items: [task], today: '2026-11-18', showDueDate: false } })
+    const wrapper = mount(DiaryTaskRows, { props: { items: [task], today: '2026-11-18', now, showDueDate: false } })
 
     expect(wrapper.get('.diary-task-row').classes()).toContain('diary-cloud-card')
     expect(wrapper.get('.diary-task-edit').element.children[0]?.className).toBe('diary-task-copy')
@@ -37,7 +38,7 @@ describe('DiaryTaskRows', () => {
   })
 
   it('does not render a placeholder when a task has no time detail', () => {
-    const wrapper = mount(DiaryTaskRows, { props: { items: [makeTask()], today: '2026-11-18', showDueDate: false } })
+    const wrapper = mount(DiaryTaskRows, { props: { items: [makeTask()], today: '2026-11-18', now, showDueDate: false } })
 
     expect(wrapper.find('.diary-task-detail').exists()).toBe(false)
     expect(wrapper.get('.diary-task-title').text()).toBe('OEE报表开发')
@@ -46,7 +47,7 @@ describe('DiaryTaskRows', () => {
 
   it('shows completed status instead of the deadline and restores the deadline when reopened', async () => {
     const completed = makeTask({ dueTime: '12:00', completedAt: new Date(2026, 10, 18, 12).getTime() })
-    const wrapper = mount(DiaryTaskRows, { props: { items: [completed], today: '2026-11-18', showDueDate: false } })
+    const wrapper = mount(DiaryTaskRows, { props: { items: [completed], today: '2026-11-18', now, showDueDate: false } })
 
     expect(wrapper.get('.diary-task-row').classes()).toContain('is-completed')
     expect(wrapper.get('.diary-task-detail').text()).toBe('已完成')
@@ -65,7 +66,7 @@ describe('DiaryTaskRows', () => {
     const overdue = makeTask({ id: 'overdue', dueDate: '2026-11-17' })
     const completed = makeTask({ id: 'completed', dueDate: '2026-11-18', completedAt: 1 })
     const wrapper = mount(DiaryTaskRows, {
-      props: { items: [urgent, future, overdue, completed], today: '2026-11-18', showDeadlineReminder: true },
+      props: { items: [urgent, future, overdue, completed], today: '2026-11-18', now, showDeadlineReminder: true },
     })
 
     const rows = wrapper.findAll('.diary-task-row')
@@ -79,15 +80,32 @@ describe('DiaryTaskRows', () => {
 
   it('labels a task completed after its deadline as overdue completion', () => {
     const completed = makeTask({ dueDate: '2026-11-18', dueTime: '12:00', completedAt: new Date(2026, 10, 18, 13, 26).getTime() })
-    const wrapper = mount(DiaryTaskRows, { props: { items: [completed], today: '2026-11-18', showDueDate: false } })
+    const wrapper = mount(DiaryTaskRows, { props: { items: [completed], today: '2026-11-18', now, showDueDate: false } })
 
     expect(wrapper.get('.diary-task-detail').text()).toBe('逾期完成')
     wrapper.unmount()
   })
 
+  it('updates overdue status and warning styling when the current time changes', async () => {
+    const task = makeTask({ dueTime: '02:00' })
+    const wrapper = mount(DiaryTaskRows, {
+      props: { items: [task], today: '2026-11-18', now: new Date(2026, 10, 18, 1, 59).getTime(), showDueDate: false },
+    })
+
+    expect(wrapper.get('.diary-task-detail').text()).toBe('截止 02:00')
+    expect(wrapper.get('.diary-task-row').classes()).not.toContain('is-overdue')
+
+    await wrapper.setProps({ now: new Date(2026, 10, 18, 2, 8).getTime() })
+    expect(wrapper.get('.diary-task-detail').text()).toBe('已逾期8分钟')
+    expect(wrapper.get('.diary-task-row').classes()).toContain('is-overdue')
+
+    await wrapper.setProps({ now: new Date(2026, 10, 18, 10, 26).getTime() })
+    expect(wrapper.get('.diary-task-detail').text()).toBe('已逾期8小时26分')
+  })
+
   it('keeps task completion and title editing on separate controls', async () => {
     const task = makeTask()
-    const wrapper = mount(DiaryTaskRows, { props: { items: [task], today: '2026-11-18' } })
+    const wrapper = mount(DiaryTaskRows, { props: { items: [task], today: '2026-11-18', now } })
 
     await wrapper.get('.diary-task-toggle').trigger('click')
     expect(wrapper.emitted('toggle')?.[0]?.[0]).toEqual(task)
@@ -118,7 +136,7 @@ describe('DiaryTaskRows', () => {
       createdAt: 1,
       updatedAt: 1,
     }
-    const wrapper = mount(DiaryTaskRows, { props: { items: [task], today: '2026-11-18' } })
+    const wrapper = mount(DiaryTaskRows, { props: { items: [task], today: '2026-11-18', now } })
 
     expect(wrapper.get('.diary-task-row').classes()).toContain('is-skipped')
     expect(wrapper.get('.diary-task-row').classes()).toContain('diary-cloud-card')
@@ -148,7 +166,7 @@ describe('DiaryTaskRows', () => {
       createdAt: 1,
       updatedAt: 1,
     }
-    const wrapper = mount(DiaryTaskRows, { props: { items: [task], today: '2026-11-18', editable: false, variant: 'plain' } })
+    const wrapper = mount(DiaryTaskRows, { props: { items: [task], today: '2026-11-18', now, editable: false, variant: 'plain' } })
 
     expect(wrapper.get('.diary-task-rows').classes()).toContain('diary-task-rows--plain')
     expect(wrapper.get('.diary-task-row').classes()).toContain('is-completed')

@@ -106,6 +106,7 @@ const calendarError = computed(() => mode.value === 'diary' ? diaryCalendarError
 const busyTaskIds = ref(new Set<string>())
 const taskFormError = ref('')
 const taskConflictNeedsReload = ref(false)
+const currentTimestamp = ref(Date.now())
 function stopAttachmentSession() {
   if (attachmentLeaseTimer) clearInterval(attachmentLeaseTimer)
   attachmentLeaseTimer = undefined
@@ -169,10 +170,10 @@ function startAttachmentSession() {
 }
 
 function onDiaryVisibilityChange() {
-  if (document.visibilityState === 'visible') {
-    void refreshDayPolicy()
-    void renewAttachmentSession()
-  }
+  if (document.visibilityState !== 'visible') return
+  currentTimestamp.value = Date.now()
+  void refreshDayPolicy()
+  void renewAttachmentSession()
 }
 type CalendarLoadContext = {
   start: string
@@ -1528,6 +1529,7 @@ onMounted(() => {
   window.addEventListener('beforeunload', beforeUnload)
   document.addEventListener('visibilitychange', onDiaryVisibilityChange)
   timer = setInterval(() => {
+    currentTimestamp.value = Date.now()
     const currentDate = localToday()
     if (today.value !== currentDate) { today.value = currentDate; void load() }
     void refreshDayPolicy()
@@ -1659,6 +1661,7 @@ onBeforeUnmount(() => {
             <DiaryTaskRows v-if="selectedTasks.length"
               :items="selectedTasks"
               :today="today"
+              :now="currentTimestamp"
               :busy-ids="busyTaskIds"
               :highlighted-id="searchHighlight?.kind === 'task' ? searchHighlight.id : null"
               :show-due-date="false"

@@ -1,4 +1,4 @@
-import { civilDate } from '../../../shared/diaryLife'
+import { civilDate, dayDistance } from '../../../shared/diaryLife'
 
 export interface TaskCompletionRecord {
   completedAt: number | null
@@ -56,6 +56,37 @@ function formatOverdueDuration(milliseconds: number): string {
     minutes ? `${minutes}分` : '',
   ].join('')
   return `逾期 ${duration || '1分'}`
+}
+
+/** Formats a live overdue label for one unfinished task or recurring occurrence. */
+export function taskOverdueLabel(
+  task: TaskCompletionRecord & { skipped?: boolean },
+  now: number,
+): string | null {
+  if (task.completedAt !== null || task.skipped || !task.dueDate) return null
+  const deadline = deadlineTimestamp(task.dueDate, task.dueTime)
+  if (deadline === null) return null
+
+  if (task.dueTime === null) {
+    const today = formatLocalDateTime(now)?.slice(0, 10)
+    if (!today || today <= task.dueDate) return null
+    return `已逾期${dayDistance(task.dueDate, today)}天`
+  }
+
+  const overdueMilliseconds = now - deadline
+  if (overdueMilliseconds <= 0) return null
+
+  const totalMinutes = Math.floor(overdueMilliseconds / 60_000)
+  if (totalMinutes < 1) return '已逾期不足1分钟'
+  if (totalMinutes < 60) return `已逾期${totalMinutes}分钟`
+
+  const hours = Math.floor(totalMinutes / 60)
+  if (hours < 24) {
+    const minutes = totalMinutes % 60
+    return `已逾期${hours}小时${minutes ? `${minutes}分` : ''}`
+  }
+
+  return `已逾期${Math.floor(totalMinutes / 1_440)}天`
 }
 
 /** Formats one task instance's completion timestamp and compares it to its deadline. */

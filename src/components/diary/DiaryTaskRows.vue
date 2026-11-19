@@ -3,7 +3,7 @@ import type { DiaryTaskListItem } from '../../../shared/diaryTasks'
 import { taskDueDateLabel } from '../../features/diary/diaryTaskCalendar'
 import { taskDeadlineVisualState } from '../../features/diary/deadlineVisualState'
 import { taskDeadlineReminderAsset } from '../../features/diary/deadlineReminderAssets'
-import { taskCompletionInfo } from '../../features/diary/taskCompletion'
+import { taskCompletionInfo, taskOverdueLabel } from '../../features/diary/taskCompletion'
 import { usePrefersReducedMotion } from '../../composables/usePrefersReducedMotion'
 import DiaryAlarmClockIcon from './DiaryAlarmClockIcon.vue'
 import './diaryCloudCard.css'
@@ -11,6 +11,7 @@ import './diaryCloudCard.css'
 const props = withDefaults(defineProps<{
   items: DiaryTaskListItem[]
   today: string
+  now: number
   busyIds?: Set<string>
   showDueDate?: boolean
   editable?: boolean
@@ -37,9 +38,15 @@ function detail(task: DiaryTaskListItem): string {
     return task.dueTime ?? ''
   }
   if (task.completedAt !== null) return taskCompletionInfo(task)?.statusLabel ?? '已完成'
+  const overdue = taskOverdueLabel(task, props.now)
+  if (overdue) return overdue
   if (props.showDueDate) return taskDueDateLabel(task, props.today)
   if (!task.dueTime) return ''
   return task.kind === 'recurring' ? task.dueTime : `截止 ${task.dueTime}`
+}
+
+function isOverdue(task: DiaryTaskListItem): boolean {
+  return taskOverdueLabel(task, props.now) !== null
 }
 
 function hasDeadlineReminder(task: DiaryTaskListItem): boolean {
@@ -55,7 +62,7 @@ function deadlineReminderSource(task: DiaryTaskListItem): string {
 
 <template>
   <div class="diary-task-rows" :class="{ 'diary-task-rows--plain': variant === 'plain' }">
-    <div v-for="task in items" :key="task.id" class="diary-task-row" :class="{ 'diary-cloud-card': variant === 'card', 'is-completed': task.completedAt !== null, 'is-skipped': task.kind === 'recurring' && task.skipped, 'is-search-highlight': highlightedId === task.id }" :data-search-highlight="highlightedId === task.id ? 'task' : undefined">
+    <div v-for="task in items" :key="task.id" class="diary-task-row" :class="{ 'diary-cloud-card': variant === 'card', 'is-completed': task.completedAt !== null, 'is-skipped': task.kind === 'recurring' && task.skipped, 'is-overdue': isOverdue(task), 'is-search-highlight': highlightedId === task.id }" :data-search-highlight="highlightedId === task.id ? 'task' : undefined">
       <button
         type="button"
         class="diary-task-toggle"
@@ -180,5 +187,6 @@ function deadlineReminderSource(task: DiaryTaskListItem): string {
 }
 .diary-task-row.is-completed .diary-task-title { color: var(--text-muted, #6b7280); text-decoration: line-through; }
 .diary-task-row.is-completed .diary-task-edit small { opacity: .72; }
+.diary-task-row.is-overdue .diary-task-detail { color: color-mix(in srgb, var(--error-color, #d03050) 70%, var(--text-muted, #6b7280)); }
 .diary-task-row.is-search-highlight { border-color: color-mix(in srgb, var(--primary, #6366f1) 36%, var(--border, #d9dce5)); background-color: color-mix(in srgb, var(--primary, #6366f1) 13%, var(--bg)); }
 </style>

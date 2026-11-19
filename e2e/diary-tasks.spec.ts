@@ -36,8 +36,14 @@ test('creates a dated task, completes it, restores it, and moves it to a new cal
   await expect(titleInput).toHaveValue(title)
   await expect(editor).toBeVisible()
   await fillDiaryTaskDate(page, '截止日期', date)
-  await fillDiaryTaskTime(page, '截止时间', '12:00')
+  await fillDiaryTaskTime(page, '截止时间', '12:05')
   await page.getByRole('button', { name: '保存', exact: true }).click()
+
+  const taskRow = page.locator('.diary-task-row').filter({ has: page.locator('.diary-task-title', { hasText: title }) })
+  await expect(taskRow.locator('.diary-task-detail')).toHaveText('截止 12:05')
+  await page.clock.fastForward(6 * 60_000)
+  await expect(taskRow.locator('.diary-task-detail')).toHaveText('已逾期1分钟')
+  await expect(taskRow).toHaveClass(/is-overdue/)
 
   const complete = page.getByRole('checkbox', { name: `完成待办：${title}`, exact: true })
   await expect(complete).toBeVisible()
@@ -109,7 +115,7 @@ test('creates a dated task, completes it, restores it, and moves it to a new cal
 
   await page.getByRole('checkbox', { name: `恢复待办：${title}`, exact: true }).click()
   await expect(page.getByRole('checkbox', { name: `完成待办：${title}`, exact: true })).toBeVisible()
-  await expect(page.locator('.diary-task-row').filter({ has: page.locator('.diary-task-title', { hasText: title }) }).locator('.diary-task-detail')).toHaveText('截止 12:00')
+  await expect(page.locator('.diary-task-row').filter({ has: page.locator('.diary-task-title', { hasText: title }) }).locator('.diary-task-detail')).toHaveText('已逾期1分钟')
   await expect(marker).toHaveAttribute('src', '/emoji/alarm-clock-animated.png')
 
   await page.getByRole('button', { name: `编辑待办：${title}`, exact: true }).click()
@@ -431,13 +437,13 @@ test('keeps long task titles and due times aligned without horizontal overflow',
   const title = `周末需要完成的综合项目${Math.random().toString(36).slice(2, 8)}`.repeat(8)
   await page.getByRole('textbox', { name: '待办名称' }).fill(title)
   await fillDiaryTaskDate(page, '截止日期', date)
-  await fillDiaryTaskTime(page, '截止时间', '12:00')
+  await fillDiaryTaskTime(page, '截止时间', '12:30')
   await page.getByRole('button', { name: '保存', exact: true }).click()
 
   const row = page.locator('.diary-life-dialog .diary-task-row').filter({ has: page.locator('.diary-task-title', { hasText: title }) })
   await expect(row).toBeVisible()
   await expect(row).toHaveClass(/diary-cloud-card/)
-  await expect(row.locator('.diary-task-detail')).toHaveText('截止 12:00')
+  await expect(row.locator('.diary-task-detail')).toHaveText('截止 12:30')
   await expect(row.locator('.diary-task-detail')).toHaveCSS('background-color', 'rgba(0, 0, 0, 0)')
   expect(await row.evaluate(element => getComputedStyle(element).backgroundImage)).toBe('none')
 
@@ -885,13 +891,13 @@ test('recurring Todo completion and skipping are scoped to one date', async ({ p
   await page.getByRole('textbox', { name: '待办名称' }).fill(title)
   await selectNaiveOption(page, '重复规则', '每天')
   await fillDiaryTaskDate(page, '开始日期', startDate)
-  await fillDiaryTaskTime(page, '截止时间', '12:00')
+  await fillDiaryTaskTime(page, '截止时间', '23:59')
   await fillDiaryTaskDate(page, '重复结束日期', `${testYear}-11-30`)
   await page.getByRole('button', { name: '保存', exact: true }).click()
 
   await expect(page.getByRole('checkbox', { name: `完成待办：${title}` })).toBeVisible()
   await expect(page.locator('.diary-task-title').filter({ hasText: title })).toContainText('↻')
-  await expect(page.locator('.diary-task-row').filter({ has: page.locator('.diary-task-title', { hasText: title }) }).locator('.diary-task-detail')).toHaveText('12:00')
+  await expect(page.locator('.diary-task-row').filter({ has: page.locator('.diary-task-title', { hasText: title }) }).locator('.diary-task-detail')).toHaveText('23:59')
   await page.getByRole('checkbox', { name: `完成待办：${title}` }).click()
   await expect(page.locator('.diary-task-row.is-completed')).toContainText(title)
   await expect(page.locator('.diary-task-row.is-completed').locator('.diary-task-detail')).toHaveText('逾期完成')
@@ -931,7 +937,7 @@ test('recurring Todo completion and skipping are scoped to one date', async ({ p
 
   await page.getByRole('button', { name: '跳过本次' }).click()
   await expect(page.locator('.diary-task-row.is-skipped')).toContainText('本次已跳过')
-  await expect(page.locator('.diary-task-row.is-skipped').locator('.diary-task-detail')).toHaveText('12:00')
+  await expect(page.locator('.diary-task-row.is-skipped').locator('.diary-task-detail')).toHaveText('23:59')
   await expect(page.locator('.diary-task-row.is-skipped')).not.toContainText('已完成')
   await expect(page.locator('.diary-task-row.is-skipped')).not.toContainText('已逾期')
   await expect(skippedCell.locator('.life-task-marker')).toHaveCount(0)
