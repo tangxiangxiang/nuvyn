@@ -75,6 +75,12 @@ async function readStableHoverColors(button: Locator) {
   }))
 }
 
+async function expectDiaryGlassModal(page: Page, dialog: Locator) {
+  await expect(dialog).toHaveCSS('backdrop-filter', /blur\(18px\)/)
+  const modalContainer = page.locator('.n-modal-container').filter({ has: dialog })
+  await expect(modalContainer.locator(':scope > .n-modal-mask')).toHaveCSS('backdrop-filter', /blur\(8px\)/)
+}
+
 async function expectDiaryCanScrollToEnd(page: Page, dialog: Locator, lastEntry: Locator, lastImage: Locator, touch: boolean) {
   const scroller = dialog.locator('.n-card__content-scrollbar > .n-scrollbar-container')
   await expect(scroller).toHaveCSS('overflow-y', /^(auto|scroll)$/)
@@ -167,6 +173,8 @@ for (const viewport of [{ width: 390, height: 844 }, { width: 430, height: 900 }
       if (viewport.width === 1280) {
         await page.getByRole('button', { name: '取消', exact: true }).click()
         const confirmation = page.getByRole('dialog', { name: '放弃未保存的修改？' })
+        const confirmationContainer = page.locator('.n-modal-container').filter({ has: confirmation })
+        await expect(confirmationContainer.locator(':scope > .n-modal-mask')).toHaveCSS('backdrop-filter', 'none')
         await confirmation.getByRole('button', { name: /^(Cancel|取消)$/ }).click()
         await expect(input).toHaveValue(`日记录 ${viewport.width}`)
 
@@ -193,6 +201,7 @@ for (const viewport of [{ width: 390, height: 844 }, { width: 430, height: 900 }
       await expect(page.getByTestId('diary-edit-entry')).toBeVisible()
       await expect(page.getByTestId('diary-bullet-reader')).toContainText(`日记录 ${viewport.width}`)
       const dialog = page.getByTestId('diary-day-dialog')
+      await expectDiaryGlassModal(page, dialog)
       const heading = dialog.locator('.diary-day-heading')
       const mood = heading.getByTestId('diary-day-mood')
       await expect(mood).toBeVisible()
@@ -260,9 +269,16 @@ for (const viewport of [{ width: 390, height: 844 }, { width: 430, height: 900 }
       await expect(cell).toHaveAttribute('aria-pressed', 'true')
       await expect(page.getByTestId('diary-add-task')).toBeVisible()
       await expect(page.getByTestId('diary-add-event')).toBeVisible()
+      const dayEventsDialog = page.locator('.diary-life-dialog')
+      await expect(dayEventsDialog.locator('.day-tasks .day-list-empty')).toHaveText('暂无待办事项')
+      await expect(dayEventsDialog.locator('.day-events .day-list-empty')).toHaveText('暂无重要日程')
+      await expectDiaryGlassModal(page, dayEventsDialog)
       await expect(page.getByRole('button', { name: '更多当天事件操作' })).toHaveCount(0)
       await expect(page.locator('.diary-event-create')).toHaveCount(0)
       await page.getByTestId('diary-add-event').click()
+      const eventEditDialog = page.locator('.diary-life-dialog')
+      await expectDiaryGlassModal(page, eventEditDialog)
+      await expect(eventEditDialog.locator('.n-card__footer')).toHaveCSS('background-color', 'rgba(0, 0, 0, 0)')
       const eventTitle = `人生事件 ${viewport.width} (${testInfo.repeatEachIndex + 1})`
       // This scenario covers the existing milestone calendar marker; future
       // dates now start as schedules, so choose the intended type explicitly.
@@ -278,6 +294,8 @@ for (const viewport of [{ width: 390, height: 844 }, { width: 430, height: 900 }
       await page.getByRole('button', { name: '保存', exact: true }).click()
       const eventModal = page.locator('.diary-life-dialog')
       await expect(eventModal).toBeVisible()
+      await expect(eventModal.locator('.day-tasks .day-list-empty')).toHaveText('暂无待办事项')
+      await expect(eventModal.locator('.day-events .day-list-empty')).toHaveCount(0)
       const eventTitleInput = page.getByRole('textbox', { name: '事件名称', exact: true })
       await expect(eventTitleInput).toHaveCount(0)
       const eventModalBounds = await eventModal.boundingBox()
@@ -1040,10 +1058,12 @@ test('mood-only Diary day stays compact in read and edit modes across themes', a
   await saveDiaryDay(page)
 
   const dialog = page.getByTestId('diary-day-dialog')
+  await expectDiaryGlassModal(page, dialog)
   await expect(dialog.getByTestId('diary-day-mood')).toBeVisible()
   await expect(dialog.getByTestId('diary-empty-reading')).toBeVisible()
   await expect(dialog.getByTestId('diary-save-entry')).toHaveCount(0)
   const originalTheme = await page.locator('html').getAttribute('data-theme')
+  const originalSurfaceColor = await dialog.evaluate(element => getComputedStyle(element).backgroundColor)
   await page.screenshot({ path: testInfo.outputPath(`diary-mood-only-read-${originalTheme ?? 'default'}.png`) })
   await page.getByRole('button', { name: '关闭日记' }).click()
 
@@ -1051,6 +1071,9 @@ test('mood-only Diary day stays compact in read and edit modes across themes', a
   const alternateTheme = await page.locator('html').getAttribute('data-theme')
   expect(alternateTheme).not.toBe(originalTheme)
   await cell.click()
+  await expectDiaryGlassModal(page, dialog)
+  const alternateSurfaceColor = await dialog.evaluate(element => getComputedStyle(element).backgroundColor)
+  expect(alternateSurfaceColor).not.toBe(originalSurfaceColor)
   await expect(dialog.getByTestId('diary-day-mood')).toBeVisible()
   await expect(dialog.getByTestId('diary-empty-reading')).toBeVisible()
   await page.screenshot({ path: testInfo.outputPath(`diary-mood-only-read-${alternateTheme ?? 'default'}.png`) })

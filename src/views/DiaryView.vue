@@ -1669,6 +1669,7 @@ onBeforeUnmount(() => {
               @toggle="toggleTask($event, { kind: 'day-list', date: selected ?? '', taskId: $event.id, restoreFocus: true })"
               @edit="editTaskFromDay"
             />
+            <p v-else-if="!calendarTasksLoading && !calendarTaskError" class="day-list-empty">暂无待办事项</p>
           </section>
           <section class="day-list-section day-events">
             <div class="day-list-section-header">
@@ -1695,8 +1696,8 @@ onBeforeUnmount(() => {
             >
               <small class="diary-task-detail diary-event-distance">{{ selectedEventDistance(event) }}</small>
             </DiaryEventRow>
+            <p v-if="!selectedEvents.length && !calendarEventLoading && !eventCalendarError" class="day-list-empty">暂无重要日程</p>
           </section>
-          <p v-if="!selectedEvents.length && !selectedTasks.length && !calendarTasksLoading && !calendarTaskError && !calendarEventLoading && !eventCalendarError" class="day-list-empty">还没有待办或事件</p>
         </div>
 
         <template v-if="eventSurface?.kind === 'task-edit'" #footer>
@@ -1751,7 +1752,7 @@ onBeforeUnmount(() => {
 .diary-undated-task-actions { display: flex; flex: 0 0 auto; align-items: center; gap: 8px; }
 .diary-event-form-error { margin: 0 0 14px; color: var(--danger, #dc2626); }
 .diary-task-reload { margin: -4px 0 12px; }
-.day-list-empty { margin: 0; padding: 12px 0; color: var(--text-muted, #6b7280); text-align: center; }
+.day-list-empty { display: flex; min-height: 48px; box-sizing: border-box; align-items: center; justify-content: center; margin: 0; padding: 8px 0; color: var(--text-muted, #6b7280); font-size: 14px; line-height: 20px; text-align: center; }
 .day-list-section { min-width: 0; }
 .day-list-section-header { position: relative; display: flex; min-width: 0; height: 16px; align-items: center; padding-inline-end: 40px; }
 .day-list-section-header h3 { min-width: 0; margin: 0; }

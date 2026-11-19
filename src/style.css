@@ -3180,6 +3180,34 @@ body:has(.ledger-detail-sheet-card) .n-modal-mask {
   -webkit-backdrop-filter: saturate(130%) blur(10px);
   backdrop-filter: saturate(130%) blur(10px);
 }
+
+/* Scope the Diary glass mask to the Naive UI modal that owns its dialog card.
+   Confirm dialogs live in sibling modal containers and keep their own mask. */
+.n-modal-container:has(.diary-life-dialog) > .n-modal-mask {
+  background: color-mix(in srgb, var(--bg) 38%, rgba(15, 23, 42, 0.16));
+  -webkit-backdrop-filter: saturate(125%) blur(8px);
+  backdrop-filter: saturate(125%) blur(8px);
+}
+
+.diary-life-dialog.n-card {
+  color: var(--text);
+  background:
+    linear-gradient(135deg, color-mix(in srgb, var(--accent) 3%, transparent), transparent 52%),
+    color-mix(in srgb, var(--bg-soft) 88%, transparent);
+  border: 1px solid color-mix(in srgb, var(--border) 76%, transparent);
+  box-shadow:
+    0 18px 48px color-mix(in srgb, #0f172a 20%, transparent),
+    inset 0 1px 0 color-mix(in srgb, var(--bg) 36%, transparent);
+  -webkit-backdrop-filter: saturate(145%) blur(18px);
+  backdrop-filter: saturate(145%) blur(18px);
+}
+
+.diary-life-dialog.diary-event-edit-dialog.n-card .n-card__footer { background: transparent; }
+
+@supports not (backdrop-filter: blur(1px)) {
+  .diary-life-dialog.n-card { background: var(--bg-soft); }
+}
+
 .settings-modal {
   --settings-surface: color-mix(in srgb, var(--bg-soft) 78%, transparent);
   --settings-sidebar: color-mix(in srgb, var(--bg-soft) 64%, transparent);
