@@ -1,10 +1,11 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, ref } from 'vue'
-import { NCheckbox, NDatePicker, NInput, NPopover, NSelect, NTimePicker } from 'naive-ui'
+import { NCheckbox, NInput, NPopover, NSelect, NTimePicker } from 'naive-ui'
 import { lunarDayLabel, lunarMonthLabel, lunarToSolar, nextLunarOccurrence, solarToLunar, type ChineseEventDateRule, type EventDateRule } from '../../../shared/lunarCalendar'
 import { birthdayAgeAt, birthdayPersonName, civilDate, displayEventTitle, nextOccurrence, type EventFields } from '../../../shared/diaryLife'
 import { useConfirm } from '../../composables/useConfirm'
 import { EVENT_EMOJI, eventEmojiSource } from '../../features/diary/eventEmoji'
+import DiaryDatePicker from './DiaryDatePicker.vue'
 
 const value = defineModel<EventFields>({ required: true })
 const props = defineProps<{ today: string; isEditing?: boolean }>()
@@ -619,15 +620,12 @@ function updateChineseRule(updates: Partial<ChineseEventDateRule>) {
 
       <label v-else-if="isBirthday" class="event-field">
         <span>出生日期</span>
-        <NDatePicker
-          :formatted-value="value.startDate || null"
+        <DiaryDatePicker
+          :model-value="value.startDate || null"
           class="event-date-picker"
-          type="date"
-          format="yyyy-MM-dd"
-          value-format="yyyy-MM-dd"
-          aria-label="出生日期"
+          label="出生日期"
           clearable
-          @update:formatted-value="updateGregorianBirthdayDate"
+          @update:model-value="updateGregorianBirthdayDate"
         />
       </label>
       <div v-if="!isBirthday && chineseRule" class="event-dates event-lunar-dates">
@@ -648,29 +646,23 @@ function updateChineseRule(updates: Partial<ChineseEventDateRule>) {
       <div v-else-if="isSchedule" class="event-dates">
         <label class="event-field">
           <span>开始日期</span>
-          <NDatePicker
-            :formatted-value="value.startDate"
+          <DiaryDatePicker
+            :model-value="value.startDate"
             class="event-date-picker"
-            type="date"
-            format="yyyy-MM-dd"
-            value-format="yyyy-MM-dd"
-            aria-label="开始日期"
+            label="开始日期"
             :status="dateRangeError ? 'error' : undefined"
-            @update:formatted-value="updateStartDate"
+            @update:model-value="updateStartDate"
           />
         </label>
         <label class="event-field">
           <span>结束日期</span>
-          <NDatePicker
-            :formatted-value="value.endDate"
+          <DiaryDatePicker
+            :model-value="value.endDate"
             class="event-date-picker"
-            type="date"
-            format="yyyy-MM-dd"
-            value-format="yyyy-MM-dd"
-            aria-label="结束日期"
+            label="结束日期"
             :status="dateRangeError ? 'error' : undefined"
             :is-date-disabled="isBeforeScheduleStart"
-            @update:formatted-value="updateEndDate"
+            @update:model-value="updateEndDate"
           />
           <small v-if="dateRangeError" id="event-end-date-error" class="event-date-error" role="alert">{{ dateRangeError }}</small>
         </label>
@@ -678,14 +670,11 @@ function updateChineseRule(updates: Partial<ChineseEventDateRule>) {
 
       <label v-else-if="!isBirthday" class="event-field">
         <span>{{ gregorianDateLabel }}</span>
-        <NDatePicker
-          :formatted-value="value.startDate"
+        <DiaryDatePicker
+          :model-value="value.startDate"
           class="event-date-picker"
-          type="date"
-          format="yyyy-MM-dd"
-          value-format="yyyy-MM-dd"
-          :aria-label="gregorianDateLabel"
-          @update:formatted-value="updateStartDate"
+          :label="gregorianDateLabel"
+          @update:model-value="updateStartDate"
         />
       </label>
 
@@ -798,15 +787,12 @@ function updateChineseRule(updates: Partial<ChineseEventDateRule>) {
           <p class="event-date-help">保留此事件已有的持续日期和时间设置，可在这里继续编辑。</p>
           <label v-if="value.endDate !== value.startDate" class="event-field">
             <span>结束日期</span>
-            <NDatePicker
-              :formatted-value="value.endDate"
+            <DiaryDatePicker
+              :model-value="value.endDate"
               class="event-date-picker"
-              type="date"
-              format="yyyy-MM-dd"
-              value-format="yyyy-MM-dd"
-              aria-label="结束日期"
+              label="结束日期"
               :is-date-disabled="isBeforeScheduleStart"
-              @update:formatted-value="updateEndDate"
+              @update:model-value="updateEndDate"
             />
           </label>
           <NCheckbox v-if="!isSchedule" v-model:checked="value.allDay">全天</NCheckbox>

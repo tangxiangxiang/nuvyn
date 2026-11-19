@@ -2,10 +2,11 @@
 import { describe, expect, it, vi } from 'vitest'
 import { mount, flushPromises, type VueWrapper } from '@vue/test-utils'
 import { defineComponent, h, nextTick, ref, type Ref } from 'vue'
-import { NDatePicker, NSelect, NTimePicker } from 'naive-ui'
+import { NSelect, NTimePicker } from 'naive-ui'
 import { lunarToSolar, nextLunarOccurrence, solarToLunar, type ChineseEventDateRule } from '../../../../shared/lunarCalendar'
 import { nextOccurrence, parseEvent, type EventFields } from '../../../../shared/diaryLife'
 import { useConfirm } from '../../../composables/useConfirm'
+import DiaryDatePicker from '../DiaryDatePicker.vue'
 import DiaryEventForm from '../DiaryEventForm.vue'
 
 const gregorianEvent: EventFields = {
@@ -79,15 +80,17 @@ async function answerPendingConfirm(answer: boolean) {
   return request
 }
 
-function visibleControls(wrapper: VueWrapper, component: typeof NDatePicker | typeof NTimePicker) {
+function visibleControls(wrapper: VueWrapper, component: typeof DiaryDatePicker | typeof NTimePicker) {
   return wrapper.findAllComponents(component).filter(({ element }) => {
     const advanced = element.closest('details')
     return !advanced || advanced.open
   })
 }
 
-function getControl(wrapper: VueWrapper, component: typeof NDatePicker | typeof NSelect | typeof NTimePicker, label: string) {
-  return wrapper.findAllComponents(component).find(control => control.attributes('aria-label') === label)!
+function getControl(wrapper: VueWrapper, component: typeof DiaryDatePicker | typeof NSelect | typeof NTimePicker, label: string) {
+  return wrapper.findAllComponents(component).find(control => component === DiaryDatePicker
+    ? (control.props() as Record<string, unknown>).label === label
+    : control.attributes('aria-label') === label)!
 }
 
 function getProp(control: ReturnType<typeof getControl>, name: string) {
@@ -101,8 +104,8 @@ describe('DiaryEventForm', () => {
     expect(wrapper.findAll('[data-testid^="event-type-"]')).toHaveLength(4)
     expect(wrapper.get('[aria-label="事件名称"]').element).toBeTruthy()
     expect(wrapper.get('[aria-label="事件备注"]').element).toBeTruthy()
-    expect(visibleControls(wrapper, NDatePicker)).toHaveLength(1)
-    expect(getProp(getControl(wrapper, NDatePicker, '发生日期'), 'formattedValue')).toBe('2026-07-03')
+    expect(visibleControls(wrapper, DiaryDatePicker)).toHaveLength(1)
+    expect(getProp(getControl(wrapper, DiaryDatePicker, '发生日期'), 'modelValue')).toBe('2026-07-03')
     expect(visibleControls(wrapper, NTimePicker)).toHaveLength(0)
     expect(wrapper.find('.event-advanced').attributes('open')).toBeUndefined()
     expect(wrapper.get('.event-advanced summary').text()).toContain('更多选项')
@@ -117,7 +120,7 @@ describe('DiaryEventForm', () => {
       endDate: '2026-07-05',
     })
 
-    expect(visibleControls(wrapper, NDatePicker)).toHaveLength(2)
+    expect(visibleControls(wrapper, DiaryDatePicker)).toHaveLength(2)
     expect(visibleControls(wrapper, NTimePicker)).toHaveLength(0)
     await wrapper.get('.event-date-section .n-checkbox').trigger('click')
     expect(fields.value.allDay).toBe(false)
@@ -181,18 +184,18 @@ describe('DiaryEventForm', () => {
       allDay: false,
     })
 
-    await getControl(wrapper, NDatePicker, '开始日期').vm.$emit('update:formatted-value', '2026-07-06')
+    await getControl(wrapper, DiaryDatePicker, '开始日期').vm.$emit('update:modelValue', '2026-07-06')
     expect(fields.value.startDate).toBe('2026-07-06')
     expect(fields.value.endDate).toBe('2026-07-06')
     expect(parseEvent(fields.value)).not.toBeNull()
 
-    await getControl(wrapper, NDatePicker, '结束日期').vm.$emit('update:formatted-value', '2026-07-07')
+    await getControl(wrapper, DiaryDatePicker, '结束日期').vm.$emit('update:modelValue', '2026-07-07')
     await getControl(wrapper, NTimePicker, '开始时间').vm.$emit('update:formatted-value', '23:00')
     await getControl(wrapper, NTimePicker, '结束时间').vm.$emit('update:formatted-value', '01:00')
     expect(parseEvent(fields.value)).not.toBeNull()
     expect(wrapper.find('[role="alert"]').exists()).toBe(false)
 
-    await getControl(wrapper, NDatePicker, '结束日期').vm.$emit('update:formatted-value', '2026-07-06')
+    await getControl(wrapper, DiaryDatePicker, '结束日期').vm.$emit('update:modelValue', '2026-07-06')
     expect(wrapper.get('[role="alert"]').text()).toContain('同一天的结束时间必须晚于开始时间')
     expect(getControl(wrapper, NTimePicker, '结束时间').props('status')).toBe('error')
     expect(parseEvent(fields.value)).toBeNull()
@@ -218,7 +221,7 @@ describe('DiaryEventForm', () => {
     expect(wrapper.get('[aria-label="纪念日期"]').element).toBeTruthy()
     expect(wrapper.get('[aria-label="日期类型"]').text()).toContain('公历')
     expect(wrapper.get('[aria-label="日期类型"]').text()).toContain('农历')
-    expect(visibleControls(wrapper, NDatePicker)).toHaveLength(1)
+    expect(visibleControls(wrapper, DiaryDatePicker)).toHaveLength(1)
     expect(wrapper.text()).toContain('每年重复')
     expect(wrapper.find('[aria-label="出生年份"]').exists()).toBe(false)
     wrapper.unmount()
@@ -233,7 +236,7 @@ describe('DiaryEventForm', () => {
     expect(wrapper.get('[aria-label="农历日期"]').element).toBeTruthy()
     expect(wrapper.find('[aria-label="出生月份类型"]').exists()).toBe(false)
     expect(wrapper.get('[aria-label="生日历法"]').text()).toContain('公历')
-    expect(visibleControls(wrapper, NDatePicker)).toHaveLength(0)
+    expect(visibleControls(wrapper, DiaryDatePicker)).toHaveLength(0)
     expect(visibleControls(wrapper, NTimePicker)).toHaveLength(0)
     expect(wrapper.find('[aria-label="农历月份类型"]').exists()).toBe(false)
     expect(wrapper.text()).not.toContain('每年重复')
@@ -433,7 +436,7 @@ describe('DiaryEventForm', () => {
     expect(fields.value.dateRule).toEqual({ calendar: 'gregory' })
     expect(fields.value.startDate).toBe(initial.startDate)
     expect(fields.value.birthday).toEqual({ birthGregorianYear: Number(initial.startDate.slice(0, 4)) })
-    expect(getProp(getControl(wrapper, NDatePicker, '出生日期'), 'formattedValue')).toBe(initial.startDate)
+    expect(getProp(getControl(wrapper, DiaryDatePicker, '出生日期'), 'modelValue')).toBe(initial.startDate)
     expect(parseEvent(fields.value)).not.toBeNull()
 
     await calendar.findAll('button').find(button => button.text() === '农历')!.trigger('click')
@@ -456,7 +459,7 @@ describe('DiaryEventForm', () => {
       birthday: { birthGregorianYear: 2000 },
     }, '2026-01-01')
 
-    expect(visibleControls(wrapper, NDatePicker)).toHaveLength(1)
+    expect(visibleControls(wrapper, DiaryDatePicker)).toHaveLength(1)
     expect(wrapper.text()).toContain('下一次：2026年2月28日 · 小明26岁生日')
     expect(parseEvent(fields.value)).not.toBeNull()
     wrapper.unmount()
@@ -493,13 +496,13 @@ describe('DiaryEventForm', () => {
     const { wrapper, fields } = mountEventForm(initial, '2026-01-01', true)
     const advanced = wrapper.get('.event-advanced')
     expect(advanced.attributes('open')).toBeUndefined()
-    expect(visibleControls(wrapper, NDatePicker)).toHaveLength(1)
+    expect(visibleControls(wrapper, DiaryDatePicker)).toHaveLength(1)
     expect(visibleControls(wrapper, NTimePicker)).toHaveLength(0)
 
     await advanced.get('summary').trigger('click')
     expect(advanced.attributes('open')).toBeDefined()
-    expect(visibleControls(wrapper, NDatePicker)).toHaveLength(2)
-    expect(getProp(getControl(wrapper, NDatePicker, '结束日期'), 'formattedValue')).toBe('2026-07-05')
+    expect(visibleControls(wrapper, DiaryDatePicker)).toHaveLength(2)
+    expect(getProp(getControl(wrapper, DiaryDatePicker, '结束日期'), 'modelValue')).toBe('2026-07-05')
     expect(getProp(getControl(wrapper, NTimePicker, '开始时间'), 'formattedValue')).toBe('18:30')
     expect(getProp(getControl(wrapper, NTimePicker, '结束时间'), 'formattedValue')).toBe('20:00')
     expect(wrapper.get('.event-advanced').text()).toContain('每年重复')
@@ -583,7 +586,7 @@ describe('DiaryEventForm', () => {
     const { wrapper, fields } = mountEventForm(initial, '2026-11-16', true)
     const baseDate = nextOccurrence(initial, initial.startDate)
     expect(baseDate).toBe('2026-11-15')
-    expect(wrapper.findComponent(NDatePicker).exists()).toBe(false)
+    expect(wrapper.findComponent(DiaryDatePicker).exists()).toBe(false)
     const targetButton = wrapper.get(`[data-testid="event-type-${target}"]`)
 
     await targetButton.trigger('click')
@@ -597,9 +600,9 @@ describe('DiaryEventForm', () => {
     expect(fields.value).toMatchObject({
       type: target, startDate: baseDate, endDate: baseDate, dateRule: { calendar: 'gregory' }, recurrence: 'yearly',
     })
-    const date = getControl(wrapper, NDatePicker, dateLabel)
-    expect(getProp(date, 'formattedValue')).toBe(baseDate)
-    await date.vm.$emit('update:formatted-value', '2026-11-14')
+    const date = getControl(wrapper, DiaryDatePicker, dateLabel)
+    expect(getProp(date, 'modelValue')).toBe(baseDate)
+    await date.vm.$emit('update:modelValue', '2026-11-14')
     const saved = parseEvent(fields.value)
     expect(saved).toMatchObject({ dateRule: { calendar: 'gregory' }, startDate: '2026-11-14', endDate: '2026-11-14' })
     expect(saved && nextOccurrence(saved, '2027-01-01')).toBe('2027-11-14')
@@ -642,13 +645,13 @@ describe('DiaryEventForm', () => {
   it('edits an existing lunar schedule through lunar controls until explicitly converted', async () => {
     const { birthday: _birth, ...annual } = birthdayEvent()
     const { wrapper, fields } = mountEventForm({ ...annual, type: 'schedule' }, '2026-11-16', true)
-    expect(wrapper.findComponent(NDatePicker).exists()).toBe(false)
+    expect(wrapper.findComponent(DiaryDatePicker).exists()).toBe(false)
     await getControl(wrapper, NSelect, '农历日期').vm.$emit('update:value', 8)
     expect(fields.value.dateRule).toMatchObject({ calendar: 'chinese', lunarDay: 8 })
     expect(parseEvent(fields.value)).not.toBeNull()
     await wrapper.get('.event-date-section .event-date-calendar-toggle button[aria-pressed="false"]').trigger('click')
     expect(fields.value.dateRule).toEqual({ calendar: 'gregory' })
-    expect(getControl(wrapper, NDatePicker, '开始日期').exists()).toBe(true)
+    expect(getControl(wrapper, DiaryDatePicker, '开始日期').exists()).toBe(true)
     wrapper.unmount()
   })
 
