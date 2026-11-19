@@ -117,6 +117,7 @@ function clearDate(): void {
     <NModal v-model:show="show">
       <section class="diary-date-picker-dialog" role="dialog" aria-modal="true" :aria-label="`选择${props.label}`">
         <NDatePicker
+          class="diary-date-picker-panel"
           panel
           type="date"
           format="yyyy-MM-dd"
@@ -174,10 +175,20 @@ function clearDate(): void {
   background: var(--bg, #fff);
   box-shadow: 0 18px 48px rgb(24 31 52 / 18%);
 }
-.diary-date-picker-dialog :deep(.n-date-panel) {
+.diary-date-picker-dialog :deep(.diary-date-picker-panel) {
   width: 100%;
   box-sizing: border-box;
   grid-template-columns: minmax(0, 1fr);
+}
+.diary-date-picker-dialog :deep(.n-date-panel--month) {
+  position: relative;
+  z-index: 2;
+  width: max-content;
+  max-width: calc(100vw - 32px);
+  box-sizing: border-box;
+  border: 1px solid var(--nuvyn-border, var(--border, #8884));
+  background-color: var(--nuvyn-bg, var(--bg, #fff));
+  box-shadow: 0 12px 28px rgb(24 31 52 / 18%);
 }
 .diary-date-picker-dialog :deep(.n-date-panel-weekdays),
 .diary-date-picker-dialog :deep(.n-date-panel-dates) {
