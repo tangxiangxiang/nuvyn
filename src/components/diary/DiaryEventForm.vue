@@ -757,7 +757,7 @@ function updateChineseRule(updates: Partial<ChineseEventDateRule>) {
       <div class="event-advanced-content">
         <div class="event-emoji-setting">
           <span>自定义 Emoji</span>
-          <NPopover v-model:show="emojiPickerOpen" trigger="click" placement="bottom-start" :show-arrow="false" raw>
+          <NPopover v-model:show="emojiPickerOpen" trigger="click" placement="left-start" :show-arrow="false" raw>
             <template #trigger>
               <button
                 type="button"
