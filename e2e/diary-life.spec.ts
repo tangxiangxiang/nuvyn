@@ -477,7 +477,7 @@ test('keeps event calendar context aligned after date edits', async ({ page }) =
 
   const dayEvent = page.getByRole('button', { name: '日期调整日程', exact: true })
   await expect(dayEvent).toHaveClass(/diary-cloud-card/)
-  expect(await dayEvent.evaluate(element => getComputedStyle(element).backgroundImage)).toContain('/diary-events-cloud-pattern.png')
+  expect(await dayEvent.evaluate(element => getComputedStyle(element).backgroundImage)).toBe('none')
   await dayEvent.click()
   await fillDiaryEventDate(page, '开始日期', movedDate)
   await fillDiaryEventDate(page, '结束日期', movedDate)
@@ -609,8 +609,15 @@ test('Diary selected day Event distance stays on one line across viewport widths
     createdAt: 1,
     updatedAt: 1,
   }
+  const pastEvent = {
+    ...event,
+    id: 'past-distance-row-event',
+    title: '已过去的日程',
+    startDate: '2026-11-15',
+    endDate: '2026-11-15',
+  }
   await page.route('**/api/diary/life/events?*', route => route.request().method() === 'GET'
-    ? route.fulfill({ json: { items: [event], next: null } })
+    ? route.fulfill({ json: { items: [event, pastEvent], next: null } })
     : route.continue())
   await page.setViewportSize({ width: 1280, height: 900 })
   await page.goto('/diary')
@@ -622,6 +629,21 @@ test('Diary selected day Event distance stays on one line across viewport widths
   const row = page.getByRole('button', { name: event.title, exact: true })
   const distance = row.locator('.diary-event-distance')
   await expect(distance).toHaveText('今天')
+  await expect(distance).toHaveCSS('background-color', 'rgba(0, 0, 0, 0)')
+  const expectThemeCardSurface = async () => {
+    const colors = await row.evaluate(element => {
+      const probe = document.createElement('div')
+      probe.style.backgroundColor = 'var(--bg)'
+      document.body.append(probe)
+      const expected = getComputedStyle(probe).backgroundColor
+      probe.remove()
+      const style = getComputedStyle(element)
+      return { backgroundColor: style.backgroundColor, backgroundImage: style.backgroundImage, expected }
+    })
+    expect(colors.backgroundColor).toBe(colors.expected)
+    expect(colors.backgroundImage).toBe('none')
+  }
+  await expectThemeCardSurface()
   const title = row.locator('.diary-event-row-title')
   for (const width of [320, 390, 430, 768, 1280]) {
     await page.setViewportSize({ width, height: width <= 430 ? 844 : 900 })
@@ -636,6 +658,20 @@ test('Diary selected day Event distance stays on one line across viewport widths
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true)
   }
   await page.setViewportSize({ width: 1280, height: 900 })
+  await page.getByRole('button', { name: '关闭当天事件' }).click()
+  const originalTheme = await page.locator('html').getAttribute('data-theme')
+  await page.locator('.theme-toggle').click()
+  await expect.poll(() => page.locator('html').getAttribute('data-theme')).not.toBe(originalTheme)
+  await page.locator('.diary-life-calendar [data-date="2026-11-16"]').click()
+  await expect(row).toBeVisible()
+  await expectThemeCardSurface()
+  await page.getByRole('button', { name: '关闭当天事件' }).click()
+  await page.locator('.theme-toggle').click()
+  await expect(page.locator('html')).toHaveAttribute('data-theme', originalTheme ?? '')
+
+  await page.locator('.diary-life-calendar [data-date="2026-11-15"]').click()
+  const pastRow = page.getByRole('button', { name: pastEvent.title, exact: true })
+  await expect(pastRow.locator('.diary-event-distance')).toHaveText('已过去1天')
   await page.getByRole('button', { name: '关闭当天事件' }).click()
   const viewToggle = page.getByTestId('diary-view-toggle')
   await expect(viewToggle).toHaveAttribute('aria-label', '切换到日记视图')

@@ -44,6 +44,21 @@ describe('DiaryTaskRows', () => {
     wrapper.unmount()
   })
 
+  it('shows completed status instead of the deadline and restores the deadline when reopened', async () => {
+    const completed = makeTask({ dueTime: '12:00', completedAt: 1 })
+    const wrapper = mount(DiaryTaskRows, { props: { items: [completed], today: '2026-11-18', showDueDate: false } })
+
+    expect(wrapper.get('.diary-task-row').classes()).toContain('is-completed')
+    expect(wrapper.get('.diary-task-detail').text()).toBe('已完成')
+    expect(wrapper.get('.diary-task-edit').attributes('aria-label')).toBe(`编辑待办：${completed.title}`)
+
+    await wrapper.get('.diary-task-toggle').trigger('click')
+    expect(wrapper.emitted('toggle')?.[0]?.[0]).toEqual(completed)
+    await wrapper.setProps({ items: [{ ...completed, completedAt: null }] })
+    expect(wrapper.get('.diary-task-detail').text()).toBe('截止 12:00')
+    wrapper.unmount()
+  })
+
   it('shows deadline Alarm Clock only in reminder lists for open urgent tasks', () => {
     const urgent = makeTask({ dueDate: '2026-11-18' })
     const future = makeTask({ id: 'future', dueDate: '2026-11-21' })
@@ -58,6 +73,7 @@ describe('DiaryTaskRows', () => {
     expect(rows[1]!.find('.diary-task-deadline-reminder').exists()).toBe(false)
     expect(rows[2]!.find('.diary-task-deadline-reminder').attributes('src')).toBe('/emoji/alarm-clock.svg')
     expect(rows[3]!.find('.diary-task-deadline-reminder').exists()).toBe(false)
+    expect(rows[3]!.find('.diary-task-detail').text()).toBe('已完成')
     wrapper.unmount()
   })
 
@@ -99,6 +115,7 @@ describe('DiaryTaskRows', () => {
     expect(wrapper.get('.diary-task-row').classes()).toContain('is-skipped')
     expect(wrapper.get('.diary-task-row').classes()).toContain('diary-cloud-card')
     expect(wrapper.text()).toContain('本次已跳过')
+    expect(wrapper.text()).not.toContain('已完成')
     expect(wrapper.text()).not.toContain('已逾期')
     wrapper.unmount()
   })

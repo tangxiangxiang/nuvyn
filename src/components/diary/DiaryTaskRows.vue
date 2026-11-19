@@ -30,6 +30,11 @@ const emit = defineEmits<{
 }>()
 
 function detail(task: DiaryTaskListItem): string {
+  if (task.kind === 'recurring' && task.skipped) {
+    if (props.showDueDate) return taskDueDateLabel(task, props.today)
+    return task.dueTime ?? ''
+  }
+  if (task.completedAt !== null) return '已完成'
   if (props.showDueDate) return taskDueDateLabel(task, props.today)
   if (!task.dueTime) return ''
   return task.kind === 'recurring' ? task.dueTime : `截止 ${task.dueTime}`
@@ -160,15 +165,13 @@ function deadlineReminderSource(task: DiaryTaskListItem): string {
 }
 .diary-task-copy { display: flex; min-width: 0; flex-direction: column; justify-content: center; gap: 3px; }
 .diary-task-title { display: block; max-width: 100%; overflow-wrap: anywhere; line-height: 1.4; }
+.day-tasks .diary-task-title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .diary-task-repeat { white-space: nowrap; }
 .diary-task-detail,
 .diary-task-status { color: var(--text-muted, #6b7280); font-size: 12px; }
 .diary-task-trailing { display: flex; align-items: center; justify-self: end; gap: 5px; min-width: 0; }
 .diary-task-deadline-reminder { width: 18px; height: 18px; flex: none; object-fit: contain; }
 .diary-task-detail {
-  padding: 3px 6px;
-  border-radius: 6px;
-  background-color: color-mix(in srgb, var(--text) 4%, transparent);
   font-variant-numeric: tabular-nums;
   line-height: 1.4;
   white-space: nowrap;
