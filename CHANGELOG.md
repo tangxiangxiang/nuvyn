@@ -3,6 +3,34 @@
 All notable changes to Nuvyn are documented in this file. Entries dated before
 the Nuvyn brand baseline may refer to Nuvyn as the historical product name.
 
+## Nuvyn v0.1.0-alpha.15 — 2026-11-19
+
+Changes since `v0.1.0-alpha.14`.
+
+### Diary — Calendar & Life
+
+- Rebuilt Diary around a shared calendar with Diary and Events views. Added birthdays, anniversaries, life moments and important schedules, including date-range schedules, yearly recurrence, Gregorian and lunar birthdays, age calculation and next-occurrence countdowns.
+- Added Gregorian/lunar date entry for birthdays and anniversaries, including leap-month handling and lunar month-length rules. Existing encrypted day payloads using the older single-description shape remain readable.
+- Extended the existing global search to Diary entries, Events and Todos while Diary is unlocked. Results locate the matching date and record in the calendar; the search does not add a plaintext index.
+- The selected-day dialog now shows Todos and important Events as independent groups, each with its own empty state.
+
+### Diary — Todo
+
+- Added encrypted, owner-scoped Todo creation, editing, completion, reopening, deletion and calendar range queries. Ordinary Todos require a due date; an in-Diary repair prompt keeps historical undated records available for user repair or deletion.
+- Added optional start dates/times, due times and notes, plus recurring task series with per-occurrence completion and skip state.
+- Unified deadline and completion-time evaluation for overdue tasks, including overdue completion duration, and added calendar status markers and reminders.
+
+### Diary — UI & Experience
+
+- Added Ledger-inspired glass surfaces for Diary dialogs, a shared Event form, a dedicated Gregorian date picker and Fluent Emoji event markers. Refined the daily list, event and Todo forms, and date-picker quick-jump presentation.
+- Adapted Diary calendars, dialogs and forms for desktop, tablet and phone, with light and dark theme support.
+
+### Reliability & Compatibility
+
+- Added Diary life, task, attachment and search coverage across unit, API and browser E2E suites, and stabilized affected application CI flows.
+- Added SQLite migrations `0040`–`0051`, advancing the schema from v39 (alpha.14) to v51. They create the database-backed Diary day/event tables with encrypted private fields, encrypted attachment metadata and Todo storage, then add recurring task and occurrence state. Migration `0043` retires the prior Diary Plan and migration-state tables; the migration-state tables contain provenance and consent records, not Diary bodies. Migration `0051` removes the temporary task-to-event link table. Migrations run transactionally per version and roll back the current version if a SQL migration fails.
+- The migration SQL does not rewrite files in the Content mount. Existing managed Diary Markdown remains there, but is not automatically imported into the new calendar-backed Diary. Before upgrading, stop the service and back up the complete Content directory together with the complete `nuvyn-data` volume, including SQLite WAL/SHM, `diary-attachments/`, hidden files and matching key material. Alpha.14 cannot read the new Diary database model, so image-only rollback is not a safe recovery plan. NAS deployment remains a separate manual operation.
+
 ## Nuvyn v0.1.0-alpha.14 — 2026-11-06
 
 Changes since `v0.1.0-alpha.13`.
