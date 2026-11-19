@@ -55,12 +55,12 @@ test('Ledger keeps the shared theme readable', async ({ page }) => {
   await expect(page.locator('body')).not.toContainText('Bills')
 })
 
-test('shared workspace navbar hides the Board entry at phone width', async ({ page }) => {
+test('shared workspace navbar keeps the workspace navigation at phone width', async ({ page }) => {
   await page.goto('/vault')
   await page.setViewportSize({ width: 320, height: 700 })
 
   await expect(page.locator('.workspace-board-link')).toHaveCount(0)
-  await expect(page.locator('.scope-chip').filter({ hasText: '笔记' })).toHaveCount(0)
+  await expect(page.locator('.scope-chip').filter({ hasText: '笔记' })).toHaveCount(1)
   await expect(page.locator('.scope-chip').filter({ hasText: '日程' })).toHaveCount(1)
   await expect(page.locator('.scope-chip').filter({ hasText: '账本' })).toHaveCount(1)
 

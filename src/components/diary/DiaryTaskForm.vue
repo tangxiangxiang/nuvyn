@@ -262,8 +262,8 @@ defineExpose({ focusTitle: () => titleInput.value?.focus() })
     <div v-if="completionDisplay" class="diary-task-form-field diary-task-form-completion">
       <span class="diary-task-form-completion-label">完成状态</span>
       <div class="diary-task-form-completion-value" data-testid="diary-task-completion">
-        <span class="diary-task-form-completion-box diary-task-form-completion-left">{{ completionDisplay.left }}</span>
-        <span class="diary-task-form-completion-box diary-task-form-completion-right" :class="{ 'is-overdue': completionDisplay.overdue }">{{ completionDisplay.right }}</span>
+        <span class="diary-task-form-completion-left">{{ completionDisplay.left }}</span>
+        <span class="diary-task-form-completion-right" :class="{ 'is-overdue': completionDisplay.overdue }">{{ completionDisplay.right }}</span>
       </div>
     </div>
     <label class="diary-task-form-field diary-task-form-description">
@@ -300,17 +300,14 @@ defineExpose({ focusTitle: () => titleInput.value?.focus() })
 .diary-task-form-time-error { margin: -10px 0 0; color: var(--error-color, #d03050); font-size: 12px; }
 .diary-task-form-completion { gap: 7px; }
 .diary-task-form-completion-label { color: var(--text-muted, #6b7280); }
-.diary-task-form-completion-value { display: grid; width: 100%; min-width: 0; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
-.diary-task-form-completion-box { box-sizing: border-box; display: flex; width: 100%; height: 34px; min-width: 0; align-items: center; padding: 0 12px; border: 1px solid var(--nuvyn-border, var(--border)); border-radius: var(--nuvyn-radius-md, 8px); background: var(--nuvyn-surface-1, var(--bg-soft)); color: var(--text); font-size: 14px; line-height: 1.5; font-variant-numeric: tabular-nums; white-space: nowrap; }
-.diary-task-form-completion-left { justify-content: flex-start; }
-.diary-task-form-completion-right { justify-content: flex-end; color: var(--text-muted, #6b7280); text-align: right; }
+.diary-task-form-completion-value { box-sizing: border-box; display: flex; width: 100%; min-width: 0; min-height: 34px; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 4px 12px; padding: 6px 12px; border: 1px solid var(--nuvyn-border, var(--border)); border-radius: var(--nuvyn-radius-md, 8px); background: var(--nuvyn-surface-1, var(--bg-soft)); color: var(--text); font-size: 14px; line-height: 1.5; font-variant-numeric: tabular-nums; user-select: text; }
+.diary-task-form-completion-left,
+.diary-task-form-completion-right { min-width: 0; white-space: nowrap; }
+.diary-task-form-completion-left { flex: 0 0 auto; }
+.diary-task-form-completion-right { margin-left: auto; color: var(--text-muted, #6b7280); text-align: right; }
 .diary-task-form-completion-right.is-overdue { color: color-mix(in srgb, var(--error-color, #d03050) 70%, var(--text-muted, #6b7280)); }
 @media (max-width: 430px) {
-  .diary-task-form-completion-value { gap: 8px; }
-  .diary-task-form-completion-box { padding: 0 8px; font-size: 13px; }
-}
-@media (max-width: 360px) {
-  .diary-task-form-completion-value { grid-template-columns: minmax(0, 1fr); }
+  .diary-task-form-completion-value { gap: 4px 8px; padding-inline: 9px; font-size: 13px; }
 }
 .diary-task-form-description textarea { resize: vertical; }
 </style>

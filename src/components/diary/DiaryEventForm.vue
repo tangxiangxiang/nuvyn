@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, ref } from 'vue'
 import { NCheckbox, NInput, NPopover, NSelect, NTimePicker } from 'naive-ui'
-import { lunarDayLabel, lunarMonthLabel, lunarToSolar, nextLunarOccurrence, solarToLunar, type ChineseEventDateRule, type EventDateRule } from '../../../shared/lunarCalendar'
+import { lunarDayLabel, lunarMonthLabel, lunarOccurrenceInYear, lunarToSolar, nextLunarOccurrence, solarToLunar, type ChineseEventDateRule, type EventDateRule } from '../../../shared/lunarCalendar'
 import { birthdayAgeAt, birthdayPersonName, civilDate, displayEventTitle, nextOccurrence, type EventFields } from '../../../shared/diaryLife'
 import { useConfirm } from '../../composables/useConfirm'
 import { EVENT_EMOJI, eventEmojiSource } from '../../features/diary/eventEmoji'
@@ -124,10 +124,37 @@ const birthdayLunarDayOptions = computed(() => {
     disabled: month ? !isValidBirthdayDate(option.value, month.isLeapMonth, month.lunarMonth) : false,
   }))
 })
-const lunarMonthTypeOptions = computed(() => [
-  { value: 'regular', label: `普通${lunarMonthLabel(chineseRule.value?.lunarMonth ?? 1)}` },
-  { value: 'leap', label: `闰${lunarMonthLabel(chineseRule.value?.lunarMonth ?? 1)}` },
-])
+const anniversaryLunarMonthOptions = computed(() => {
+  const rule = chineseRule.value
+  if (!rule) return []
+  const fromDate = props.today > value.value.startDate ? props.today : value.value.startDate
+  const firstYear = solarToLunar(fromDate)?.year ?? 1901
+  const options: Array<{ value: string; label: string; disabled?: boolean }> = lunarMonthOptions.flatMap(option => {
+    const leapRule: ChineseEventDateRule = {
+      ...rule,
+      lunarMonth: option.value,
+      isLeapMonth: true,
+      leapMonthPolicy: 'leap-only',
+    }
+    let hasFutureLeapMonth = false
+    for (let year = firstYear; year <= 2100; year++) {
+      const occurrence = lunarOccurrenceInYear(leapRule, year)
+      if (occurrence !== null && occurrence >= fromDate) {
+        hasFutureLeapMonth = true
+        break
+      }
+    }
+    return [
+      { value: `regular:${option.value}`, label: option.label },
+      ...(hasFutureLeapMonth ? [{ value: `leap:${option.value}`, label: `闰${option.label}` }] : []),
+    ]
+  })
+  const selectedLeapMonth = `leap:${rule.lunarMonth}`
+  if (rule.isLeapMonth && !options.some(option => option.value === selectedLeapMonth)) {
+    options.push({ value: selectedLeapMonth, label: `闰${lunarMonthLabel(rule.lunarMonth)}`, disabled: true })
+  }
+  return options
+})
 const leapMonthPolicyOptions = computed(() => [
   { value: 'regular-month', label: `按普通${lunarMonthLabel(chineseRule.value?.lunarMonth ?? 1)}` },
   { value: 'leap-only', label: '跳过该年，只在闰月出现' },
@@ -144,7 +171,7 @@ const isBeforeScheduleStart = (timestamp: number) => timestamp < scheduleStartTi
 const eventTypes: Array<{ value: EventFields['type']; label: string; icon: string; defaultEmoji: string }> = [
   { value: 'birthday', label: '生日', icon: 'birthday', defaultEmoji: '🎂' },
   { value: 'anniversary', label: '纪念日', icon: 'ring', defaultEmoji: '💍' },
-  { value: 'milestone', label: '人生时刻', icon: 'graduation', defaultEmoji: '🎯' },
+  { value: 'milestone', label: '人生时刻', icon: 'graduation', defaultEmoji: '🎓' },
   { value: 'schedule', label: '重要日程', icon: 'work', defaultEmoji: '💼' },
 ]
 const lunarPreviewDate = computed(() => {
@@ -160,6 +187,10 @@ const birthdayPreview = computed(() => {
 })
 const title = computed(() => isBirthday.value ? '生日' : isAnniversary.value ? '纪念日' : isMilestone.value ? '人生时刻' : '重要日程')
 const gregorianDateLabel = computed(() => isBirthday.value ? '出生日期' : isAnniversary.value ? '纪念日期' : isMilestone.value ? '发生日期' : '日期')
+const titlePlaceholder = computed(() => isBirthday.value ? undefined
+  : isAnniversary.value ? '例如：结婚纪念日'
+    : isMilestone.value ? '例如：买下第一套房'
+      : '例如：体检、出差、家庭聚餐')
 const emojiSource = computed(() => eventEmojiSource(value.value.emoji))
 
 defineExpose({
@@ -201,16 +232,14 @@ function updateEndDate(date: string | null) {
   value.value.endDate = date ?? ''
 }
 
-function updateLunarMonth(month: string | number | null) {
-  if (month !== null) updateChineseRule({ lunarMonth: Number(month) })
+function updateAnniversaryLunarMonth(value: string | number | null) {
+  const match = /^(regular|leap):(\d{1,2})$/.exec(String(value ?? ''))
+  if (!match) return
+  updateChineseRule({ lunarMonth: Number(match[2]), isLeapMonth: match[1] === 'leap' })
 }
 
 function updateLunarDay(day: string | number | null) {
   if (day !== null) updateChineseRule({ lunarDay: Number(day) })
-}
-
-function updateLunarMonthType(type: string | number | null) {
-  if (type === 'regular' || type === 'leap') updateChineseRule({ isLeapMonth: type === 'leap' })
 }
 
 function updateLeapMonthPolicy(policy: string | number | null) {
@@ -557,7 +586,7 @@ function updateChineseRule(updates: Partial<ChineseEventDateRule>) {
       <NInput
         v-model:value="titleInput"
         :input-props="{ 'aria-label': isBirthday ? '生日称呼' : '事件名称' }"
-        :placeholder="isBirthday ? undefined : '值得记住的事'"
+        :placeholder="titlePlaceholder"
         :maxlength="160"
       />
     </label>
@@ -631,15 +660,16 @@ function updateChineseRule(updates: Partial<ChineseEventDateRule>) {
       <div v-if="!isBirthday && chineseRule" class="event-dates event-lunar-dates">
         <label class="event-field">
           <span>农历月份</span>
-          <NSelect :value="chineseRule.lunarMonth" :options="lunarMonthOptions" aria-label="农历月份" @update:value="updateLunarMonth" />
+          <NSelect
+            :value="`${chineseRule.isLeapMonth ? 'leap' : 'regular'}:${chineseRule.lunarMonth}`"
+            :options="anniversaryLunarMonthOptions"
+            aria-label="农历月份"
+            @update:value="updateAnniversaryLunarMonth"
+          />
         </label>
         <label class="event-field">
           <span>农历日期</span>
           <NSelect :value="chineseRule.lunarDay" :options="lunarDayOptions" aria-label="农历日期" @update:value="updateLunarDay" />
-        </label>
-        <label class="event-field event-lunar-month-type">
-          <span>月份类型</span>
-          <NSelect :value="chineseRule.isLeapMonth ? 'leap' : 'regular'" :options="lunarMonthTypeOptions" aria-label="农历月份类型" @update:value="updateLunarMonthType" />
         </label>
       </div>
 
@@ -930,7 +960,7 @@ function updateChineseRule(updates: Partial<ChineseEventDateRule>) {
 .event-title-field { flex: 1; }
 .event-dates { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
 .event-birthday-dates { grid-template-columns: repeat(3, minmax(0, 1fr)); }
-.event-lunar-dates { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.event-lunar-dates { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 .event-date-section { display: flex; min-width: 0; flex-direction: column; gap: 12px; }
 .event-date-heading { display: flex; min-width: 0; align-items: center; justify-content: space-between; gap: 12px; }
 .event-date-section h2 { margin: 0; font-size: 14px; font-weight: 650; letter-spacing: .01em; color: var(--text-muted, #6b7280); }

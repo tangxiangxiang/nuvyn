@@ -1,25 +1,10 @@
 import { addDays, nextOccurrence, occursOn, type DiaryEvent } from '../../../shared/diaryLife'
 import { isTaskOverdue, type DiaryTask } from '../../../shared/diaryTasks'
+import { isTaskCompletedLate } from './taskCompletion'
 
 export type DeadlineVisualState = 'normal' | 'due-soon' | 'overdue' | 'inactive'
 export type TodoDayVisualState = 'none' | 'pending' | 'due-soon' | 'overdue' | 'completed' | 'completed-late'
-export type DeadlineTask = Pick<DiaryTask, 'completedAt' | 'dueDate'> & { skipped?: boolean }
-
-function completedLocalDate(completedAt: number): string | null {
-  // Server completion timestamps are serialized Date.now() epoch milliseconds.
-  const date = new Date(completedAt)
-  if (Number.isNaN(date.getTime())) return null
-  const year = date.getFullYear().toString().padStart(4, '0')
-  const month = (date.getMonth() + 1).toString().padStart(2, '0')
-  const day = date.getDate().toString().padStart(2, '0')
-  return `${year}-${month}-${day}`
-}
-
-function completedLate(task: DeadlineTask): boolean {
-  if (task.completedAt === null || task.dueDate === null) return false
-  const date = completedLocalDate(task.completedAt)
-  return date !== null && date > task.dueDate
-}
+export type DeadlineTask = Pick<DiaryTask, 'completedAt' | 'dueDate' | 'dueTime'> & { skipped?: boolean }
 
 /** Classifies a single task or recurring occurrence by civil date, never dueTime. */
 export function taskDeadlineVisualState(task: DeadlineTask, today: string): DeadlineVisualState {
@@ -50,7 +35,7 @@ export function todoDayVisualState(tasks: readonly DeadlineTask[], today: string
   }
 
   if (tasks.every(task => task.skipped !== true && task.completedAt !== null)) {
-    return tasks.some(completedLate) ? 'completed-late' : 'completed'
+    return tasks.some(isTaskCompletedLate) ? 'completed-late' : 'completed'
   }
   return 'none'
 }

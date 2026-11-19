@@ -92,15 +92,20 @@ describe('Diary deadline visual state', () => {
     ], today)).toBe('none')
   })
 
-  it('distinguishes a late completion by the completion timestamp local date', () => {
+  it('uses the precise due time and date-only end of day for completion markers', () => {
     const dueDate = '2026-11-17'
-    const onTimeAt = new Date(2026, 10, 17, 23, 59).getTime()
+    const exactDueTime = new Date(2026, 10, 17, 2, 0).getTime()
+    const lateSameDay = new Date(2026, 10, 17, 3, 26).getTime()
+    const beforeDateDeadline = new Date(2026, 10, 17, 23, 59).getTime()
     const lateAt = new Date(2026, 10, 18, 0, 0).getTime()
-    expect(todoDayVisualState([makeTask({ dueDate, dueTime: '00:01', completedAt: onTimeAt })], today)).toBe('completed')
+    expect(todoDayVisualState([makeTask({ dueDate, dueTime: '02:00', completedAt: exactDueTime })], today)).toBe('completed')
+    expect(todoDayVisualState([makeTask({ dueDate, dueTime: '02:00', completedAt: lateSameDay })], today)).toBe('completed-late')
+    expect(todoDayVisualState([makeTask({ dueDate, dueTime: '03:26', completedAt: lateSameDay })], today)).toBe('completed')
+    expect(todoDayVisualState([makeTask({ dueDate, completedAt: beforeDateDeadline })], today)).toBe('completed')
     expect(todoDayVisualState([makeTask({ dueDate, completedAt: lateAt })], today)).toBe('completed-late')
     expect(todoDayVisualState([makeTask({ dueDate: '2026-11-18', completedAt: lateAt })], today)).toBe('completed')
     expect(todoDayVisualState([
-      makeTask({ dueDate, completedAt: onTimeAt }),
+      makeTask({ dueDate, dueTime: '02:00', completedAt: exactDueTime }),
       makeTask({ id: 'late', dueDate, completedAt: lateAt }),
     ], today)).toBe('completed-late')
     const lateOccurrence = { ...makeTask({ id: 'series:2026-11-17', dueDate, completedAt: lateAt }), kind: 'recurring' as const }

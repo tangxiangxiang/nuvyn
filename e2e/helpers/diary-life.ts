@@ -90,7 +90,16 @@ export async function selectNaiveOption(page: Page, label: string, optionName: s
   if (touch) await control.tap()
   else await control.click()
   const menu = page.locator('.n-base-select-menu').last()
-  const option = page.getByText(optionName, { exact: true }).last()
+  await expect(menu).toBeVisible()
+  const virtualList = menu.locator('.v-vl').first()
+  if (await virtualList.count()) {
+    await virtualList.evaluate(element => {
+      element.scrollTop = 0
+      element.dispatchEvent(new Event('scroll'))
+    })
+    await page.evaluate(() => new Promise<void>(resolve => requestAnimationFrame(() => resolve())))
+  }
+  const option = menu.getByText(optionName, { exact: true }).last()
   for (let attempt = 0; attempt < 30 && await option.count() === 0; attempt += 1) {
     await menu.hover()
     await page.mouse.wheel(0, 160)
@@ -128,7 +137,7 @@ export async function fillDiaryTaskTime(page: Page, label: string, value: string
 }
 
 export function diaryEventDateInput(page: Page, label: string) {
-  return page.locator(`.event-date-picker[aria-label="${label}"] input`)
+  return page.getByRole('textbox', { name: new RegExp(`^${label}(?: ${label})?$`) })
 }
 
 export async function fillDiaryEventDate(page: Page, label: string, value: string) {

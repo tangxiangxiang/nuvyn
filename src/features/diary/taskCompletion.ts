@@ -107,3 +107,10 @@ export function taskCompletionInfo(task: TaskCompletionRecord): TaskCompletionIn
     statusLabel: overdueDuration === null ? '已完成' : '逾期完成',
   }
 }
+
+/** Shares the exact deadline comparison used by the task editor and calendar. */
+export function isTaskCompletedLate(task: TaskCompletionRecord & { skipped?: boolean }): boolean {
+  if (task.skipped || task.completedAt === null) return false
+  const completion = taskCompletionInfo(task)
+  return completion !== null && completion.overdueLabel !== null
+}

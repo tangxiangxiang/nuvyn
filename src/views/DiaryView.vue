@@ -1250,7 +1250,7 @@ function createEvent() {
   if (!date || surface?.kind !== 'day-list' || !access.isUnlocked.value) return
   const type = date >= today.value ? 'schedule' : 'milestone'
   const eventId = createDiaryEventId()
-  const draft: EventFields = { title: '', description: '', emoji: type === 'schedule' ? '💼' : '🎯', type, startDate: date, endDate: date, startTime: null, endTime: null, allDay: true, dateRule: { calendar: 'gregory' }, recurrence: 'none', showCountdown: false, isPrimary: false }
+  const draft: EventFields = { title: '', description: '', emoji: type === 'schedule' ? '💼' : '🎓', type, startDate: date, endDate: date, startTime: null, endTime: null, allDay: true, dateRule: { calendar: 'gregory' }, recurrence: 'none', showCountdown: false, isPrimary: false }
   eventSurface.value = {
     kind: 'edit',
     event: null,

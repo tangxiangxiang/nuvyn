@@ -2,7 +2,7 @@
 import { describe, expect, it, vi } from 'vitest'
 import { mount, flushPromises, type VueWrapper } from '@vue/test-utils'
 import { defineComponent, h, nextTick, ref, type Ref } from 'vue'
-import { NSelect, NTimePicker } from 'naive-ui'
+import { NInput, NSelect, NTimePicker } from 'naive-ui'
 import { lunarToSolar, nextLunarOccurrence, solarToLunar, type ChineseEventDateRule } from '../../../../shared/lunarCalendar'
 import { nextOccurrence, parseEvent, type EventFields } from '../../../../shared/diaryLife'
 import { useConfirm } from '../../../composables/useConfirm'
@@ -12,7 +12,7 @@ import DiaryEventForm from '../DiaryEventForm.vue'
 const gregorianEvent: EventFields = {
   title: '大学毕业',
   description: '和家人一起庆祝',
-  emoji: '🎯',
+  emoji: '🎓',
   type: 'milestone',
   startDate: '2026-07-03',
   endDate: '2026-07-03',
@@ -87,10 +87,12 @@ function visibleControls(wrapper: VueWrapper, component: typeof DiaryDatePicker 
   })
 }
 
-function getControl(wrapper: VueWrapper, component: typeof DiaryDatePicker | typeof NSelect | typeof NTimePicker, label: string) {
-  return wrapper.findAllComponents(component).find(control => component === DiaryDatePicker
-    ? (control.props() as Record<string, unknown>).label === label
-    : control.attributes('aria-label') === label)!
+function getControl(wrapper: VueWrapper, component: typeof DiaryDatePicker | typeof NInput | typeof NSelect | typeof NTimePicker, label: string) {
+  return wrapper.findAllComponents(component).find(control => {
+    if (component === DiaryDatePicker) return (control.props() as Record<string, unknown>).label === label
+    if (component === NInput) return ((control.props() as Record<string, unknown>).inputProps as Record<string, unknown> | undefined)?.['aria-label'] === label
+    return control.attributes('aria-label') === label
+  })!
 }
 
 function getProp(control: ReturnType<typeof getControl>, name: string) {
@@ -103,6 +105,7 @@ describe('DiaryEventForm', () => {
 
     expect(wrapper.findAll('[data-testid^="event-type-"]')).toHaveLength(4)
     expect(wrapper.get('[aria-label="事件名称"]').element).toBeTruthy()
+    expect(getProp(getControl(wrapper, NInput, '事件名称'), 'placeholder')).toBe('例如：买下第一套房')
     expect(wrapper.get('[aria-label="事件备注"]').element).toBeTruthy()
     expect(visibleControls(wrapper, DiaryDatePicker)).toHaveLength(1)
     expect(getProp(getControl(wrapper, DiaryDatePicker, '发生日期'), 'modelValue')).toBe('2026-07-03')
@@ -224,7 +227,60 @@ describe('DiaryEventForm', () => {
     expect(visibleControls(wrapper, DiaryDatePicker)).toHaveLength(1)
     expect(wrapper.text()).toContain('每年重复')
     expect(wrapper.find('[aria-label="出生年份"]').exists()).toBe(false)
+    expect(wrapper.find('[aria-label="农历月份类型"]').exists()).toBe(false)
+    expect(getProp(getControl(wrapper, NInput, '事件名称'), 'placeholder')).toBe('例如：结婚纪念日')
     wrapper.unmount()
+  })
+
+  it('combines regular and leap lunar anniversary months while preserving the recurrence rule', async () => {
+    const date = lunarToSolar({ year: 2023, month: 2, day: 1, isLeapMonth: true })!
+    const rule: ChineseEventDateRule = {
+      calendar: 'chinese', lunarMonth: 2, lunarDay: 1, isLeapMonth: true,
+      leapMonthPolicy: 'leap-only', shortMonthPolicy: 'skip',
+    }
+    const { wrapper, fields } = mountEventForm({
+      ...gregorianEvent,
+      type: 'anniversary',
+      title: '重要纪念日',
+      startDate: date,
+      endDate: date,
+      recurrence: 'yearly',
+      dateRule: rule,
+    }, '2023-03-01', true)
+    const month = getControl(wrapper, NSelect, '农历月份')
+    const options = getProp(month, 'options') as Array<{ value: string; label: string; disabled?: boolean }>
+
+    expect(getProp(month, 'value')).toBe('leap:2')
+    expect(options).toContainEqual(expect.objectContaining({ value: 'regular:2', label: '二月' }))
+    expect(options).toContainEqual(expect.objectContaining({ value: 'leap:2', label: '闰二月' }))
+    expect(wrapper.find('[aria-label="农历月份类型"]').exists()).toBe(false)
+
+    await month.vm.$emit('update:value', 'regular:2')
+    expect(fields.value.dateRule).toMatchObject({ lunarMonth: 2, isLeapMonth: false, leapMonthPolicy: 'leap-only', shortMonthPolicy: 'skip' })
+    await month.vm.$emit('update:value', 'leap:2')
+    expect(fields.value.dateRule).toEqual(rule)
+    expect(parseEvent(fields.value)).not.toBeNull()
+    wrapper.unmount()
+  })
+
+  it('uses type-specific event placeholders and aligns milestone default Emoji without overwriting custom Emoji', async () => {
+    const defaultSchedule: EventFields = { ...gregorianEvent, type: 'schedule', emoji: '💼' }
+    const defaultForm = mountEventForm(defaultSchedule)
+    await defaultForm.wrapper.get('[data-testid="event-type-milestone"]').trigger('click')
+    expect(defaultForm.fields.value.emoji).toBe('🎓')
+    expect(defaultForm.wrapper.get('[aria-label="选择事件 Emoji"] img').attributes('src')).toBe('/emoji/event-graduation.svg')
+    await defaultForm.wrapper.get('[data-testid="event-type-anniversary"]').trigger('click')
+    expect(getProp(getControl(defaultForm.wrapper, NInput, '事件名称'), 'placeholder')).toBe('例如：结婚纪念日')
+    await defaultForm.wrapper.get('[data-testid="event-type-schedule"]').trigger('click')
+    expect(getProp(getControl(defaultForm.wrapper, NInput, '事件名称'), 'placeholder')).toBe('例如：体检、出差、家庭聚餐')
+    await defaultForm.wrapper.get('[data-testid="event-type-birthday"]').trigger('click')
+    expect(getProp(getControl(defaultForm.wrapper, NInput, '生日称呼'), 'placeholder')).toBeUndefined()
+    defaultForm.wrapper.unmount()
+
+    const customForm = mountEventForm({ ...defaultSchedule, emoji: '🎯' })
+    await customForm.wrapper.get('[data-testid="event-type-milestone"]').trigger('click')
+    expect(customForm.fields.value.emoji).toBe('🎯')
+    customForm.wrapper.unmount()
   })
 
   it('renders lunar birthday fields and computes its next age-aware occurrence', () => {
@@ -411,6 +467,7 @@ describe('DiaryEventForm', () => {
     })
     expect(fields.value.startDate).toBe(initial.startDate)
     expect(wrapper.text()).toContain('下一次：')
+    expect(getProp(getControl(wrapper, NSelect, '农历月份'), 'value')).toBe('regular:5')
 
     await getControl(wrapper, NSelect, '农历日期').vm.$emit('update:value', 20)
     const convertedDate = fields.value.dateRule?.calendar === 'chinese'

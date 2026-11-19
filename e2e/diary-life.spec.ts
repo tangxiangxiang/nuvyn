@@ -327,7 +327,7 @@ for (const viewport of [{ width: 390, height: 844 }, { width: 430, height: 900 }
       await unlockDiary(page)
       await expect(page.getByRole('button', { name: '切换到日记视图' })).toBeVisible()
       await expect(page.getByTestId('diary-event-list-toggle')).toHaveCount(0)
-      await expect(cell.locator('img')).toHaveAttribute('src', /event-goal/)
+      await expect(cell.locator('img')).toHaveAttribute('src', /event-graduation/)
       await page.screenshot({ path: testInfo.outputPath('diary-calendar.png') })
       expect(await page.locator('.monaco-editor').count()).toBe(0)
       if (viewport.width === 1280) {
@@ -927,6 +927,9 @@ test('creates lunar and Gregorian birthdays without guessing the birth year', as
   await expect(birthYear).toHaveValue('')
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true)
   await birthYear.fill('1951')
+  await expect(page.locator('.event-date-preview')).toHaveCount(0)
+  await selectNaiveOption(page, '农历月份', '十月')
+  await selectNaiveOption(page, '农历日期', '初七')
   await expect(page.locator('.event-date-preview')).toContainText('岁生日')
 
   const birthdayCalendar = page.getByRole('group', { name: '生日历法' })
