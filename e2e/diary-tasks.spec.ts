@@ -45,6 +45,16 @@ test('creates a dated task, completes it, restores it, and moves it to a new cal
   await expect(taskRow.locator('.diary-task-detail')).toHaveText('已逾期1分钟')
   await expect(taskRow).toHaveClass(/is-overdue/)
 
+  await page.getByRole('button', { name: `编辑待办：${title}`, exact: true }).click()
+  const savedStatus = editor.locator('[data-testid="diary-task-completion"]')
+  const expectedOverdue = '已逾期1分钟'
+  await expect(savedStatus.locator('.diary-task-form-completion-left')).toHaveText('尚未完成')
+  await expect(savedStatus.locator('.diary-task-form-completion-right')).toHaveText(expectedOverdue)
+  await fillDiaryTaskDate(page, '截止日期', nextDate)
+  await expect(savedStatus.locator('.diary-task-form-completion-right')).toHaveText(expectedOverdue)
+  await fillDiaryTaskDate(page, '截止日期', date)
+  await page.getByRole('button', { name: '取消', exact: true }).click()
+
   const complete = page.getByRole('checkbox', { name: `完成待办：${title}`, exact: true })
   await expect(complete).toBeVisible()
   const marker = cell.locator('.life-task-marker')
@@ -146,6 +156,42 @@ test('creates a dated task, completes it, restores it, and moves it to a new cal
     expect(bounds!.x).toBeGreaterThanOrEqual(0)
     expect(bounds!.x + bounds!.width).toBeLessThanOrEqual(viewport.width + 1)
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true)
+    const completionStatus = form.locator('[data-testid="diary-task-completion"]')
+    await expect(completionStatus).toBeVisible()
+    await expect(completionStatus.locator('.diary-task-form-completion-box')).toHaveCount(2)
+    const statusFits = await completionStatus.evaluate(element => element.scrollWidth <= element.clientWidth)
+    expect(statusFits).toBe(true)
+    const boxesFit = await completionStatus.locator('.diary-task-form-completion-box').evaluateAll(elements =>
+      elements.every(element => element.scrollWidth <= element.clientWidth),
+    )
+    expect(boxesFit).toBe(true)
+    if (viewport.width === 1280) {
+      const [statusHeights, inputHeight] = await Promise.all([
+        completionStatus.locator('.diary-task-form-completion-box').evaluateAll(elements =>
+          elements.map(element => element.getBoundingClientRect().height),
+        ),
+        form.locator('.diary-task-form-title .n-input').evaluate(element => element.getBoundingClientRect().height),
+      ])
+      for (const height of statusHeights) expect(Math.abs(height - inputHeight)).toBeLessThanOrEqual(1)
+      const root = page.locator('html')
+      const originalTheme = await root.getAttribute('data-theme')
+      const leftStatusBox = completionStatus.locator('.diary-task-form-completion-left')
+      const beforeTheme = await leftStatusBox.evaluate(element => {
+        const style = getComputedStyle(element)
+        return { background: style.backgroundColor, border: style.borderColor }
+      })
+      const alternateTheme = originalTheme === 'dark' ? 'light' : 'dark'
+      await page.evaluate(theme => document.documentElement.setAttribute('data-theme', theme), alternateTheme)
+      await expect(root).toHaveAttribute('data-theme', alternateTheme)
+      const afterTheme = await leftStatusBox.evaluate(element => {
+        const style = getComputedStyle(element)
+        return { background: style.backgroundColor, border: style.borderColor }
+      })
+      expect(afterTheme.background).not.toBe(beforeTheme.background)
+      expect(afterTheme.border).not.toBe(beforeTheme.border)
+      await page.evaluate(theme => document.documentElement.setAttribute('data-theme', theme), originalTheme!)
+      await expect(root).toHaveAttribute('data-theme', originalTheme!)
+    }
     await page.getByRole('button', { name: '取消', exact: true }).click()
     await expect(form).toBeHidden()
   }
@@ -161,6 +207,7 @@ test('creates a dated task, completes it, restores it, and moves it to a new cal
   await nextCell.click()
   await expect(nextCell.locator('.life-task-marker')).toHaveAttribute('src', '/emoji/stopwatch.svg')
   await page.getByRole('button', { name: `编辑待办：${title}`, exact: true }).click()
+  await expect(page.locator('.diary-task-edit-dialog [data-testid="diary-task-completion"]')).toHaveCount(0)
   await page.getByRole('button', { name: '删除', exact: true }).click()
   await page.getByRole('dialog', { name: '删除这条待办？' }).getByRole('button', { name: /^(Confirm|确认|确定)$/ }).click()
   await expect(nextCell.locator('.life-task-marker')).toHaveCount(0)

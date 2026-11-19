@@ -1639,9 +1639,10 @@ onBeforeUnmount(() => {
             :model-value="taskDraft"
             :inert="busy"
             :today="today"
+            :now="currentTimestamp"
             :allow-recurrence="!editingTask || editingTask.kind === 'recurring'"
             :lock-recurrence-start="editingTask?.kind === 'recurring'"
-            :completion="editingTask && editingTask.completedAt !== null ? editingTask : null"
+            :status-task="editingTask"
             @update:model-value="updateTaskDraft"
           />
         </div>

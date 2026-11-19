@@ -198,35 +198,99 @@ describe('DiaryTaskForm', () => {
     wrapper.unmount()
   })
 
-  it('shows a completed task time as read-only above the remarks', () => {
+  it('shows a completed task status in one read-only row above the remarks', async () => {
     const initial: TaskEditorFields = {
       title: '性能稼动率接口开发', description: '备注内容', startDate: null, startTime: null,
       dueDate: '2026-11-15', dueTime: '02:00', recurrence: null,
     }
-    const completion = {
+    const statusTask = {
       completedAt: new Date(2026, 10, 15, 3, 26).getTime(),
       dueDate: initial.dueDate,
       dueTime: initial.dueTime,
     }
-    const wrapper = mount(DiaryTaskForm, { props: { modelValue: initial, today: '2026-11-16', completion } })
+    const wrapper = mount(DiaryTaskForm, { props: { modelValue: initial, today: '2026-11-16', statusTask, now: new Date(2026, 10, 19).getTime() } })
 
-    const completed = wrapper.get('[data-testid="diary-task-completion"]')
-    expect(completed.text()).toContain('完成时间')
-    expect(completed.text()).toContain('2026-11-15 03:26')
-    expect(completed.text()).toContain('逾期 1小时26分')
+    const statusField = wrapper.get('.diary-task-form-completion')
+    const statusBox = wrapper.get('[data-testid="diary-task-completion"]')
+    expect(statusField.text()).toContain('完成状态')
+    expect(statusBox.get('.diary-task-form-completion-left').text()).toBe('2026-11-15 03:26')
+    expect(statusBox.get('.diary-task-form-completion-right').text()).toBe('逾期1小时26分')
+    expect(statusBox.findAll('.diary-task-form-completion-box')).toHaveLength(2)
+    expect(statusBox.get('.diary-task-form-completion-right').classes()).toContain('is-overdue')
     expect(wrapper.find('[aria-label="完成时间"]').exists()).toBe(false)
-    expect(completed.element.compareDocumentPosition(wrapper.get('.diary-task-form-description').element)
+    expect(wrapper.find('[data-testid="diary-task-completion"] input').exists()).toBe(false)
+    expect(statusBox.attributes('tabindex')).toBeUndefined()
+    expect(statusField.element.compareDocumentPosition(wrapper.get('.diary-task-form-description').element)
       & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+
+    await wrapper.setProps({ modelValue: { ...initial, dueDate: '2026-11-25', dueTime: '02:00' } })
+    expect(statusBox.get('.diary-task-form-completion-left').text()).toBe('2026-11-15 03:26')
+    expect(statusBox.get('.diary-task-form-completion-right').text()).toBe('逾期1小时26分')
     wrapper.unmount()
   })
 
-  it('does not show a completion time for an unfinished task', () => {
+  it('shows persisted overdue state, updates it with the shared clock, and hides it after a saved deadline change', async () => {
     const initial: TaskEditorFields = {
       title: '未完成待办', description: '', startDate: null, startTime: null,
       dueDate: '2026-11-15', dueTime: '02:00', recurrence: null,
     }
-    const wrapper = mount(DiaryTaskForm, { props: { modelValue: initial, today: '2026-11-16' } })
+    const statusTask = { completedAt: null, dueDate: '2026-11-15', dueTime: '02:00' }
+    const wrapper = mount(DiaryTaskForm, {
+      props: { modelValue: initial, today: '2026-11-16', statusTask, now: new Date(2026, 10, 15, 1, 59).getTime() },
+    })
 
+    expect(wrapper.find('[data-testid="diary-task-completion"]').exists()).toBe(false)
+    await wrapper.setProps({ now: new Date(2026, 10, 15, 10, 26).getTime() })
+    const statusRow = wrapper.get('[data-testid="diary-task-completion"]')
+    expect(statusRow.get('.diary-task-form-completion-left').text()).toBe('尚未完成')
+    expect(statusRow.get('.diary-task-form-completion-right').text()).toBe('已逾期8小时26分')
+    expect(statusRow.get('.diary-task-form-completion-right').classes()).toContain('is-overdue')
+
+    await wrapper.setProps({ modelValue: { ...initial, dueDate: '2026-11-25' } })
+    expect(statusRow.get('.diary-task-form-completion-left').text()).toBe('尚未完成')
+    expect(statusRow.get('.diary-task-form-completion-right').text()).toBe('已逾期8小时26分')
+    await wrapper.setProps({ statusTask: { ...statusTask, dueDate: '2026-11-25' } })
+    expect(wrapper.find('[data-testid="diary-task-completion"]').exists()).toBe(false)
+    wrapper.unmount()
+  })
+
+  it('uses the recurring occurrence status and suppresses skipped instances', async () => {
+    const initial: TaskEditorFields = {
+      title: '每周整理', description: '', startDate: null, startTime: null,
+      dueDate: '2026-11-17', dueTime: null,
+      recurrence: { frequency: 'weekly', startDate: '2026-11-10', untilDate: '2026-12-31' },
+    }
+    const occurrence = { completedAt: null, dueDate: '2026-11-17', dueTime: null }
+    const wrapper = mount(DiaryTaskForm, {
+      props: { modelValue: initial, today: '2026-11-19', statusTask: occurrence, now: new Date(2026, 10, 19, 8).getTime() },
+    })
+
+    expect(wrapper.get('[data-testid="diary-task-completion"] .diary-task-form-completion-left').text()).toBe('尚未完成')
+    expect(wrapper.get('[data-testid="diary-task-completion"] .diary-task-form-completion-right').text()).toBe('已逾期2天')
+    await wrapper.setProps({ statusTask: { ...occurrence, skipped: true } })
+    expect(wrapper.find('[data-testid="diary-task-completion"]').exists()).toBe(false)
+    await wrapper.setProps({ statusTask: { ...occurrence, completedAt: new Date(2026, 10, 17, 23, 59).getTime() } })
+    expect(wrapper.get('[data-testid="diary-task-completion"] .diary-task-form-completion-left').text()).toBe('2026-11-17 23:59')
+    expect(wrapper.get('[data-testid="diary-task-completion"] .diary-task-form-completion-right').text()).toBe('按时完成')
+    wrapper.unmount()
+  })
+
+  it('shows the exact saved completion time for an on-time task and hides it after restoration', async () => {
+    const initial: TaskEditorFields = {
+      title: '按时完成', description: '', startDate: null, startTime: null,
+      dueDate: '2026-12-31', dueTime: '23:30', recurrence: null,
+    }
+    const statusTask = {
+      completedAt: new Date(2026, 11, 31, 23, 30).getTime(),
+      dueDate: '2026-12-31',
+      dueTime: '23:30',
+    }
+    const wrapper = mount(DiaryTaskForm, { props: { modelValue: initial, today: '2026-12-31', statusTask } })
+
+    expect(wrapper.get('[data-testid="diary-task-completion"] .diary-task-form-completion-left').text()).toBe('2026-12-31 23:30')
+    expect(wrapper.get('[data-testid="diary-task-completion"] .diary-task-form-completion-right').text()).toBe('按时完成')
+    expect(wrapper.get('[data-testid="diary-task-completion"] .diary-task-form-completion-right').classes()).not.toContain('is-overdue')
+    await wrapper.setProps({ statusTask: { ...statusTask, completedAt: null } })
     expect(wrapper.find('[data-testid="diary-task-completion"]').exists()).toBe(false)
     wrapper.unmount()
   })
