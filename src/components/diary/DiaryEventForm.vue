@@ -565,8 +565,8 @@ function updateChineseRule(updates: Partial<ChineseEventDateRule>) {
     <p v-if="dateRangeError && !isSchedule" class="event-date-error" role="alert">{{ dateRangeError }}</p>
 
     <section class="event-date-section" :aria-label="title + '日期'">
-      <div class="event-date-heading">
-        <h2>{{ isBirthday ? '出生日期' : isAnniversary ? '纪念日期' : isMilestone ? '发生日期' : '日程日期' }}</h2>
+      <div v-if="(!isSchedule && !isMilestone) || chineseRule" class="event-date-heading">
+        <h2 v-if="!isSchedule">{{ isBirthday ? '出生日期' : isAnniversary ? '纪念日期' : '发生日期' }}</h2>
         <div v-if="isBirthday || isAnniversary || chineseRule" class="event-date-calendar-toggle" role="group" :aria-label="isBirthday ? '生日历法' : '日期类型'">
           <template v-if="isBirthday">
             <button type="button" :aria-pressed="dateRule.calendar === 'chinese'" :disabled="dateRule.calendar !== 'chinese' && !canSwitchBirthdayToLunar" @click="setCalendar('chinese')">农历</button>
