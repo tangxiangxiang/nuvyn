@@ -462,14 +462,16 @@ describe('DiaryEventForm', () => {
     wrapper.unmount()
   })
 
-  it('leaves a new birthday birth year blank instead of inferring it from the selected calendar date', async () => {
+  it('leaves a new lunar birthday year, month, and day blank instead of inferring them from the selected calendar date', async () => {
     const { wrapper, fields } = mountEventForm({ ...gregorianEvent, startDate: '2026-11-19', endDate: '2026-11-19' })
     await wrapper.get('[data-testid="event-type-birthday"]').trigger('click')
 
     expect(wrapper.get('[aria-label="出生年份"]').element).toBeTruthy()
     expect((wrapper.get('[aria-label="出生年份"]').element as HTMLInputElement).value).toBe('')
+    expect(getProp(getControl(wrapper, NSelect, '农历月份'), 'value')).toBeNull()
+    expect(getProp(getControl(wrapper, NSelect, '农历日期'), 'value')).toBeNull()
     expect(fields.value.birthday).toBeUndefined()
-    expect(wrapper.text()).toContain('填写出生日期后显示下一次生日')
+    expect(wrapper.text()).not.toContain('填写出生日期后显示下一次生日')
     expect(fields.value.startDate).not.toBe('')
     expect(parseEvent(fields.value)).toBeNull()
     wrapper.unmount()

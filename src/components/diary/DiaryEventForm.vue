@@ -23,6 +23,14 @@ const isBirthday = computed(() => value.value.type === 'birthday')
 const isAnniversary = computed(() => value.value.type === 'anniversary')
 const isMilestone = computed(() => value.value.type === 'milestone')
 const isSchedule = computed(() => value.value.type === 'schedule')
+const birthdayLunarMonthSelection = ref<string | null>(isBirthday.value && chineseRule.value
+  ? `${chineseRule.value.isLeapMonth ? 'leap' : 'regular'}:${chineseRule.value.lunarMonth}`
+  : null)
+const birthdayLunarDaySelection = ref<number | null>(isBirthday.value && chineseRule.value ? chineseRule.value.lunarDay : null)
+const selectedBirthdayLunarMonth = computed(() => {
+  const match = /^(regular|leap):(\d{1,2})$/.exec(birthdayLunarMonthSelection.value ?? '')
+  return match ? { lunarMonth: Number(match[2]), isLeapMonth: match[1] === 'leap' } : null
+})
 const titleInput = computed({
   get: () => isBirthday.value ? birthdayPersonName(value.value.title) : value.value.title,
   set: (title: string) => { value.value.title = title },
@@ -30,12 +38,19 @@ const titleInput = computed({
 const canUseLunar = computed(() => value.value.recurrence === 'yearly' && value.value.allDay
   && value.value.startTime === null && value.value.endTime === null
   && value.value.startDate === value.value.endDate && solarToLunar(value.value.startDate) !== null)
-const birthdayLunarDraft = ref<{ dateRule: ChineseEventDateRule; birthday?: { birthLunarYear: number }; startDate: string } | null>(null)
+const birthdayLunarDraft = ref<{
+  dateRule: ChineseEventDateRule
+  birthday?: { birthLunarYear: number }
+  startDate: string
+  lunarMonthSelection: string | null
+  lunarDaySelection: number | null
+} | null>(null)
 const canSwitchBirthdayToLunar = computed(() => dateRule.value.calendar === 'gregory'
   && (Boolean(value.value.startDate && solarToLunar(value.value.startDate)) || (!value.value.startDate && birthdayLunarDraft.value !== null)))
 const birthdayDateIsValid = computed(() => {
   if (!isBirthday.value) return true
   if (chineseRule.value) {
+    if (birthdayLunarMonthSelection.value === null || birthdayLunarDaySelection.value === null) return false
     const birthLunarYear = value.value.birthday && 'birthLunarYear' in value.value.birthday
       ? value.value.birthday.birthLunarYear
       : null
@@ -71,13 +86,14 @@ const endTimeError = computed(() => {
 const lunarMonthOptions = Array.from({ length: 12 }, (_, index) => ({ value: index + 1, label: lunarMonthLabel(index + 1) }))
 const lunarDayOptions = Array.from({ length: 30 }, (_, index) => ({ value: index + 1, label: lunarDayLabel(index + 1) }))
 const birthdayLunarMonthOptions = computed(() => {
+  const selectedDay = birthdayLunarDaySelection.value ?? 1
   const year = value.value.birthday && 'birthLunarYear' in value.value.birthday
     ? value.value.birthday.birthLunarYear
     : null
   const options = lunarMonthOptions.map(option => ({
     value: `regular:${option.value}`,
     label: option.label,
-    disabled: !isValidBirthdayDate(chineseRule.value?.lunarDay ?? 1, false, option.value),
+    disabled: !isValidBirthdayDate(selectedDay, false, option.value),
   }))
   if (Number.isInteger(year) && year! >= 1901 && year! <= 2100) {
     const leapMonth = Array.from({ length: 12 }, (_, index) => index + 1)
@@ -86,7 +102,7 @@ const birthdayLunarMonthOptions = computed(() => {
       options.splice(leapMonth, 0, {
         value: `leap:${leapMonth}`,
         label: `闰${lunarMonthLabel(leapMonth)}`,
-        disabled: !isValidBirthdayDate(chineseRule.value?.lunarDay ?? 1, true, leapMonth),
+        disabled: !isValidBirthdayDate(selectedDay, true, leapMonth),
       })
     }
   }
@@ -100,10 +116,13 @@ const birthdayLunarMonthOptions = computed(() => {
   }
   return options
 })
-const birthdayLunarDayOptions = computed(() => lunarDayOptions.map(option => ({
-  ...option,
-  disabled: !isValidBirthdayDate(option.value),
-})))
+const birthdayLunarDayOptions = computed(() => {
+  const month = selectedBirthdayLunarMonth.value
+  return lunarDayOptions.map(option => ({
+    ...option,
+    disabled: month ? !isValidBirthdayDate(option.value, month.isLeapMonth, month.lunarMonth) : false,
+  }))
+})
 const lunarMonthTypeOptions = computed(() => [
   { value: 'regular', label: `普通${lunarMonthLabel(chineseRule.value?.lunarMonth ?? 1)}` },
   { value: 'leap', label: `闰${lunarMonthLabel(chineseRule.value?.lunarMonth ?? 1)}` },
@@ -300,11 +319,27 @@ async function setEventType(rawType: string) {
 
   if (!props.isEditing && previous.emoji === previousType.defaultEmoji) next.emoji = target.defaultEmoji
   if (!props.isEditing) next.showCountdown = targetType === 'birthday' || targetType === 'anniversary'
+  if (targetType === 'birthday' && next.dateRule?.calendar === 'chinese') {
+    if (props.isEditing || previousRule) {
+      birthdayLunarMonthSelection.value = `${next.dateRule.isLeapMonth ? 'leap' : 'regular'}:${next.dateRule.lunarMonth}`
+      birthdayLunarDaySelection.value = next.dateRule.lunarDay
+    } else {
+      birthdayLunarMonthSelection.value = null
+      birthdayLunarDaySelection.value = null
+    }
+  } else if (previous.type === 'birthday') {
+    birthdayLunarMonthSelection.value = null
+    birthdayLunarDaySelection.value = null
+  }
   value.value = next
 }
 
 function syncBirthdayDate() {
   if (!isBirthday.value || !chineseRule.value) return
+  if (birthdayLunarMonthSelection.value === null || birthdayLunarDaySelection.value === null) {
+    calendarError.value = ''
+    return
+  }
   const birthLunarYear = value.value.birthday && 'birthLunarYear' in value.value.birthday
     ? value.value.birthday.birthLunarYear
     : null
@@ -344,10 +379,25 @@ function updateBirthLunarYear(raw: string) {
 }
 
 function updateBirthdayLunarMonth(value: string | number | null) {
-  if (value === null) return
+  if (value === null) {
+    birthdayLunarMonthSelection.value = null
+    calendarError.value = ''
+    return
+  }
   const match = /^(regular|leap):(\d{1,2})$/.exec(String(value))
   if (!match) return
+  birthdayLunarMonthSelection.value = `${match[1]}:${Number(match[2])}`
   updateChineseRule({ lunarMonth: Number(match[2]), isLeapMonth: match[1] === 'leap' })
+}
+
+function updateBirthdayLunarDay(value: string | number | null) {
+  if (value === null) {
+    birthdayLunarDaySelection.value = null
+    calendarError.value = ''
+    return
+  }
+  birthdayLunarDaySelection.value = Number(value)
+  updateChineseRule({ lunarDay: Number(value) })
 }
 
 function updateGregorianBirthdayDate(date: string | null) {
@@ -385,7 +435,8 @@ function setCalendar(calendar: 'gregory' | 'chinese') {
       const lunarBirthYear = value.value.birthday && 'birthLunarYear' in value.value.birthday
         ? value.value.birthday.birthLunarYear
         : null
-      const birthDate = chineseRule.value && Number.isInteger(lunarBirthYear)
+      const birthDate = chineseRule.value && birthdayLunarMonthSelection.value !== null
+        && birthdayLunarDaySelection.value !== null && Number.isInteger(lunarBirthYear)
         ? lunarToSolar({ year: lunarBirthYear!, month: chineseRule.value.lunarMonth, day: chineseRule.value.lunarDay, isLeapMonth: chineseRule.value.isLeapMonth })
         : null
       birthdayLunarDraft.value = {
@@ -395,6 +446,8 @@ function setCalendar(calendar: 'gregory' | 'chinese') {
         },
         ...(Number.isInteger(lunarBirthYear) ? { birthday: { birthLunarYear: lunarBirthYear! } } : {}),
         startDate: birthDate ?? '',
+        lunarMonthSelection: birthdayLunarMonthSelection.value,
+        lunarDaySelection: birthdayLunarDaySelection.value,
       }
       value.value.dateRule = { calendar: 'gregory' }
       value.value.startDate = birthDate ?? ''
@@ -410,6 +463,8 @@ function setCalendar(calendar: 'gregory' | 'chinese') {
         value.value.dateRule = { ...previous.dateRule }
         value.value.startDate = previous.startDate
         value.value.endDate = previous.startDate
+        birthdayLunarMonthSelection.value = previous.lunarMonthSelection
+        birthdayLunarDaySelection.value = previous.lunarDaySelection
         if (previous.birthday) value.value.birthday = { ...previous.birthday }
         else delete value.value.birthday
         return
@@ -427,12 +482,18 @@ function setCalendar(calendar: 'gregory' | 'chinese') {
       year: lunarDate.year, month: prior.dateRule.lunarMonth, day: prior.dateRule.lunarDay,
       isLeapMonth: prior.dateRule.isLeapMonth,
     }) : null
-    const rule = priorDate === value.value.startDate
+    const restorePriorSelections = Boolean(prior && priorDate === value.value.startDate
+      && (prior.startDate !== '' || prior.lunarMonthSelection !== null || prior.lunarDaySelection !== null))
+    const rule = restorePriorSelections
       ? { ...prior!.dateRule }
       : defaultLunarRule(lunarDate)
     value.value.dateRule = rule
     value.value.endDate = value.value.startDate
     value.value.birthday = { birthLunarYear: lunarDate.year }
+    birthdayLunarMonthSelection.value = restorePriorSelections
+      ? prior!.lunarMonthSelection
+      : `${rule.isLeapMonth ? 'leap' : 'regular'}:${rule.lunarMonth}`
+    birthdayLunarDaySelection.value = restorePriorSelections ? prior!.lunarDaySelection : rule.lunarDay
     birthdayLunarDraft.value = null
     return
   }
@@ -495,7 +556,7 @@ function updateChineseRule(updates: Partial<ChineseEventDateRule>) {
       <NInput
         v-model:value="titleInput"
         :input-props="{ 'aria-label': isBirthday ? '生日称呼' : '事件名称' }"
-        :placeholder="isBirthday ? '例如：爷爷' : '值得记住的事'"
+        :placeholder="isBirthday ? undefined : '值得记住的事'"
         :maxlength="160"
       />
     </label>
@@ -506,15 +567,16 @@ function updateChineseRule(updates: Partial<ChineseEventDateRule>) {
     <section class="event-date-section" :aria-label="title + '日期'">
       <div class="event-date-heading">
         <h2>{{ isBirthday ? '出生日期' : isAnniversary ? '纪念日期' : isMilestone ? '发生日期' : '日程日期' }}</h2>
-        <div v-if="isBirthday" class="event-date-calendar-toggle" role="group" aria-label="生日历法">
-          <button type="button" :aria-pressed="dateRule.calendar === 'chinese'" :disabled="dateRule.calendar !== 'chinese' && !canSwitchBirthdayToLunar" @click="setCalendar('chinese')">农历</button>
-          <button type="button" :aria-pressed="dateRule.calendar === 'gregory'" @click="setCalendar('gregory')">公历</button>
+        <div v-if="isBirthday || isAnniversary || chineseRule" class="event-date-calendar-toggle" role="group" :aria-label="isBirthday ? '生日历法' : '日期类型'">
+          <template v-if="isBirthday">
+            <button type="button" :aria-pressed="dateRule.calendar === 'chinese'" :disabled="dateRule.calendar !== 'chinese' && !canSwitchBirthdayToLunar" @click="setCalendar('chinese')">农历</button>
+            <button type="button" :aria-pressed="dateRule.calendar === 'gregory'" @click="setCalendar('gregory')">公历</button>
+          </template>
+          <template v-else>
+            <button type="button" :aria-pressed="dateRule.calendar === 'gregory'" @click="setCalendar('gregory')">公历</button>
+            <button type="button" :aria-pressed="dateRule.calendar === 'chinese'" :disabled="dateRule.calendar !== 'chinese' && !canUseLunar" @click="setCalendar('chinese')">农历</button>
+          </template>
         </div>
-      </div>
-
-      <div v-if="!isBirthday && (isAnniversary || chineseRule)" class="event-date-calendar-toggle" role="group" aria-label="日期类型">
-        <button type="button" :aria-pressed="dateRule.calendar === 'gregory'" @click="setCalendar('gregory')">公历</button>
-        <button type="button" :aria-pressed="dateRule.calendar === 'chinese'" :disabled="dateRule.calendar !== 'chinese' && !canUseLunar" @click="setCalendar('chinese')">农历</button>
       </div>
 
       <div v-if="isBirthday && chineseRule" class="event-dates event-birthday-dates">
@@ -528,15 +590,16 @@ function updateChineseRule(updates: Partial<ChineseEventDateRule>) {
             step="1"
             required
             aria-label="出生年份"
-            placeholder="例如 1951"
             @input="updateBirthLunarYear(($event.target as HTMLInputElement).value)"
           >
         </label>
         <label class="event-field">
           <span>农历月份</span>
           <NSelect
-            :value="`${chineseRule.isLeapMonth ? 'leap' : 'regular'}:${chineseRule.lunarMonth}`"
+            :value="birthdayLunarMonthSelection"
             :options="birthdayLunarMonthOptions"
+            placeholder="请选择月份"
+            clearable
             aria-label="农历月份"
             @update:value="updateBirthdayLunarMonth"
           />
@@ -544,10 +607,12 @@ function updateChineseRule(updates: Partial<ChineseEventDateRule>) {
         <label class="event-field">
           <span>农历日期</span>
           <NSelect
-            :value="chineseRule.lunarDay"
+            :value="birthdayLunarDaySelection"
             :options="birthdayLunarDayOptions"
+            placeholder="请选择日期"
+            clearable
             aria-label="农历日期"
-            @update:value="updateLunarDay"
+            @update:value="updateBirthdayLunarDay"
           />
         </label>
       </div>
@@ -565,7 +630,7 @@ function updateChineseRule(updates: Partial<ChineseEventDateRule>) {
           @update:formatted-value="updateGregorianBirthdayDate"
         />
       </label>
-      <div v-if="!isBirthday && chineseRule" class="event-dates">
+      <div v-if="!isBirthday && chineseRule" class="event-dates event-lunar-dates">
         <label class="event-field">
           <span>农历月份</span>
           <NSelect :value="chineseRule.lunarMonth" :options="lunarMonthOptions" aria-label="农历月份" @update:value="updateLunarMonth" />
@@ -574,7 +639,7 @@ function updateChineseRule(updates: Partial<ChineseEventDateRule>) {
           <span>农历日期</span>
           <NSelect :value="chineseRule.lunarDay" :options="lunarDayOptions" aria-label="农历日期" @update:value="updateLunarDay" />
         </label>
-        <label class="event-field">
+        <label class="event-field event-lunar-month-type">
           <span>月份类型</span>
           <NSelect :value="chineseRule.isLeapMonth ? 'leap' : 'regular'" :options="lunarMonthTypeOptions" aria-label="农历月份类型" @update:value="updateLunarMonthType" />
         </label>
@@ -626,16 +691,15 @@ function updateChineseRule(updates: Partial<ChineseEventDateRule>) {
 
       <p v-if="isBirthday && dateRule.calendar === 'gregory' && value.startDate && !solarToLunar(value.startDate)" class="event-date-help">此日期仍可作为公历生日保存，超出农历换算范围时不能切换为农历。</p>
 
-      <p v-if="isBirthday" class="event-date-preview" aria-live="polite">
-        <template v-if="birthdayPreview">下一次：{{ formatGregorianDate(birthdayPreview.date) }} · {{ birthdayPreview.title }}</template>
-        <template v-else>填写出生日期后显示下一次生日</template>
+      <p v-if="isBirthday && birthdayPreview" class="event-date-preview" aria-live="polite">
+        下一次：{{ formatGregorianDate(birthdayPreview.date) }} · {{ birthdayPreview.title }}
       </p>
-      <p v-else-if="chineseRule" class="event-date-preview" aria-live="polite">
+      <p v-else-if="!isBirthday && chineseRule" class="event-date-preview" aria-live="polite">
         <template v-if="lunarPreviewDate">下一次：{{ formatGregorianDate(lunarPreviewDate) }}（公历）</template>
         <template v-else>支持范围内暂无下一次日期</template>
       </p>
 
-      <NCheckbox v-if="isAnniversary" :checked="value.recurrence === 'yearly'" :disabled="dateRule.calendar === 'chinese'" @update:checked="value.recurrence = $event ? 'yearly' : 'none'">每年重复</NCheckbox>
+      <NCheckbox v-if="isAnniversary && !chineseRule" :checked="value.recurrence === 'yearly'" @update:checked="value.recurrence = $event ? 'yearly' : 'none'">每年重复</NCheckbox>
       <NCheckbox v-if="isSchedule && !chineseRule" v-model:checked="value.allDay">全天</NCheckbox>
       <p v-if="isSchedule && value.allDay && (value.startTime || value.endTime)" class="event-date-help">保存为全天日程后会清除已有时间。</p>
       <div v-if="isSchedule && !chineseRule && !value.allDay" class="event-dates">
@@ -880,6 +944,7 @@ function updateChineseRule(updates: Partial<ChineseEventDateRule>) {
 .event-title-field { flex: 1; }
 .event-dates { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
 .event-birthday-dates { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.event-lunar-dates { grid-template-columns: repeat(3, minmax(0, 1fr)); }
 .event-date-section { display: flex; min-width: 0; flex-direction: column; gap: 12px; }
 .event-date-heading { display: flex; min-width: 0; align-items: center; justify-content: space-between; gap: 12px; }
 .event-date-section h2 { margin: 0; font-size: 14px; font-weight: 650; letter-spacing: .01em; color: var(--text-muted, #6b7280); }
@@ -892,8 +957,9 @@ function updateChineseRule(updates: Partial<ChineseEventDateRule>) {
   box-sizing: border-box;
   width: 100%;
   min-width: 0;
-  min-height: 38px;
-  padding: 7px 9px;
+  height: 34px;
+  min-height: 34px;
+  padding: 5px 9px;
   border: 1px solid var(--border, #8885);
   border-radius: 8px;
   background: var(--bg-soft, var(--bg, #fff));
@@ -939,9 +1005,14 @@ function updateChineseRule(updates: Partial<ChineseEventDateRule>) {
 @media (max-width: 700px) {
   .event-type-picker { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }
+@media (max-width: 600px) {
+  .event-lunar-dates { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .event-lunar-month-type { grid-column: 1 / -1; }
+}
 @media (max-width: 480px) {
   .event-fields { gap: 17px; }
   .event-dates { grid-template-columns: minmax(0, 1fr); gap: 12px; }
+  .event-lunar-dates { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .event-birthday-dates { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .event-birthday-dates .event-field:first-child { grid-column: 1 / -1; }
   .event-emoji-trigger { width: 38px; height: 38px; }
