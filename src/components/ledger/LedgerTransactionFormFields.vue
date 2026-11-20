@@ -1,10 +1,10 @@
 <script setup lang="ts">
 import { computed, ref, watch, type VNodeChild } from 'vue'
-import { NButton, NFormItem, NInput, NPopover, NRadioButton, NRadioGroup, NSelect, type InputInst, type SelectGroupOption, type SelectOption } from 'naive-ui'
+import { NButton, NFormItem, NInput, NPopover, NRadioButton, NRadioGroup, type InputInst, type SelectGroupOption, type SelectOption } from 'naive-ui'
 import type { LedgerTransferFeeMode, LedgerTransferKind } from '../../../shared/ledgerProtocol'
 import { formatLedgerMoney, parseLedgerMoney } from '../../features/ledger/money'
-import { ledgerSelectNodeProps } from '../../features/ledger/naiveControls'
 import LedgerDateTimePicker from './LedgerDateTimePicker.vue'
+import LedgerTransactionSelect from './LedgerTransactionSelect.vue'
 
 type TransactionFormType = 'income' | 'expense' | 'transfer'
 type OptionRenderer = (option: SelectOption | SelectGroupOption, selected?: boolean) => VNodeChild
@@ -207,34 +207,28 @@ defineExpose({
 
       <div v-if="type !== 'transfer'" class="ledger-form-grid">
         <NFormItem class="ledger-form-field" label="账户" :show-feedback="false" required>
-          <NSelect
-            v-model:value="accountId"
-            class="ledger-form-control"
-            size="medium"
+          <LedgerTransactionSelect
+            v-model="accountId"
+            label="账户"
+            :id="`${idPrefix}-account`"
+            name="accountId"
+            required
             :options="accountOptions"
             :render-label="renderAccountLabel"
-            :node-props="ledgerSelectNodeProps"
-            :input-props="{ id: `${idPrefix}-account`, name: 'accountId', required: true }"
-            aria-label="账户"
-            aria-haspopup="listbox"
-            role="combobox"
             placeholder="请选择账户"
             :disabled="saving"
           />
         </NFormItem>
 
         <NFormItem class="ledger-form-field" label="分类" :show-feedback="false" required>
-          <NSelect
-            v-model:value="categoryId"
-            class="ledger-form-control"
-            size="medium"
+          <LedgerTransactionSelect
+            v-model="categoryId"
+            label="分类"
+            :id="`${idPrefix}-category`"
+            name="categoryId"
+            required
             :options="categoryOptions"
             :render-label="renderCategoryLabel"
-            :node-props="ledgerSelectNodeProps"
-            :input-props="{ id: `${idPrefix}-category`, name: 'categoryId', required: true }"
-            aria-label="分类"
-            aria-haspopup="listbox"
-            role="combobox"
             :placeholder="categoryOptions.length ? '请选择分类' : '暂无可用分类'"
             :disabled="saving"
           />
@@ -250,33 +244,27 @@ defineExpose({
           </NRadioGroup>
         </NFormItem>
         <NFormItem class="ledger-form-field" label="转出账户" :show-feedback="false" required>
-          <NSelect
-            v-model:value="fromAccountId"
-            class="ledger-form-control"
-            size="medium"
+          <LedgerTransactionSelect
+            v-model="fromAccountId"
+            label="转出账户"
+            :id="`${idPrefix}-from-account`"
+            name="fromAccountId"
+            required
             :options="transferFromAccountOptions ?? transferAccountOptions"
             :render-label="renderAccountLabel"
-            :node-props="ledgerSelectNodeProps"
-            :input-props="{ id: `${idPrefix}-from-account`, name: 'fromAccountId', required: true }"
-            aria-label="转出账户"
-            aria-haspopup="listbox"
-            role="combobox"
             placeholder="请选择转出账户"
             :disabled="saving"
           />
         </NFormItem>
         <NFormItem class="ledger-form-field" label="转入账户" :show-feedback="false" required>
-          <NSelect
-            v-model:value="toAccountId"
-            class="ledger-form-control"
-            size="medium"
+          <LedgerTransactionSelect
+            v-model="toAccountId"
+            label="转入账户"
+            :id="`${idPrefix}-to-account`"
+            name="toAccountId"
+            required
             :options="transferToAccountOptions ?? transferAccountOptions"
             :render-label="renderAccountLabel"
-            :node-props="ledgerSelectNodeProps"
-            :input-props="{ id: `${idPrefix}-to-account`, name: 'toAccountId', required: true }"
-            aria-label="转入账户"
-            aria-haspopup="listbox"
-            role="combobox"
             placeholder="请选择转入账户"
             :disabled="saving"
           />
