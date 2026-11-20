@@ -85,6 +85,7 @@ function selectOption(option: SelectOption): void {
     :aria-label="props.label"
     aria-haspopup="dialog"
     role="combobox"
+    :show-arrow="false"
     :placeholder="props.placeholder"
     :disabled="props.disabled"
     :show="false"
@@ -146,11 +147,12 @@ function selectOption(option: SelectOption): void {
 
 .ledger-option-picker-header {
   display: flex;
-  min-height: 60px;
+  min-height: 64px;
+  box-sizing: border-box;
   align-items: center;
   justify-content: space-between;
   gap: 12px;
-  padding: 10px 16px 10px 20px;
+  padding: 8px 16px 8px 20px;
   border-bottom: 1px solid color-mix(in srgb, var(--border, #8884) 70%, transparent);
 }
 
@@ -210,7 +212,6 @@ function selectOption(option: SelectOption): void {
     margin: auto 0 0;
     border-radius: 18px 18px 0 0;
   }
-  .ledger-option-picker-header { min-height: 56px; }
   .ledger-option-picker-list { padding-bottom: max(18px, env(safe-area-inset-bottom)); }
 }
 </style>
