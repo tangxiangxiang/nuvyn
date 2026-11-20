@@ -1,6 +1,5 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
-import { useMediaQuery } from '@vueuse/core'
 import { NButton, NDatePicker, NIcon, NInput, NModal, type InputInst } from 'naive-ui'
 import { Calendar } from '@vicons/tabler'
 
@@ -19,7 +18,6 @@ const input = ref<InputInst | null>(null)
 const show = ref(false)
 const inputValue = ref(props.modelValue.replace('T', ' '))
 const draftValue = ref('')
-const touchScreen = useMediaQuery('(pointer: coarse)')
 
 type LocalDateTimeParts = {
   year: number
@@ -79,12 +77,6 @@ function openPicker(): void {
   show.value = true
 }
 
-function handleTriggerKeydown(event: KeyboardEvent): void {
-  if (event.key !== 'Enter' && !(touchScreen.value && event.key === ' ')) return
-  event.preventDefault()
-  openPicker()
-}
-
 function updateInputValue(value: string): void {
   inputValue.value = value
   const canonical = value.replace(' ', 'T')
@@ -96,6 +88,10 @@ function restoreInputValue(): void {
   const canonical = inputValue.value.replace(' ', 'T')
   const parts = parseLocalDateTime(canonical)
   if (!parts || !isValidCalendarDate(parts)) inputValue.value = props.modelValue.replace('T', ' ')
+}
+
+function preventEnterSubmit(event: KeyboardEvent): void {
+  event.preventDefault()
 }
 
 function updateValue(value: string | null, timestamp: number | null): void {
@@ -126,15 +122,23 @@ defineExpose({
     :value="inputValue"
     placeholder="请选择日期时间"
     :disabled="props.disabled"
-    :readonly="touchScreen"
     :aria-label="props.label"
-    aria-haspopup="dialog"
-    @click="openPicker"
-    @keydown="handleTriggerKeydown"
+    @keydown.enter="preventEnterSubmit"
     @blur="restoreInputValue"
     @update:value="updateInputValue"
   >
-    <template #suffix><NIcon :size="16" aria-hidden="true"><Calendar /></NIcon></template>
+    <template #suffix>
+      <button
+        type="button"
+        class="ledger-date-time-picker-trigger"
+        :aria-label="`选择${props.label}`"
+        aria-haspopup="dialog"
+        :disabled="props.disabled"
+        @click.stop="openPicker"
+      >
+        <NIcon :size="16" aria-hidden="true"><Calendar /></NIcon>
+      </button>
+    </template>
   </NInput>
   <NModal v-model:show="show">
     <section
@@ -164,6 +168,23 @@ defineExpose({
 </template>
 
 <style scoped>
+.ledger-date-time-picker-trigger {
+  display: inline-grid;
+  width: 30px;
+  height: 30px;
+  place-items: center;
+  padding: 0;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text-muted, #6b7280);
+  cursor: pointer;
+}
+
+.ledger-date-time-picker-trigger:hover:not(:disabled) { background: color-mix(in srgb, var(--text) 7%, transparent); }
+.ledger-date-time-picker-trigger:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.ledger-date-time-picker-trigger:disabled { cursor: not-allowed; opacity: .5; }
+
 .ledger-date-time-dialog {
   width: min(400px, calc(100% - 24px));
   max-height: calc(100dvh - 24px);
