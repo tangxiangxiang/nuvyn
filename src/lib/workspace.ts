@@ -5,7 +5,7 @@ export type WorkspaceKind = 'vault' | 'ledger' | 'board' | 'diary' | null
 export type ChromeStyle = 'workspace' | 'immersive'
 
 export type WorkspaceNavigationKey = ScopeKey | 'board'
-export type WorkspaceNavigationViewport = 'desktop' | 'mobile'
+export type WorkspaceNavigationViewport = 'desktop' | 'compact'
 
 /** Stable Chinese names used by the visible workspace navigation. */
 export const workspaceDisplayNames = {
@@ -17,23 +17,25 @@ export const workspaceDisplayNames = {
 
 /**
  * Navigation availability is deliberately separate from route/runtime
- * availability: every workspace remains directly addressable on mobile.
+ * availability: every workspace remains directly addressable in compact mode.
  */
 export const workspaceNavigationAvailability = {
-  note: { desktop: true, mobile: true },
-  diary: { desktop: true, mobile: true },
-  ledger: { desktop: true, mobile: true },
-  board: { desktop: true, mobile: true },
+  note: { desktop: true, compact: true },
+  diary: { desktop: true, compact: true },
+  ledger: { desktop: true, compact: true },
+  board: { desktop: true, compact: true },
 } as const satisfies Record<
   WorkspaceNavigationKey,
   Record<WorkspaceNavigationViewport, boolean>
 >
 
-/** Keep the nav's responsive behavior on Diary's existing 600px boundary. */
+/** Phone-specific width used by phone-only layout rules. */
 export const workspaceMobileNavigationQuery = '(max-width: 600px)'
+/** Use a single current-workspace menu on both phones and tablets. */
+export const workspaceCompactNavigationQuery = '(max-width: 1199px)'
 export const workspaceNoteTabletQuery = '(min-width: 601px) and (max-width: 1199px)'
 // Note reuses the established tablet presentation on phones without changing
-// the tablet-only Diary pull-to-refresh and shared mobile navigation boundary.
+// the tablet-only Diary pull-to-refresh behavior.
 export const workspaceNoteCompactQuery = '(max-width: 1199px)'
 
 export function isWorkspaceNavigationAvailable(

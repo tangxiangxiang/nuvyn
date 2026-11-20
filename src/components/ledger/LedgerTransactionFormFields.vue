@@ -89,8 +89,9 @@ const repaymentTotalAmount = computed(() => {
     const feeMinor = transferFeeAmount.value.trim()
       ? parseLedgerMoney(transferFeeAmount.value, props.currency)
       : 0
-    if (amountMinor < 0 || feeMinor < 0) return null
-    return formatLedgerMoney(amountMinor + feeMinor, props.currency)
+    const totalMinor = amountMinor + feeMinor
+    if (amountMinor <= 0 || !Number.isSafeInteger(totalMinor) || totalMinor <= 0) return null
+    return formatLedgerMoney(totalMinor, props.currency)
   } catch {
     return null
   }
@@ -103,6 +104,15 @@ watch(hasPositiveTransferFee, (visible) => {
 function selectTransferFeeMode(value: LedgerTransferFeeMode): void {
   transferFeeMode.value = value
   feeModePopoverOpen.value = false
+}
+
+function allowTransferFeeInput(value: string): boolean {
+  const allowAmountInput = props.allowAmountInput
+  if (!allowAmountInput) return true
+  if (props.type === 'transfer' && transferKind.value === 'repayment' && value.startsWith('-')) {
+    return allowAmountInput(value.slice(1))
+  }
+  return allowAmountInput(value)
 }
 
 defineExpose({
@@ -122,7 +132,7 @@ defineExpose({
           <template #label>
             <div class="ledger-amount-label-row">
               <span>{{ type === 'transfer' && transferKind === 'repayment' ? '还款本金' : type === 'transfer' && transferKind === 'withdrawal' ? '提现金额' : '金额' }}</span>
-              <span v-if="repaymentTotalAmount" class="ledger-received-amount">总扣款 {{ repaymentTotalAmount }}</span>
+              <span v-if="repaymentTotalAmount" class="ledger-received-amount">实际扣款 {{ repaymentTotalAmount }}</span>
               <span v-if="withdrawalReceivedAmount" class="ledger-received-amount">实际到账 {{ withdrawalReceivedAmount }}</span>
             </div>
           </template>
@@ -146,7 +156,7 @@ defineExpose({
         <NFormItem v-if="type === 'transfer' && transferKind !== 'general'" class="ledger-form-field" :show-feedback="false">
           <template #label>
             <div class="ledger-fee-label-row">
-              <span>{{ transferKind === 'repayment' ? '利息（可选）' : '手续费（可选）' }}</span>
+              <span>{{ transferKind === 'repayment' ? '利息 / 优惠（可选）' : '手续费（可选）' }}</span>
               <NPopover
                 v-if="hasPositiveTransferFee"
                 v-model:show="feeModePopoverOpen"
@@ -195,9 +205,9 @@ defineExpose({
               class="ledger-money-control"
               type="text"
               size="small"
-              :allow-input="allowAmountInput"
+              :allow-input="allowTransferFeeInput"
               :bordered="false"
-              :input-props="{ id: `${idPrefix}-fee-amount`, name: 'feeAmount', inputmode: 'decimal', autocomplete: 'off' }"
+              :input-props="{ id: `${idPrefix}-fee-amount`, name: 'feeAmount', inputmode: transferKind === 'repayment' ? 'text' : 'decimal', autocomplete: 'off' }"
               placeholder="0.00"
               :disabled="saving"
             />

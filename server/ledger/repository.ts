@@ -415,7 +415,7 @@ const SELECT_RECENT_ACTIVE_TRANSACTIONS_BEFORE = `
   FROM ledger_transactions
   WHERE deleted_at IS NULL
     AND occurred_at < @to
-    AND NOT (group_id IS NOT NULL AND type = 'expense')
+    AND NOT (group_id IS NOT NULL AND type IN ('expense', 'income'))
   ORDER BY occurred_at DESC, created_at DESC, id DESC
   LIMIT @limit
 `
@@ -979,14 +979,18 @@ function transactionTypeSearchClauses(search: string): string[] {
 function transactionQueryFilter(
   options: LedgerTransactionQueryOptions,
   includeCursor: boolean,
-  hideGroupedCharges = false,
+  hideGroupedCompanions = false,
 ): { clauses: string[]; params: Record<string, string | number> } {
   const clauses: string[] = []
   const params: Record<string, string | number> = {}
 
   if (options.includeDeleted !== true) clauses.push('deleted_at IS NULL')
 
-  if (options.type !== undefined && options.type !== 'all') {
+  if (options.type === 'expense') {
+    clauses.push("(type = 'expense' OR (type = 'income' AND group_id IS NOT NULL))")
+  } else if (options.type === 'income') {
+    clauses.push("(type = 'income' AND group_id IS NULL)")
+  } else if (options.type !== undefined && options.type !== 'all') {
     clauses.push('type = @type')
     params.type = options.type
   }
@@ -1010,8 +1014,8 @@ function transactionQueryFilter(
     params.groupId = options.groupId
   }
 
-  if (hideGroupedCharges) {
-    clauses.push("NOT (group_id IS NOT NULL AND type = 'expense')")
+  if (hideGroupedCompanions && options.groupId === undefined && options.includeDeleted !== true) {
+    clauses.push("NOT (group_id IS NOT NULL AND type IN ('expense', 'income'))")
   }
 
   if (options.from !== undefined) {
@@ -1394,6 +1398,7 @@ export function createLedgerRepository(db: DatabaseT): LedgerRepository {
       const { clauses, params } = transactionQueryFilter(
         options,
         true,
+        true,
       )
       params.limit = options.limit + 1
       params.offset = options.offset ?? 0
@@ -1413,23 +1418,32 @@ export function createLedgerRepository(db: DatabaseT): LedgerRepository {
 
     summarizeTransactions(options: LedgerTransactionQueryOptions): LedgerTransactionQuerySummary {
       const { clauses, params } = transactionQueryFilter(options, false)
+      const totalCount = options.includeDeleted !== true && options.groupId === undefined
+        ? "COUNT(CASE WHEN NOT (group_id IS NOT NULL AND type IN ('expense', 'income')) THEN 1 END)"
+        : 'COUNT(*)'
       const row = db.prepare(`
         SELECT
-          COUNT(*) AS total,
-          COALESCE(SUM(CASE WHEN type = 'income'
+          ${totalCount} AS total,
+          COALESCE(SUM(CASE WHEN type = 'income' AND group_id IS NULL
             AND NOT EXISTS (
               SELECT 1
               FROM ledger_transaction_statistics_exclusions AS exclusion
               WHERE exclusion.transaction_id = ledger_transactions.id
             )
             THEN amount_minor ELSE 0 END), 0) AS income_minor,
-          COALESCE(SUM(CASE WHEN type = 'expense'
-            AND NOT EXISTS (
+          COALESCE(SUM(CASE
+            WHEN type = 'expense' AND NOT EXISTS (
               SELECT 1
               FROM ledger_transaction_statistics_exclusions AS exclusion
               WHERE exclusion.transaction_id = ledger_transactions.id
-            )
-            THEN amount_minor ELSE 0 END), 0) AS expense_minor,
+            ) THEN amount_minor
+            WHEN type = 'income' AND group_id IS NOT NULL AND NOT EXISTS (
+              SELECT 1
+              FROM ledger_transaction_statistics_exclusions AS exclusion
+              WHERE exclusion.transaction_id = ledger_transactions.id
+            ) THEN -amount_minor
+            ELSE 0
+          END), 0) AS expense_minor,
           COALESCE(SUM(CASE WHEN type = 'transfer' AND transfer_kind = 'repayment'
             AND NOT EXISTS (
               SELECT 1
@@ -1438,8 +1452,7 @@ export function createLedgerRepository(db: DatabaseT): LedgerRepository {
             )
             THEN amount_minor ELSE 0 END), 0) AS repayment_minor,
           COUNT(CASE WHEN (
-            type = 'income'
-            OR type = 'expense'
+            ((type = 'income' OR type = 'expense') AND group_id IS NULL)
             OR (type = 'transfer' AND transfer_kind = 'repayment')
           ) AND EXISTS (
             SELECT 1

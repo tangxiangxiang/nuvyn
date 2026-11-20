@@ -58,9 +58,10 @@ type FormSnapshot = {
 const initialSnapshot = ref<FormSnapshot | null>(null)
 
 const transaction = computed(() => props.transaction)
-const groupedExpense = computed(() => {
-  const expense = props.groupTransactions?.find((item) => item.type === 'expense' && item.deletedAt === null)
-  return expense?.type === 'expense' ? expense : null
+const groupedFee = computed(() => {
+  const companion = props.groupTransactions?.find((item) =>
+    (item.type === 'expense' || item.type === 'income') && item.deletedAt === null)
+  return companion?.type === 'expense' || companion?.type === 'income' ? companion : null
 })
 const formType = computed<'income' | 'expense' | 'transfer'>(() => transaction.value.type === 'adjustment' ? 'expense' : transaction.value.type)
 const associatedAccounts = computed(() => {
@@ -122,11 +123,11 @@ async function refreshAssociatedAccounts(): Promise<void> {
 
 function reset(): void {
   const value = transaction.value
-  const fee = value.type === 'transfer' ? groupedExpense.value : null
+  const fee = value.type === 'transfer' ? groupedFee.value : null
   const requestedAmountMinor = value.type === 'transfer'
     && value.transferKind === 'withdrawal'
     && value.feeMode === 'deducted'
-    && fee
+    && fee?.type === 'expense'
     ? value.amountMinor + fee.amountMinor
     : value.type === 'adjustment' ? null : value.amountMinor
   amount.value = requestedAmountMinor === null
@@ -146,7 +147,7 @@ function reset(): void {
   transferKind.value = value.type === 'transfer' ? value.transferKind : 'general'
   resetting = false
   transferFeeAmount.value = fee
-    ? ledgerDecimalFromMinor(fee.amountMinor, store.settings.value?.baseCurrency ?? 'CNY')
+    ? ledgerDecimalFromMinor(fee.type === 'income' ? -fee.amountMinor : fee.amountMinor, store.settings.value?.baseCurrency ?? 'CNY')
     : ''
   transferFeeMode.value = value.type === 'transfer'
     ? value.feeMode ?? (value.transferKind === 'withdrawal' ? (fee ? 'extra' : 'deducted') : null)
@@ -257,8 +258,13 @@ function validateFinancialFields(): {
         error.value = `请输入有效的${settings.baseCurrency}利息或手续费。`
         return null
       }
-      if (feeMinor < 0) {
-        error.value = '利息或手续费不能为负数。'
+      if (feeMinor < 0 && transferKind.value !== 'repayment') {
+        error.value = '只有还款利息 / 优惠可以为负数。'
+        return null
+      }
+      const actualDebitMinor = amountMinor + feeMinor
+      if (transferKind.value === 'repayment' && (!Number.isSafeInteger(actualDebitMinor) || actualDebitMinor <= 0)) {
+        error.value = '实际扣款必须大于 0。'
         return null
       }
       if (feeMinor > 0 && transferKind.value === 'withdrawal') {

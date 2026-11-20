@@ -49,19 +49,21 @@ const associatedAccounts = computed(() => {
 const archivedAccounts = computed(() => associatedAccounts.value.filter((account) => account.archivedAt !== null))
 const ordinaryTransaction = computed(() => transaction.value !== null && transaction.value.type !== 'adjustment')
 const deleted = computed(() => transaction.value?.deletedAt !== null)
-const groupedCompanion = computed(() => transaction.value?.type === 'expense' && transaction.value.groupId !== undefined)
+const groupedCompanion = computed(() => (transaction.value?.type === 'expense' || transaction.value?.type === 'income')
+  && transaction.value.groupId !== undefined)
 const canEdit = computed(() => ordinaryTransaction.value && !deleted.value && !groupedCompanion.value)
 const editReady = computed(() => canEdit.value && (
   transaction.value?.type !== 'transfer' || !transaction.value.groupId || groupStatus.value === 'ready'
 ))
-const groupedExpense = computed(() => groupTransactions.value.find((item) => item.type === 'expense') ?? null)
+const groupedFee = computed(() => groupTransactions.value.find((item) => item.type === 'expense' || item.type === 'income') ?? null)
 const groupedTotalMinor = computed(() => {
   const value = transaction.value
-  if (!value || value.type !== 'transfer' || !groupedExpense.value) return null
-  return value.amountMinor + groupedExpense.value.amountMinor
+  const fee = groupedFee.value
+  if (!value || value.type !== 'transfer' || !fee || (fee.type !== 'expense' && fee.type !== 'income')) return null
+  return value.amountMinor + (fee.type === 'income' ? -fee.amountMinor : fee.amountMinor)
 })
 const canDelete = computed(() => canEdit.value && archivedAccounts.value.length === 0)
-const canUpdateStatistics = computed(() => transaction.value?.deletedAt === null
+const canUpdateStatistics = computed(() => !groupedCompanion.value && transaction.value?.deletedAt === null
   && ledgerTransactionContributesToStatistics(transaction.value))
 
 function accountName(id: string): string {
@@ -99,7 +101,7 @@ async function loadGroup(value: LedgerTransactionDto | null): Promise<void> {
     if (serial !== groupRequestSerial) return
     if (value.type === 'transfer' && value.deletedAt === null && (
       !group.some((item) => item.id === value.id && item.type === 'transfer' && item.deletedAt === null)
-      || !group.some((item) => item.type === 'expense' && item.deletedAt === null)
+      || !group.some((item) => (item.type === 'expense' || item.type === 'income') && item.deletedAt === null)
     )) {
       groupStatus.value = 'error'
       return
@@ -314,9 +316,9 @@ async function remove(): Promise<void> {
             </template>
             <template v-else-if="transaction.type === 'transfer'">
               <div class="ledger-detail-row"><span>转账类型</span><strong>{{ typeLabel(transaction) }}</strong></div>
-              <div v-if="groupedExpense" class="ledger-detail-row"><span>{{ transaction.transferKind === 'repayment' ? '还款本金' : '到账金额' }}</span><strong>{{ formatLedgerMoney(transaction.amountMinor, store.settings.value?.baseCurrency ?? 'CNY') }}</strong></div>
-              <div v-if="groupedExpense" class="ledger-detail-row"><span>{{ transaction.transferKind === 'repayment' ? '利息' : '手续费' }}</span><strong>{{ formatLedgerMoney(groupedExpense.amountMinor, store.settings.value?.baseCurrency ?? 'CNY') }}</strong></div>
-              <div v-if="groupedExpense" class="ledger-detail-row"><span>{{ transaction.transferKind === 'repayment' ? '总扣款' : '实际扣款' }}</span><strong>{{ formatLedgerMoney(groupedTotalMinor ?? transaction.amountMinor, store.settings.value?.baseCurrency ?? 'CNY') }}</strong></div>
+              <div v-if="groupedFee" class="ledger-detail-row"><span>{{ transaction.transferKind === 'repayment' ? '还款本金' : '到账金额' }}</span><strong>{{ formatLedgerMoney(transaction.amountMinor, store.settings.value?.baseCurrency ?? 'CNY') }}</strong></div>
+              <div v-if="groupedFee" class="ledger-detail-row"><span>{{ transaction.transferKind === 'repayment' ? '利息 / 优惠' : '手续费' }}</span><strong>{{ formatLedgerMoney(groupedFee.type === 'income' ? -groupedFee.amountMinor : groupedFee.amountMinor, store.settings.value?.baseCurrency ?? 'CNY') }}</strong></div>
+              <div v-if="groupedFee" class="ledger-detail-row"><span>实际扣款</span><strong>{{ formatLedgerMoney(groupedTotalMinor ?? transaction.amountMinor, store.settings.value?.baseCurrency ?? 'CNY') }}</strong></div>
               <div class="ledger-detail-row"><span>转出账户</span><strong>{{ accountName(transaction.fromAccountId) }}</strong></div>
               <div class="ledger-detail-row"><span>转入账户</span><strong>{{ accountName(transaction.toAccountId) }}</strong></div>
             </template>

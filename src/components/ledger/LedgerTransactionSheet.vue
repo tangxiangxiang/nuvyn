@@ -324,7 +324,13 @@ function validate(): { amountMinor: number; occurredAtMs: number; feeMinor: numb
         } catch {
           return validationFailure(`请输入有效的${settings.value.baseCurrency}费用金额。`)
         }
-        if (feeMinor < 0) return validationFailure('利息或手续费不能为负数。')
+        if (feeMinor < 0 && transferKind.value !== 'repayment') {
+          return validationFailure('只有还款利息 / 优惠可以为负数。')
+        }
+        const actualDebitMinor = amountMinor + feeMinor
+        if (transferKind.value === 'repayment' && (!Number.isSafeInteger(actualDebitMinor) || actualDebitMinor <= 0)) {
+          return validationFailure('实际扣款必须大于 0。')
+        }
       }
       if (transferKind.value === 'withdrawal' && feeMinor > 0) {
         if (!transferFeeMode.value) return validationFailure('请选择手续费方式。')
@@ -376,7 +382,7 @@ async function submit(): Promise<void> {
             type: 'transfer' as const,
             transferKind: transferKind.value,
             amountMinor: parsed.amountMinor,
-            ...(parsed.feeMinor > 0 ? {
+            ...(parsed.feeMinor !== 0 ? {
               feeMinor: parsed.feeMinor,
               ...(transferKind.value === 'withdrawal' && transferFeeMode.value ? { feeMode: transferFeeMode.value } : {}),
             } : {}),

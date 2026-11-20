@@ -217,7 +217,11 @@ function cashflowForTransactions(transactions: readonly LedgerTransaction[]): Le
 
   for (const transaction of transactions) {
     if (transaction.type === 'income') {
-      incomeMinor = checkedAddMinor(incomeMinor, transaction.amountMinor)
+      if (transaction.groupId !== undefined) {
+        expenseMinor = checkedSubMinor(expenseMinor, transaction.amountMinor)
+      } else {
+        incomeMinor = checkedAddMinor(incomeMinor, transaction.amountMinor)
+      }
     } else if (transaction.type === 'expense') {
       expenseMinor = checkedAddMinor(expenseMinor, transaction.amountMinor)
     } else if (transaction.type === 'transfer' && transaction.transferKind === 'repayment') {
@@ -259,13 +263,16 @@ function categorySlicesForTransactions(
     if (category === undefined) {
       return projectionInvariant(`transaction ${transaction.id} references missing Category ${categoryId}`)
     }
-    if (category.kind !== transaction.type) {
+    const isRepaymentRebate = transaction.type === 'income' && transaction.groupId !== undefined
+    const categoryKind = isRepaymentRebate ? 'expense' : transaction.type
+    if (category.kind !== categoryKind) {
       return projectionInvariant(`transaction ${transaction.id} has a mismatched Category kind`)
     }
-    const previous = groups[transaction.type].get(categoryId) ?? 0
-    groups[transaction.type].set(
+    const amountMinor = isRepaymentRebate ? -transaction.amountMinor : transaction.amountMinor
+    const previous = groups[categoryKind].get(categoryId) ?? 0
+    groups[categoryKind].set(
       categoryId,
-      checkedAddMinor(previous, transaction.amountMinor),
+      checkedAddMinor(previous, amountMinor),
     )
   }
 
@@ -507,10 +514,10 @@ export function createLedgerProjections(
     const chargeMinor = checkedSumMinor(
       repository
         .listTransactionsByGroupId(transaction.groupId)
-        .filter((item) => item.type === 'expense')
-        .map((item) => item.amountMinor),
+        .filter((item) => item.type === 'expense' || item.type === 'income')
+        .map((item) => item.type === 'income' ? -item.amountMinor : item.amountMinor),
     )
-    if (chargeMinor <= 0 || dto.type !== 'transfer') return dto
+    if (chargeMinor === 0 || dto.type !== 'transfer') return dto
     const summary: LedgerTransferBundleSummary = {
       chargeMinor,
       totalMinor: checkedAddMinor(transaction.amountMinor, chargeMinor),
@@ -548,7 +555,17 @@ export function createLedgerProjections(
     const nowMs = captureNow()
     const currentBalanceMinor = repository.getAccountBalanceBefore(account, exclusiveInstant(nowMs))
     const page = transactionPage({ ...query, accountId }, settings.baseCurrency, { includeSummary: false })
-    const balancesByTransactionId = repository.getAccountBalancesAtPositions(account, page.rows)
+    const balancePositionByTransactionId = new Map<string, LedgerTransaction>()
+    for (const transaction of page.rows) {
+      const groupedPosition = transaction.type === 'transfer' && transaction.groupId !== undefined
+        ? repository.listTransactionsByGroupId(transaction.groupId)[0]
+        : undefined
+      balancePositionByTransactionId.set(transaction.id, groupedPosition ?? transaction)
+    }
+    const balancesByPositionId = repository.getAccountBalancesAtPositions(
+      account,
+      [...balancePositionByTransactionId.values()],
+    )
     const movementRange = monthRange(nowMs, settings.timezone)
     const movementTransactions = repository.listActiveTransactionsForAccountInRange(
       account.id,
@@ -564,7 +581,7 @@ export function createLedgerProjections(
       ),
       transactionBalances: page.rows.map((transaction) => ({
         transactionId: transaction.id,
-        balanceMinor: balancesByTransactionId.get(transaction.id)
+        balanceMinor: balancesByPositionId.get(balancePositionByTransactionId.get(transaction.id)!.id)
           ?? projectionInvariant(`missing balance for transaction ${transaction.id}`),
       })),
       transactions: page.rows.map((transaction) => transactionDtoWithBundle(transaction, page.excludedIds)),

@@ -537,7 +537,9 @@ function phoneTransactionTime(transaction: LedgerTransactionDto): string {
 }
 
 function signedAmountMinor(transaction: LedgerTransactionDto): number {
-  return transaction.type === 'expense' ? -transaction.amountMinor : transaction.amountMinor
+  if (transaction.type === 'expense') return -transaction.amountMinor
+  if (transaction.type === 'transfer') return transaction.bundle?.totalMinor ?? transaction.amountMinor
+  return transaction.amountMinor
 }
 
 function buildQuery(pageNumber = tablePage.value): LedgerTransactionQuery {

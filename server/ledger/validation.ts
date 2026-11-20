@@ -306,11 +306,8 @@ function parseAmountMinor(record: UnknownRecord): number {
 
 function parseOptionalFeeMinor(record: UnknownRecord): number | undefined {
   if (!hasOwn(record, 'feeMinor')) return undefined
-  const feeMinor = parseSafeInteger(record, 'feeMinor')
-  if (feeMinor < 0) {
-    throw ledgerValidationError('feeMinor must not be negative', { field: 'feeMinor' })
-  }
-  return feeMinor
+  // Transfer companion adjustments are signed: repayment rebates are negative.
+  return parseSafeInteger(record, 'feeMinor')
 }
 
 function parseAdjustmentBalance(record: UnknownRecord, key: string): number {

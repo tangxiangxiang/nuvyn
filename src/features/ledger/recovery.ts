@@ -148,7 +148,8 @@ function isSafeTransactionPayload(value: unknown): value is LedgerTransactionCre
       && nonEmptyString(value.toAccountId)
       && value.fromAccountId !== value.toAccountId
       && (value.transferKind === undefined || value.transferKind === 'general' || value.transferKind === 'repayment' || value.transferKind === 'withdrawal')
-      && (value.feeMinor === undefined || safeInteger(value.feeMinor) && value.feeMinor >= 0)
+      && (value.feeMinor === undefined || safeInteger(value.feeMinor)
+        && (value.feeMinor >= 0 || value.transferKind === 'repayment'))
       && (value.feeMode === undefined || value.feeMode === 'extra' || value.feeMode === 'deducted')
       && (value.location === undefined || typeof value.location === 'string')
       && (value.payee === undefined || typeof value.payee === 'string')

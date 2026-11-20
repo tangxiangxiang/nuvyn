@@ -1,15 +1,16 @@
 <script setup lang="ts">
-import { computed, inject, nextTick, onBeforeUnmount, onMounted, ref, watch, type ComponentPublicInstance } from 'vue'
-import { NButton, NDropdown, NIcon } from 'naive-ui'
+import { computed, h, inject, nextTick, onBeforeUnmount, onMounted, ref, watch, type ComponentPublicInstance } from 'vue'
+import { NButton, NDropdown, NIcon, type DropdownOption } from 'naive-ui'
 import {
   CalendarEvent,
   Edit,
   Eye,
-  Photo,
+  LayoutGrid,
   LayoutSidebarLeftExpand,
   LayoutSidebarRightExpand,
   Moon,
   MoodSmile,
+  Photo,
   Search,
   Sun,
   Volume,
@@ -29,9 +30,10 @@ import { isDiaryShortcutBlocked, isDiaryTextEntryContext } from '../views/diaryS
 import {
   isWorkspaceNavigationAvailable,
   workspaceDisplayNames,
-  workspaceMobileNavigationQuery,
+  workspaceCompactNavigationQuery,
   type ChromeStyle,
   type WorkspaceKind,
+  type WorkspaceNavigationKey,
 } from '../lib/workspace'
 
 const props = withDefaults(defineProps<{
@@ -65,18 +67,18 @@ const { theme, toggle } = useTheme()
 const { t } = useI18n()
 const route = useRoute()
 const router = useRouter()
-const workspaceMobileMediaQuery = typeof window !== 'undefined' && typeof window.matchMedia === 'function'
-  ? window.matchMedia(workspaceMobileNavigationQuery)
+const workspaceCompactMediaQuery = typeof window !== 'undefined' && typeof window.matchMedia === 'function'
+  ? window.matchMedia(workspaceCompactNavigationQuery)
   : null
-const isMobileWorkspaceViewport = ref(workspaceMobileMediaQuery?.matches ?? false)
+const isCompactWorkspaceViewport = ref(workspaceCompactMediaQuery?.matches ?? false)
 const workspaceNavigationRef = ref<HTMLElement | null>(null)
 let workspaceNavigationResizeFrame = 0
 
 function onWorkspaceViewportChange(event: MediaQueryListEvent): void {
-  isMobileWorkspaceViewport.value = event.matches
+  isCompactWorkspaceViewport.value = event.matches
 }
 
-const workspaceNavigationViewport = computed(() => isMobileWorkspaceViewport.value ? 'mobile' : 'desktop')
+const workspaceNavigationViewport = computed(() => isCompactWorkspaceViewport.value ? 'compact' : 'desktop')
 const showBoardNavigation = computed(() => (
   isWorkspaceNavigationAvailable('board', workspaceNavigationViewport.value)
 ))
@@ -124,6 +126,36 @@ const scopeChips = computed(() => {
     isWorkspaceNavigationAvailable(chip.scope, workspaceNavigationViewport.value)
   ))
 })
+
+const mobileWorkspaceKey = computed<WorkspaceNavigationKey>(() => {
+  if (isBoard.value) return 'board'
+  return (['note', 'diary', 'ledger'] as const).find(isScopeActive) ?? 'note'
+})
+const mobileWorkspaceLabel = computed(() => workspaceDisplayNames[mobileWorkspaceKey.value])
+const mobileWorkspaceMenuOpen = ref(false)
+const mobileWorkspaceOptions = computed<DropdownOption[]>(() => [
+  { key: 'note', label: workspaceDisplayNames.note },
+  { key: 'diary', label: workspaceDisplayNames.diary },
+  { key: 'ledger', label: workspaceDisplayNames.ledger },
+  { key: 'board', label: workspaceDisplayNames.board },
+])
+
+function mobileWorkspaceOptionProps(option: DropdownOption) {
+  const current = option.key === mobileWorkspaceKey.value
+  return {
+    role: 'menuitem',
+    'aria-current': current ? 'page' as const : undefined,
+    'data-current': current ? 'true' : undefined,
+  }
+}
+
+function onMobileWorkspaceSelect(key: string): void {
+  if (key === 'board') {
+    void router.push({ name: 'board' })
+    return
+  }
+  if (key === 'note' || key === 'diary' || key === 'ledger') onScopeClick(key)
+}
 
 function revealActiveWorkspaceNavigation(): void {
   const navigation = workspaceNavigationRef.value
@@ -322,6 +354,58 @@ function onScopeClick(scope: ScopeKey): void {
    responsibilities separate means collapsing the rail never changes the
    user's selected tab. */
 const { leftSidebarVisible, rightRailVisible, noteTablet, workspaceRightPanelAvailable, toggleSidePanel, toggleRightRail } = useVaultLayout()
+
+const compactNoteActionOptions = computed<DropdownOption[]>(() => [
+  ...(appShell?.noteSpeechReadAllCommand?.value
+    ? [{
+        label: t('note.speech_read_all'),
+        key: 'speech-read-all',
+        icon: () => h(NIcon, { 'aria-hidden': 'true' }, { default: () => h(Volume) }),
+      }]
+    : []),
+  ...(appShell?.noteSpeechReadSelectionCommand?.value
+    ? [{
+        label: t('note.speech_read_selection'),
+        key: 'speech-read-selection',
+        icon: () => h(NIcon, { 'aria-hidden': 'true' }, { default: () => h(Volume) }),
+      }]
+    : []),
+  ...(appShell?.noteTabletImageCommand?.value
+    ? [{
+        label: t('editor.insert_image'),
+        key: 'insert-image',
+        icon: () => h(NIcon, { 'aria-hidden': 'true' }, { default: () => h(Photo) }),
+      }]
+    : []),
+  {
+    label: t('nav.theme_toggle'),
+    key: 'toggle-theme',
+    icon: () => h(NIcon, { 'aria-hidden': 'true' }, {
+      default: () => h(themeIcon.value === 'sun' ? Sun : Moon),
+    }),
+  },
+  {
+    label: t(leftSidebarVisible.value ? 'nav.left_panel_close' : 'nav.left_panel_open'),
+    key: 'toggle-left-panel',
+    icon: () => h(NIcon, { 'aria-hidden': 'true' }, { default: () => h(LayoutSidebarLeftExpand) }),
+  },
+  ...(workspaceRightPanelAvailable.value
+    ? [{
+        label: t(rightRailVisible.value ? 'nav.right_rail_close' : 'nav.right_rail_open'),
+        key: 'toggle-right-panel',
+        icon: () => h(NIcon, { 'aria-hidden': 'true' }, { default: () => h(LayoutSidebarRightExpand) }),
+      }]
+    : []),
+])
+
+function onCompactNoteActionSelect(key: string): void {
+  if (key === 'speech-read-all') appShell?.noteSpeechReadAllCommand?.value?.()
+  else if (key === 'speech-read-selection') appShell?.noteSpeechReadSelectionCommand?.value?.()
+  else if (key === 'insert-image') appShell?.noteTabletImageCommand?.value?.()
+  else if (key === 'toggle-theme') toggle()
+  else if (key === 'toggle-left-panel') toggleSidePanel()
+  else if (key === 'toggle-right-panel') toggleRightRail()
+}
 
 const showBrandConstellation = ref(false)
 const brandVirtueModeActive = ref(false)
@@ -913,7 +997,7 @@ watch(workspaceNavigationViewport, () => {
 })
 
 onMounted(() => {
-  workspaceMobileMediaQuery?.addEventListener('change', onWorkspaceViewportChange)
+  workspaceCompactMediaQuery?.addEventListener('change', onWorkspaceViewportChange)
   window.addEventListener('resize', onWorkspaceWindowResize)
   void nextTick(revealActiveWorkspaceNavigation)
   reducedMotionMediaQuery = typeof window.matchMedia === 'function'
@@ -929,7 +1013,7 @@ onMounted(() => {
 onBeforeUnmount(() => {
   analysisExportDisposed = true
   leaveAnalysisScopeChip()
-  workspaceMobileMediaQuery?.removeEventListener('change', onWorkspaceViewportChange)
+  workspaceCompactMediaQuery?.removeEventListener('change', onWorkspaceViewportChange)
   window.removeEventListener('resize', onWorkspaceWindowResize)
   if (workspaceNavigationResizeFrame) cancelAnimationFrame(workspaceNavigationResizeFrame)
   reducedMotionMediaQuery?.removeEventListener('change', onReducedMotionChange)
@@ -972,43 +1056,70 @@ onBeforeUnmount(() => {
           <span class="brand-wordmark">Nuvyn</span>
         </span>
       </NButton>
-      <!-- Scope filter: lives in the navbar (the file tree header is too
-           narrow on 150px sidebars). The Ledger chip opens the Ledger workspace. -->
+      <!-- Keep workspace switching in the global header; phones and tablets
+           use one current-workspace menu while desktop keeps direct links. -->
       <div v-if="isWorkspace" ref="workspaceNavigationRef" class="workspace-navigation">
-        <div v-if="showScopeChips" class="scope-chips" role="tablist" :aria-label="t('nav.scope_label')">
+        <NDropdown
+          v-if="isCompactWorkspaceViewport"
+          v-model:show="mobileWorkspaceMenuOpen"
+          trigger="click"
+          placement="bottom-start"
+          :options="mobileWorkspaceOptions"
+          :menu-props="() => ({ role: 'menu', class: 'mobile-workspace-menu', 'aria-label': t('nav.workspace_switch') })"
+          :node-props="mobileWorkspaceOptionProps"
+          @select="onMobileWorkspaceSelect"
+        >
           <NButton
-            v-for="chip in scopeChips"
-            :key="chip.scope"
-            class="nav-workspace-link scope-chip"
-            :class="{ active: isScopeActive(chip.scope) }"
+            class="mobile-workspace-selector"
             attr-type="button"
             size="small"
             quaternary
             :bordered="false"
-            :aria-pressed="isScopeActive(chip.scope)"
-            :aria-label="scopeLabel(chip.scope, chip.label)"
-            :title="scopeLabel(chip.scope, chip.label)"
-            @click="onScopeClick(chip.scope)"
-            @mouseenter="enterScopeChip(chip.scope)"
-            @mouseleave="leaveAnalysisScopeChip"
+            :aria-label="t('nav.workspace_current', { workspace: mobileWorkspaceLabel })"
+            :title="t('nav.workspace_current', { workspace: mobileWorkspaceLabel })"
+            aria-haspopup="menu"
+            :aria-expanded="mobileWorkspaceMenuOpen"
+            data-testid="mobile-workspace-selector"
           >
-            <span class="scope-chip-label">{{ chip.label }}</span>
+            <span class="mobile-workspace-label">{{ mobileWorkspaceLabel }}</span>
           </NButton>
-        </div>
-        <NButton
-          v-if="showBoardNavigation"
-          class="nav-workspace-link workspace-board-link"
-          :class="{ active: isBoard }"
-          attr-type="button"
-          size="small"
-          quaternary
-          :bordered="false"
-          :aria-current="isBoard ? 'page' : undefined"
-          :aria-label="workspaceDisplayNames.board"
-          @click="router.push({ name: 'board' })"
-        >
-          <span class="workspace-board-link-label">{{ workspaceDisplayNames.board }}</span>
-        </NButton>
+        </NDropdown>
+        <template v-else>
+          <div v-if="showScopeChips" class="scope-chips" role="tablist" :aria-label="t('nav.scope_label')">
+            <NButton
+              v-for="chip in scopeChips"
+              :key="chip.scope"
+              class="nav-workspace-link scope-chip"
+              :class="{ active: isScopeActive(chip.scope) }"
+              attr-type="button"
+              size="small"
+              quaternary
+              :bordered="false"
+              :aria-pressed="isScopeActive(chip.scope)"
+              :aria-label="scopeLabel(chip.scope, chip.label)"
+              :title="scopeLabel(chip.scope, chip.label)"
+              @click="onScopeClick(chip.scope)"
+              @mouseenter="enterScopeChip(chip.scope)"
+              @mouseleave="leaveAnalysisScopeChip"
+            >
+              <span class="scope-chip-label">{{ chip.label }}</span>
+            </NButton>
+          </div>
+          <NButton
+            v-if="showBoardNavigation"
+            class="nav-workspace-link workspace-board-link"
+            :class="{ active: isBoard }"
+            attr-type="button"
+            size="small"
+            quaternary
+            :bordered="false"
+            :aria-current="isBoard ? 'page' : undefined"
+            :aria-label="workspaceDisplayNames.board"
+            @click="router.push({ name: 'board' })"
+          >
+            <span class="workspace-board-link-label">{{ workspaceDisplayNames.board }}</span>
+          </NButton>
+        </template>
       </div>
       <div class="nav-spacer" />
       <div class="nav-actions">
@@ -1030,7 +1141,7 @@ onBeforeUnmount(() => {
           </NIcon>
         </NButton>
         <NDropdown
-          v-if="isVault && appShell?.noteSpeechReadAllCommand?.value"
+          v-if="isVault && !noteTablet && appShell?.noteSpeechReadAllCommand?.value"
           trigger="click"
           placement="bottom-end"
           :options="noteSpeechOptions"
@@ -1063,6 +1174,7 @@ onBeforeUnmount(() => {
           <NIcon class="nav-search-icon" aria-hidden="true"><Search /></NIcon>
         </NButton>
         <NButton
+          v-if="!(isVault && noteTablet)"
           class="theme-toggle"
           attr-type="button"
           size="small"
@@ -1076,18 +1188,6 @@ onBeforeUnmount(() => {
             <Sun v-if="themeIcon === 'sun'" />
             <Moon v-else />
           </NIcon>
-        </NButton>
-        <NButton
-          v-if="isVault && noteTablet && appShell?.noteTabletImageCommand?.value"
-          quaternary
-          size="small"
-          :bordered="false"
-          :aria-label="t('editor.insert_image')"
-          :title="t('editor.insert_image')"
-          data-testid="tablet-insert-image"
-          @click="appShell?.noteTabletImageCommand?.value?.()"
-        >
-          <NIcon aria-hidden="true"><Photo /></NIcon>
         </NButton>
         <NButton
           v-if="isVault && !isLedger && viewModeApi && isVaultDocumentVisible"
@@ -1107,8 +1207,28 @@ onBeforeUnmount(() => {
             <Eye v-else />
           </NIcon>
         </NButton>
+        <NDropdown
+          v-if="isVault && noteTablet && compactNoteActionOptions.length"
+          trigger="click"
+          placement="bottom-end"
+          :options="compactNoteActionOptions"
+          @select="onCompactNoteActionSelect"
+        >
+          <NButton
+            class="nav-more-actions"
+            attr-type="button"
+            size="small"
+            quaternary
+            :bordered="false"
+            :aria-label="t('nav.more_actions')"
+            :title="t('nav.more_actions')"
+            data-testid="compact-note-actions"
+          >
+            <NIcon aria-hidden="true"><LayoutGrid /></NIcon>
+          </NButton>
+        </NDropdown>
         <NButton
-          v-if="isVault && !isLedger"
+          v-if="isVault && !noteTablet && !isLedger"
           class="left-panel-toggle"
           attr-type="button"
           size="small"
@@ -1123,7 +1243,7 @@ onBeforeUnmount(() => {
           <NIcon class="left-panel-toggle-icon" aria-hidden="true"><LayoutSidebarLeftExpand /></NIcon>
         </NButton>
         <NButton
-          v-if="isVault && !isLedger && workspaceRightPanelAvailable"
+          v-if="isVault && !noteTablet && !isLedger && workspaceRightPanelAvailable"
           class="right-rail-toggle"
           attr-type="button"
           size="small"

@@ -49,8 +49,8 @@ import {
   type LedgerReplayResult,
 } from './idempotency.js'
 import {
-  assertNonNegativeSafeInteger,
   assertPositiveMinor,
+  assertSafeMinor,
   checkedAddMinor,
   checkedSubMinor,
 } from './money.js'
@@ -882,7 +882,8 @@ export function createLedgerService(
     const transaction = repository.getTransaction(id)
     if (
       transaction === null
-      || (transaction.type === 'expense' && transaction.groupId !== undefined)
+      || ((transaction.type === 'expense' || transaction.type === 'income')
+        && transaction.groupId !== undefined)
     ) {
       notFound('Ledger Transaction')
     }
@@ -891,7 +892,13 @@ export function createLedgerService(
 
   function requireStatisticsEligibleTransaction(id: string): LedgerTransaction {
     const transaction = repository.getTransaction(id)
-    if (transaction === null) notFound('Ledger Transaction')
+    if (
+      transaction === null
+      || ((transaction.type === 'expense' || transaction.type === 'income')
+        && transaction.groupId !== undefined)
+    ) {
+      notFound('Ledger Transaction')
+    }
     if (transaction.deletedAt !== null) transactionDeleted()
     if (!ledgerTransactionContributesToStatistics(transaction)) {
       throw ledgerValidationError('Transaction does not contribute to Ledger statistics', {
@@ -1029,23 +1036,29 @@ export function createLedgerService(
             )
 
             const feeMinor = request.feeMinor ?? 0
-            assertNonNegativeSafeInteger(feeMinor, 'feeMinor')
+            assertSafeMinor(feeMinor, 'feeMinor')
+            if (feeMinor < 0 && transferKind !== 'repayment') {
+              throw ledgerValidationError('Only repayment rebates may have a negative feeMinor', {
+                field: 'feeMinor',
+              })
+            }
             if (feeMinor === 0 && request.feeMode !== undefined) {
               throw ledgerValidationError('feeMode requires a positive feeMinor', {
                 field: 'feeMinor',
               })
             }
-            if (feeMinor > 0 && transferKind === 'general') {
+            if (feeMinor !== 0 && transferKind === 'general') {
               throw ledgerValidationError('A fee can only be attached to a repayment or withdrawal', {
                 field: 'transferKind',
               })
             }
-            const feeCategory = feeMinor > 0
+            const feeCategory = feeMinor !== 0
               ? requireSystemCategory(transferKind === 'repayment' ? 'interest' : 'fee')
               : null
             let transferAmountMinor = request.amountMinor
             let feeMode: LedgerTransferFeeMode | undefined
-            if (feeMinor > 0 && transferKind === 'repayment') {
+            if (feeMinor !== 0 && transferKind === 'repayment') {
+              assertPositiveMinor(checkedAddMinor(request.amountMinor, feeMinor), 'actual repayment debit')
               if (request.feeMode !== undefined) {
                 throw ledgerValidationError('Repayment fees do not support a feeMode', {
                   field: 'feeMode',
@@ -1058,7 +1071,7 @@ export function createLedgerService(
                 assertPositiveMinor(transferAmountMinor, 'amountMinor after fee')
               }
             }
-            const groupId = feeMinor > 0 ? generatedId(createId) : undefined
+            const groupId = feeMinor !== 0 ? generatedId(createId) : undefined
 
             const transaction: TransferTransaction = {
               id: generatedId(createId),
@@ -1079,12 +1092,11 @@ export function createLedgerService(
               updatedAt: timestamp,
             }
             repository.insertTransaction(transaction)
-            if (feeMinor > 0 && feeCategory && groupId) {
-              const fee: ExpenseTransaction = {
+            if (feeMinor !== 0 && feeCategory && groupId) {
+              const companionBase = {
                 id: generatedId(createId),
-                type: 'expense',
                 groupId,
-                amountMinor: feeMinor,
+                amountMinor: Math.abs(feeMinor),
                 accountId: fromAccount.id,
                 categoryId: feeCategory.id,
                 occurredAt: request.occurredAt,
@@ -1096,6 +1108,9 @@ export function createLedgerService(
                 createdAt: timestamp,
                 updatedAt: timestamp,
               }
+              const fee: ExpenseTransaction | IncomeTransaction = feeMinor < 0
+                ? { ...companionBase, type: 'income' }
+                : { ...companionBase, type: 'expense' }
               repository.insertTransaction(fee)
             }
             return {
@@ -1221,41 +1236,51 @@ export function createLedgerService(
           const groupTransactions = transaction.groupId
             ? repository.listTransactionsByGroupId(transaction.groupId, true)
             : []
-          const activeGroupExpenses = groupTransactions.filter(
-            (item): item is ExpenseTransaction => item.type === 'expense' && item.deletedAt === null,
+          const activeGroupCompanions = groupTransactions.filter(
+            (item): item is ExpenseTransaction | IncomeTransaction =>
+              (item.type === 'expense' || item.type === 'income') && item.deletedAt === null,
           )
-          const hasDeletedGroupExpense = groupTransactions.some(
-            (item) => item.type === 'expense' && item.deletedAt !== null,
+          const hasDeletedGroupCompanion = groupTransactions.some(
+            (item) => (item.type === 'expense' || item.type === 'income') && item.deletedAt !== null,
           )
           if (
             transaction.groupId !== undefined
-            && (activeGroupExpenses.length !== 1 || hasDeletedGroupExpense)
+            && (activeGroupCompanions.length !== 1 || hasDeletedGroupCompanion)
           ) {
             throw ledgerValidationError(
-              'Grouped transfer must have exactly one active companion expense',
+              'Grouped transfer must have exactly one active companion adjustment',
               { field: 'groupId' },
             )
           }
-          const existingFee = activeGroupExpenses[0]
+          const existingCompanion = activeGroupCompanions[0]
+          const existingFeeMinor = existingCompanion
+            ? existingCompanion.type === 'income' ? -existingCompanion.amountMinor : existingCompanion.amountMinor
+            : 0
           const hasFeePatch = hasOwn(patch, 'feeMinor')
             || hasOwn(patch, 'feeMode')
           if (hasOwn(patch, 'feeMinor')) {
-            assertNonNegativeSafeInteger(patch.feeMinor, 'feeMinor')
+            assertSafeMinor(patch.feeMinor, 'feeMinor')
           }
           if (
             hasFeePatch
             && !hasOwn(patch, 'feeMinor')
-            && existingFee === undefined
+            && existingCompanion === undefined
           ) {
             throw ledgerValidationError(
-              'feeMinor is required when adding a transfer companion expense',
+              'feeMinor is required when adding a transfer companion adjustment',
               { field: 'feeMinor' },
             )
           }
 
           const feeMinor = hasOwn(patch, 'feeMinor')
             ? patch.feeMinor ?? 0
-            : existingFee?.amountMinor ?? 0
+            : existingFeeMinor
+          assertSafeMinor(feeMinor, 'feeMinor')
+          if (feeMinor < 0 && transferKind !== 'repayment') {
+            throw ledgerValidationError('Only repayment rebates may have a negative feeMinor', {
+              field: 'feeMinor',
+            })
+          }
           if (
             feeMinor === 0
             && hasOwn(patch, 'feeMode')
@@ -1264,19 +1289,23 @@ export function createLedgerService(
               field: 'feeMinor',
             })
           }
-          if (feeMinor > 0 && transferKind === 'general') {
+          if (feeMinor !== 0 && transferKind === 'general') {
             throw ledgerValidationError('A fee can only be attached to a repayment or withdrawal', {
               field: 'transferKind',
             })
           }
 
           let feeCategory: LedgerCategory | null = null
-          if (feeMinor > 0) {
+          if (feeMinor !== 0) {
             feeCategory = requireSystemCategory(transferKind === 'repayment' ? 'interest' : 'fee')
           }
 
           let feeMode: LedgerTransferFeeMode | undefined
-          if (feeMinor > 0 && transferKind === 'repayment') {
+          if (feeMinor !== 0 && transferKind === 'repayment') {
+            assertPositiveMinor(checkedAddMinor(
+              hasOwn(patch, 'amountMinor') ? patch.amountMinor! : transaction.amountMinor,
+              feeMinor,
+            ), 'actual repayment debit')
             if (hasOwn(patch, 'feeMode')) {
               throw ledgerValidationError('Repayment fees do not support a feeMode', {
                 field: 'feeMode',
@@ -1293,8 +1322,8 @@ export function createLedgerService(
             ? patch.amountMinor!
             : transaction.transferKind === 'withdrawal'
               && transaction.feeMode === 'deducted'
-              && existingFee !== undefined
-              ? checkedAddMinor(transaction.amountMinor, existingFee.amountMinor)
+              && existingCompanion?.type === 'expense'
+              ? checkedAddMinor(transaction.amountMinor, existingCompanion.amountMinor)
               : transaction.amountMinor
           let transferAmountMinor = requestedAmountMinor
           if (feeMinor > 0 && transferKind === 'withdrawal' && feeMode === 'deducted') {
@@ -1302,7 +1331,7 @@ export function createLedgerService(
             assertPositiveMinor(transferAmountMinor, 'amountMinor after fee')
           }
 
-          const nextGroupId = feeMinor > 0
+          const nextGroupId = feeMinor !== 0
             ? transaction.groupId ?? generatedId(createId)
             : undefined
           const updated: TransferTransaction = {
@@ -1332,60 +1361,53 @@ export function createLedgerService(
             repository.restoreTransactionToStatistics(transaction.id)
           }
 
-          if (feeMinor > 0 && feeCategory && nextGroupId) {
-            const updatedFee: ExpenseTransaction = existingFee
-              ? {
-                  ...existingFee,
-                  groupId: nextGroupId,
-                  amountMinor: feeMinor,
-                  accountId: fromAccount.id,
-                  categoryId: feeCategory.id,
-                  occurredAt,
-                  location: updated.location,
-                  payee: companionIdentityChanged
-                    ? companionPayee(transferKind, fromAccount.name, toAccount.name, updated.payee)
-                    : existingFee.payee,
-                  note: updated.note,
-                  version: nextVersion(existingFee.version),
-                  updatedAt: timestamp,
-                }
-              : {
-                  id: generatedId(createId),
-                  type: 'expense',
-                  groupId: nextGroupId,
-                  amountMinor: feeMinor,
-                  accountId: fromAccount.id,
-                  categoryId: feeCategory.id,
-                  occurredAt,
-                  location: updated.location,
-                  payee: companionPayee(transferKind, fromAccount.name, toAccount.name, updated.payee),
-                  note: updated.note,
-                  deletedAt: null,
-                  version: 1,
-                  createdAt: timestamp,
-                  updatedAt: timestamp,
-                }
-            if (existingFee) {
+          if (feeMinor !== 0 && feeCategory && nextGroupId) {
+            const companionBase = {
+              ...(existingCompanion ?? {
+                id: generatedId(createId),
+                deletedAt: null,
+                version: 0,
+                createdAt: timestamp,
+              }),
+              groupId: nextGroupId,
+              amountMinor: Math.abs(feeMinor),
+              accountId: fromAccount.id,
+              categoryId: feeCategory.id,
+              occurredAt,
+              location: updated.location,
+              payee: companionIdentityChanged || !existingCompanion
+                ? companionPayee(transferKind, fromAccount.name, toAccount.name, updated.payee)
+                : existingCompanion.payee,
+              note: updated.note,
+              deletedAt: null,
+              version: existingCompanion ? nextVersion(existingCompanion.version) : 1,
+              createdAt: existingCompanion?.createdAt ?? timestamp,
+              updatedAt: timestamp,
+            }
+            const updatedFee: ExpenseTransaction | IncomeTransaction = feeMinor < 0
+              ? { ...companionBase, type: 'income' }
+              : { ...companionBase, type: 'expense' }
+            if (existingCompanion) {
               if (repository.updateTransaction({
                 transaction: updatedFee,
-                expectedVersion: existingFee.version,
+                expectedVersion: existingCompanion.version,
               }) !== 1) versionConflict()
             } else {
               repository.insertTransaction(updatedFee)
             }
-          } else if (existingFee) {
-            const deletedFee: ExpenseTransaction = {
-              ...existingFee,
+          } else if (existingCompanion) {
+            const deletedFee: ExpenseTransaction | IncomeTransaction = {
+              ...existingCompanion,
               deletedAt: timestamp,
-              version: nextVersion(existingFee.version),
+              version: nextVersion(existingCompanion.version),
               updatedAt: timestamp,
             }
             if (repository.softDeleteTransaction({
-              id: existingFee.id,
+              id: existingCompanion.id,
               deletedAt: timestamp,
               version: deletedFee.version,
               updatedAt: timestamp,
-              expectedVersion: existingFee.version,
+              expectedVersion: existingCompanion.version,
             }) !== 1) versionConflict()
           }
 

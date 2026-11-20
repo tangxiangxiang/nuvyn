@@ -290,6 +290,7 @@ function transactionMeta(transaction: LedgerTransactionDto): string {
 function transactionAmount(transaction: LedgerTransactionDto): string {
   if (transaction.type === 'income') return formatLedgerSignedMoney(transaction.amountMinor, store.settings.value?.baseCurrency ?? 'CNY')
   if (transaction.type === 'expense') return formatLedgerSignedMoney(-transaction.amountMinor, store.settings.value?.baseCurrency ?? 'CNY')
+  if (transaction.type === 'transfer') return formatLedgerMoney(transaction.bundle?.totalMinor ?? transaction.amountMinor, store.settings.value?.baseCurrency ?? 'CNY')
   return formatLedgerMoney(transaction.amountMinor, store.settings.value?.baseCurrency ?? 'CNY')
 }
 

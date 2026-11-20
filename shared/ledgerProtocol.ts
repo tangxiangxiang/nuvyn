@@ -151,6 +151,7 @@ interface LedgerTransactionDtoBase {
 }
 
 export interface LedgerTransferBundleSummary {
+  /** Signed companion adjustment: positive for a charge, negative for a rebate. */
   readonly chargeMinor: number
   readonly totalMinor: number
 }
@@ -173,7 +174,7 @@ export interface LedgerTransferTransactionDto extends LedgerTransactionDtoBase {
   readonly type: 'transfer'
   readonly transferKind: LedgerTransferKind
   readonly feeMode?: LedgerTransferFeeMode
-  /** Present on read projections when a companion expense is attached. */
+  /** Present on read projections when a charge or repayment rebate is attached. */
   readonly bundle?: LedgerTransferBundleSummary
   readonly fromAccountId: string
   readonly toAccountId: string
@@ -236,7 +237,7 @@ export interface LedgerTransferCreateRequest {
   readonly transferKind?: LedgerTransferKind
   /** Principal, or requested withdrawal amount before a fee is applied. */
   readonly amountMinor: number
-  /** Optional companion expense. It is never included in amountMinor. */
+  /** Signed companion adjustment. Negative values are repayment rebates; it is never included in amountMinor. */
   readonly feeMinor?: number
   /** Only applies to withdrawal fees; defaults to extra during migration. */
   readonly feeMode?: LedgerTransferFeeMode

@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import {
   isWorkspaceNavigationAvailable,
+  workspaceCompactNavigationQuery,
   workspaceDisplayNames,
   workspaceMobileNavigationQuery,
   workspaceNavigationAvailability,
@@ -17,24 +18,25 @@ describe('workspace navigation availability', () => {
     })
   })
 
-  it('shows the full navigation on both desktop and mobile', () => {
+  it('keeps every workspace available in desktop and compact navigation', () => {
     expect(Object.entries(workspaceNavigationAvailability)
       .filter(([, availability]) => availability.desktop)
       .map(([key]) => key))
       .toEqual(['note', 'diary', 'ledger', 'board'])
 
     expect(Object.entries(workspaceNavigationAvailability)
-      .filter(([, availability]) => availability.mobile)
+      .filter(([, availability]) => availability.compact)
       .map(([key]) => key))
       .toEqual(['note', 'diary', 'ledger', 'board'])
   })
 
-  it('uses the existing inclusive 600px mobile boundary', () => {
+  it('keeps phone and compact navigation boundaries explicit', () => {
     expect(workspaceMobileNavigationQuery).toBe('(max-width: 600px)')
-    expect(isWorkspaceNavigationAvailable('note', 'mobile')).toBe(true)
-    expect(isWorkspaceNavigationAvailable('board', 'mobile')).toBe(true)
-    expect(isWorkspaceNavigationAvailable('diary', 'mobile')).toBe(true)
-    expect(isWorkspaceNavigationAvailable('ledger', 'mobile')).toBe(true)
+    expect(workspaceCompactNavigationQuery).toBe('(max-width: 1199px)')
+    expect(isWorkspaceNavigationAvailable('note', 'compact')).toBe(true)
+    expect(isWorkspaceNavigationAvailable('board', 'compact')).toBe(true)
+    expect(isWorkspaceNavigationAvailable('diary', 'compact')).toBe(true)
+    expect(isWorkspaceNavigationAvailable('ledger', 'compact')).toBe(true)
   })
 
   it('keeps workspace routes available regardless of navigation visibility', () => {

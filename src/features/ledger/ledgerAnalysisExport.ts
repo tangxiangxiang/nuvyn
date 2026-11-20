@@ -15,9 +15,14 @@ export type LedgerAnalysisAccountDto = Pick<LedgerAccountDto,
   | 'currency' | 'currencyExponent' | 'note' | 'archivedAt'
 >
 
+type LedgerAnalysisExpenseDto = Omit<LedgerExpenseTransactionDto, 'amountMinor'> & {
+  /** Signed in the analysis export so repayment rebates net against interest without appearing as income. */
+  readonly amountMinor: number
+}
+
 export type LedgerAnalysisTransactionDto = (
   | LedgerIncomeTransactionDto
-  | LedgerExpenseTransactionDto
+  | LedgerAnalysisExpenseDto
   | Omit<LedgerTransferTransactionDto, 'bundle'>
   | LedgerAdjustmentTransactionDto
 ) & {
@@ -105,6 +110,18 @@ export async function loadLedgerAnalysisExport(): Promise<LedgerAnalysisExportDt
           ...principal,
           fromAccountName: accountNames.get(transaction.fromAccountId) ?? null,
           toAccountName: accountNames.get(transaction.toAccountId) ?? null,
+        }
+      }
+      if (transaction.type === 'income' && transaction.groupId !== undefined) {
+        // The stored income row restores the source account balance. Export it
+        // as a signed expense adjustment so reports show net interest, not
+        // artificial income, while preserving the same account movement.
+        return {
+          ...transaction,
+          type: 'expense',
+          amountMinor: -transaction.amountMinor,
+          accountName: accountNames.get(transaction.accountId) ?? null,
+          categoryName: categoryNames.get(transaction.categoryId) ?? null,
         }
       }
       return {

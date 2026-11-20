@@ -12,12 +12,12 @@ import { __resetVaultLayoutState } from '../../composables/vault/useVaultLayout'
 import { AppShellContextKey } from '../../composables/appShellContext'
 import { CalendarEvent, MoodSmile } from '@vicons/tabler'
 
-function installWorkspaceMobileMediaQuery(initialMatches: boolean) {
+function installWorkspaceCompactMediaQuery(initialMatches: boolean) {
   const originalDescriptor = Object.getOwnPropertyDescriptor(window, 'matchMedia')
   const listeners = new Set<(event: MediaQueryListEvent) => void>()
   const query = {
     matches: initialMatches,
-    media: '(max-width: 600px)',
+    media: '(max-width: 1199px)',
     addEventListener: vi.fn((_type: string, listener: (event: MediaQueryListEvent) => void) => {
       listeners.add(listener)
     }),
@@ -1336,31 +1336,32 @@ describe('NavBar — brand constellation', () => {
   })
 })
 
-describe('NavBar — workspace mobile availability', () => {
+describe('NavBar — workspace compact availability', () => {
   beforeEach(() => {
     useI18n().setLocale('en')
     useScopeFilter().activeScope.value = 'note'
   })
   afterEach(() => useI18n().setLocale('zh'))
 
-  it('keeps all workspaces available across the mobile boundary', async () => {
-    const media = installWorkspaceMobileMediaQuery(true)
+  it('keeps all workspaces available across the compact boundary', async () => {
+    const media = installWorkspaceCompactMediaQuery(true)
     const { wrapper } = mountNavBar()
-    const assertAllWorkspaces = () => {
-      expect(wrapper.findAll('.scope-chip-label').map((label) => label.text())).toEqual([
-        '笔记', '日程', '账本',
-      ])
-      expect(wrapper.find('.workspace-board-link').exists()).toBe(true)
-      expect(wrapper.findAll('.scope-chip[aria-pressed="true"]')).toHaveLength(1)
-      expect(wrapper.find('.scope-chip[aria-pressed="true"] .scope-chip-label').text()).toBe('笔记')
+    const assertMobileSelector = () => {
+      expect(wrapper.find('.mobile-workspace-selector').text()).toContain('笔记')
+      expect(wrapper.findAll('.scope-chip, .workspace-board-link')).toHaveLength(0)
     }
-    assertAllWorkspaces()
+    assertMobileSelector()
     media.resize(false)
     await nextTick()
-    assertAllWorkspaces()
+    expect(wrapper.find('.mobile-workspace-selector').exists()).toBe(false)
+    expect(wrapper.findAll('.scope-chip-label').map((label) => label.text())).toEqual([
+      '笔记', '日程', '账本',
+    ])
+    expect(wrapper.find('.workspace-board-link').exists()).toBe(true)
+    expect(wrapper.findAll('.scope-chip[aria-pressed="true"]')).toHaveLength(1)
     media.resize(true)
     await nextTick()
-    assertAllWorkspaces()
+    assertMobileSelector()
 
     wrapper.unmount()
     media.restore()

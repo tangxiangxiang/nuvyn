@@ -170,7 +170,10 @@ describe('Ledger stateless request validation', () => {
       feeMinor: 25,
       feeCategoryId: 'fee-category',
     })).toThrow()
-    expect(() => parseTransactionPatchRequest({ expectedVersion: 1, feeMinor: -1 })).toThrow()
+    expect(parseTransactionPatchRequest({ expectedVersion: 1, feeMinor: -1 })).toEqual({
+      expectedVersion: 1,
+      feeMinor: -1,
+    })
     expect(parseExpectedVersionCommand({ expectedVersion: 3 })).toBe(3)
     expect(() => parseSettingsPatchRequest({ expectedVersion: 1 })).toThrow()
     expect(() => parseAccountPatchRequest({ expectedVersion: 1, currency: 'USD' })).toThrow()
