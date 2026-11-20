@@ -388,6 +388,59 @@ describe('Ledger transaction creation sheet', () => {
     expect(localStorage.getItem(recentAccountKey)).toBe('bank-1')
   })
 
+  it('filters repayment account choices and saves the selected account IDs', async () => {
+    const credit = {
+      ...account('credit-1', '信用卡'),
+      type: 'credit_card' as const,
+      nature: 'liability' as const,
+      currentBalanceMinor: -50_000,
+    }
+    setup([account('bank-1', '招商银行'), account('wallet-1', '现金钱包'), credit])
+    await openSheet()
+    const sheet = getSheet()
+    await sheet.findAll('[role="tab"]').find((button) => button.text() === '转账')!.trigger('click')
+    await sheet.get('[aria-label="转出账户"] .n-base-selection').trigger('click')
+    await flushPromises()
+    const initialFromDialog = new DOMWrapper(document.body).get('[role="dialog"][aria-label="选择转出账户"]')
+    await initialFromDialog.get('[data-ledger-option="credit-1"]').trigger('click')
+    await flushPromises()
+    await sheet.findAll('.n-radio-button').find((button) => button.text() === '还款')!.trigger('click')
+    await flushPromises()
+    expect(naiveSelectValue(sheet, '转出账户')).toBe('')
+
+    await sheet.get('[aria-label="转出账户"] .n-base-selection').trigger('click')
+    await flushPromises()
+    const fromDialog = new DOMWrapper(document.body).get('[role="dialog"][aria-label="选择转出账户"]')
+    expect(fromDialog.text()).toContain('招商银行')
+    expect(fromDialog.text()).toContain('现金钱包')
+    expect(fromDialog.text()).not.toContain('信用卡')
+    expect(fromDialog.text()).toContain('¥10,000.00')
+    await fromDialog.get('[data-ledger-option="bank-1"]').trigger('click')
+    await flushPromises()
+
+    await sheet.get('[aria-label="转入账户"] .n-base-selection').trigger('click')
+    await flushPromises()
+    const toDialog = new DOMWrapper(document.body).get('[role="dialog"][aria-label="选择转入账户"]')
+    expect(toDialog.text()).toContain('信用卡')
+    expect(toDialog.text()).not.toContain('招商银行')
+    await toDialog.get('[data-ledger-option="credit-1"]').trigger('click')
+    await flushPromises()
+
+    await sheet.get('input[name="amount"]').setValue('25')
+    await setLedgerDateTime(sheet, '2026-09-05T12:30')
+    api.createLedgerTransaction.mockResolvedValue({ id: 'repayment-1', type: 'transfer' } as unknown as LedgerTransactionDto)
+    await sheet.get('form').trigger('submit')
+    await flushPromises()
+
+    expect(api.createLedgerTransaction).toHaveBeenLastCalledWith(expect.objectContaining({
+      type: 'transfer',
+      transferKind: 'repayment',
+      amountMinor: 2500,
+      fromAccountId: 'bank-1',
+      toAccountId: 'credit-1',
+    }), expect.any(String))
+  })
+
   it('reveals a lightweight withdrawal fee mode picker only after a positive fee is entered', async () => {
     localStorage.setItem(recentAccountKey, 'bank-1')
     await openSheet()

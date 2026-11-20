@@ -56,6 +56,8 @@ test('tablet touch controls remain hidden at rest and accessible by tapping', as
   const date = page.getByTestId('ledger-period-date-control-today').locator('.ledger-period-date-editor')
   await date.locator('input').tap()
   await expect(date).toHaveCSS('opacity', '1')
+  await expect(page.locator('.n-date-panel')).toHaveCount(0)
+  await date.getByRole('button', { name: /选择.*日期/ }).tap()
   await expect(page.locator('.n-date-panel').first()).toBeVisible()
   await heading.tap()
   await expect(date).toHaveCSS('opacity', '0')

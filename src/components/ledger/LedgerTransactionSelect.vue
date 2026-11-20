@@ -1,11 +1,11 @@
 <script setup lang="ts">
 import { computed, defineComponent, ref, watch, type PropType, type VNodeChild } from 'vue'
-import { useMediaQuery } from '@vueuse/core'
 import { NIcon, NModal, NSelect, type SelectGroupOption, type SelectOption } from 'naive-ui'
 import { Check, X } from '@vicons/tabler'
 
 type OptionRenderer = (option: SelectOption | SelectGroupOption, selected?: boolean) => VNodeChild
 type OptionGroup = { key: string; label: string; options: SelectOption[] }
+type GroupChildOption = NonNullable<SelectGroupOption['children']>[number]
 
 const props = withDefaults(defineProps<{
   label: string
@@ -25,7 +25,6 @@ const props = withDefaults(defineProps<{
 })
 
 const selectedValue = defineModel<string>({ required: true })
-const phoneLayout = useMediaQuery('(max-width: 600px)')
 const selectionDialogOpen = ref(false)
 
 const OptionLabel = defineComponent({
@@ -47,8 +46,9 @@ const optionGroups = computed<OptionGroup[]>(() => {
   const groups: OptionGroup[] = []
   const ungrouped: SelectOption[] = []
   props.options.forEach((option, index) => {
-    if (option.type === 'group') {
-      const options = (option.children ?? []).filter((child): child is SelectOption => child.value !== undefined)
+    if (isGroupOption(option)) {
+      const children = Array.isArray(option.children) ? option.children : []
+      const options = children.filter(isSelectableOption)
       if (!options.length) return
       const label = typeof option.label === 'string' ? option.label : ''
       groups.push({ key: String(option.key ?? `group-${index}`), label, options })
@@ -59,6 +59,14 @@ const optionGroups = computed<OptionGroup[]>(() => {
   if (ungrouped.length) groups.push({ key: 'ungrouped-options', label: '', options: ungrouped })
   return groups
 })
+
+function isGroupOption(option: SelectOption | SelectGroupOption): option is SelectGroupOption {
+  return 'type' in option && option.type === 'group'
+}
+
+function isSelectableOption(option: GroupChildOption): option is SelectOption {
+  return typeof option.value === 'string' || typeof option.value === 'number'
+}
 
 watch(() => props.disabled, (disabled) => {
   if (disabled) selectionDialogOpen.value = false
