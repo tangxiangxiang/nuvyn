@@ -2341,18 +2341,24 @@ watch(tabletDrawer, async (drawer, previous) => {
 
 function onTabletDrawerKeydown(event: KeyboardEvent): void {
   if (!tabletDrawer.value || event.defaultPrevented) return
+  const eventTarget = event.target instanceof Element ? event.target : null
+  const activeElement = document.activeElement instanceof Element ? document.activeElement : null
+  // Teleported modals such as export, search, and confirmation dialogs own
+  // Escape while they are open. Do not let the underlying drawer consume it.
+  if (eventTarget?.closest('[aria-modal="true"]') || activeElement?.closest('[aria-modal="true"]')) return
+  if (!eventTarget) return
+  const root = tabletDrawer.value === 'left' ? tabletLeftRef.value : tabletRightRef.value
+  const insideDrawer = Boolean(root?.contains(eventTarget))
+  const onTrigger = Boolean(eventTarget.closest(
+    '.left-panel-toggle, .right-rail-toggle, [data-testid="compact-note-actions"]',
+  ))
+  if (!insideDrawer && !onTrigger) return
   if (event.key === 'Escape') {
     event.preventDefault()
     event.stopPropagation()
     closeTabletDrawer()
     return
   }
-  // Teleported search/confirm/access dialogs own their own keyboard scope.
-  const root = tabletDrawer.value === 'left' ? tabletLeftRef.value : tabletRightRef.value
-  if (!(event.target instanceof Element)) return
-  const insideDrawer = Boolean(root?.contains(event.target))
-  const onTrigger = Boolean(event.target.closest('.left-panel-toggle, .right-rail-toggle'))
-  if (!insideDrawer && !onTrigger) return
   if (event.key === 'Tab' && insideDrawer) {
     tabletFocusTrap.onTab(() => root, event)
   }
