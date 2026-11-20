@@ -2346,6 +2346,12 @@ function onTabletDrawerKeydown(event: KeyboardEvent): void {
   // Teleported modals such as export, search, and confirmation dialogs own
   // Escape while they are open. Do not let the underlying drawer consume it.
   if (eventTarget?.closest('[aria-modal="true"]') || activeElement?.closest('[aria-modal="true"]')) return
+  if (event.key === 'Escape') {
+    event.preventDefault()
+    event.stopPropagation()
+    closeTabletDrawer()
+    return
+  }
   if (!eventTarget) return
   const root = tabletDrawer.value === 'left' ? tabletLeftRef.value : tabletRightRef.value
   const insideDrawer = Boolean(root?.contains(eventTarget))
@@ -2353,12 +2359,6 @@ function onTabletDrawerKeydown(event: KeyboardEvent): void {
     '.left-panel-toggle, .right-rail-toggle, [data-testid="compact-note-actions"]',
   ))
   if (!insideDrawer && !onTrigger) return
-  if (event.key === 'Escape') {
-    event.preventDefault()
-    event.stopPropagation()
-    closeTabletDrawer()
-    return
-  }
   if (event.key === 'Tab' && insideDrawer) {
     tabletFocusTrap.onTab(() => root, event)
   }
