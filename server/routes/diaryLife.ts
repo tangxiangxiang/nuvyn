@@ -7,16 +7,22 @@ import { withDiaryBodyOperation } from '../diaryAccess/guard.js'
 import { DiaryAccessServiceError } from '../diaryAccess/service.js'
 import { diaryLifeStore, DiaryConflict } from '../diaryLife.js'
 import { diaryTaskStore, DiaryTaskCursorError, DiaryTaskExpansionLimit, DiaryTaskHistoryProtectedError, DiaryTaskListChanged, DiaryTaskNotFound, DiaryTaskRecurrenceError, DiaryTaskValidationError } from '../diaryTasks.js'
-import { diaryToday } from '../diaryDate.js'
+import { diaryToday, DIARY_TIME_ZONE_HEADER, resolveDiaryTimeZone } from '../diaryDate.js'
 import { DiarySearchCursorError } from '../diarySearch.js'
 import { DiaryAttachmentError } from '../diaryAttachments/service.js'
 import { cleanupDiaryAttachmentStorage, DiaryAttachmentStorage, ensureDiaryAttachmentStorage } from '../diaryAttachments/storage.js'
 import { MAX_DIARY_DAY_ATTACHMENTS } from '../../shared/diaryAttachments.js'
 import { metadataDb } from './shared.js'
 
-type Env = { Variables: { authUser: { id: number }; authSessionId: number } }
+type Env = { Variables: { authUser: { id: number }; authSessionId: number; diaryTimeZone: string } }
 const routes = new Hono<Env>()
 routes.use('*', async (c, next) => { c.header('Cache-Control', 'no-store'); await next() })
+routes.use('*', async (c, next) => {
+  const timeZone = resolveDiaryTimeZone(c.req.header(DIARY_TIME_ZONE_HEADER))
+  if (!timeZone) return c.json({ code: 'invalid-diary-time-zone' }, 400)
+  c.set('diaryTimeZone', timeZone)
+  await next()
+})
 routes.use('*', bodyLimit({ maxSize: 32768 }))
 type Store = ReturnType<typeof diaryLifeStore>
 type TaskStore = ReturnType<typeof diaryTaskStore>
@@ -50,7 +56,7 @@ async function guarded(c: Context<Env>, run: (store: Store, db: Database, tasks:
 }
 const version = (v: unknown): v is number => Number.isSafeInteger(v) && (v as number) >= 0 && (v as number) < Number.MAX_SAFE_INTEGER
 const idValid = (id: string) => /^[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/.test(id)
-routes.get('/day-policy', c => guarded(c, () => c.json({ today: diaryToday() })))
+routes.get('/day-policy', c => guarded(c, () => c.json({ today: diaryToday(c.get('diaryTimeZone')) })))
 const diarySearchRequests = new WeakMap<Database, Map<number, { startedAt: number; count: number }>>()
 function allowDiarySearch(db: Database, sessionId: number): boolean {
   const now = Date.now()
@@ -102,7 +108,7 @@ routes.post('/events/search', async c => {
       return c.json({ code: 'invalid-diary-search' }, 400)
     }
     if (!allowDiarySearch(db, sessionId)) return c.json({ code: 'diary-search-rate-limited' }, 429)
-    return c.json(await store.searchEvents(query, limit, cursor, diaryToday(), c.req.raw.signal))
+    return c.json(await store.searchEvents(query, limit, cursor, diaryToday(c.get('diaryTimeZone')), c.req.raw.signal))
   })
 })
 routes.get('/days', c => guarded(c, store => {
@@ -116,12 +122,12 @@ routes.get('/days/:date', c => guarded(c, async (store, db) => {
   const storage = new DiaryAttachmentStorage(db)
   await ensureDiaryAttachmentStorage(db, storage)
   await cleanupDiaryAttachmentStorage(db, storage, c.get('authUser')?.id)
-  return c.json({ day: store.getDay(date), version: store.dayVersion(date), attachments: store.dayAttachments(date), today: diaryToday() })
+  return c.json({ day: store.getDay(date), version: store.dayVersion(date), attachments: store.dayAttachments(date), today: diaryToday(c.get('diaryTimeZone')) })
 }))
 routes.put('/days/:date', c => guarded(c, async (store, db) => {
   const date = c.req.param('date')
   if (!civilDate(date)) return c.json({ code: 'invalid-diary-day' }, 400)
-  if (date > diaryToday()) return c.json({ code: 'diary-future-date' }, 403)
+  if (date > diaryToday(c.get('diaryTimeZone'))) return c.json({ code: 'diary-future-date' }, 403)
   const body = await c.req.json().catch(() => null)
   const fields = parseDay(body)
   const attachmentIds = body?.attachments
@@ -165,7 +171,7 @@ routes.post('/tasks/search', async c => {
       return c.json({ code: 'invalid-diary-search' }, 400)
     }
     if (!allowDiarySearch(db, sessionId)) return c.json({ code: 'diary-search-rate-limited' }, 429)
-    return c.json(await tasks.searchTasks(query, limit, cursor, diaryToday(), c.req.raw.signal))
+    return c.json(await tasks.searchTasks(query, limit, cursor, diaryToday(c.get('diaryTimeZone')), c.req.raw.signal))
   })
 })
 routes.get('/events/:id', c => guarded(c, store => {
@@ -230,7 +236,7 @@ routes.get('/task-series/:id/occurrences/:date', c => guarded(c, (_store, _db, t
 routes.get('/task-series/:id/search-target', c => guarded(c, (_store, _db, tasks) => {
   const id = c.req.param('id')
   if (!idValid(id)) return c.json({ code: 'invalid-diary-task-series-id' }, 400)
-  const occurrence = tasks.searchTarget(id, diaryToday())
+  const occurrence = tasks.searchTarget(id, diaryToday(c.get('diaryTimeZone')))
   return occurrence ? c.json({ occurrence }) : c.json({ code: 'diary-not-found' }, 404)
 }))
 routes.put('/task-series/:id', c => guarded(c, async (_store, _db, tasks) => {
@@ -325,7 +331,7 @@ for (const kind of ['days', 'events'] as const) {
     const body = await c.req.json().catch(() => null)
     const id = c.req.param('id')
     if (!version(body?.expectedVersion) || body.expectedVersion < 1 || !(kind === 'days' ? civilDate(id) : idValid(id))) return c.json({ code: 'invalid-diary-delete' }, 400)
-    if (kind === 'days' && id > diaryToday()) return c.json({ code: 'diary-future-date' }, 403)
+    if (kind === 'days' && id > diaryToday(c.get('diaryTimeZone'))) return c.json({ code: 'diary-future-date' }, 403)
     store.remove(kind === 'days' ? 'day' : 'event', id, body.expectedVersion)
     if (kind === 'days') await cleanupDiaryAttachmentStorage(db, undefined, c.get('authUser')?.id).catch(() => {})
     return c.json({ ok: true })

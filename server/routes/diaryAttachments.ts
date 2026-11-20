@@ -3,18 +3,24 @@ import { bodyLimit } from 'hono/body-limit'
 import { civilDate } from '../../shared/diaryLife.js'
 import { MAX_DIARY_ATTACHMENT_BYTES } from '../../shared/diaryAttachments.js'
 import { withDiaryBodyOperation } from '../diaryAccess/guard.js'
-import { diaryToday } from '../diaryDate.js'
+import { diaryToday, DIARY_TIME_ZONE_HEADER, resolveDiaryTimeZone } from '../diaryDate.js'
 import type { DiaryBodyOperation } from '../diaryAccess/service.js'
 import { DiaryAttachmentError, discardStagedDiaryAttachment, readDiaryAttachment, renewDiaryAttachmentStageSession, stageDiaryAttachment } from '../diaryAttachments/service.js'
 import { DiaryAttachmentStorage } from '../diaryAttachments/storage.js'
 import { validateDiaryAttachmentInput } from '../diaryAttachments/validation.js'
 import { metadataDb } from './shared.js'
 
-type Env = { Variables: { authUser: { id: number }; authSessionId: number } }
+type Env = { Variables: { authUser: { id: number }; authSessionId: number; diaryTimeZone: string } }
 const routes = new Hono<Env>()
 const MAX_MULTIPART_OVERHEAD = 64 * 1024
 routes.use('*', async (c, next) => {
   c.header('Cache-Control', 'no-store')
+  await next()
+})
+routes.use('*', async (c, next) => {
+  const timeZone = resolveDiaryTimeZone(c.req.header(DIARY_TIME_ZONE_HEADER))
+  if (!timeZone) return c.json({ code: 'invalid-diary-time-zone' }, 400)
+  c.set('diaryTimeZone', timeZone)
   await next()
 })
 routes.use('*', bodyLimit({ maxSize: MAX_DIARY_ATTACHMENT_BYTES + MAX_MULTIPART_OVERHEAD }))
@@ -44,7 +50,7 @@ routes.post('/stage', c => guarded(c, async (owner, operation) => {
   const file = form.get('file')
   const requestKey = c.req.header('Idempotency-Key') ?? ''
   if (typeof date !== 'string' || !civilDate(date) || typeof sessionId !== 'string' || !(file instanceof File)) return c.json({ code: 'diary-attachment-invalid' }, 400)
-  if (date > diaryToday()) return c.json({ code: 'diary-future-date' }, 403)
+  if (date > diaryToday(c.get('diaryTimeZone'))) return c.json({ code: 'diary-future-date' }, 403)
   if (file.size < 1) return c.json({ code: 'diary-attachment-invalid' }, 400)
   if (file.size > MAX_DIARY_ATTACHMENT_BYTES) return c.json({ code: 'diary-attachment-too-large' }, 413)
   const bytes = Buffer.from(await file.arrayBuffer())
@@ -71,7 +77,7 @@ routes.post('/sessions/:sessionId/heartbeat', c => guarded(c, async (owner, oper
   if (!civilDate(date)) {
     return c.json({ code: 'diary-attachment-invalid' }, 400)
   }
-  if (date > diaryToday()) return c.json({ code: 'diary-future-date' }, 403)
+  if (date > diaryToday(c.get('diaryTimeZone'))) return c.json({ code: 'diary-future-date' }, 403)
   const db = metadataDb()
   await renewDiaryAttachmentStageSession({
     db, owner, date,

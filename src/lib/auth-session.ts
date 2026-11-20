@@ -11,6 +11,7 @@ import { NUVYN_DIARY_ACCESS_CAPABILITY_HEADER } from '../../shared/technicalName
 
 export const AUTH_SESSION_REQUIRED_CODE = 'auth-session-required' as const
 export const DIARY_ACCESS_LOCKED_CODE = 'diary-locked' as const
+const DIARY_TIME_ZONE_HEADER = 'X-Diary-Time-Zone'
 
 export type AuthSessionRequiredEvent = {
   /** Request epoch captured when the protected request started. */
@@ -118,16 +119,22 @@ async function fetchWithSessionObservation(
   input: string | URL | Request,
   init: RequestInit | undefined,
   capability: string | null,
+  includeDiaryTimeZone = false,
 ): Promise<Response> {
   const requestGeneration = captureAuthSessionGeneration()
   let requestInput = input
   let requestInit = init
-  if (capability) {
+  if (capability || includeDiaryTimeZone) {
     const headers = new Headers(input instanceof Request ? input.headers : undefined)
     if (init?.headers) {
       new Headers(init.headers).forEach((value, name) => headers.set(name, value))
     }
-    headers.set(NUVYN_DIARY_ACCESS_CAPABILITY_HEADER, capability)
+    if (capability) headers.set(NUVYN_DIARY_ACCESS_CAPABILITY_HEADER, capability)
+    if (includeDiaryTimeZone) {
+      let timeZone = 'UTC'
+      try { timeZone = Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC' } catch { /* use the stable legacy-compatible fallback */ }
+      headers.set(DIARY_TIME_ZONE_HEADER, timeZone)
+    }
     if (input instanceof Request && init === undefined) {
       requestInput = new Request(input, { headers })
     } else {
@@ -166,7 +173,7 @@ export function diaryAuthFetch(
   input: string | URL | Request,
   init?: RequestInit,
 ): Promise<Response> {
-  return fetchWithSessionObservation(input, init, getDiaryCapability())
+  return fetchWithSessionObservation(input, init, getDiaryCapability(), true)
 }
 
 /** Test-only reset; no production code relies on this. */

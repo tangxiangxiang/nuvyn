@@ -32,6 +32,11 @@ import { eventDistanceLabel } from '../features/diary/eventDistance'
 import { todoDayVisualState, type TodoDayVisualState } from '../features/diary/deadlineVisualState'
 import { clearDiarySearchOpen, consumeDiarySearchOpen, diarySearchOpenIntent, type DiaryDiarySearchOpenIntent, type DiaryEventSearchOpenIntent, type DiaryTaskSearchOpenIntent } from '../composables/diary/useDiarySearchNavigation'
 
+function preventDiaryBackdropClickThrough(event: MouseEvent) {
+  const target = event.composedPath()[0]
+  if (target instanceof Element && target.matches('.n-modal-mask, .n-modal-scroll-content')) event.preventDefault()
+}
+
 const access = useDiaryAccessSession()
 const accessContext = inject(DiaryAccessContextKey, null)
 const appShell = inject(AppShellContextKey, null)
@@ -1604,6 +1609,7 @@ onBeforeUnmount(() => {
         :close-on-esc="!busy && !attachmentBusy"
         :auto-focus="false"
         :closable="false"
+        @mask-click="preventDiaryBackdropClickThrough"
         @update:show="visible => !visible && closeEventSurface()"
       >
         <template #header>

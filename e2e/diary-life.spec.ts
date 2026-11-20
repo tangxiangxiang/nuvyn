@@ -19,7 +19,9 @@ test.beforeEach(async ({ page }, testInfo) => {
     || testInfo.title === 'keeps event calendar context aligned after date edits'
     || testInfo.title === 'Diary selected day Event distance stays on one line across viewport widths'
     ? new Date('2026-11-16T12:00:00+08:00')
-    : testInfo.title === 'uses the server day boundary and enables editing after midnight without reopening'
+    : testInfo.title === 'closes the Diary reading dialog without selecting another date'
+      ? new Date(diaryLifeFixtureYear(testInfo), 0, 20, 12)
+      : testInfo.title === 'uses the server day boundary and enables editing after midnight without reopening'
       ? new Date(diaryLifeFixtureYear(testInfo), 0, 29, 12)
       : new Date(diaryLifeFixtureYear(testInfo), 0, 10, 12)
   await page.clock.install({ time })
@@ -31,6 +33,29 @@ function dateNumberOffset(cell: Locator) {
     const text = number.getBoundingClientRect()
     return { x: text.x - date.x, y: text.y - date.y }
   })
+}
+
+async function tapCalendarDateUnderBackdrop(page: Page) {
+  const point = await page.evaluate(() => {
+    const card = document.querySelector<HTMLElement>('.diary-life-dialog')
+    if (!card) return null
+    const cardBounds = card.getBoundingClientRect()
+    for (const cell of document.querySelectorAll<HTMLElement>('.diary-life-calendar .life-date[aria-pressed="false"]')) {
+      const bounds = cell.getBoundingClientRect()
+      const x = bounds.left + bounds.width / 2
+      const y = bounds.top + bounds.height / 2
+      const hit = document.elementFromPoint(x, y)
+      const outsideCard = !hit?.closest('.diary-life-dialog')
+      const ownedByModal = Boolean(hit?.closest('.n-modal-container'))
+      if (y < cardBounds.top && x >= 0 && x < innerWidth && y >= 0 && y < innerHeight && outsideCard && ownedByModal) {
+        return { date: cell.dataset.date, x, y }
+      }
+    }
+    return null
+  })
+  expect(point, 'a visible calendar date should be covered by the modal backdrop').not.toBeNull()
+  await page.touchscreen.tap(point!.x, point!.y)
+  return page.locator(`.diary-life-calendar .life-date[data-date="${point!.date}"]`)
 }
 
 async function expectDiaryContentUnclipped(scroller: Locator, content: Locator) {
@@ -143,6 +168,121 @@ async function expectDiaryCanScrollToEnd(page: Page, dialog: Locator, lastEntry:
   expect(await horizontalLayout()).toEqual(beforeScroll)
   await expectDiaryScrollbarsHidden(dialog, scroller)
 }
+
+for (const width of [390, 430]) {
+  test.describe(`Diary mobile backdrop at ${width}px`, () => {
+    test.use({ isMobile: true, hasTouch: true, viewport: { width, height: 844 } })
+
+    test('closes the day events dialog without opening the date under the same touch', async ({ page }) => {
+      await page.goto('/diary')
+      await unlockDiary(page)
+      await page.getByRole('button', { name: '切换到日程视图' }).tap()
+
+      const selectedDate = page.locator('.diary-life-calendar .life-date[data-date$="-01-10"]')
+      await expect(selectedDate).toBeVisible()
+      await selectedDate.tap()
+      const dialog = page.locator('.diary-life-dialog')
+      await expect(dialog).toBeVisible()
+      await dialog.getByRole('heading', { name: '待办事项' }).tap()
+      await expect(dialog).toBeVisible()
+
+      const backgroundDate = await tapCalendarDateUnderBackdrop(page)
+      await expect(dialog).toHaveCount(0)
+      await expect(backgroundDate).toHaveAttribute('aria-pressed', 'false')
+      await expect(page.locator('.diary-life-dialog')).toHaveCount(0)
+
+      for (let iteration = 0; iteration < 3; iteration += 1) {
+        await selectedDate.tap()
+        await expect(dialog).toBeVisible()
+        await dialog.getByRole('button', { name: '关闭当天事件' }).tap()
+        await expect(dialog).toHaveCount(0)
+      }
+    })
+
+    test('closes the Diary reading dialog without selecting another date', async ({ page }) => {
+      await page.goto('/diary')
+      await unlockDiary(page)
+
+      const day = width === 390 ? '12' : '13'
+      const cell = page.locator(`.diary-life-calendar .life-date[data-date$="-01-${day}"]`)
+      await openEmptyDiaryDay(page, cell, () => cell.click())
+      await page.getByRole('textbox', { name: '第 1 条日记', exact: true }).fill(`触摸遮罩日记 ${width}`)
+      await saveDiaryDay(page)
+      await page.getByRole('button', { name: '关闭日记' }).tap()
+      await expect(page.getByTestId('diary-day-dialog')).toHaveCount(0)
+
+      await cell.click()
+      const dialog = page.getByTestId('diary-day-dialog')
+      await expect(dialog).toBeVisible()
+      await dialog.locator('.diary-day-heading').tap()
+      await expect(dialog).toBeVisible()
+      const backgroundDate = await tapCalendarDateUnderBackdrop(page)
+      await expect(dialog).toHaveCount(0)
+      await expect(backgroundDate).toHaveAttribute('aria-pressed', 'false')
+      await expect(page.getByTestId('diary-day-dialog')).toHaveCount(0)
+    })
+
+    test('keeps a dirty Event draft when backdrop close is cancelled', async ({ page }) => {
+      await page.goto('/diary')
+      await unlockDiary(page)
+      await page.getByRole('button', { name: '切换到日程视图' }).tap()
+
+      const selectedDate = page.locator('.diary-life-calendar .life-date[data-date$="-01-10"]')
+      await selectedDate.tap()
+      await page.getByTestId('diary-add-event').tap()
+      const title = page.getByRole('textbox', { name: '事件名称', exact: true })
+      await title.fill(`保留草稿 ${width}`)
+      await page.touchscreen.tap(width / 2, 8)
+
+      const confirmation = page.getByRole('dialog', { name: '放弃未保存的修改？' })
+      await expect(confirmation).toBeVisible()
+      await confirmation.getByRole('button', { name: /^(Cancel|取消)$/ }).tap()
+      await expect(title).toHaveValue(`保留草稿 ${width}`)
+      await expect(page.locator('.diary-life-dialog')).toBeVisible()
+    })
+
+    test('keeps a dirty Todo draft when backdrop close is cancelled', async ({ page }) => {
+      await page.goto('/diary')
+      await unlockDiary(page)
+      await page.getByRole('button', { name: '切换到日程视图' }).tap()
+
+      const selectedDate = page.locator('.diary-life-calendar .life-date[data-date$="-01-10"]')
+      await selectedDate.tap()
+      await page.getByTestId('diary-add-task').tap()
+      const title = page.getByRole('textbox', { name: '待办名称', exact: true })
+      await title.fill(`保留待办草稿 ${width}`)
+      await page.touchscreen.tap(width / 2, 8)
+
+      const confirmation = page.getByRole('dialog', { name: '放弃未保存的修改？' })
+      await expect(confirmation).toBeVisible()
+      await confirmation.getByRole('button', { name: /^(Cancel|取消)$/ }).tap()
+      await expect(title).toHaveValue(`保留待办草稿 ${width}`)
+      await expect(page.locator('.diary-task-edit-dialog')).toBeVisible()
+    })
+  })
+}
+
+test.describe('Diary desktop modal dismissal', () => {
+  test.use({ isMobile: false, hasTouch: false, viewport: { width: 1280, height: 800 } })
+
+  test('keeps backdrop click and Escape dismissal working', async ({ page }) => {
+    await page.goto('/diary')
+    await unlockDiary(page)
+    await page.getByRole('button', { name: '切换到日程视图' }).click()
+
+    const cell = page.locator('.diary-life-calendar .life-date[data-date$="-01-10"]')
+    await cell.click()
+    const dialog = page.locator('.diary-life-dialog')
+    await expect(dialog).toBeVisible()
+    await page.mouse.click(4, 4)
+    await expect(dialog).toHaveCount(0)
+
+    await cell.click()
+    await expect(dialog).toBeVisible()
+    await page.keyboard.press('Escape')
+    await expect(dialog).toHaveCount(0)
+  })
+})
 
 for (const viewport of [{ width: 390, height: 844 }, { width: 430, height: 900 }, { width: 768, height: 1024 }, { width: 1280, height: 800 }]) {
   test.describe(`Diary at ${viewport.width}`, () => {
@@ -1018,46 +1158,56 @@ test('clears the date highlight on Escape after opening with a pointer', async (
   await expect(cell.locator('.life-date-badge')).toHaveCSS('outline-style', 'solid')
 })
 
-test('uses the server day boundary and enables editing after midnight without reopening', async ({ page }, testInfo) => {
-  const year = diaryLifeFixtureYear(testInfo)
-  const date = `${year}-01-28`
-  await page.goto('/diary')
-  await unlockDiary(page)
+test.describe('Diary local timezone boundary', () => {
+  test.use({ timezoneId: 'Asia/Shanghai' })
 
-  let serverToday = `${year}-01-27`
-  await page.route(`**/api/diary/life/days/${date}`, async route => {
-    const response = await route.fetch()
-    await route.fulfill({ response, json: { ...await response.json(), today: serverToday } })
-  })
-  let policyChecks = 0
-  await page.route('**/api/diary/life/day-policy', route => {
-    policyChecks++
-    return route.fulfill({ json: { today: serverToday } })
-  })
-  const heartbeats: string[] = []
-  page.on('request', request => {
-    if (request.url().endsWith('/heartbeat')) heartbeats.push(request.url())
-  })
-  await page.locator(`.diary-life-calendar [data-date="${date}"]`).click()
-  const dialog = page.getByTestId('diary-day-dialog')
-  await expect(dialog.getByText('未来的日子还没有日记。可以在事件中安排计划。')).toBeVisible()
-  await expect(dialog.getByTestId('diary-edit-entry')).toHaveCount(0)
-  await expect(dialog.getByTestId('diary-day-actions-menu')).toHaveCount(0)
-  await expect(dialog.getByTestId('diary-bullet-editor')).toHaveCount(0)
-  await expect(dialog.getByRole('button', { name: '选择心情' })).toHaveCount(0)
-  await page.clock.fastForward(30_000)
-  await expect.poll(() => policyChecks).toBeGreaterThan(0)
-  expect(heartbeats).toHaveLength(0)
+  test('uses the server day boundary and enables editing after midnight without reopening', async ({ page }, testInfo) => {
+    const year = diaryLifeFixtureYear(testInfo)
+    const date = `${year}-01-28`
+    await page.goto('/diary')
+    await unlockDiary(page)
 
-  serverToday = date
-  await page.clock.fastForward(30_000)
-  const edit = dialog.getByTestId('diary-edit-entry')
-  await expect(edit).toBeVisible()
-  await edit.click()
-  const first = dialog.getByRole('textbox', { name: '第 1 条日记', exact: true })
-  await first.fill('跨日后的日记')
-  await page.clock.fastForward(30_000)
-  await expect(first).toHaveValue('跨日后的日记')
+    let serverToday = `${year}-01-27`
+    await page.route(`**/api/diary/life/days/${date}`, async route => {
+      const response = await route.fetch()
+      await route.fulfill({ response, json: { ...await response.json(), today: serverToday } })
+    })
+    let policyChecks = 0
+    await page.route('**/api/diary/life/day-policy', route => {
+      policyChecks++
+      return route.fulfill({ json: { today: serverToday } })
+    })
+    const heartbeats: string[] = []
+    const diaryTimeZones: string[] = []
+    page.on('request', request => {
+      if (request.url().endsWith('/heartbeat')) heartbeats.push(request.url())
+      if (request.url().includes('/api/diary/life/day-policy') || request.url().includes(`/api/diary/life/days/${date}`)) {
+        diaryTimeZones.push(request.headers()['x-diary-time-zone'] ?? '')
+      }
+    })
+    await page.locator(`.diary-life-calendar [data-date="${date}"]`).click()
+    await expect.poll(() => diaryTimeZones.length).toBeGreaterThan(0)
+    expect(diaryTimeZones).toContain('Asia/Shanghai')
+    const dialog = page.getByTestId('diary-day-dialog')
+    await expect(dialog.getByText('未来的日子还没有日记。可以在事件中安排计划。')).toBeVisible()
+    await expect(dialog.getByTestId('diary-edit-entry')).toHaveCount(0)
+    await expect(dialog.getByTestId('diary-day-actions-menu')).toHaveCount(0)
+    await expect(dialog.getByTestId('diary-bullet-editor')).toHaveCount(0)
+    await expect(dialog.getByRole('button', { name: '选择心情' })).toHaveCount(0)
+    await page.clock.fastForward(30_000)
+    await expect.poll(() => policyChecks).toBeGreaterThan(0)
+    expect(heartbeats).toHaveLength(0)
+
+    serverToday = date
+    await page.clock.fastForward(30_000)
+    const edit = dialog.getByTestId('diary-edit-entry')
+    await expect(edit).toBeVisible()
+    await edit.click()
+    const first = dialog.getByRole('textbox', { name: '第 1 条日记', exact: true })
+    await first.fill('跨日后的日记')
+    await page.clock.fastForward(30_000)
+    await expect(first).toHaveValue('跨日后的日记')
+  })
 })
 
 test('restores focus for entry shortcuts without treating Chinese composition as a shortcut', async ({ page, context }) => {

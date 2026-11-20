@@ -93,6 +93,17 @@ describe('explicit Diary request session boundary', () => {
     expect(fetchMock).toHaveBeenCalledOnce()
   })
 
+  it('sends the browser IANA timezone on Diary requests', async () => {
+    const fetchMock = vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
+      expect(new Headers(init?.headers).get('X-Diary-Time-Zone')).toBe(Intl.DateTimeFormat().resolvedOptions().timeZone)
+      return new Response('{}', { status: 200, headers: { 'content-type': 'application/json' } })
+    })
+    vi.stubGlobal('fetch', fetchMock)
+
+    await expect(diaryAuthFetch('/api/diary/life/day-policy')).resolves.toMatchObject({ status: 200 })
+    expect(fetchMock).toHaveBeenCalledOnce()
+  })
+
   it('sends the opaque capability only through the explicit Diary seam', async () => {
     const capability = 'a'.repeat(43)
     const fetchMock = vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {

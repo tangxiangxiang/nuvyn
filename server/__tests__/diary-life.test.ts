@@ -20,8 +20,11 @@ let auth: AuthenticatedTestContext
 let capability: string
 let tempRoot: string
 const base = '/api/diary/life'
-function request(method: string, path: string, body?: unknown, unlocked = true) {
-  const req = jsonRequest(`${base}${path}`, { method, body, origin: auth.runtime.config.publicOrigin })
+function request(method: string, path: string, body?: unknown, unlocked = true, timeZone?: string) {
+  const initial = jsonRequest(`${base}${path}`, { method, body, origin: auth.runtime.config.publicOrigin })
+  const headers = new Headers(initial.headers)
+  if (timeZone !== undefined) headers.set('X-Diary-Time-Zone', timeZone)
+  const req = new Request(initial, { headers })
   return app.fetch(unlocked ? withDiaryCapability(auth, req, capability) : withAuthCookie(auth, req))
 }
 const event = { title: '私人生日', description: '加密正文', emoji: '🎂', type: 'anniversary', startDate: '2024-02-29', endDate: '2024-02-29', startTime: null, endTime: null, allDay: true, recurrence: 'yearly', showCountdown: true, isPrimary: false, expectedVersion: 0 }
@@ -41,33 +44,86 @@ describe('Diary database API', () => {
     await fs.rm(tempRoot, { recursive: true, force: true })
   })
 
-  it('uses the server time zone at midnight and protects future dates without blocking future Events', async () => {
-    const zone = vi.spyOn(Temporal.Now, 'timeZoneId').mockReturnValue('America/Los_Angeles')
+  it('uses the requesting browser timezone for Diary dates and keeps future Events available', async () => {
     const fields = { moodId: null, entries: ['测试日记'], expectedVersion: 0 }
+    vi.stubEnv('TZ', 'UTC')
     try {
-      expect(await (await request('GET', '/day-policy')).json()).toEqual({ today: '2026-11-15' })
-      for (const date of ['2026-11-14', '2026-11-15']) {
-        expect((await request('PUT', `/days/${date}`, fields)).status).toBe(200)
-        expect((await request('PUT', `/days/${date}`, { ...fields, expectedVersion: 1 })).status).toBe(200)
-      }
-      for (const date of ['2026-11-16', '2026-12-01', '2027-01-01']) {
-        const denied = await request('PUT', `/days/${date}`, { ...fields, today: date })
+      for (const [instant, expectedVersion] of [
+        ['2026-11-19T16:01:00Z', 0], // Beijing 00:01
+        ['2026-11-19T23:59:00Z', 1], // Beijing 07:59
+        ['2026-11-20T00:00:00Z', 2], // Beijing 08:00
+      ] as const) {
+        vi.setSystemTime(new Date(instant))
+        expect(await (await request('GET', '/day-policy', undefined, true, 'Asia/Shanghai')).json()).toEqual({ today: '2026-11-20' })
+        expect(await (await request('GET', '/days/2026-11-20', undefined, true, 'Asia/Shanghai')).json()).toMatchObject({ today: '2026-11-20' })
+        expect((await request('PUT', '/days/2026-11-20', { ...fields, expectedVersion }, true, 'Asia/Shanghai')).status).toBe(200)
+        const denied = await request('PUT', '/days/2026-11-21', { ...fields, today: '2026-11-21' }, true, 'Asia/Shanghai')
         expect(denied.status).toBe(403)
         expect(await denied.json()).toEqual({ code: 'diary-future-date' })
-        const deletion = await request('DELETE', `/days/${date}`, { expectedVersion: 1 })
-        expect(deletion.status).toBe(403)
-        expect(await deletion.json()).toEqual({ code: 'diary-future-date' })
-        expect(await (await request('GET', `/days/${date}`)).json()).toMatchObject({ day: null, version: 0 })
+        expect((await request('DELETE', '/days/2026-11-21', { expectedVersion: 1 }, true, 'Asia/Shanghai')).status).toBe(403)
       }
+
+      vi.setSystemTime(new Date('2026-11-20T07:59:00Z'))
+      expect(await (await request('GET', '/day-policy', undefined, true, 'America/Los_Angeles')).json()).toEqual({ today: '2026-11-19' })
+      expect((await request('PUT', '/days/2026-11-19', fields, true, 'America/Los_Angeles')).status).toBe(200)
+      expect((await request('PUT', '/days/2026-11-20', fields, true, 'America/Los_Angeles')).status).toBe(403)
+      vi.setSystemTime(new Date('2026-11-20T08:00:00Z'))
+      expect(await (await request('GET', '/day-policy', undefined, true, 'America/Los_Angeles')).json()).toEqual({ today: '2026-11-20' })
+      expect((await request('PUT', '/days/2026-11-20', { ...fields, expectedVersion: 3 }, true, 'America/Los_Angeles')).status).toBe(200)
+
+      vi.setSystemTime(new Date('2026-11-19T23:59:00Z'))
+      expect(await (await request('GET', '/day-policy')).json()).toEqual({ today: '2026-11-19' })
+      vi.setSystemTime(new Date('2026-11-20T00:00:00Z'))
+      expect(await (await request('GET', '/day-policy', undefined, true, 'UTC')).json()).toEqual({ today: '2026-11-20' })
+
+      const missing = await request('GET', '/day-policy')
+      expect(missing.status).toBe(200)
+      expect(await missing.json()).toEqual({ today: '2026-11-20' })
+      const invalid = await request('GET', '/day-policy', undefined, true, '+08:00')
+      expect(invalid.status).toBe(400)
+      expect(await invalid.json()).toEqual({ code: 'invalid-diary-time-zone' })
+
       expect((await request('PUT', `/events/${randomUUID()}`, {
         ...event, startDate: '2027-01-01', endDate: '2027-01-01',
-      })).status).toBe(200)
-
-      vi.setSystemTime(new Date('2026-11-16T08:00:00Z'))
-      expect(await (await request('GET', '/day-policy')).json()).toEqual({ today: '2026-11-16' })
-      expect((await request('PUT', '/days/2026-11-16', fields)).status).toBe(200)
-    } finally { zone.mockRestore() }
+      }, true, 'Asia/Shanghai')).status).toBe(200)
+    } finally { vi.unstubAllEnvs() }
   })
+
+  it('uses the requested zone when selecting recurring Event search targets', async () => {
+    vi.setSystemTime(new Date('2026-11-19T16:01:00Z'))
+    const id = randomUUID()
+    expect((await request('PUT', `/events/${id}`, {
+      ...event,
+      title: '跨时区纪念日',
+      startDate: '2024-11-19', endDate: '2024-11-19',
+      expectedVersion: 0,
+    }, true, 'Asia/Shanghai')).status).toBe(200)
+    const result = await (await request('POST', '/events/search', { query: '跨时区纪念日' }, true, 'Asia/Shanghai')).json()
+    expect(result.items).toMatchObject([{ id, targetDate: '2027-11-19' }])
+
+    const seriesId = randomUUID()
+    expect((await request('PUT', `/task-series/${seriesId}`, {
+      title: '跨时区重复待办', description: '', dueTime: null,
+      recurrence: { frequency: 'weekly', startDate: '2026-11-19', untilDate: null },
+      expectedVersion: 0,
+    }, true, 'Asia/Shanghai')).status).toBe(200)
+    const target = await (await request('GET', `/task-series/${seriesId}/search-target`, undefined, true, 'Asia/Shanghai')).json()
+    expect(target).toMatchObject({ occurrence: { occurrenceDate: '2026-11-26' } })
+    const taskSearch = await (await request('POST', '/tasks/search', { query: '跨时区重复待办' }, true, 'Asia/Shanghai')).json()
+    expect(taskSearch.items).toMatchObject([{ id: seriesId, targetDate: '2026-11-26' }])
+  })
+
+  it('uses UTC for old clients and rejects invalid timezone headers', async () => {
+    vi.setSystemTime(new Date('2026-11-16T07:59:00Z'))
+    const legacy = await request('GET', '/day-policy')
+    expect(legacy.status).toBe(200)
+    expect(await legacy.json()).toEqual({ today: '2026-11-16' })
+    const invalid = await request('PUT', '/days/2026-11-16', { moodId: null, entries: ['不应保存'], expectedVersion: 0 }, true, 'Mars/Olympus')
+    expect(invalid.status).toBe(400)
+    expect(await invalid.json()).toEqual({ code: 'invalid-diary-time-zone' })
+    expect(await (await request('GET', '/days/2026-11-16')).json()).toMatchObject({ day: null, version: 0 })
+  })
+
 
   it('reconciles only the attachment files belonging to the active database', async () => {
     const unrelatedRoot = path.join(tempRoot, 'other-instance')

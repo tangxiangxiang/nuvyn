@@ -40,6 +40,10 @@ const emit = defineEmits<{
   'remove-attachment': [id: string]
   'move-attachment': [id: string, entryId: string | null]
 }>()
+function preventDiaryBackdropClickThrough(event: MouseEvent) {
+  const target = event.composedPath()[0]
+  if (target instanceof Element && target.matches('.n-modal-mask, .n-modal-scroll-content')) event.preventDefault()
+}
 const preferences = useDiaryMoodIconPreferences()
 const picker = ref(false)
 watch(() => [props.show, props.mode, props.date], () => { picker.value = false })
@@ -146,6 +150,7 @@ function selectAttachments(event: Event) {
     :mask-closable="!props.busy && !props.attachmentBusy"
     :close-on-esc="!props.busy && !props.attachmentBusy"
     :auto-focus="false"
+    @mask-click="preventDiaryBackdropClickThrough"
     @update:show="value => !value && emit('close')"
   >
     <NCard
