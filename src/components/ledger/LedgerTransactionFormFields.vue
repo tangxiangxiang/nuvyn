@@ -346,9 +346,15 @@ defineExpose({
 .ledger-transfer-amount-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; margin-top: 12px; }
 .ledger-transfer-amount-grid .ledger-amount-field { margin-top: 0; }
 .ledger-transfer-kind-field { grid-column: 1 / -1; }
-.ledger-transfer-kinds { display: flex; width: 100%; }
-.ledger-transfer-kinds :deep(.n-radio-button) { display: flex; min-width: 0; flex: 1 1 0; justify-content: center; }
-.ledger-transfer-kinds :deep(.n-radio-button__label) { width: 100%; text-align: center; }
+.ledger-transfer-kinds { display: flex; width: 100%; height: auto; box-sizing: border-box; gap: 2px; padding: 3px; border: 1px solid color-mix(in srgb, var(--border) 82%, transparent); border-radius: 9px; background: color-mix(in srgb, var(--bg) 54%, transparent); line-height: normal; white-space: normal; }
+.ledger-transfer-kinds :deep(.n-radio-group__splitor) { display: none; }
+.ledger-transfer-kinds :deep(.n-radio-button) { display: flex; height: 32px; min-width: 0; flex: 1 1 0; align-items: center; justify-content: center; box-sizing: border-box; padding: 0 8px; border: 0; border-radius: 7px; background: transparent; color: var(--text-muted); line-height: 32px; transition: background-color .18s ease, color .18s ease; }
+.ledger-transfer-kinds :deep(.n-radio-button__state-border) { display: none; }
+.ledger-transfer-kinds :deep(.n-radio__label) { width: 100%; text-align: center; }
+.ledger-transfer-kinds :deep(.n-radio-button--checked) { background: color-mix(in srgb, var(--accent) 11%, transparent); color: var(--accent); font-weight: 700; }
+.ledger-transfer-kinds :deep(.n-radio-button:not(.n-radio-button--checked):not(.n-radio-button--disabled):hover) { background: color-mix(in srgb, var(--accent) 6%, transparent); color: var(--text); }
+.ledger-transfer-kinds :deep(.n-radio-button--focus:not(.n-radio-button--disabled)) { outline: none; }
+.ledger-transfer-kinds :deep(.n-radio-button:has(.n-radio-input:focus-visible):not(.n-radio-button--disabled)) { outline: 2px solid var(--accent); outline-offset: 2px; z-index: 2; }
 .ledger-fee-label-row { display: flex; width: 100%; align-items: center; justify-content: space-between; gap: 8px; }
 .ledger-amount-label-row { display: flex; width: 100%; align-items: center; justify-content: space-between; gap: 8px; }
 .ledger-received-amount { color: var(--accent); font-size: .72rem; font-weight: 650; }

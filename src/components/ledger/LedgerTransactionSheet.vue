@@ -74,11 +74,11 @@ const activeCategories = computed(() => store.activeCategories.value)
 const applicableCategories = computed(() => activeCategories.value.filter((category) => category.kind === type.value))
 const accountOptions = computed(() => ledgerAccountSelectOptions(activeAccounts.value))
 const transferFromAccountOptions = computed(() => ledgerAccountSelectOptions(activeAccounts.value, {
-  showBalance: false,
+  showBalance: true,
   allowedNatures: transferKind.value === 'general' ? undefined : ['asset'],
 }))
 const transferToAccountOptions = computed(() => ledgerAccountSelectOptions(activeAccounts.value, {
-  showBalance: false,
+  showBalance: true,
   allowedNatures: transferKind.value === 'repayment' ? ['liability'] : transferKind.value === 'withdrawal' ? ['asset'] : undefined,
 }))
 const categoryOptions = computed(() => {

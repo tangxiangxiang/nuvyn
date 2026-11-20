@@ -97,7 +97,7 @@ function accountOptionsForTransferSide(side: 'from' | 'to'): SelectGroupOption[]
         ? ['liability'] as const
         : ['asset'] as const
   return ledgerAccountSelectOptions(store.activeAccounts.value, {
-    showBalance: false,
+    showBalance: true,
     allowedNatures,
   })
 }
