@@ -227,6 +227,7 @@ defineExpose({
             :id="`${idPrefix}-category`"
             name="categoryId"
             required
+            option-layout="grid"
             :options="categoryOptions"
             :render-label="renderCategoryLabel"
             :placeholder="categoryOptions.length ? '请选择分类' : '暂无可用分类'"

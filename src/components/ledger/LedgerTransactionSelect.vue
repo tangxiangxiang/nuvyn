@@ -14,10 +14,12 @@ const props = withDefaults(defineProps<{
   placeholder: string
   options: Array<SelectOption | SelectGroupOption>
   renderLabel?: OptionRenderer
+  optionLayout?: 'list' | 'grid'
   required?: boolean
   disabled?: boolean
 }>(), {
   renderLabel: undefined,
+  optionLayout: 'list',
   required: false,
   disabled: false,
 })
@@ -80,7 +82,6 @@ function selectOption(option: SelectOption): void {
     size="medium"
     :options="props.options"
     :render-label="props.renderLabel"
-    :node-props="ledgerSelectNodeProps"
     :input-props="{ id: props.id, name: props.name, required: props.required }"
     :aria-label="props.label"
     aria-haspopup="dialog"
@@ -95,6 +96,7 @@ function selectOption(option: SelectOption): void {
   <NModal v-model:show="selectionDialogOpen">
     <section
       class="ledger-option-picker-dialog"
+      :class="{ 'ledger-option-picker-dialog--grid': props.optionLayout === 'grid' }"
       role="dialog"
       aria-modal="true"
       :aria-label="`选择${props.label}`"
@@ -182,6 +184,12 @@ function selectOption(option: SelectOption): void {
 
 .ledger-option-picker-group + .ledger-option-picker-group { margin-top: 10px; }
 .ledger-option-picker-group > .ledger-select-group-label { margin: 0 8px 4px; }
+.ledger-option-picker-dialog--grid .ledger-option-picker-group {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 6px 8px;
+}
+.ledger-option-picker-dialog--grid .ledger-option-picker-group > .ledger-select-group-label { grid-column: 1 / -1; }
 .ledger-option-picker-option {
   display: flex;
   width: 100%;
@@ -199,6 +207,15 @@ function selectOption(option: SelectOption): void {
 }
 .ledger-option-picker-option:hover:not(:disabled) { background: color-mix(in srgb, var(--text) 5%, transparent); }
 .ledger-option-picker-option--selected { border-color: color-mix(in srgb, var(--accent) 22%, transparent); background: color-mix(in srgb, var(--accent) 9%, transparent); }
+.ledger-option-picker-dialog--grid .ledger-option-picker-option {
+  min-height: 48px;
+  box-sizing: border-box;
+  padding-block: 6px;
+  border-color: color-mix(in srgb, var(--border, #8884) 72%, transparent);
+  background: color-mix(in srgb, var(--bg-soft, var(--bg, #fff)) 60%, var(--bg, #fff));
+}
+.ledger-option-picker-dialog--grid .ledger-option-picker-option:hover:not(:disabled) { border-color: color-mix(in srgb, var(--accent) 34%, var(--border, #8884)); background: color-mix(in srgb, var(--accent) 6%, var(--bg, #fff)); }
+.ledger-option-picker-dialog--grid .ledger-option-picker-option--selected { border-color: color-mix(in srgb, var(--accent) 48%, var(--border, #8884)); background: color-mix(in srgb, var(--accent) 10%, var(--bg, #fff)); }
 .ledger-option-picker-option:disabled { cursor: not-allowed; opacity: .5; }
 .ledger-option-picker-option-label { display: flex; min-width: 0; flex: 1 1 auto; align-items: center; }
 .ledger-option-picker-check { flex: 0 0 auto; color: var(--accent); }
