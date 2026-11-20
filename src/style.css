@@ -1505,29 +1505,36 @@ main.container.auth-page-shell {
   position: absolute;
   inset: 0;
   z-index: 30;
-  background: rgb(0 0 0 / 0.32);
+  background: rgb(18 24 38 / 0.24);
+  -webkit-backdrop-filter: blur(2px);
+  backdrop-filter: blur(2px);
 }
 .note-tablet-mode > .workspace-left-navigation,
 .note-tablet-mode > .workspace-right-navigation {
   position: absolute;
-  top: 0;
-  bottom: 0;
+  top: 8px;
+  bottom: max(8px, env(safe-area-inset-bottom));
   z-index: 31;
+  box-sizing: border-box;
   min-width: 0;
   background: var(--vs-bg-1);
-  box-shadow: 0 4px 24px rgb(0 0 0 / 0.24);
+  border: 1px solid color-mix(in srgb, var(--vs-border) 82%, transparent);
+  box-shadow: 0 12px 36px rgb(15 23 42 / 0.18), 0 2px 8px rgb(15 23 42 / 0.1);
   overscroll-behavior: contain;
+  overflow: hidden;
 }
 .note-tablet-mode > .workspace-left-navigation {
-  left: 0;
+  left: 8px;
   display: grid;
   grid-template-columns: 44px minmax(0, 1fr);
-  width: min(380px, 85vw);
+  width: min(360px, calc(100vw - 64px));
+  border-radius: 16px;
 }
 .note-tablet-mode > .workspace-right-navigation {
-  right: 0;
+  right: 8px;
   display: flex;
-  width: min(420px, 85vw);
+  width: min(380px, calc(100vw - 64px));
+  border-radius: 16px;
 }
 .note-tablet-mode .workspace-left-navigation > :not(.activity-bar),
 .note-tablet-mode .workspace-right-navigation > .right-rail {
@@ -1560,11 +1567,16 @@ main.container.auth-page-shell {
    Only the drawer geometry and reading insets shrink for the smaller screen. */
 @media (max-width: 600px) {
   .note-tablet-mode > .workspace-left-navigation {
-    width: min(340px, calc(100vw - 20px));
+    width: min(320px, calc(100vw - 40px));
     grid-template-columns: 40px minmax(0, 1fr);
   }
   .note-tablet-mode > .workspace-right-navigation {
-    width: min(360px, calc(100vw - 20px));
+    width: min(320px, calc(100vw - 40px));
+  }
+  .note-tablet-mode > .workspace-left-navigation,
+  .note-tablet-mode > .workspace-right-navigation {
+    top: 6px;
+    bottom: max(6px, env(safe-area-inset-bottom));
   }
   .note-tablet-mode .activity-bar .ab-btn {
     width: 40px;
