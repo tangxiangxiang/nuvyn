@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it } from 'vitest'
-import { applyMigrations } from '../db.js'
+import { applyMigrations, LATEST_SCHEMA_VERSION } from '../db.js'
 import type { LedgerAccount } from '../ledger/domain.js'
 import type {
   LedgerAccountDto,
@@ -203,7 +203,7 @@ describe('Ledger persistent idempotency replay', () => {
     const projectionsB = createLedgerProjections(repositoryB, { now: () => reopenNow })
 
     expect((reopened.prepare('SELECT version FROM schema_version').get() as { version: number }).version)
-      .toBe(51)
+      .toBe(LATEST_SCHEMA_VERSION)
     expect(serviceB.getSettings()).toMatchObject({
       baseCurrency: 'CNY',
       currencyExponent: 2,

@@ -988,6 +988,7 @@ function onEscape(event: KeyboardEvent) {
 
 watch(() => route?.fullPath, () => {
   navigationSelectedScope.value = null
+  leaveAnalysisScopeChip()
   stopBrandConstellation()
   void nextTick(revealActiveWorkspaceNavigation)
 })
@@ -1080,6 +1081,8 @@ onBeforeUnmount(() => {
             aria-haspopup="menu"
             :aria-expanded="mobileWorkspaceMenuOpen"
             data-testid="mobile-workspace-selector"
+            @mouseenter="isLedger && enterScopeChip('ledger')"
+            @mouseleave="leaveAnalysisScopeChip"
           >
             <span class="mobile-workspace-label">{{ mobileWorkspaceLabel }}</span>
           </NButton>

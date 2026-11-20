@@ -5,16 +5,28 @@ import nodePath from 'node:path'
 import type { Page, APIRequestContext } from '@playwright/test'
 import { expect, test } from './fixtures/auth'
 import { createDoc } from './helpers/edit-program'
+import { ensureVaultLeftDrawerOpen, toggleNotePanel } from './helpers/workspace-navigation'
 
 test.use({ hasTouch: true })
 
-const left = (page: Page) => page.getByTestId('left-panel-toggle')
-const right = (page: Page) => page.locator('.right-rail-toggle')
 const tab = (page: Page, path: string) => page.locator(`[role="tab"][data-tab-id="${path}"]`)
 
 async function ensureLeftDrawerOpen(page: Page) {
-  if (await left(page).getAttribute('aria-pressed') !== 'true') await left(page).tap()
-  await expect(page.locator('.file-tree')).toBeVisible()
+  await ensureVaultLeftDrawerOpen(page)
+}
+
+async function toggleLeftPanel(page: Page) {
+  await toggleNotePanel(page, 'left')
+}
+
+async function toggleRightPanel(page: Page) {
+  await toggleNotePanel(page, 'right')
+}
+
+async function expectPanelOpen(page: Page, side: 'left' | 'right', open: boolean) {
+  const panel = side === 'left' ? page.locator('.file-tree') : page.locator('.right-rail')
+  if (open) await expect(panel).toBeVisible()
+  else await expect(panel).toBeHidden()
 }
 
 async function selectFileTreeDocument(page: Page, path: string) {
@@ -68,26 +80,18 @@ for (const [width, height] of [[320, 740], [390, 844], [430, 932], [600, 900], [
     const f = await seed(request)
     try {
       await read(page, f.paths[0]!)
-      const note = page.locator('.scope-chip').filter({ hasText: '笔记' })
-      await expect(note).toHaveCount(1)
-      await expect(page.locator('.workspace-board-link')).toHaveCount(1)
+      const note = page.getByTestId('mobile-workspace-selector')
       if (width! < 1200) {
+        await expect(note).toBeVisible()
+        await expect(note).toHaveText('笔记')
+        await expect(page.locator('.scope-chip, .workspace-board-link')).toHaveCount(0)
         await expect(page.locator('.vault')).toHaveClass(/note-tablet-mode/)
         await expect(page.locator('.navbar')).toHaveClass(/note-tablet-nav/)
         if (width! > 600) {
-          // Keep tablet navbar labels and chip geometry exactly as before.
           await expect(note).toHaveCSS('height', '28px')
           await expect(page.locator('.navbar .brand-wordmark')).toBeVisible()
-          for (const name of ['笔记', '日程', '账本']) {
-            await expect(page.locator('.navbar .scope-chip-label').filter({ hasText: name })).toBeVisible()
-          }
-          await expect(page.locator('.navbar .workspace-board-link-label')).toBeVisible()
         } else {
-          for (const name of ['笔记', '日程', '账本']) {
-            await expect(page.locator('.navbar .scope-chip-label').filter({ hasText: name })).toBeVisible()
-          }
-          await expect(page.locator('.navbar .workspace-board-link-label')).toBeVisible()
-          await expect(page.locator('.navbar .scope-chip-icon, .navbar .workspace-board-link-icon')).toHaveCount(0)
+          await expect(page.locator('.navbar .brand-wordmark')).toBeHidden()
         }
         // Narrow screens may scroll workspace links, but may not create
         // document-level overflow or displace account/actions.
@@ -97,20 +101,20 @@ for (const [width, height] of [[320, 740], [390, 844], [430, 932], [600, 900], [
         const editorArea = await page.locator('.editor-area').boundingBox()
         const content = await page.locator('.reading-content').boundingBox()
         expect(content?.y).toBe(editorArea?.y)
-        await expect(left(page)).toHaveAttribute('aria-pressed', 'false')
-        await expect(right(page)).toHaveAttribute('aria-pressed', 'false')
+        await expectPanelOpen(page, 'left', false)
+        await expectPanelOpen(page, 'right', false)
         const before = await page.locator('.editor-area').boundingBox()
-        await left(page).tap()
+        await toggleLeftPanel(page)
         await expect(page.locator('.file-tree')).toBeVisible()
         await expect(page.getByTestId('open-workspace-documents')).toHaveCount(0)
         expect((await page.locator('.editor-area').boundingBox())?.width).toBe(before?.width)
-        await right(page).tap()
-        await expect(left(page)).toHaveAttribute('aria-pressed', 'false')
+        await toggleRightPanel(page)
+        await expectPanelOpen(page, 'left', false)
         await expect(page.locator('.right-rail')).toBeVisible()
         expect((await page.locator('.editor-area').boundingBox())?.width).toBe(before?.width)
         await page.getByTestId('note-tablet-backdrop').click({ position: { x: 10, y: 100 } })
-        await expect(right(page)).toHaveAttribute('aria-pressed', 'false')
-        await expect(right(page)).toBeFocused()
+        await expectPanelOpen(page, 'right', false)
+        await expect(page.getByTestId('compact-note-actions')).toBeFocused()
         await noPageOverflow(page)
         expect(await page.locator('.vault').evaluate((el) => el.getBoundingClientRect().bottom <= innerHeight + 1)).toBe(true)
       } else {
@@ -132,7 +136,7 @@ for (const viewport of [{ width: 768, height: 1024 }, { width: 1024, height: 768
       await page.setViewportSize(viewport)
       await expect(page.locator('.vault')).toHaveClass(/note-tablet-mode/)
       await page.screenshot({ path: testInfo.outputPath('reading.png') })
-      await left(page).tap()
+      await toggleLeftPanel(page)
       await page.screenshot({ path: testInfo.outputPath('left-navigation.png') })
       await page.locator('.activity-bar button').nth(1).tap()
       await expect(page.locator('.tag-panel')).toBeVisible()
@@ -140,16 +144,16 @@ for (const viewport of [{ width: 768, height: 1024 }, { width: 1024, height: 768
       await expect(page.locator('.history-panel')).toBeVisible()
       await page.locator('.activity-bar button').first().tap()
       await page.keyboard.press('Escape')
-      await expect(left(page)).toBeFocused()
-      await right(page).tap()
+      await expect(page.getByTestId('compact-note-actions')).toBeFocused()
+      await toggleRightPanel(page)
       await page.screenshot({ path: testInfo.outputPath('right-outline.png') })
       await page.locator('.toc-panel-link').filter({ hasText: 'Destination' }).tap()
-      await expect(right(page)).toHaveAttribute('aria-pressed', 'false')
+      await expectPanelOpen(page, 'right', false)
       await expect(page.locator('.reading-pane #destination')).toBeInViewport()
-      await right(page).tap()
+      await toggleRightPanel(page)
       await expect(page.locator('.toc-panel-link[aria-current="location"]')).toContainText('Destination')
       await page.keyboard.press('Escape')
-      await expect(right(page)).toHaveAttribute('aria-pressed', 'false')
+      await expectPanelOpen(page, 'right', false)
       await page.locator('.reading-pane').evaluate((el) => { el.scrollTop = 0 })
       await page.locator('summary').filter({ hasText: 'Touch details' }).tap()
       await expect(page.locator('details')).toHaveAttribute('open', '')
@@ -161,7 +165,7 @@ for (const viewport of [{ width: 768, height: 1024 }, { width: 1024, height: 768
       await page.getByRole('link', { name: 'Next note', exact: true }).tap()
       await expect(page.locator('.reading-pane #destination')).toBeInViewport()
       await selectFileTreeDocument(page, f.paths[0]!)
-      await expect(left(page)).toHaveAttribute('aria-pressed', 'false')
+      await expectPanelOpen(page, 'left', false)
       await expect(page.locator('.reading-pane h1')).toHaveText('Tablet reading')
       await selectFileTreeDocument(page, f.paths[1]!)
       await expect(page.locator('.reading-pane h1')).toHaveText('Second note')
@@ -172,7 +176,7 @@ for (const viewport of [{ width: 768, height: 1024 }, { width: 1024, height: 768
       if (!await row.isVisible()) await page.locator('[data-tree-key="folder:inbox"] > .row-line').tap()
       await row.locator('.row-line').tap()
       await expect(page.locator('.reading-pane h1')).toHaveText('Tablet reading')
-      await expect(left(page)).toHaveAttribute('aria-pressed', 'false')
+      await expectPanelOpen(page, 'left', false)
       await page.getByTestId('view-toggle').tap()
       await expect(page.locator('.monaco-host')).toBeVisible()
       const editor = await page.locator('.monaco-host').boundingBox()
@@ -182,9 +186,9 @@ for (const viewport of [{ width: 768, height: 1024 }, { width: 1024, height: 768
         const editor = (el as any).__vueParentComponent.setupState.editor
         ;(window as any).__tabletModel = editor.getModel()
       })
-      await left(page).tap()
+      await toggleLeftPanel(page)
       await expect(page.locator('.file-tree .search-input')).toHaveValue(f.paths[0]!.split('/').at(-1)!)
-      await right(page).tap()
+      await toggleRightPanel(page)
       await page.keyboard.press('Escape')
       expect(await page.locator('.monaco-host').evaluate((el) => (el as any).__vueParentComponent.setupState.editor.getModel() === (window as any).__tabletModel)).toBe(true)
       await page.setViewportSize({ width: 1440, height: 900 })
@@ -220,7 +224,7 @@ test('tablet hides the open-documents list while retaining desktop tabs and sear
     await ensureLeftDrawerOpen(page)
     await expect(page.getByTestId('open-workspace-documents')).toHaveCount(0)
     await selectFileTreeDocument(page, paths[0]!)
-    await expect(left(page)).toHaveAttribute('aria-pressed', 'false')
+    await expectPanelOpen(page, 'left', false)
     await expect(page.locator('.reading-pane h1')).toHaveText('Tablet 0')
     await selectFileTreeDocument(page, paths[1]!)
     await expect(page.locator('.reading-pane h1')).toHaveText('Tablet 1')
@@ -229,8 +233,8 @@ test('tablet hides the open-documents list while retaining desktop tabs and sear
     await expect(page.locator('.palette')).toBeVisible()
     await page.keyboard.press('Escape')
     await expect(page.locator('.palette')).toHaveCount(0)
-    await expect(left(page)).toHaveAttribute('aria-pressed', 'true')
-    await left(page).tap()
+    await expectPanelOpen(page, 'left', true)
+    await toggleLeftPanel(page)
     await page.setViewportSize({ width: 1440, height: 900 })
     await expect(page.locator('.editor-tabs-shell')).toHaveCount(1)
     await expect(page.locator('.editor-tabs-shell [data-tab-id]')).toHaveCount(9)
@@ -299,7 +303,7 @@ test('tablet rich reader retains diagrams, authored Flex, includes, snippets, Bo
     await page.locator('#widgets > .nuvyn-fold-toggle').tap()
     await expect(diagram).toBeVisible()
     expect(await diagram.evaluate((el) => el === (window as any).__tabletDiagram)).toBe(true)
-    await right(page).tap()
+    await toggleRightPanel(page)
     await page.locator('.toc-panel-link').filter({ hasText: 'Fourth level' }).tap()
     await expect(page.locator('#fourth-level')).toBeInViewport()
     await noPageOverflow(page)

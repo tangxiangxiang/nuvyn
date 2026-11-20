@@ -342,15 +342,17 @@ describe('Ledger transaction query projections', () => {
     const page = fixture.projections.listTransactions(query({ search: '还款', limit: '1' }))
     expect(page.transactions).toHaveLength(1)
     expect(page.page).toMatchObject({
-      total: 2,
+      total: 1,
       incomeMinor: 0,
       expenseMinor: 500,
       repaymentMinor: 10_000,
     })
 
     const allRows = fixture.projections.listTransactions(query({ search: '还款', limit: '10' }))
-    expect(new Set(allRows.transactions.map((row) => row.id))).toEqual(new Set([repayment.id, interest.id]))
+    expect(allRows.transactions.map((row) => row.id)).toEqual([repayment.id])
+    expect(allRows.transactions[0]).toMatchObject({ bundle: { chargeMinor: 500, totalMinor: 10_500 } })
     expect(allRows.transactions.map((row) => row.id)).not.toContain(unrelatedIncome.id)
+    expect(interest.groupId).toBe(repayment.groupId)
   })
 
   it('searches exact amount magnitudes without numeric substring matches', () => {
@@ -1331,7 +1333,7 @@ describe('Ledger Overview and trend projections', () => {
     })
 
     const page = fixture.projections.listTransactions(query())
-    expect(page.transactions).toHaveLength(2)
+    expect(page.transactions).toHaveLength(1)
     expect(page.transactions.find((row) => row.id === repayment.id)).toMatchObject({
       id: repayment.id,
       type: 'transfer',
@@ -1339,7 +1341,7 @@ describe('Ledger Overview and trend projections', () => {
       groupId: repayment.groupId,
       bundle: { chargeMinor: 300, totalMinor: 5_300 },
     })
-    expect(page.page).toMatchObject({ total: 2, incomeMinor: 0, expenseMinor: 300, repaymentMinor: 5_000 })
+    expect(page.page).toMatchObject({ total: 1, incomeMinor: 0, expenseMinor: 300, repaymentMinor: 5_000 })
 
     const grouped = fixture.projections.listTransactions(query({ groupId: repayment.groupId }))
     expect(grouped.transactions.map((row) => row.type).sort()).toEqual(['expense', 'transfer'])
@@ -1348,37 +1350,36 @@ describe('Ledger Overview and trend projections', () => {
     const feeRows = fixture.projections.listTransactions(query({ categoryId: feeCategory.id }))
     expect(feeRows.transactions).toHaveLength(1)
     expect(feeRows.transactions[0]).toMatchObject({
-      type: 'expense',
-      amountMinor: 300,
-      categoryId: feeCategory.id,
+      type: 'transfer',
+      amountMinor: 5_000,
       groupId: repayment.groupId,
-      payee: `${loan.name}还款利息`,
+      bundle: { chargeMinor: 300, totalMinor: 5_300 },
     })
     expect(feeRows.page.total).toBe(1)
 
     const expenseRows = fixture.projections.listTransactions(query({ type: 'expense' }))
     expect(expenseRows.transactions).toHaveLength(1)
     expect(expenseRows.transactions[0]).toMatchObject({
-      type: 'expense',
-      amountMinor: 300,
-      categoryId: feeCategory.id,
+      type: 'transfer',
+      amountMinor: 5_000,
       groupId: repayment.groupId,
+      bundle: { chargeMinor: 300, totalMinor: 5_300 },
     })
     expect(expenseRows.page.total).toBe(1)
+    expect(expenseRows.page).toMatchObject({ expenseMinor: 300, repaymentMinor: 5_000 })
 
     const accountRows = fixture.projections.listTransactions(query({ accountId: bank.id }))
     expect(accountRows.transactions.map((row) => row.id)).toEqual(expect.arrayContaining([repayment.id]))
-    expect(accountRows.transactions).toHaveLength(2)
-    expect(accountRows.page.total).toBe(2)
+    expect(accountRows.transactions).toHaveLength(1)
+    expect(accountRows.page.total).toBe(1)
 
     const bankDetail = fixture.projections.getAccountTransactions(bank.id, query({ limit: '5' }))
     expect(bankDetail.account.currentBalanceMinor).toBe(4_700)
     const bankDetailBalances = new Map(
       bankDetail.transactionBalances.map((entry) => [entry.transactionId, entry.balanceMinor]),
     )
-    const repaymentFee = bankDetail.transactions.find((row) => row.type === 'expense')
-    expect(bankDetailBalances.get(repayment.id)).toBe(5_000)
-    expect(repaymentFee === undefined ? undefined : bankDetailBalances.get(repaymentFee.id)).toBe(4_700)
+    expect(bankDetail.transactions.map((row) => row.id)).toEqual([repayment.id])
+    expect(bankDetailBalances.get(repayment.id)).toBe(4_700)
 
     const withdrawalDestination = account(fixture, 'grouped-wallet', { type: 'wallet' })
     const withdrawal = transaction(fixture, 'grouped-withdrawal', {
@@ -1400,15 +1401,43 @@ describe('Ledger Overview and trend projections', () => {
     const withdrawalFeeRows = fixture.projections.listTransactions(query({ categoryId: withdrawalFeeCategory.id }))
     expect(withdrawalFeeRows.transactions).toHaveLength(1)
     expect(withdrawalFeeRows.transactions[0]).toMatchObject({
-      type: 'expense',
-      amountMinor: 50,
-      categoryId: withdrawalFeeCategory.id,
+      type: 'transfer',
+      amountMinor: 2_000,
       groupId: withdrawal.groupId,
-      payee: `${bank.name}提现手续费`,
+      bundle: { chargeMinor: 50, totalMinor: 2_050 },
     })
     expect(withdrawalFeeRows.page.total).toBe(1)
     expect(fixture.projections.listTransactions(query({ search: '提现手续费' })).transactions.map((row) => row.id))
-      .toEqual([legacyWithdrawalFee.id])
+      .toEqual([withdrawal.id])
+  })
+
+  it('projects repayment rebates as negative expense while keeping income filters clean', () => {
+    const fixture = freshFixture()
+    const bank = account(fixture, 'rebate-projection-bank', { openingBalanceMinor: 500_000 })
+    const loan = account(fixture, 'rebate-projection-loan', { type: 'loan', nature: 'liability' })
+    const repayment = transaction(fixture, 'rebate-projection-transfer', {
+      type: 'transfer', transferKind: 'repayment', amountMinor: 180_000, feeMinor: -1,
+      fromAccountId: bank.id, toAccountId: loan.id,
+    })
+    const companion = fixture.repository.listTransactionsByGroupId(repayment.groupId!)
+      .find((row) => row.type === 'income')!
+
+    expect(fixture.service.getAccount(bank.id).currentBalanceMinor).toBe(320_001)
+    expect(fixture.service.getAccount(loan.id).currentBalanceMinor).toBe(-180_000)
+    expect(fixture.projections.listTransactions(query()).transactions).toEqual([
+      expect.objectContaining({
+        id: repayment.id,
+        bundle: { chargeMinor: -1, totalMinor: 179_999 },
+      }),
+    ])
+    expect(fixture.projections.listTransactions(query({ type: 'income' })).transactions).toEqual([])
+    expect(fixture.projections.listTransactions(query({ groupId: repayment.groupId })).transactions)
+      .toEqual(expect.arrayContaining([
+        expect.objectContaining({ id: repayment.id, type: 'transfer', amountMinor: 180_000 }),
+        expect.objectContaining({ id: companion.id, type: 'income', amountMinor: 1 }),
+      ]))
+    expect(fixture.projections.getOverview({ scope: 'all', anchorDate: undefined }).cashflow)
+      .toEqual({ incomeMinor: 0, expenseMinor: -1, repaymentMinor: 180_000, balanceMinor: 1 })
   })
 
   it('returns fixed recent five active records and calendar-month trend points', () => {

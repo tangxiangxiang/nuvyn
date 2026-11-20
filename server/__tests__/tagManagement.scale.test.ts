@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import Database from 'better-sqlite3'
 import { performance } from 'node:perf_hooks'
-import { applyMigrations } from '../db'
+import { applyMigrations, LATEST_SCHEMA_VERSION } from '../db'
 import {
   applyTagOperation,
   buildTagOperationPlan,
@@ -73,7 +73,7 @@ describe('Tags scale evidence', { timeout: SCALE_TEST_TIMEOUT_MS }, () => {
       }
       console.info('[tag-undo-migration-perf]', JSON.stringify(evidence))
 
-      expect(legacy.prepare('SELECT version FROM schema_version').get()).toEqual({ version: 51 })
+      expect(legacy.prepare('SELECT version FROM schema_version').get()).toEqual({ version: LATEST_SCHEMA_VERSION })
       expect(legacy.prepare(`
         SELECT document_id, tag_id FROM document_tags ORDER BY document_id, tag_id
       `).all()).toEqual(expectedMemberships)

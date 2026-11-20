@@ -9,6 +9,7 @@ import { createSession } from '../auth/session'
 import { closeAuthTestContext, createAuthenticatedTestContext, jsonRequest, unlockDiaryAccessForTesting, withAuthCookie, withDiaryCapability, type AuthenticatedTestContext } from './helpers/auth'
 import { DiaryTaskCursorError, DiaryTaskValidationError, diaryTaskStore } from '../diaryTasks'
 import * as database from '../db'
+import { LATEST_SCHEMA_VERSION } from '../db'
 import { isTaskOverdue } from '../../shared/diaryTasks'
 import { lunarToSolar } from '../../shared/lunarCalendar'
 
@@ -1267,7 +1268,7 @@ describe('Diary task API', () => {
     })
     expect((await request('GET', `/tasks/${taskId}`)).status).toBe(404)
     expect(db.prepare("SELECT version FROM diary_deleted_records WHERE owner_user_id = ? AND kind = 'event' AND id = ?").get(auth.userId, eventId)).toMatchObject({ version: 2 })
-    expect(db.prepare("SELECT version FROM schema_version").get()).toMatchObject({ version: 51 })
+    expect(db.prepare("SELECT version FROM schema_version").get()).toMatchObject({ version: LATEST_SCHEMA_VERSION })
   })
 
   it('adds the list revision foundation without changing existing Todo ciphertext or version', async () => {
@@ -1286,7 +1287,7 @@ describe('Diary task API', () => {
     expect(after).toEqual(before)
     expect((await (await request('GET', `/tasks/${id}`)).json()).task).toEqual(task)
     expect((await (await request('GET', '/tasks/list')).json()).items).toContainEqual(task)
-    expect(db.prepare('SELECT version FROM schema_version').get()).toMatchObject({ version: 51 })
+    expect(db.prepare('SELECT version FROM schema_version').get()).toMatchObject({ version: LATEST_SCHEMA_VERSION })
     expect((db.prepare('SELECT revision FROM diary_task_list_revisions WHERE owner_user_id = ?').get(auth.userId) as { revision: number }).revision).toBe(0)
   })
 })

@@ -987,7 +987,17 @@ function transactionQueryFilter(
   if (options.includeDeleted !== true) clauses.push('deleted_at IS NULL')
 
   if (options.type === 'expense') {
-    clauses.push("(type = 'expense' OR (type = 'income' AND group_id IS NOT NULL))")
+    clauses.push(`(
+      type = 'expense'
+      OR (type = 'income' AND group_id IS NOT NULL)
+      OR (type = 'transfer' AND group_id IS NOT NULL AND EXISTS (
+        SELECT 1
+        FROM ledger_transactions AS companion
+        WHERE companion.group_id = ledger_transactions.group_id
+          AND companion.type IN ('expense', 'income')
+          AND companion.deleted_at IS NULL
+      ))
+    )`)
   } else if (options.type === 'income') {
     clauses.push("(type = 'income' AND group_id IS NULL)")
   } else if (options.type !== undefined && options.type !== 'all') {
@@ -1005,7 +1015,16 @@ function transactionQueryFilter(
   }
 
   if (options.categoryId !== undefined) {
-    clauses.push('category_id = @categoryId')
+    clauses.push(`(
+      category_id = @categoryId
+      OR (type = 'transfer' AND group_id IS NOT NULL AND EXISTS (
+        SELECT 1
+        FROM ledger_transactions AS companion
+        WHERE companion.group_id = ledger_transactions.group_id
+          AND companion.category_id = @categoryId
+          AND companion.deleted_at IS NULL
+      ))
+    )`)
     params.categoryId = options.categoryId
   }
 
@@ -1053,6 +1072,24 @@ function transactionQueryFilter(
         WHERE ledger_categories.name LIKE @searchPattern ESCAPE '\\' COLLATE NOCASE
           AND ledger_categories.id = category_id
       )
+      OR (type = 'transfer' AND group_id IS NOT NULL AND EXISTS (
+        SELECT 1
+        FROM ledger_transactions AS companion
+        WHERE companion.group_id = ledger_transactions.group_id
+          AND companion.deleted_at IS NULL
+          AND (
+            companion.location LIKE @searchPattern ESCAPE '\\' COLLATE NOCASE
+            OR companion.payee LIKE @searchPattern ESCAPE '\\' COLLATE NOCASE
+            OR companion.note LIKE @searchPattern ESCAPE '\\' COLLATE NOCASE
+            OR EXISTS (
+              SELECT 1
+              FROM ledger_categories AS companion_category
+              WHERE companion_category.name LIKE @searchPattern ESCAPE '\\' COLLATE NOCASE
+                AND companion_category.id = companion.category_id
+            )
+            ${options.searchAmountMinor !== undefined ? 'OR companion.amount_minor = @searchAmountMinor\n            OR companion.amount_minor = -@searchAmountMinor' : ''}
+          )
+      ))
       ${options.searchAmountMinor !== undefined ? 'OR amount_minor = @searchAmountMinor\n      OR amount_minor = -@searchAmountMinor' : ''}
       ${typeSearchClauses.length > 0 ? `OR ${typeSearchClauses.join('\n      OR ')}` : ''}
     )`)

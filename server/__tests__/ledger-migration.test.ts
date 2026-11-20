@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it } from 'vitest'
 import Database from 'better-sqlite3'
-import { applyMigrations } from '../db.js'
+import { applyMigrations, LATEST_SCHEMA_VERSION } from '../db.js'
 import { DEFAULT_LEDGER_CATEGORIES_V2 } from '../ledger/defaultCategories.js'
 
 const databases: Database.Database[] = []
@@ -39,6 +39,7 @@ function insertIncome(
   const values = {
     type: 'income',
     amountMinor: 100,
+    groupId: null,
     accountId,
     fromAccountId: null,
     toAccountId: null,
@@ -56,14 +57,15 @@ function insertIncome(
   }
   db.prepare(`
     INSERT INTO ledger_transactions (
-      id, type, amount_minor, account_id, from_account_id, to_account_id,
+      id, type, group_id, amount_minor, account_id, from_account_id, to_account_id,
       category_id, occurred_at, payee, note,
       adjustment_calculated_balance_minor, adjustment_target_balance_minor,
       deleted_at, version, created_at, updated_at
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `).run(
     id,
     values.type,
+    values.groupId,
     values.amountMinor,
     values.accountId,
     values.fromAccountId,
@@ -79,6 +81,16 @@ function insertIncome(
     values.createdAt,
     values.updatedAt,
   )
+}
+
+function insertGroupedIncome(
+  db: Database.Database,
+  id: string,
+  groupId: string,
+  accountId: string,
+  categoryId: string,
+): void {
+  insertIncome(db, id, accountId, categoryId, { groupId, amountMinor: 1 })
 }
 
 function insertTransfer(
@@ -159,7 +171,7 @@ describe('Ledger 0013 foundation migration', () => {
     const db = freshDb()
     applyMigrations(db)
 
-    expect((db.prepare('SELECT version FROM schema_version').get() as { version: number }).version).toBe(51)
+    expect((db.prepare('SELECT version FROM schema_version').get() as { version: number }).version).toBe(LATEST_SCHEMA_VERSION)
     const tables = (db.prepare(
       "SELECT name FROM sqlite_master WHERE type = 'table' ORDER BY name",
     ).all() as Array<{ name: string }>).map((row) => row.name)
@@ -180,6 +192,74 @@ describe('Ledger 0013 foundation migration', () => {
     expect(tables.some((name) => /ledger_(monthly|balance|summary|cache)/.test(name))).toBe(false)
   })
 
+  it('upgrades v51 repayment bundles to v52 without changing existing data and permits linked rebates', () => {
+    const db = freshDb()
+    applyMigrations(db, 51)
+    insertAccount(db, 'rebate-source')
+    insertAccount(db, 'rebate-liability', 'liability')
+    insertCategory(db, 'rebate-interest-category')
+    insertCategory(db, 'rebate-income-category', 'income')
+    insertTransfer(db, 'legacy-repayment', 'rebate-source', 'rebate-liability', {
+      transferKind: 'repayment',
+      groupId: 'legacy-repayment-group',
+      amountMinor: 180_000,
+    })
+    insertGroupedExpense(
+      db,
+      'legacy-repayment-interest',
+      'legacy-repayment-group',
+      'rebate-source',
+      'rebate-interest-category',
+    )
+    const before = db.prepare(`
+      SELECT id, type, group_id, amount_minor, account_id, from_account_id,
+             to_account_id, category_id, payee, note, deleted_at, version,
+             created_at, updated_at
+      FROM ledger_transactions
+      ORDER BY id
+    `).all()
+
+    applyMigrations(db)
+
+    expect((db.prepare('SELECT version FROM schema_version').get() as { version: number }).version)
+      .toBe(LATEST_SCHEMA_VERSION)
+    expect(db.prepare(`
+      SELECT id, type, group_id, amount_minor, account_id, from_account_id,
+             to_account_id, category_id, payee, note, deleted_at, version,
+             created_at, updated_at
+      FROM ledger_transactions
+      ORDER BY id
+    `).all()).toEqual(before)
+
+    insertGroupedIncome(
+      db,
+      'repayment-rebate',
+      'legacy-repayment-group',
+      'rebate-source',
+      'rebate-income-category',
+    )
+    expect(() => insertGroupedIncome(
+      db,
+      'orphan-rebate',
+      'missing-repayment-group',
+      'rebate-source',
+      'rebate-income-category',
+    )).toThrow(/invalid ledger transaction group fields/)
+
+    const transactionsBeforeRepeat = db.prepare(`
+      SELECT id, type, group_id, amount_minor, account_id, category_id
+      FROM ledger_transactions
+      ORDER BY id
+    `).all()
+    applyMigrations(db)
+    expect(db.prepare(`
+      SELECT id, type, group_id, amount_minor, account_id, category_id
+      FROM ledger_transactions
+      ORDER BY id
+    `).all()).toEqual(transactionsBeforeRepeat)
+    expect(db.pragma('foreign_key_check')).toEqual([])
+  })
+
   it('upgrades a schema through version 12 and is idempotent on repeat application', () => {
     const db = freshDb()
     applyMigrations(db, 12)
@@ -190,7 +270,7 @@ describe('Ledger 0013 foundation migration', () => {
     ).get() as { count: number }).count
     applyMigrations(db)
 
-    expect((db.prepare('SELECT version FROM schema_version').get() as { version: number }).version).toBe(51)
+    expect((db.prepare('SELECT version FROM schema_version').get() as { version: number }).version).toBe(LATEST_SCHEMA_VERSION)
     expect((db.prepare(
       "SELECT COUNT(*) AS count FROM sqlite_master WHERE type = 'table'",
     ).get() as { count: number }).count).toBe(firstTableCount)
@@ -217,7 +297,7 @@ describe('Ledger 0013 foundation migration', () => {
 
     applyMigrations(db)
 
-    expect((db.prepare('SELECT version FROM schema_version').get() as { version: number }).version).toBe(51)
+    expect((db.prepare('SELECT version FROM schema_version').get() as { version: number }).version).toBe(LATEST_SCHEMA_VERSION)
     expect(db.prepare(`
       SELECT id, type, amount_minor, account_id, category_id, payee,
              occurred_at, note, deleted_at, version, created_at, updated_at

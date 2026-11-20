@@ -2326,7 +2326,10 @@ watch(tabletDrawer, async (drawer, previous) => {
   }
   // Capture the actual NavBar trigger before the panel takes keyboard focus.
   // Safari does not consistently focus a button when it is tapped.
-  document.querySelector<HTMLElement>(drawer === 'left' ? '[data-testid="left-panel-toggle"]' : '.right-rail-toggle')?.focus()
+  const triggerSelector = noteTabletLayout.value
+    ? '[data-testid="compact-note-actions"]'
+    : drawer === 'left' ? '[data-testid="left-panel-toggle"]' : '.right-rail-toggle'
+  document.querySelector<HTMLElement>(triggerSelector)?.focus()
   tabletFocusTrap.activate()
   await nextTick()
   if (tabletDrawer.value !== drawer) return
@@ -2338,17 +2341,19 @@ watch(tabletDrawer, async (drawer, previous) => {
 
 function onTabletDrawerKeydown(event: KeyboardEvent): void {
   if (!tabletDrawer.value || event.defaultPrevented) return
+  if (event.key === 'Escape') {
+    event.preventDefault()
+    event.stopPropagation()
+    closeTabletDrawer()
+    return
+  }
   // Teleported search/confirm/access dialogs own their own keyboard scope.
   const root = tabletDrawer.value === 'left' ? tabletLeftRef.value : tabletRightRef.value
   if (!(event.target instanceof Element)) return
   const insideDrawer = Boolean(root?.contains(event.target))
   const onTrigger = Boolean(event.target.closest('.left-panel-toggle, .right-rail-toggle'))
   if (!insideDrawer && !onTrigger) return
-  if (event.key === 'Escape') {
-    event.preventDefault()
-    event.stopPropagation()
-    closeTabletDrawer()
-  } else if (event.key === 'Tab' && insideDrawer) {
+  if (event.key === 'Tab' && insideDrawer) {
     tabletFocusTrap.onTab(() => root, event)
   }
 }

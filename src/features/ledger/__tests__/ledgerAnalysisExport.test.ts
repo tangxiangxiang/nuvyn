@@ -117,6 +117,39 @@ describe('Ledger analysis data export', () => {
     expect(data.transactions.every(({ deletedAt }) => deletedAt === null)).toBe(true)
   })
 
+  it('exports a repayment rebate as a signed expense adjustment rather than ordinary income', async () => {
+    const rebate = {
+      ...transactionBase,
+      id: 'repayment-rebate',
+      type: 'income' as const,
+      accountId: 'bank',
+      categoryId: 'interest',
+      groupId: 'repayment-group',
+      payee: '还款优惠',
+      amountMinor: 1,
+    }
+    api.listLedgerCategories.mockResolvedValue([
+      category,
+      { ...category, id: 'interest', name: '利息' },
+      { ...category, id: 'salary', name: '工资', kind: 'income' },
+    ])
+    api.listLedgerTransactions.mockResolvedValue({
+      transactions: [rebate],
+      page: { nextCursor: null, total: 1 },
+    })
+
+    const data = await loadLedgerAnalysisExport()
+
+    expect(data.transactions).toEqual([expect.objectContaining({
+      id: 'repayment-rebate',
+      type: 'expense',
+      amountMinor: -1,
+      groupId: 'repayment-group',
+      accountName: '银行账户',
+      categoryName: '利息',
+    })])
+  })
+
   it.each([
     ...activeTransactions,
     { ...transactions[1]!, id: 'ordinary-expense', excludedFromStatistics: false },

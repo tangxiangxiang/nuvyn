@@ -4,6 +4,7 @@ import type { Page } from '@playwright/test'
 import { expect, test } from './fixtures/auth'
 import { createDoc, gotoVaultReady, openDoc } from './helpers/edit-program'
 import { chooseDocumentExport } from './helpers/document-export'
+import { ensureVaultLeftDrawerOpen } from './helpers/workspace-navigation'
 
 async function openMenu(page: Page, path: string): Promise<void> {
   const row = page.locator(`[data-tree-key="file:${path}"]`)
@@ -134,9 +135,7 @@ test('export dialog supports Escape, restores tree focus and fits a mobile viewp
     await gotoVaultReady(page)
     // Open the existing mobile Files drawer; do not change its layout policy.
     const row = page.locator(`[data-tree-key="file:${path}"]`)
-    const toggle = page.getByTestId('left-panel-toggle')
-    await expect(toggle).toBeVisible()
-    if (!await page.locator('.file-tree').isVisible()) await toggle.click()
+    await ensureVaultLeftDrawerOpen(page)
     // The inbox folder starts collapsed on a fresh mobile drawer. openMenu
     // expands its ancestor before waiting for the specific file row.
     await openMenu(page, path)

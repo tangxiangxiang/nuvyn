@@ -1,5 +1,6 @@
 import { expect, test, type APIRequestContext, type Page } from './fixtures/auth'
 import { unlockDiary } from './helpers/diary-life'
+import { selectWorkspace } from './helpers/workspace-navigation'
 
 const RUN_ID = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
 const MOBILE_VIEWPORT = { width: 375, height: 812 }
@@ -91,11 +92,6 @@ async function expectTabletWorkspaceNavigation(page: Page): Promise<void> {
   await page.keyboard.press('Escape')
 }
 
-async function selectMobileWorkspace(page: Page, workspace: string): Promise<void> {
-  await page.getByTestId('mobile-workspace-selector').click()
-  await page.getByRole('menu', { name: WORKSPACE_MENU_LABEL }).getByRole('menuitem', { name: workspace }).click()
-}
-
 test('workspace names stay Chinese across mobile, tablet and desktop', async ({ page }) => {
   const navigation = page.locator('.workspace-navigation')
   for (const width of [320, 390, 430, 600, 601, 768, 1280, 1920]) {
@@ -174,7 +170,7 @@ test('switching to Note does not enlarge the shared tablet header', async ({ pag
     expect(boardHeader).not.toBeNull()
 
     for (const next of ['note', 'ledger', 'note', 'board'] as const) {
-      await selectMobileWorkspace(page, WORKSPACE_NAMES[next])
+      await selectWorkspace(page, next)
       await expect(page).toHaveURL(next === 'board'
         ? /\/board(?:[/?#]|$)/
         : next === 'note'
@@ -308,18 +304,18 @@ test('mobile navigation switches between Note, Board and Ledger', async ({ page 
   await page.goto('/ledger')
   await expectMobileNavigation(page)
 
-  await selectMobileWorkspace(page, WORKSPACE_NAMES.note)
+  await selectWorkspace(page, 'note')
   await expect(page).toHaveURL(/\/vault(?:[/?#]|$)/)
   await expect(page.getByTestId('mobile-workspace-selector')).toHaveText(WORKSPACE_NAMES.note)
   await expectMobileNavigation(page)
 
-  await selectMobileWorkspace(page, WORKSPACE_NAMES.board)
+  await selectWorkspace(page, 'board')
   await expect(page).toHaveURL(/\/board(?:[/?#]|$)/)
   await expect(page.getByTestId('board-home')).toBeVisible()
   await expect(page.getByTestId('mobile-workspace-selector')).toHaveText(WORKSPACE_NAMES.board)
   await expectMobileNavigation(page)
 
-  await selectMobileWorkspace(page, WORKSPACE_NAMES.ledger)
+  await selectWorkspace(page, 'ledger')
   await expect(page).toHaveURL(/\/ledger(?:[/?#]|$)/)
   await expect(page.getByTestId('ledger-page')).toBeVisible()
   await expectMobileNavigation(page)
@@ -336,8 +332,9 @@ test('Diary Calendar matches Note navbar geometry across tablet breakpoints', as
   }
 
   await page.setViewportSize({ width: 768, height: 1024 })
-  await selectMobileWorkspace(page, WORKSPACE_NAMES.diary)
+  await selectWorkspace(page, 'diary')
   await unlockDiary(page)
+  await expect(page).toHaveURL(/\/diary(?:\/|$)/)
   await expect(page.getByTestId('diary-life')).toBeVisible()
   await expect(page.locator('.navbar .brand-wordmark')).toBeVisible()
   await expect(page.getByTestId('mobile-workspace-selector')).toHaveText(WORKSPACE_NAMES.diary)
@@ -360,12 +357,13 @@ test('Diary and Ledger entries remain usable from the mobile navigation', async 
   await page.setViewportSize(MOBILE_VIEWPORT)
   await expectMobileNavigation(page)
 
-  await selectMobileWorkspace(page, WORKSPACE_NAMES.diary)
+  await selectWorkspace(page, 'diary')
   await unlockDiary(page)
+  await expect(page).toHaveURL(/\/diary(?:\/|$)/)
   await expect(page.getByTestId('mobile-workspace-selector')).toHaveText(WORKSPACE_NAMES.diary, { timeout: 15_000 })
   await expect(page.getByTestId('diary-life')).toBeVisible()
 
-  await selectMobileWorkspace(page, WORKSPACE_NAMES.ledger)
+  await selectWorkspace(page, 'ledger')
   await expect(page).toHaveURL(/\/ledger(?:[/?#]|$)/)
   await expect(page.getByTestId('ledger-page')).toBeVisible()
 })

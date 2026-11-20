@@ -4,10 +4,11 @@ import path from 'node:path'
 import type { Page } from '@playwright/test'
 import { expect, test } from './fixtures/auth'
 import { createDoc } from './helpers/edit-program'
+import { ensureVaultLeftDrawerOpen, selectCompactNoteAction, toggleNotePanel } from './helpers/workspace-navigation'
 
 test.use({ hasTouch: true })
 const host = (page: Page) => page.locator('.monaco-host')
-const imageButton = (page: Page) => page.getByTestId('tablet-insert-image')
+const moreActions = (page: Page) => page.getByTestId('compact-note-actions')
 
 async function edit(page: Page, document: string) {
   await page.goto(`/vault/${document}`)
@@ -25,8 +26,7 @@ async function sameModel(page: Page) {
 }
 
 async function openTreeDocument(page: Page, document: string) {
-  const toggle = page.getByTestId('left-panel-toggle')
-  if (await toggle.getAttribute('aria-pressed') !== 'true') await toggle.tap()
+  await ensureVaultLeftDrawerOpen(page)
   const row = page.locator(`[data-tree-key="file:${document}"] > .row-line`)
   if (!await row.isVisible()) await page.locator('[data-tree-key="folder:inbox"] > .row-line').tap()
   await row.tap()
@@ -44,13 +44,13 @@ for (const [width, height] of [[320, 740], [390, 844], [430, 932], [600, 900], [
       const tablet = width! < 1200
       if (!tablet) {
         await expect(page.locator('.vault')).not.toHaveClass(/note-tablet-mode/)
-        await expect(imageButton(page)).toHaveCount(0)
+        await expect(moreActions(page)).toHaveCount(0)
         return
       }
       await edit(page, document)
-      await expect(imageButton(page)).toBeVisible()
+      await expect(moreActions(page)).toBeVisible()
       await expect(page.locator('.editor-tabs-shell')).toHaveCount(0)
-      const box = await imageButton(page).boundingBox()
+      const box = await moreActions(page).boundingBox()
       // Compact Note shares the 36px Workspace navbar on phone and tablet.
       expect(box!.height).toBe(28)
       const navbar = await page.locator('.navbar').boundingBox()
@@ -59,12 +59,12 @@ for (const [width, height] of [[320, 740], [390, 844], [430, 932], [600, 900], [
       await page.locator('.monaco-editor .view-lines').tap({ position: { x: 80, y: 12 } })
       await page.keyboard.insertText('触摸输入 ')
       await expect.poll(async () => (await (await request.get(`/api/posts/${document}`)).json()).raw).toContain('触摸输入')
-      await page.getByTestId('left-panel-toggle').tap()
+      await ensureVaultLeftDrawerOpen(page)
       await expect(page.locator('.file-tree')).toBeVisible()
       await expect(page.getByTestId('open-workspace-documents')).toHaveCount(0)
-      await page.getByTestId('left-panel-toggle').tap()
+      await toggleNotePanel(page, 'left')
       await page.getByTestId('view-toggle').tap()
-      await expect(imageButton(page)).toHaveCount(0)
+      await expect(moreActions(page)).toBeVisible()
       await expect(page.locator('.reading-pane')).toContainText('触摸输入')
       await page.getByTestId('view-toggle').tap()
       expect(await host(page).evaluate((el) => (el as any).__vueParentComponent.setupState.editor.hasTextFocus())).toBe(false)
@@ -97,9 +97,10 @@ test('long editor preserves its model, selection, undo and save state through vi
       await sameModel(page)
       expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true)
     }
-    for (const selector of ['[data-testid="left-panel-toggle"]', '.right-rail-toggle']) {
-      await page.locator(selector).tap()
-      await page.locator(selector).tap()
+    for (const action of ['left-panel', 'right-panel'] as const) {
+      const side = action === 'left-panel' ? 'left' : 'right'
+      await toggleNotePanel(page, side)
+      await toggleNotePanel(page, side)
       await sameModel(page)
       expect(await host(page).evaluate((el) => (el as any).__vueParentComponent.setupState.editor.hasTextFocus())).toBe(false)
     }
@@ -132,13 +133,13 @@ test('touch image entry retains line 20 and cancellation leaves the document unc
   try {
     await edit(page, document)
     await host(page).evaluate((el) => (el as any).__vueParentComponent.setupState.editor.setPosition({ lineNumber: 20, column: 1 }))
-    await imageButton(page).tap()
+    await selectCompactNoteAction(page, 'insert-image')
     const picker = page.locator('.attachment-picker-modal')
     await expect(picker).toBeVisible()
     await page.keyboard.press('Escape')
     await expect(picker).toHaveCount(0)
     expect(await host(page).evaluate((el) => (el as any).__vueParentComponent.setupState.editor.getValue())).toBe(raw)
-    await imageButton(page).tap()
+    await selectCompactNoteAction(page, 'insert-image')
     const chooser = page.waitForEvent('filechooser')
     await picker.getByRole('button', { name: /上传新图片|Upload (?:a )?new image/ }).tap()
     await (await chooser).setFiles({ name: 'tablet.png', mimeType: 'image/png', buffer: Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=', 'base64') })
@@ -171,7 +172,7 @@ test('an image upload cannot insert into a different tablet Note after navigatio
   })
   try {
     await edit(page, a)
-    await imageButton(page).tap()
+    await selectCompactNoteAction(page, 'insert-image')
     const uploadedResponse = page.waitForResponse((response) => new URL(response.url()).pathname === '/api/note/images' && response.request().method() === 'POST')
     const chooser = page.waitForEvent('filechooser')
     await page.locator('.attachment-picker-modal').getByRole('button', { name: /上传新图片|Upload (?:a )?new image/ }).tap()

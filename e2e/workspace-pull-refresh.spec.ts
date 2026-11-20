@@ -1,4 +1,5 @@
 import { expect, test } from './fixtures/auth'
+import { selectWorkspace } from './helpers/workspace-navigation'
 import { deleteBoardIfExists, uniqueBoardTitle, waitForEditorReady } from './helpers/board'
 import { ensureLedgerDashboardFixtures } from './helpers/ledger-live'
 
@@ -129,7 +130,7 @@ test('Ledger and Board block native downward pulls in the navbar and release the
   expect(await pullFromNavbar(12, 4)).toBe(true)
   await expect(page.locator('.page-pull-refresh-indicator')).toHaveCount(0)
 
-  await page.locator('.workspace-board-link').click()
+  await selectWorkspace(page, 'board')
   await expect(page.getByTestId('board-home')).toBeVisible()
   await expect(page.locator('html')).toHaveCSS('overscroll-behavior-y', 'none')
   expect(await pullFromNavbar(0, 8)).toBe(false)

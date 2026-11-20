@@ -2,16 +2,14 @@ import { randomUUID } from 'node:crypto'
 import type { Page, APIRequestContext } from '@playwright/test'
 import { expect, test } from './fixtures/auth'
 import { createDoc, gotoVaultReady } from './helpers/edit-program'
+import { ensureVaultLeftDrawerOpen } from './helpers/workspace-navigation'
 
 const tab = (page: Page, path: string) => page.locator(`[data-tab-id="${path}"]`)
 const noteTabs = (page: Page) => page.locator('.tabs [data-tab-mode]')
 const host = (page: Page) => page.locator('.monaco-host')
 
 async function row(page: Page, path: string) {
-  if (await page.locator('.vault.note-tablet-mode').count()
-    && await page.getByTestId('left-panel-toggle').getAttribute('aria-pressed') !== 'true') {
-    await page.getByTestId('left-panel-toggle').tap()
-  }
+  if (await page.locator('.vault.note-tablet-mode').count()) await ensureVaultLeftDrawerOpen(page)
   const folder = page.locator('[data-tree-key="folder:inbox"]')
   if (!(await page.locator(`[data-tree-key="file:${path}"]`).isVisible())) await folder.locator(':scope > .row-line').click()
   return page.locator(`[data-tree-key="file:${path}"] > .row-line`)
@@ -191,7 +189,7 @@ test.describe('touch preview operations', () => {
       await (await row(page, f.paths.a)).tap()
       await expect(host(page)).toBeVisible()
       await expect(page.locator('.monaco-editor .view-lines')).toContainText('Alpha')
-      await page.getByTestId('left-panel-toggle').tap()
+      await ensureVaultLeftDrawerOpen(page)
       await expect(page.locator('.file-tree')).toBeVisible()
       await expect(page.getByTestId('open-workspace-documents')).toHaveCount(0)
       await (await row(page, f.paths.b)).tap()

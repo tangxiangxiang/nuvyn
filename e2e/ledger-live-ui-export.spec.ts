@@ -4,6 +4,7 @@ import type { LedgerAccountDto, LedgerCategoryDto, LedgerSettingsDto, LedgerTran
 import type { LedgerAnalysisExportDto } from '../src/features/ledger/ledgerAnalysisExport'
 import { expect, test } from './fixtures/auth'
 import { ensureLedgerDashboardFixtures } from './helpers/ledger-live'
+import { selectWorkspace } from './helpers/workspace-navigation'
 
 test.beforeEach(async ({ request }) => {
   await ensureLedgerDashboardFixtures(request)
@@ -15,7 +16,19 @@ async function openDashboard(page: Page): Promise<void> {
 }
 
 async function hoverLedgerNav(page: Page): Promise<void> {
-  await page.locator('.scope-chip').filter({ hasText: '账本' }).hover()
+  // Route changes clear Ledger's hover arm even when the pointer remains over
+  // its selector. Move away first so hover() emits a fresh mouseenter.
+  await page.mouse.move(0, 0)
+  const compactSelector = page.getByTestId('mobile-workspace-selector')
+  if (await compactSelector.isVisible()) await compactSelector.hover()
+  else await page.locator('.scope-chip').filter({ hasText: '账本' }).hover()
+}
+
+async function ledgerNavigationTarget(page: Page) {
+  const compactSelector = page.getByTestId('mobile-workspace-selector')
+  return await compactSelector.isVisible()
+    ? compactSelector
+    : page.locator('.scope-chip').filter({ hasText: '账本' })
 }
 
 test('active Ledger nav hover + E downloads complete active facts without changing UI, even at a narrow fine-pointer width', async ({ page, request }) => {
@@ -61,8 +74,12 @@ test('active Ledger nav hover + E downloads complete active facts without changi
   const eyebrow = page.getByTestId('ledger-dashboard').locator('.ledger-eyebrow')
   await expect(eyebrow).toHaveText('LEDGER')
   await expect(eyebrow.locator('span')).toHaveCount(0)
-  const chip = page.locator('.scope-chip').filter({ hasText: '账本' })
-  await expect(chip).toHaveAttribute('aria-pressed', 'true')
+  const navigationTarget = await ledgerNavigationTarget(page)
+  const compactSelector = page.getByTestId('mobile-workspace-selector')
+  if (await compactSelector.isVisible()) {
+    await expect(navigationTarget).toContainText('账本')
+    await expect(navigationTarget).toHaveAttribute('aria-expanded', 'false')
+  } else await expect(navigationTarget).toHaveAttribute('aria-pressed', 'true')
 
   let downloadCount = 0
   page.on('download', () => { downloadCount += 1 })
@@ -73,11 +90,11 @@ test('active Ledger nav hover + E downloads complete active facts without changi
   expect(downloadCount).toBe(0)
   await hoverLedgerNav(page)
   expect(downloadCount).toBe(0)
-  await chip.evaluate(async (element) => {
+  await navigationTarget.evaluate(async (element) => {
     getComputedStyle(element).color
     await Promise.all(element.getAnimations({ subtree: true }).map((animation) => animation.finished.catch(() => {})))
   })
-  const appearance = await chip.evaluate((element) => {
+  const appearance = await navigationTarget.evaluate((element) => {
     const style = getComputedStyle(element)
     return { className: element.className, title: element.getAttribute('title'), cursor: style.cursor, padding: style.padding, font: style.font, border: style.border, color: style.color }
   })
@@ -107,10 +124,11 @@ test('active Ledger nav hover + E downloads complete active facts without changi
   await page.keyboard.down('e')
   await page.keyboard.up('e')
   expect(downloadCount).toBe(1)
-  expect(await chip.evaluate((element) => {
+  expect(await navigationTarget.evaluate((element) => {
     const style = getComputedStyle(element)
     return { className: element.className, title: element.getAttribute('title'), cursor: style.cursor, padding: style.padding, font: style.font, border: style.border, color: style.color }
   })).toEqual(appearance)
+  if (await compactSelector.isVisible()) await expect(compactSelector).toHaveAttribute('aria-expanded', 'false')
   await expect(eyebrow).toHaveText('LEDGER')
   await expect(page.getByTestId('ledger-record-button')).toBeVisible()
 
@@ -189,9 +207,9 @@ test('leaving Ledger invalidates a pending export even if Ledger is reopened bef
     await hoverLedgerNav(page)
     await page.keyboard.press('e')
     await readStarted
-    await page.locator('.scope-chip').filter({ hasText: '笔记' }).click()
+    await selectWorkspace(page, 'note')
     await expect(page.locator('.vault')).toBeVisible()
-    await page.locator('.scope-chip').filter({ hasText: '账本' }).click()
+    await selectWorkspace(page, 'ledger')
     await expect(page.getByTestId('ledger-dashboard')).toBeVisible()
     release()
     await page.waitForLoadState('networkidle')
@@ -219,7 +237,7 @@ test.describe('touch pointer', () => {
     page.on('request', (request) => {
       if (new URL(request.url()).pathname === '/api/ledger/transactions') transactionReads += 1
     })
-    const target = page.locator('.scope-chip').filter({ hasText: '账本' })
+    const target = page.getByTestId('mobile-workspace-selector')
     await target.dispatchEvent('mouseenter')
     await target.dispatchEvent('touchstart')
     await page.keyboard.press('e')

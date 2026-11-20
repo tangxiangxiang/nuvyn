@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto'
 import type { Page } from '@playwright/test'
 import { expect, test } from './fixtures/auth'
 import { cleanupCreatedPaths, createDoc, gotoVaultReady, interceptHistory, openDoc } from './helpers/edit-program'
+import { ensureVaultLeftDrawerOpen, selectCompactNoteAction, selectWorkspace } from './helpers/workspace-navigation'
 
 type SpeechMock = {
   settingsReads: number
@@ -205,7 +206,7 @@ test('reading selection is scoped to the current article and Note eligibility ex
     await gotoVaultReady(page)
     await openDoc(page, documentPath)
     await page.setViewportSize({ width: 768, height: 1024 })
-    await expect(page.getByTestId('note-speech-menu')).toBeVisible()
+    await expect(page.getByTestId('compact-note-actions')).toBeVisible()
     await page.getByTestId('view-toggle').click()
     const reader = page.locator('.reading-pane .article')
     await expect(reader).toBeVisible()
@@ -221,18 +222,21 @@ test('reading selection is scoped to the current article and Note eligibility ex
     })
     const actions = page.getByTestId('note-reading-selection-actions')
     await expect(actions).toBeVisible()
-    await actions.getByRole('button', { name: /朗读所选内容|Read selection aloud/i }).click()
+    await actions.getByRole('button', { name: /朗读所选内容|Read selection aloud/u }).click()
     await expect.poll(() => mock.syntheses.length).toBe(1)
     expect(mock.syntheses[0]?.text).toBe('Read this visible selection only.')
 
     await page.setViewportSize({ width: 390, height: 844 })
-    await expect(page.getByTestId('note-speech-menu')).toBeVisible()
+    await expect(page.getByTestId('compact-note-actions')).toBeVisible()
     await page.goto('/ledger')
     await expect(page.getByTestId('note-speech-menu')).toHaveCount(0)
+    await expect(page.getByTestId('compact-note-actions')).toHaveCount(0)
     await page.goto('/board')
     await expect(page.getByTestId('note-speech-menu')).toHaveCount(0)
+    await expect(page.getByTestId('compact-note-actions')).toHaveCount(0)
     await page.goto('/vault/diary')
     await expect(page.getByTestId('note-speech-menu')).toHaveCount(0)
+    await expect(page.getByTestId('compact-note-actions')).toHaveCount(0)
   } finally {
     await cleanupCreatedPaths(request, created)
   }
@@ -257,6 +261,10 @@ test('a history comparison does not offer Note speech on a phone', async ({ page
     await expect(page.locator('.history-comparison-pane')).toBeVisible()
     await page.setViewportSize({ width: 390, height: 844 })
     await expect(menu).toHaveCount(0)
+    const compactActions = page.getByTestId('compact-note-actions')
+    await expect(compactActions).toBeVisible()
+    await compactActions.click()
+    await expect(page.getByRole('menuitem', { name: /朗读全文|Read note aloud/i })).toHaveCount(0)
     expect(mock.syntheses).toHaveLength(0)
   } finally {
     await cleanupCreatedPaths(request, created)
@@ -461,17 +469,15 @@ test.describe('phone read aloud', () => {
       const mock = await mockSpeech(page, true, true)
       const created: string[] = []
       const path = `inbox/phone-speech-${randomUUID()}`
-      const menu = page.getByTestId('note-speech-menu')
+      const menu = page.getByTestId('compact-note-actions')
       const player = page.getByTestId('note-speech-player')
       const start = async () => {
-        await menu.tap()
-        await page.locator('.n-dropdown-option').filter({ hasText: /朗读全文|Read note aloud/ }).tap()
+        await selectCompactNoteAction(page, 'read-all')
       }
 
       try {
         await createDoc(request, path, '# Phone Note\n\nFirst paragraph.\n\nSecond paragraph.', created)
         await gotoVaultReady(page)
-        await expect(menu).toHaveCount(0)
         await page.goto(`/vault/${path}`)
         await expect(menu).toBeInViewport({ ratio: 1 })
         await start()
@@ -550,7 +556,7 @@ test.describe('phone read aloud', () => {
     const nextPath = `inbox/phone-next-${randomUUID()}`
     const source = '# Selection\n\nRead this only.\n\nLeave this out.'
     const player = page.getByTestId('note-speech-player')
-    const menu = page.getByTestId('note-speech-menu')
+    const menu = page.getByTestId('compact-note-actions')
     const actions = page.getByTestId('note-reading-selection-actions')
     try {
       await createDoc(request, path, source, created)
@@ -563,13 +569,12 @@ test.describe('phone read aloud', () => {
         editor.setSelection({ startLineNumber: 3, startColumn: 1, endLineNumber: 3, endColumn: 16 })
         editor.focus()
       })
-      await menu.tap()
-      await page.locator('.n-dropdown-option').filter({ hasText: /朗读所选内容|Read selection aloud/ }).tap()
+      await selectCompactNoteAction(page, 'read-selection')
       await expect(player).toContainText(/正在朗读|Reading aloud/)
       expect(mock.syntheses.map(({ text }) => text)).toEqual(['Read this only.'])
       expect(await host.evaluate((element) => (element as any).__vueParentComponent.setupState.editor.getValue())).toBe(source)
 
-      await page.getByTestId('left-panel-toggle').tap()
+      await ensureVaultLeftDrawerOpen(page)
       const nextRow = page.locator(`[data-tree-key="file:${nextPath}"] > .row-line`)
       if (!await nextRow.isVisible()) await page.locator('[data-tree-key="folder:inbox"] > .row-line').tap()
       await nextRow.tap()
@@ -594,7 +599,7 @@ test.describe('phone read aloud', () => {
       await actions.getByRole('button', { name: /朗读所选内容|Read selection aloud/ }).tap()
       await expect(player).toContainText(/正在朗读|Reading aloud/)
       expect(mock.syntheses.map(({ text }) => text)).toEqual(['Read this only.', 'Read this only.'])
-      await page.locator('.scope-chip').filter({ hasText: '账本' }).tap()
+      await selectWorkspace(page, 'ledger')
       await expect(page).toHaveURL(/\/ledger/)
       await expect(player).toHaveCount(0)
       await expect(menu).toHaveCount(0)

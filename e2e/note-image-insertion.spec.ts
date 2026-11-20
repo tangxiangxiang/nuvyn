@@ -5,6 +5,7 @@ import { deflateSync } from 'node:zlib'
 import path from 'node:path'
 import { expect, test } from './fixtures/auth'
 import { createDoc, gotoVaultReady, openDoc } from './helpers/edit-program'
+import { selectCompactNoteAction, toggleNotePanel } from './helpers/workspace-navigation'
 
 function crc32(bytes: Buffer): number {
   let crc = 0xffffffff
@@ -487,12 +488,10 @@ test('renders a Flex image layout on desktop and stacks it on mobile', async ({ 
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true)
 
     await page.setViewportSize({ width: 390, height: 844 })
-    const leftPanelToggle = page.getByTestId('left-panel-toggle')
-    if ((await leftPanelToggle.getAttribute('aria-pressed')) === 'true') await leftPanelToggle.click()
-    const rightRailToggle = page.locator('.right-rail-toggle')
-    if (await rightRailToggle.count()) {
-      if ((await rightRailToggle.getAttribute('aria-pressed')) === 'true') await rightRailToggle.click()
-    }
+    const compactSelector = page.getByTestId('mobile-workspace-selector')
+    await expect(compactSelector).toBeVisible()
+    if (await page.locator('.file-tree').isVisible()) await toggleNotePanel(page, 'left')
+    if (await page.locator('.right-rail').isVisible()) await toggleNotePanel(page, 'right')
     const mobileGeometry = await flexImages.evaluateAll((images) => images.map((image) => {
       const bounds = image.getBoundingClientRect()
       return { x: bounds.x, y: bounds.y, right: bounds.right, width: bounds.width }

@@ -251,8 +251,15 @@ export async function createDoc(
  */
 export async function waitForVaultReady(page: Page) {
   await expect(page.locator('.vault')).toBeVisible({ timeout: VAULT_READY_TIMEOUT_MS })
-  // Tablet Note starts with navigation closed; its toolbar remains available.
-  await expect(page.getByTestId('left-panel-toggle')).toBeVisible({ timeout: VAULT_READY_TIMEOUT_MS })
+  // Compact Note layouts intentionally unmount the tree until the Files drawer
+  // is opened. On those layouts, the workspace selector is the shell's stable
+  // readiness signal; gotoVaultReady additionally waits for the initial data.
+  const compactSelector = page.getByTestId('mobile-workspace-selector')
+  if (await compactSelector.isVisible()) {
+    await expect(compactSelector).toBeVisible({ timeout: VAULT_READY_TIMEOUT_MS })
+    return
+  }
+  await expect(page.locator('.file-tree')).toBeAttached({ timeout: VAULT_READY_TIMEOUT_MS })
 }
 
 /**

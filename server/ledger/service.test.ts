@@ -702,14 +702,28 @@ describe('Ledger Transaction and Adjustment service lifecycle', () => {
     expect(service.getAccount(bank.id).currentBalanceMinor).toBe(4_100)
     expect(service.getAccount(loan.id).currentBalanceMinor).toBe(-5_500)
 
-    const cleared = service.patchTransaction(repayment.id, {
+    const rebatePatched = service.patchTransaction(repayment.id, {
       expectedVersion: patched.version,
+      feeMinor: -1,
+    })
+    expect(rebatePatched).toMatchObject({ amountMinor: 5_500, groupId, version: 3 })
+    const rebateGroup = repository.listTransactionsByGroupId(groupId, true)
+    expect(rebateGroup).toHaveLength(2)
+    expect(rebateGroup).toEqual(expect.arrayContaining([
+      expect.objectContaining({ type: 'income', amountMinor: 1, accountId: bank.id, groupId }),
+      expect.objectContaining({ type: 'transfer', amountMinor: 5_500, groupId }),
+    ]))
+    expect(service.getAccount(bank.id).currentBalanceMinor).toBe(4_501)
+    expect(service.getAccount(loan.id).currentBalanceMinor).toBe(-5_500)
+
+    const cleared = service.patchTransaction(repayment.id, {
+      expectedVersion: rebatePatched.version,
       feeMinor: 0,
     })
     expect(cleared.groupId).toBeUndefined()
-    expect(repository.listTransactionsByGroupId(groupId, true).find((item) => item.type === 'expense')).toMatchObject({
-      deletedAt: expect.any(Number),
-    })
+    expect(repository.listTransactionsByGroupId(groupId, true)).toEqual([
+      expect.objectContaining({ type: 'income', amountMinor: 1, deletedAt: expect.any(Number) }),
+    ])
     expect(service.getAccount(bank.id).currentBalanceMinor).toBe(4_500)
 
     const withdrawal = transactionFromResult(service.createTransaction(transactionRequest({
@@ -756,6 +770,69 @@ describe('Ledger Transaction and Adjustment service lifecycle', () => {
     expect(service.getAccount(wallet.id).currentBalanceMinor).toBe(10_000)
     expect(service.getAccount(replacementSource.id).currentBalanceMinor).toBe(10_000)
     expect(service.getAccount(bank.id).currentBalanceMinor).toBe(4_500)
+  })
+
+  it('records repayment rebates as signed adjustments without changing principal accounting', () => {
+    const { repository, service } = freshService()
+    initialize(service)
+
+    for (const [index, feeMinor] of [0, 2_000, -1, -1_000].entries()) {
+      const principalMinor = 180_000
+      const bank = createAccount(service, `rebate-bank-${index}`, {
+        openingBalanceMinor: 500_000,
+      })
+      const loan = createAccount(service, `rebate-loan-${index}`, {
+        type: 'loan',
+        nature: 'liability',
+      })
+      const idempotencyKey = `repayment-adjustment-${index}`
+      const request = transactionRequest({
+        type: 'transfer',
+        transferKind: 'repayment',
+        amountMinor: principalMinor,
+        feeMinor,
+        fromAccountId: bank.id,
+        toAccountId: loan.id,
+      })
+      const result = service.createTransaction(request, idempotencyKey)
+      const repayment = transactionFromResult(result)
+      const actualDebitMinor = principalMinor + feeMinor
+
+      expect(service.getAccount(bank.id).currentBalanceMinor).toBe(500_000 - actualDebitMinor)
+      expect(service.getAccount(loan.id).currentBalanceMinor).toBe(-principalMinor)
+      if (feeMinor === 0) {
+        expect(repayment.groupId).toBeUndefined()
+      } else {
+        const companion = repository.listTransactionsByGroupId(repayment.groupId!)
+          .find((item) => item.type === (feeMinor < 0 ? 'income' : 'expense'))
+        expect(companion).toMatchObject({
+          amountMinor: Math.abs(feeMinor),
+          accountId: bank.id,
+          groupId: repayment.groupId,
+        })
+      }
+
+      const replay = service.createTransaction(request, idempotencyKey)
+      expect(replay.replayed).toBe(true)
+      expect(repayment.groupId === undefined ? 1 : repository.listTransactionsByGroupId(repayment.groupId).length)
+        .toBe(feeMinor === 0 ? 1 : 2)
+    }
+
+    const source = createAccount(service, 'rebate-invalid-source')
+    const liability = createAccount(service, 'rebate-invalid-liability', { type: 'loan', nature: 'liability' })
+    for (const [transferKind, feeMinor] of [['repayment', -180_000], ['repayment', -180_001], ['general', -1], ['withdrawal', -1]] as const) {
+      expectLedgerError(
+        () => service.createTransaction(transactionRequest({
+          type: 'transfer',
+          transferKind,
+          amountMinor: 180_000,
+          feeMinor,
+          fromAccountId: source.id,
+          toAccountId: liability.id,
+        }), `invalid-repayment-adjustment-${transferKind}-${feeMinor}`),
+        transferKind === 'repayment' ? 'ledger-money-non-positive' : 'ledger-validation-failed',
+      )
+    }
   })
 
   it('keeps statistics exclusion as an idempotent analytics sidecar', () => {
@@ -846,6 +923,32 @@ describe('Ledger Transaction and Adjustment service lifecycle', () => {
       excludedFromStatistics: true,
     })
     expect(repository.isTransactionExcludedFromStatistics(companion.id)).toBe(true)
+
+    const rebate = transactionFromResult(service.createTransaction(transactionRequest({
+      type: 'transfer', transferKind: 'repayment', amountMinor: 300, feeMinor: -1,
+      fromAccountId: asset.id, toAccountId: liability.id,
+    }), 'statistics-exclusion-grouped-rebate'))
+    const rebateCompanion = repository.listTransactionsByGroupId(rebate.groupId!)
+      .find((transaction) => transaction.type === 'income')!
+    expect(service.excludeTransactionFromStatistics(rebateCompanion.id)).toEqual({
+      transactionId: rebateCompanion.id,
+      excludedFromStatistics: true,
+    })
+    expect(service.excludeTransactionFromStatistics(rebateCompanion.id)).toEqual({
+      transactionId: rebateCompanion.id,
+      excludedFromStatistics: true,
+    })
+    expect(service.restoreTransactionToStatistics(rebateCompanion.id)).toEqual({
+      transactionId: rebateCompanion.id,
+      excludedFromStatistics: false,
+    })
+    expectLedgerError(() => service.getTransaction(rebateCompanion.id), 'ledger-not-found')
+
+    service.deleteTransaction(rebate.id, { expectedVersion: rebate.version })
+    expectLedgerError(
+      () => service.excludeTransactionFromStatistics(rebateCompanion.id),
+      'ledger-transaction-deleted',
+    )
 
     service.deleteTransaction(income.id, { expectedVersion: income.version })
     expectLedgerError(

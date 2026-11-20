@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto'
 import Database from 'better-sqlite3'
 import { describe, expect, it } from 'vitest'
-import { applyMigrations } from '../db'
+import { applyMigrations, LATEST_SCHEMA_VERSION } from '../db'
 
 type Fixture = {
   ownerId: number
@@ -71,7 +71,7 @@ describe('remove Diary Event-Todo association migration', () => {
     try {
       applyMigrations(db)
 
-      expect(db.prepare('SELECT version FROM schema_version').get()).toEqual({ version: 51 })
+      expect(db.prepare('SELECT version FROM schema_version').get()).toEqual({ version: LATEST_SCHEMA_VERSION })
       expect(db.prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'diary_task_event_links'").get()).toBeUndefined()
       expect(db.prepare('SELECT id, start_date, encrypted_fields, version FROM diary_events WHERE owner_user_id = ? AND id = ?')
         .get(fixture.ownerId, fixture.eventId)).toEqual({
@@ -93,7 +93,7 @@ describe('remove Diary Event-Todo association migration', () => {
       expect(db.pragma('foreign_key_check')).toEqual([])
 
       applyMigrations(db)
-      expect(db.prepare('SELECT version FROM schema_version').get()).toEqual({ version: 51 })
+      expect(db.prepare('SELECT version FROM schema_version').get()).toEqual({ version: LATEST_SCHEMA_VERSION })
       expect(db.pragma('foreign_key_check')).toEqual([])
     } finally {
       db.close()
@@ -117,13 +117,13 @@ describe('remove Diary Event-Todo association migration', () => {
     }
   })
 
-  it('starts fresh databases at schema 51 and is safe to initialize repeatedly', () => {
+  it('starts fresh databases at the latest schema and is safe to initialize repeatedly', () => {
     const db = new Database(':memory:')
     db.pragma('foreign_keys = ON')
     try {
       applyMigrations(db)
       applyMigrations(db)
-      expect(db.prepare('SELECT version FROM schema_version').get()).toEqual({ version: 51 })
+      expect(db.prepare('SELECT version FROM schema_version').get()).toEqual({ version: LATEST_SCHEMA_VERSION })
       expect(db.prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'diary_task_event_links'").get()).toBeUndefined()
       expect(db.pragma('foreign_key_check')).toEqual([])
     } finally {

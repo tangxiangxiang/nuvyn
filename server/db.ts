@@ -44,6 +44,9 @@ export function getDataDir(): string {
 /** Explicit production wait before SQLite reports an exhausted write lock. */
 export const SQLITE_BUSY_TIMEOUT_MS = 5_000
 
+/** Latest fully applied SQLite schema version. */
+export const LATEST_SCHEMA_VERSION = 52
+
 function ensureDataDir() {
   if (!existsSync(DATA_DIR)) mkdirSync(DATA_DIR, { recursive: true })
 }

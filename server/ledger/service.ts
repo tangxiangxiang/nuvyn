@@ -892,14 +892,21 @@ export function createLedgerService(
 
   function requireStatisticsEligibleTransaction(id: string): LedgerTransaction {
     const transaction = repository.getTransaction(id)
-    if (
-      transaction === null
-      || ((transaction.type === 'expense' || transaction.type === 'income')
-        && transaction.groupId !== undefined)
-    ) {
-      notFound('Ledger Transaction')
-    }
+    if (transaction === null) notFound('Ledger Transaction')
     if (transaction.deletedAt !== null) transactionDeleted()
+
+    if ((transaction.type === 'expense' || transaction.type === 'income') && transaction.groupId !== undefined) {
+      const group = repository.listTransactionsByGroupId(transaction.groupId)
+      const parent = group.find((item): item is TransferTransaction => item.type === 'transfer'
+        && item.groupId === transaction.groupId
+        && (item.transferKind === 'repayment' || item.transferKind === 'withdrawal'))
+      const validCompanion = parent !== undefined
+        && transaction.accountId === parent.fromAccountId
+        && (transaction.type === 'expense'
+          || (transaction.type === 'income' && parent.transferKind === 'repayment'))
+      if (!validCompanion) notFound('Ledger Transaction')
+    }
+
     if (!ledgerTransactionContributesToStatistics(transaction)) {
       throw ledgerValidationError('Transaction does not contribute to Ledger statistics', {
         field: 'transactionId',

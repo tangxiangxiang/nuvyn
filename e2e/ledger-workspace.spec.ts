@@ -1,4 +1,5 @@
 import { expect, test } from './fixtures/auth'
+import { selectWorkspace } from './helpers/workspace-navigation'
 
 test('canonical Ledger renders inside the shared Nuvyn App Shell', async ({ page }) => {
   await page.goto('/ledger')
@@ -36,7 +37,7 @@ test('legacy Bills URLs redirect to the canonical Ledger routes', async ({ page 
 
 test('Ledger scope switches back to the shared Vault body', async ({ page }) => {
   await page.goto('/ledger')
-  await page.locator('.scope-chip').filter({ hasText: '笔记' }).click()
+  await selectWorkspace(page, 'note')
 
   await expect(page).toHaveURL(/\/vault(?:[/?#]|$)/)
   await expect(page.locator('body')).not.toHaveClass(/ledger-mode/)
@@ -60,9 +61,10 @@ test('shared workspace navbar keeps the workspace navigation at phone width', as
   await page.setViewportSize({ width: 320, height: 700 })
 
   await expect(page.locator('.workspace-board-link')).toHaveCount(0)
-  await expect(page.locator('.scope-chip').filter({ hasText: '笔记' })).toHaveCount(1)
-  await expect(page.locator('.scope-chip').filter({ hasText: '日程' })).toHaveCount(1)
-  await expect(page.locator('.scope-chip').filter({ hasText: '账本' })).toHaveCount(1)
+  await expect(page.locator('.scope-chip')).toHaveCount(0)
+  await expect(page.getByTestId('mobile-workspace-selector')).toHaveText('笔记')
+  await selectWorkspace(page, 'ledger')
+  await expect(page.getByTestId('mobile-workspace-selector')).toHaveText('账本')
 
   const metrics = await page.evaluate(() => {
     const navbar = document.querySelector<HTMLElement>('.navbar')

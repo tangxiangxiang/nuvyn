@@ -69,7 +69,9 @@ describe('NavBar hidden Ledger analysis gesture', () => {
         },
       },
     })
-    const chip = wrapper.findAll('.scope-chip').find((item) => item.text().includes('账本'))!
+    const chip = mobileWidth
+      ? wrapper.get('[data-testid="mobile-workspace-selector"]')
+      : wrapper.findAll('.scope-chip').find((item) => item.text().includes('账本'))!
     const otherChip = wrapper.findAll('.scope-chip').find((item) => item.text().includes('日程'))!
     return { command, otherCommand, chip, otherChip, router, calendarVisible, commandRef }
   }
@@ -141,6 +143,7 @@ describe('NavBar hidden Ledger analysis gesture', () => {
     await chip.trigger('mouseenter')
     key()
     expect(command).toHaveBeenCalledOnce()
+    expect(chip.attributes('aria-expanded')).toBe('false')
     await flushPromises()
     finePointer = false
     key()
