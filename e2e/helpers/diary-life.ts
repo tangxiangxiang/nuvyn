@@ -48,7 +48,7 @@ export async function openEmptyDiaryDay(page: Page, cell: Locator, open = () => 
         selected: cell?.getAttribute('aria-pressed') ?? null,
         dayDialog: Boolean(document.querySelector('[data-testid="diary-day-dialog"]')),
         editor: Boolean(document.querySelector('[data-testid="diary-bullet-editor"]')),
-        viewMode: document.querySelector<HTMLElement>('[data-testid="diary-view-toggle"]')?.getAttribute('aria-label') ?? null,
+        viewMode: document.querySelector<HTMLElement>('.diary-view-toggle[aria-pressed="true"]')?.getAttribute('aria-label') ?? null,
       }
     }, date)
     throw new Error(`Failed to open Diary day ${date} (${path}); page state: ${JSON.stringify(state)}; matching requests: ${observed.join(', ') || 'none'}; cause: ${(error as Error).message}`)
