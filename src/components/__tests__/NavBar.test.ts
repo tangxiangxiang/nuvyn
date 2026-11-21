@@ -10,7 +10,7 @@ import { useTheme } from '../../composables/useTheme'
 import { useScopeFilter } from '../../composables/vault/useScopeFilter'
 import { __resetVaultLayoutState } from '../../composables/vault/useVaultLayout'
 import { AppShellContextKey } from '../../composables/appShellContext'
-import { CalendarEvent, MoodSmile } from '@vicons/tabler'
+import { CalendarEvent, ListCheck, MoodSmile } from '@vicons/tabler'
 
 function installWorkspaceCompactMediaQuery(initialMatches: boolean) {
   const originalDescriptor = Object.getOwnPropertyDescriptor(window, 'matchMedia')
@@ -259,7 +259,7 @@ describe('NavBar — scope chips', () => {
   it('shows Diary controls after unlocking and offers locking from the account menu', async () => {
     const appShell = {
       settingsRequestTick: ref(0),
-      diaryViewMode: ref<'diary' | 'events'>('diary'),
+      diaryViewMode: ref<'diary' | 'events' | 'tasks'>('diary'),
       diaryViewToggleCommand: ref(vi.fn()),
     }
     const wrapper = mount(NavBar, {
@@ -267,12 +267,12 @@ describe('NavBar — scope chips', () => {
       global: { provide: { [AppShellContextKey as symbol]: appShell }, stubs: { transition: false } },
     })
 
-    expect(wrapper.find('[data-testid="diary-view-toggle"]').exists()).toBe(false)
+    expect(wrapper.find('[data-testid="diary-view-mode-diary"]').exists()).toBe(false)
     expect(wrapper.find('[data-testid="diary-event-list-toggle"]').exists()).toBe(false)
 
     await wrapper.setProps({ diaryUnlocked: true })
 
-    expect(wrapper.find('[data-testid="diary-view-toggle"]').exists()).toBe(true)
+    expect(wrapper.findAll('.diary-view-toggle')).toHaveLength(3)
     expect(wrapper.find('[data-testid="diary-event-list-toggle"]').exists()).toBe(false)
 
     await wrapper.get('[data-testid="account-button"]').trigger('click')
@@ -282,29 +282,43 @@ describe('NavBar — scope chips', () => {
     wrapper.unmount()
   })
 
-  it('shows the icon for the target Diary view and preserves the action label', async () => {
-    const diaryViewMode = ref<'diary' | 'events'>('diary')
-    const diaryViewToggleCommand = vi.fn()
+  it('shows three independent Diary view buttons and selects the requested mode', async () => {
+    const diaryViewMode = ref<'diary' | 'events' | 'tasks'>('diary')
+    const selectView = vi.fn()
     const appShell = {
       settingsRequestTick: ref(0),
       diaryViewMode,
-      diaryViewToggleCommand: ref(diaryViewToggleCommand),
+      diaryViewToggleCommand: ref(selectView),
     }
     const wrapper = mount(NavBar, {
       props: { workspaceKind: 'diary', diaryUnlocked: true },
       global: { provide: { [AppShellContextKey as symbol]: appShell }, stubs: { transition: false } },
     })
-    const toggle = wrapper.get('[data-testid="diary-view-toggle"]')
+    const diary = wrapper.get('[data-testid="diary-view-mode-diary"]')
+    const events = wrapper.get('[data-testid="diary-view-mode-events"]')
+    const tasks = wrapper.get('[data-testid="diary-view-mode-tasks"]')
+    expect(wrapper.findAll('.diary-view-toggle')).toHaveLength(3)
+    expect(wrapper.findComponent(MoodSmile).exists()).toBe(true)
     expect(wrapper.findComponent(CalendarEvent).exists()).toBe(true)
-    expect(toggle.attributes('aria-label')).toBe('切换到日程视图')
-    expect(wrapper.find('[data-testid="diary-event-list-toggle"]').exists()).toBe(false)
-    await toggle.trigger('click')
-    expect(diaryViewToggleCommand).toHaveBeenCalledOnce()
+    expect(wrapper.findComponent(ListCheck).exists()).toBe(true)
+    expect(diary.attributes('aria-label')).toBe('日记视图')
+    expect(events.attributes('aria-label')).toBe('事件视图')
+    expect(tasks.attributes('aria-label')).toBe('待办视图')
+    expect(diary.attributes('aria-pressed')).toBe('true')
+    expect(events.attributes('aria-pressed')).toBe('false')
 
+    await events.trigger('click')
+    expect(selectView).toHaveBeenCalledWith('events')
     diaryViewMode.value = 'events'
     await nextTick()
-    expect(wrapper.findComponent(MoodSmile).exists()).toBe(true)
-    expect(toggle.attributes('aria-label')).toBe('切换到日记视图')
+    expect(diary.attributes('aria-pressed')).toBe('false')
+    expect(events.attributes('aria-pressed')).toBe('true')
+
+    await tasks.trigger('click')
+    expect(selectView).toHaveBeenLastCalledWith('tasks')
+    diaryViewMode.value = 'tasks'
+    await nextTick()
+    expect(tasks.attributes('aria-pressed')).toBe('true')
     wrapper.unmount()
   })
 
