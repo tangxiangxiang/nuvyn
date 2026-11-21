@@ -267,6 +267,11 @@ describe('Ledger transaction creation sheet', () => {
     expect((amountInput.element as HTMLInputElement).value).toBe('20-')
     await amountInput.setValue('20-5.28')
     expect(sheet.get('[data-testid="ledger-amount-expression-preview"]').text()).toContain('¥14.72')
+    await amountInput.trigger('focusout')
+    await flushPromises()
+    expect((amountInput.element as HTMLInputElement).value).toBe('14.72')
+    expect(sheet.find('.ledger-amount-expression-row').exists()).toBe(true)
+    expect(sheet.find('[aria-label="减法"]').exists()).toBe(false)
   })
 
   it('does not submit an earlier preview when the current expression is incomplete', async () => {

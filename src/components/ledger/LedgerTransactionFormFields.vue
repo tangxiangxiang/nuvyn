@@ -53,6 +53,7 @@ const amountInput = ref<InputInst | null>(null)
 const amountContainer = ref<HTMLElement | null>(null)
 const amountElement = ref<HTMLInputElement | null>(null)
 const amountFocused = ref(false)
+const amountExpressionToolsOpened = ref(false)
 const feeModePopoverOpen = ref(false)
 const idPrefix = props.mode === 'create' ? 'ledger-transaction' : 'ledger-edit-transaction'
 
@@ -148,6 +149,7 @@ function onAmountKeydown(event: KeyboardEvent): void {
 
 function onAmountFocus(event: FocusEvent): void {
   amountFocused.value = true
+  amountExpressionToolsOpened.value = true
   if (event.target instanceof HTMLInputElement) amountElement.value = event.target
 }
 
@@ -214,7 +216,7 @@ defineExpose({
                 @keydown="onAmountKeydown"
               />
             </div>
-            <div v-if="amountExpressionPreview || (amountFocused && amount.trim())" class="ledger-amount-expression-row">
+            <div v-if="amountExpressionPreview || amountExpressionToolsOpened" class="ledger-amount-expression-row">
               <span v-if="amountExpressionPreview" class="ledger-amount-expression-preview" data-testid="ledger-amount-expression-preview" aria-live="polite">
                 计算结果：{{ amountExpressionPreview }}
               </span>
@@ -451,7 +453,7 @@ defineExpose({
 .ledger-money-input > span { color: var(--accent); font-size: .78rem; font-weight: 750; }
 .ledger-money-control { flex: 1; min-width: 0; font-size: .95rem; font-weight: 650; }
 .ledger-money-field-control { display: grid; min-width: 0; gap: 4px; }
-.ledger-amount-expression-row { display: flex; min-height: 20px; align-items: center; justify-content: space-between; gap: 8px; padding: 0 2px; }
+.ledger-amount-expression-row { display: flex; min-height: 21px; align-items: center; justify-content: space-between; gap: 8px; padding: 0 2px; }
 .ledger-amount-expression-preview { min-width: 0; color: var(--text-muted); font-size: .72rem; line-height: 1.35; }
 .ledger-amount-expression-operators { display: flex; flex: 0 0 auto; gap: 4px; }
 .ledger-amount-expression-operators button { width: 25px; height: 21px; padding: 0; border: 1px solid color-mix(in srgb, var(--accent) 22%, var(--border)); border-radius: 6px; background: color-mix(in srgb, var(--bg) 75%, transparent); color: var(--accent); cursor: pointer; font: inherit; font-size: .82rem; line-height: 1; }
