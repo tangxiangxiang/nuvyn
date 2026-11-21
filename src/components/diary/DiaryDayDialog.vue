@@ -237,8 +237,8 @@ function selectAttachments(event: Event) {
 <template>
   <NModal
     :show="props.show"
-    :mask-closable="!props.busy && !props.attachmentBusy"
-    :close-on-esc="!props.busy && !props.attachmentBusy"
+    :mask-closable="!props.busy && !props.attachmentBusy && !picker"
+    :close-on-esc="!props.busy && !props.attachmentBusy && !picker"
     :auto-focus="false"
     @mask-click="preventDiaryBackdropClickThrough"
     @update:show="value => !value && emit('close')"
@@ -288,6 +288,8 @@ function selectAttachments(event: Event) {
                 @clear="updateMood(null)"
                 @close="closeMoodPicker"
                 @layout-change="scheduleMoodPickerPosition"
+                @pointerdown.stop
+                @click.stop
               />
             </Teleport>
           </div>
