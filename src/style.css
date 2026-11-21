@@ -885,13 +885,12 @@ body.brand-constellation-active * {
   flex: 0 0 auto;
   gap: 6px;            /* search and theme toggle sit close together as a unit */
 }
-/* Separate the three Diary view controls without turning them into one
-   continuous pill. Keep their touch targets aligned with the utility icons. */
+/* Give Diary view buttons the same spacing as search, theme and account.
+   The switch is only a semantic wrapper, not an extra visual group. */
 .diary-view-switch {
   display: inline-flex;
   align-items: center;
-  gap: 4px;
-  margin-right: 6px;
+  gap: 6px;
 }
 .diary-view-switch .diary-view-toggle.is-active { color: var(--accent); background: color-mix(in srgb, var(--accent) 10%, transparent); }
 .nav-search,
@@ -1849,7 +1848,6 @@ main.container.auth-page-shell {
   }
   .navbar.is-workspace .diary-view-switch {
     gap: 2px;
-    margin-right: 4px;
   }
 
   .navbar.is-workspace .workspace-navigation {
@@ -1912,7 +1910,7 @@ main.container.auth-page-shell {
   }
 
   .navbar.is-workspace .nav-actions { gap: 0; }
-  .navbar.is-workspace .diary-view-switch { gap: 1px; margin-right: 2px; }
+  .navbar.is-workspace .diary-view-switch { gap: 0; }
 
   .navbar.is-workspace .mobile-workspace-selector {
     padding-left: 5px;
