@@ -262,6 +262,7 @@ test('repairs a legacy undated task from the conditional notice without inferrin
 
   await page.goto('/diary')
   await unlockDiary(page)
+  await page.getByTestId('diary-view-mode-tasks').click()
   const notice = page.getByTestId('diary-undated-task-notice')
   await expect(notice).toContainText('1 条历史待办缺少截止日期')
   await notice.getByRole('button', { name: '补充截止日期' }).click()
@@ -358,27 +359,15 @@ test('starts a new recurring task on its explicit start date and ignores hidden 
   await expect(startCell.locator('.life-task-marker')).toHaveCount(0)
 })
 
-test('lays out an Event, event count and deadline icon within one calendar date on all viewport sizes', async ({ page }) => {
+test('keeps Event and Todo markers visually separate across viewport sizes', async ({ page }) => {
   await page.goto('/diary')
   await unlockDiary(page)
   const date = `${testYear}-11-16`
   const event = (id: string, title: string, type: 'birthday' | 'schedule', isPrimary = false) => ({
-    id,
-    title,
-    description: '',
-    emoji: type === 'birthday' ? '🎂' : '💼',
-    type,
-    startDate: date,
-    endDate: date,
-    startTime: null,
-    endTime: null,
-    allDay: true,
-    recurrence: 'none',
-    showCountdown: false,
-    isPrimary,
-    version: 1,
-    createdAt: 1,
-    updatedAt: 1,
+    id, title, description: '', emoji: type === 'birthday' ? '🎂' : '💼', type,
+    startDate: date, endDate: date, startTime: null, endTime: null, allDay: true,
+    recurrence: 'none', showCountdown: false, isPrimary, version: 1,
+    createdAt: 1, updatedAt: 1,
   })
   await page.route('**/api/diary/life/**', async route => {
     const request = route.request()
@@ -389,54 +378,54 @@ test('lays out an Event, event count and deadline icon within one calendar date 
         event('schedule-1', '日程一', 'schedule'),
         event('schedule-2', '日程二', 'schedule'),
       ], next: null } })
-      return
-    }
-    if (request.method() === 'GET' && pathname === '/api/diary/life/task-occurrences') {
+    } else if (request.method() === 'GET' && pathname === '/api/diary/life/task-occurrences') {
       await route.fulfill({ json: { items: [{
-        id: 'deadline-task',
-        title: '临期待办',
-        description: '',
-        startDate: null,
-        startTime: null,
-        dueDate: date,
-        dueTime: null,
-        completedAt: null,
-        version: 1,
-        createdAt: 1,
-        updatedAt: 1,
+        id: 'deadline-task', title: '临期待办', description: '', startDate: null,
+        startTime: null, dueDate: date, dueTime: null, completedAt: null,
+        version: 1, createdAt: 1, updatedAt: 1,
       }], nextCursor: null } })
-      return
-    }
-    await route.continue()
+    } else await route.continue()
   })
 
-  await page.getByTestId('diary-view-mode-tasks').click()
   const calendar = page.locator('.diary-life-calendar')
   const cell = calendar.locator(`[data-date="${date}"]`)
-  const marker = cell.locator('.life-marker')
-  await expect(marker.locator('.life-event-marker')).toHaveAttribute('src', '/emoji/event-birthday.svg')
-  await expect(marker.locator('.life-task-marker')).toHaveAttribute('src', '/emoji/alarm-clock-animated.png')
-  await expect(marker.locator('small')).toHaveText('+2')
-
   const originalViewport = page.viewportSize()
+
+  await page.getByTestId('diary-view-mode-events').click()
+  await expect(cell.locator('.life-event-marker')).toHaveAttribute('src', '/emoji/event-birthday.svg')
+  await expect(cell.locator('.life-marker small')).toHaveText('+2')
+  await expect(cell.locator('.life-task-marker')).toHaveCount(0)
+
   for (const width of [320, 390, 430, 768, 1280]) {
     await page.setViewportSize({ width, height: 900 })
     const cellBounds = await cell.boundingBox()
-    const eventBounds = await marker.locator('.life-event-marker').boundingBox()
-    const taskBounds = await marker.locator('.life-task-marker').boundingBox()
+    const eventBounds = await cell.locator('.life-event-marker').boundingBox()
     expect(cellBounds).not.toBeNull()
     expect(eventBounds).not.toBeNull()
-    expect(taskBounds).not.toBeNull()
     expect(eventBounds!.width).toBe(width <= 420 ? 18 : 21)
     expect(eventBounds!.height).toBe(width <= 420 ? 18 : 21)
+    expect(eventBounds!.x).toBeGreaterThanOrEqual(cellBounds!.x)
+    expect(eventBounds!.x + eventBounds!.width).toBeLessThanOrEqual(cellBounds!.x + cellBounds!.width)
+    await expect(cell.locator('.life-task-marker')).toHaveCount(0)
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true)
+  }
+
+  await page.getByTestId('diary-view-mode-tasks').click()
+  await expect(cell.locator('.life-event-marker')).toHaveCount(0)
+  await expect(cell.locator('.life-marker small')).toHaveCount(0)
+  await expect(cell.locator('.life-task-marker')).toHaveAttribute('src', '/emoji/alarm-clock-animated.png')
+
+  for (const width of [320, 390, 430, 768, 1280]) {
+    await page.setViewportSize({ width, height: 900 })
+    const cellBounds = await cell.boundingBox()
+    const taskBounds = await cell.locator('.life-task-marker').boundingBox()
+    expect(cellBounds).not.toBeNull()
+    expect(taskBounds).not.toBeNull()
     expect(taskBounds!.width).toBe(width <= 420 ? 18 : 21)
     expect(taskBounds!.height).toBe(width <= 420 ? 18 : 21)
-    expect(eventBounds!.x).toBeGreaterThanOrEqual(cellBounds!.x)
+    expect(taskBounds!.x).toBeGreaterThanOrEqual(cellBounds!.x)
     expect(taskBounds!.x + taskBounds!.width).toBeLessThanOrEqual(cellBounds!.x + cellBounds!.width)
-    expect(eventBounds!.x + eventBounds!.width).toBeLessThanOrEqual(taskBounds!.x)
-    expect(Math.abs((eventBounds!.y + eventBounds!.height / 2) - (taskBounds!.y + taskBounds!.height / 2))).toBeLessThanOrEqual(1)
-    if (width <= 420) await expect(marker.locator('small')).toBeHidden()
-    else await expect(marker.locator('small')).toBeVisible()
+    await expect(cell.locator('.life-event-marker')).toHaveCount(0)
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true)
   }
   if (originalViewport) await page.setViewportSize(originalViewport)
