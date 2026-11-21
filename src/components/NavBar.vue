@@ -3,6 +3,7 @@ import { computed, h, inject, nextTick, onBeforeUnmount, onMounted, ref, watch, 
 import { NButton, NDropdown, NIcon, type DropdownOption } from 'naive-ui'
 import {
   CalendarEvent,
+  ListCheck,
   Edit,
   Eye,
   LayoutGrid,
@@ -90,6 +91,11 @@ const effectiveWorkspaceKind = computed<WorkspaceKind>(() => {
 const isWorkspace = computed(() => effectiveWorkspaceKind.value !== null)
 const isVault = computed(() => effectiveWorkspaceKind.value === 'vault')
 const isDiary = computed(() => effectiveWorkspaceKind.value === 'diary')
+const diaryViewOptions = [
+  { value: 'diary', label: '日记视图' },
+  { value: 'events', label: '事件视图' },
+  { value: 'tasks', label: '待办视图' },
+] as const
 /* Ledger shares this navbar with Vault, but its body does not own Vault's
    editor/read-mode or right-rail controls. Keep the route fallback for
    legacy isolated mounts that still pass only `isVault`. */
@@ -1126,23 +1132,34 @@ onBeforeUnmount(() => {
       </div>
       <div class="nav-spacer" />
       <div class="nav-actions">
-        <NButton
+        <div
           v-if="isDiary && props.diaryUnlocked && appShell?.diaryViewToggleCommand?.value"
-          class="diary-view-toggle"
-          attr-type="button"
-          size="small"
-          quaternary
-          :bordered="false"
-          :aria-label="appShell.diaryViewMode?.value === 'diary' ? '切换到日程视图' : '切换到日记视图'"
-          :title="appShell.diaryViewMode?.value === 'diary' ? '切换到日程视图' : '切换到日记视图'"
-          data-testid="diary-view-toggle"
-          @click="appShell?.diaryViewToggleCommand?.value?.()"
+          class="diary-view-switch"
+          role="group"
+          aria-label="日程视图"
         >
-          <NIcon aria-hidden="true">
-            <CalendarEvent v-if="appShell.diaryViewMode?.value === 'diary'" />
-            <MoodSmile v-else />
-          </NIcon>
-        </NButton>
+          <NButton
+            v-for="item in diaryViewOptions"
+            :key="item.value"
+            class="diary-view-toggle"
+            :class="{ 'is-active': appShell.diaryViewMode?.value === item.value }"
+            attr-type="button"
+            size="small"
+            quaternary
+            :bordered="false"
+            :aria-pressed="appShell.diaryViewMode?.value === item.value"
+            :aria-label="item.label"
+            :title="item.label"
+            :data-testid="`diary-view-mode-${item.value}`"
+            @click="appShell?.diaryViewToggleCommand?.value?.(item.value)"
+          >
+            <NIcon aria-hidden="true">
+              <MoodSmile v-if="item.value === 'diary'" />
+              <CalendarEvent v-else-if="item.value === 'events'" />
+              <ListCheck v-else />
+            </NIcon>
+          </NButton>
+        </div>
         <NDropdown
           v-if="isVault && !noteTablet && appShell?.noteSpeechReadAllCommand?.value"
           trigger="click"
