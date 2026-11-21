@@ -896,7 +896,17 @@ test('Diary NavBar icon controls share the standard size across viewport widths'
     expect(Math.max(...metrics.map(metric => metric.y)) - Math.min(...metrics.map(metric => metric.y)))
       .toBeLessThan(1)
     const gaps = metrics.slice(1).map((metric, index) => metric.x - metrics[index].x - metrics[index].width)
-    expect(gaps.every(gap => gap >= 0 && gap <= 10)).toBe(true)
+    const expectedInnerGap = width <= 360 ? 1 : width <= 600 ? 2 : 4
+    const expectedUtilityGap = width <= 360 ? 0 : width <= 600 ? 2 : 6
+    // The view modes read as a compact group, with one deliberate break
+    // before the search/theme/account actions.
+    expect(gaps.map(gap => Math.round(gap))).toEqual([
+      expectedInnerGap,
+      expectedInnerGap,
+      width <= 360 ? 2 : width <= 600 ? 6 : 12,
+      expectedUtilityGap,
+      expectedUtilityGap,
+    ])
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true)
   }
 
