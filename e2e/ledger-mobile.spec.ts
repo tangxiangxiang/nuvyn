@@ -260,7 +260,7 @@ test('the create sheet focuses amount only on wider screens', async ({ page, req
   }
 })
 
-test('phone amount expression controls enter a subtraction and save its exact result', async ({ page, request }) => {
+test('phone amount accepts a subtraction expression and saves its exact result', async ({ page, request }) => {
   await ensureLedgerDashboardFixtures(request)
   const existingIds = new Set((await getTransactions(request)).transactions.map((item) => item.id))
   const account = (await getAccounts(request)).find((item) => item.archivedAt === null)
@@ -271,11 +271,10 @@ test('phone amount expression controls enter a subtraction and save its exact re
   await page.getByTestId('ledger-record-button').tap()
   const sheet = page.getByTestId('ledger-transaction-sheet')
   const amount = sheet.locator('input[name="amount"]')
-  await amount.fill('20')
-  await sheet.getByRole('button', { name: '减法' }).tap()
-  await expect(amount).toHaveValue('20-')
-  await amount.pressSequentially('5.28')
+  await amount.fill('20-5.28')
   await expect(amount).toHaveValue('20-5.28')
+  await expect(sheet.getByRole('button', { name: '加法' })).toHaveCount(0)
+  await expect(sheet.getByRole('button', { name: '减法' })).toHaveCount(0)
   await expect(sheet.getByTestId('ledger-amount-expression-preview')).toHaveText('计算结果：¥14.72')
 
   await selectOptionContaining(page, '账户', account!.name)
