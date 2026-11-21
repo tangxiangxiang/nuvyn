@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, nextTick, ref, watch } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { NButton, NCard, NIcon, NModal, NSpin } from 'naive-ui'
 import { ArrowBackUp, MoodSmile, Pencil, X } from '@vicons/tabler'
 import type { DayFields, DiaryDay } from '../../../shared/diaryLife'
@@ -46,7 +46,99 @@ function preventDiaryBackdropClickThrough(event: MouseEvent) {
 }
 const preferences = useDiaryMoodIconPreferences()
 const picker = ref(false)
+const moodTrigger = ref<HTMLButtonElement | null>(null)
+const moodPickerRef = ref<InstanceType<typeof DiaryMoodPicker> | null>(null)
+const moodPopoverHost = ref<HTMLElement | null>(null)
+const moodPickerStyle = ref<Record<string, string>>({ top: '12px', left: '12px' })
+let moodPositionFrame: number | null = null
 watch(() => [props.show, props.mode, props.date], () => { picker.value = false })
+
+function moodPickerElement(): HTMLElement | null {
+  const element = moodPickerRef.value?.$el
+  return element instanceof HTMLElement ? element : null
+}
+
+function positionMoodPicker(): void {
+  if (!picker.value) return
+  const trigger = moodTrigger.value
+  const element = moodPickerElement()
+  if (!trigger || !element) return
+  const triggerRect = trigger.getBoundingClientRect()
+  const pickerRect = element.getBoundingClientRect()
+  const viewportWidth = window.innerWidth || document.documentElement.clientWidth
+  const viewportHeight = window.innerHeight || document.documentElement.clientHeight
+  const inset = 12
+  const gap = 8
+  const width = pickerRect.width || element.offsetWidth
+  const height = pickerRect.height || element.offsetHeight
+  const maxLeft = Math.max(inset, viewportWidth - width - inset)
+  const maxTop = Math.max(inset, viewportHeight - height - inset)
+  const left = Math.min(Math.max(triggerRect.left, inset), maxLeft)
+  const belowTop = triggerRect.bottom + gap
+  const aboveTop = triggerRect.top - height - gap
+  const top = belowTop > maxTop && aboveTop >= inset
+    ? aboveTop
+    : Math.min(Math.max(belowTop, inset), maxTop)
+  moodPickerStyle.value = {
+    left: `${Math.round(left)}px`,
+    top: `${Math.round(top)}px`,
+  }
+}
+
+function scheduleMoodPickerPosition(): void {
+  if (!picker.value) return
+  void nextTick(() => {
+    if (!picker.value) return
+    if (moodPositionFrame !== null) cancelAnimationFrame(moodPositionFrame)
+    moodPositionFrame = requestAnimationFrame(() => {
+      moodPositionFrame = null
+      positionMoodPicker()
+    })
+  })
+}
+
+function openMoodPicker(): void {
+  if (editActionsDisabled.value) return
+  const host = moodTrigger.value?.closest<HTMLElement>('.n-modal-scroll-content')
+  if (!host) return
+  moodPopoverHost.value = host
+  moodPickerStyle.value = { top: '12px', left: '12px' }
+  picker.value = true
+  void nextTick(() => {
+    moodPickerRef.value?.focusInitial()
+    scheduleMoodPickerPosition()
+  })
+}
+
+function onMoodOutsidePointerDown(event: PointerEvent): void {
+  if (!picker.value) return
+  const path = event.composedPath()
+  if (moodTrigger.value && path.includes(moodTrigger.value)) return
+  const element = moodPickerElement()
+  if (element && path.includes(element)) return
+  closeMoodPicker(false)
+}
+
+function onMoodPickerKeydown(event: KeyboardEvent): void {
+  if (!picker.value || event.key !== 'Escape') return
+  event.preventDefault()
+  event.stopPropagation()
+  closeMoodPicker()
+}
+
+onMounted(() => {
+  document.addEventListener('pointerdown', onMoodOutsidePointerDown, true)
+  document.addEventListener('keydown', onMoodPickerKeydown, true)
+  window.addEventListener('resize', scheduleMoodPickerPosition)
+  window.addEventListener('scroll', scheduleMoodPickerPosition, true)
+})
+onBeforeUnmount(() => {
+  document.removeEventListener('pointerdown', onMoodOutsidePointerDown, true)
+  document.removeEventListener('keydown', onMoodPickerKeydown, true)
+  window.removeEventListener('resize', scheduleMoodPickerPosition)
+  window.removeEventListener('scroll', scheduleMoodPickerPosition, true)
+  if (moodPositionFrame !== null) cancelAnimationFrame(moodPositionFrame)
+})
 const bulletEditor = ref<InstanceType<typeof DiaryBulletEditor> | null>(null)
 const attachmentInput = ref<HTMLInputElement | null>(null)
 const entryImageInput = ref<HTMLInputElement | null>(null)
@@ -112,9 +204,16 @@ function imageGroupsForEntry(entryId: string | null) {
     .filter(group => group.length)
 }
 
+function closeMoodPicker(restoreFocus = true): void {
+  if (!picker.value) return
+  picker.value = false
+  moodPopoverHost.value = null
+  if (restoreFocus) void nextTick(() => moodTrigger.value?.focus())
+}
+
 function updateMood(moodId: string | null) {
   emit('update:draft', { ...props.draft, moodId })
-  picker.value = false
+  closeMoodPicker()
 }
 
 function chooseEntryImages(entryId: string) {
@@ -147,8 +246,8 @@ function selectAttachments(event: Event) {
 <template>
   <NModal
     :show="props.show"
-    :mask-closable="!props.busy && !props.attachmentBusy"
-    :close-on-esc="!props.busy && !props.attachmentBusy"
+    :mask-closable="!props.busy && !props.attachmentBusy && !picker"
+    :close-on-esc="!props.busy && !props.attachmentBusy && !picker"
     :auto-focus="false"
     @mask-click="preventDiaryBackdropClickThrough"
     @update:show="value => !value && emit('close')"
@@ -173,17 +272,35 @@ function selectAttachments(event: Event) {
             </span>
             <button
               v-else-if="props.mode === 'edit' && !props.loading && !props.readFailed"
+              ref="moodTrigger"
               type="button"
               class="diary-day-mood diary-day-mood-trigger"
               aria-label="选择心情"
+              aria-haspopup="true"
+              aria-controls="diary-mood-picker"
               :aria-expanded="picker"
               :disabled="editActionsDisabled"
-              @click="picker = !picker"
+              @click="picker ? closeMoodPicker() : openMoodPicker()"
             >
               <img v-if="moodSource" :src="moodSource" :alt="moodLabel">
               <span v-else-if="moodLabel" class="diary-day-mood-label" :title="moodLabel">{{ moodLabel }}</span>
               <MoodSmile v-else aria-hidden="true" />
             </button>
+            <Teleport v-if="picker && moodPopoverHost" :to="moodPopoverHost">
+              <DiaryMoodPicker
+                ref="moodPickerRef"
+                class="life-mood-picker"
+                :style="moodPickerStyle"
+                :current-mood="props.draft.moodId"
+                :busy="editActionsDisabled"
+                @select="updateMood($event)"
+                @clear="updateMood(null)"
+                @close="closeMoodPicker"
+                @layout-change="scheduleMoodPickerPosition"
+                @pointerdown.stop
+                @click.stop
+              />
+            </Teleport>
           </div>
           <div class="diary-day-header-actions">
             <DiaryActionMenu
@@ -206,8 +323,6 @@ function selectAttachments(event: Event) {
       <p v-else-if="props.readFailed" class="diary-day-message" role="alert">读取失败，请关闭后重试。</p>
       <template v-else-if="!props.error || props.mode === 'edit'">
         <div class="diary-day-body" data-testid="diary-day-content">
-          <DiaryMoodPicker v-if="props.mode === 'edit' && picker" class="life-mood-picker" :current-mood="props.draft.moodId" @select="updateMood($event)" @clear="updateMood(null)" @close="picker = false" />
-
           <div class="diary-day-stream" data-testid="diary-attachments">
           <DiaryBulletReader v-if="props.mode === 'read' && props.draft.entries.length" :entries="props.draft.entries" :entry-ids="props.draft.entryIds">
             <template #after-entry="{ entryId }">
@@ -345,7 +460,7 @@ function selectAttachments(event: Event) {
 .diary-day-mood-trigger:hover:not(:disabled) { background: color-mix(in srgb, var(--text) 6%, transparent); }
 .diary-day-mood-trigger:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
 .diary-day-mood-trigger:disabled { cursor: not-allowed; }
-.life-mood-picker { position: static !important; max-width: 100%; }
+.life-mood-picker { max-width: calc(100vw - 24px); }
 </style>
 
 <style>

@@ -145,6 +145,7 @@ function onRadioKeydown(index: number, event: KeyboardEvent): void {
 function onPickerKeydown(event: KeyboardEvent): void {
   if (event.key !== 'Escape') return
   event.preventDefault()
+  event.stopPropagation()
   emit('close')
 }
 
