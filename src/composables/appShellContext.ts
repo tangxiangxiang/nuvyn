@@ -6,6 +6,8 @@ import type { InjectionKey, Ref } from 'vue'
  * uses the live Vault context; the shell only signals that the modal should
  * open.
  */
+export type DiaryCalendarMode = 'diary' | 'events' | 'tasks'
+
 export interface AppShellContext {
   readonly settingsRequestTick: Readonly<Ref<number>>
   /** Open the single App-level search surface from global chrome. */
@@ -21,9 +23,9 @@ export interface AppShellContext {
   /** Switch Note/Diary presentation while preserving each scope's document context. */
   readonly vaultScopeChangeCommand?: Ref<((scope: 'note' | 'diary') => Promise<boolean>) | null>
   /** Diary-owned presentation toggle, exposed to the global workspace chrome. */
-  readonly diaryViewToggleCommand?: Ref<(() => void) | null>
+  readonly diaryViewToggleCommand?: Ref<((mode: DiaryCalendarMode) => void) | null>
   /** Read-only mirror of the Diary view mode used for the toggle affordance. */
-  readonly diaryViewMode?: Ref<'diary' | 'events'>
+  readonly diaryViewMode?: Ref<DiaryCalendarMode>
   /** Vault-owned capability for the decorative brand animation to enter Zen Mode. */
   readonly zenModeBrandEntry?: Ref<{
     canEnter: () => boolean
