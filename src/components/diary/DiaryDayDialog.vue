@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, nextTick, ref, watch } from 'vue'
-import { NButton, NCard, NIcon, NModal, NSpin } from 'naive-ui'
+import { NButton, NCard, NIcon, NModal, NPopover, NSpin } from 'naive-ui'
 import { ArrowBackUp, MoodSmile, Pencil, X } from '@vicons/tabler'
 import type { DayFields, DiaryDay } from '../../../shared/diaryLife'
 import type { DiaryAttachment } from '../../../shared/diaryAttachments'
@@ -46,6 +46,7 @@ function preventDiaryBackdropClickThrough(event: MouseEvent) {
 }
 const preferences = useDiaryMoodIconPreferences()
 const picker = ref(false)
+const moodTrigger = ref<HTMLButtonElement | null>(null)
 watch(() => [props.show, props.mode, props.date], () => { picker.value = false })
 const bulletEditor = ref<InstanceType<typeof DiaryBulletEditor> | null>(null)
 const attachmentInput = ref<HTMLInputElement | null>(null)
@@ -112,9 +113,14 @@ function imageGroupsForEntry(entryId: string | null) {
     .filter(group => group.length)
 }
 
+function closeMoodPicker(): void {
+  picker.value = false
+  void nextTick(() => moodTrigger.value?.focus())
+}
+
 function updateMood(moodId: string | null) {
   emit('update:draft', { ...props.draft, moodId })
-  picker.value = false
+  closeMoodPicker()
 }
 
 function chooseEntryImages(entryId: string) {
@@ -171,19 +177,39 @@ function selectAttachments(event: Event) {
               <img v-if="moodSource" :src="moodSource" :alt="moodLabel">
               <span v-else-if="moodLabel" class="diary-day-mood-label" :title="moodLabel">{{ moodLabel }}</span>
             </span>
-            <button
+            <NPopover
               v-else-if="props.mode === 'edit' && !props.loading && !props.readFailed"
-              type="button"
-              class="diary-day-mood diary-day-mood-trigger"
-              aria-label="选择心情"
-              :aria-expanded="picker"
-              :disabled="editActionsDisabled"
-              @click="picker = !picker"
+              v-model:show="picker"
+              trigger="click"
+              placement="bottom-start"
+              :show-arrow="false"
+              raw
             >
-              <img v-if="moodSource" :src="moodSource" :alt="moodLabel">
-              <span v-else-if="moodLabel" class="diary-day-mood-label" :title="moodLabel">{{ moodLabel }}</span>
-              <MoodSmile v-else aria-hidden="true" />
-            </button>
+              <template #trigger>
+                <button
+                  ref="moodTrigger"
+                  type="button"
+                  class="diary-day-mood diary-day-mood-trigger"
+                  aria-label="选择心情"
+                  aria-haspopup="true"
+                  aria-controls="diary-mood-picker"
+                  :aria-expanded="picker"
+                  :disabled="editActionsDisabled"
+                >
+                  <img v-if="moodSource" :src="moodSource" :alt="moodLabel">
+                  <span v-else-if="moodLabel" class="diary-day-mood-label" :title="moodLabel">{{ moodLabel }}</span>
+                  <MoodSmile v-else aria-hidden="true" />
+                </button>
+              </template>
+              <DiaryMoodPicker
+                class="life-mood-picker"
+                :current-mood="props.draft.moodId"
+                :busy="editActionsDisabled"
+                @select="updateMood($event)"
+                @clear="updateMood(null)"
+                @close="closeMoodPicker"
+              />
+            </NPopover>
           </div>
           <div class="diary-day-header-actions">
             <DiaryActionMenu
@@ -206,8 +232,6 @@ function selectAttachments(event: Event) {
       <p v-else-if="props.readFailed" class="diary-day-message" role="alert">读取失败，请关闭后重试。</p>
       <template v-else-if="!props.error || props.mode === 'edit'">
         <div class="diary-day-body" data-testid="diary-day-content">
-          <DiaryMoodPicker v-if="props.mode === 'edit' && picker" class="life-mood-picker" :current-mood="props.draft.moodId" @select="updateMood($event)" @clear="updateMood(null)" @close="picker = false" />
-
           <div class="diary-day-stream" data-testid="diary-attachments">
           <DiaryBulletReader v-if="props.mode === 'read' && props.draft.entries.length" :entries="props.draft.entries" :entry-ids="props.draft.entryIds">
             <template #after-entry="{ entryId }">
