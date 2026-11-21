@@ -251,10 +251,7 @@ function selectDate(date: string, event: MouseEvent) {
         <span
           v-if="markers[dateFor(year, month, date)]"
           class="life-marker"
-          :class="{
-            'life-marker--with-task': Boolean(todoMarkers[dateFor(year, month, date)]),
-            'life-marker--with-event-task': Boolean(markers[dateFor(year, month, date)]?.emoji && todoMarkers[dateFor(year, month, date)]),
-          }"
+          :class="{ 'life-marker--with-task': Boolean(todoMarkers[dateFor(year, month, date)]) }"
         >
           <img v-if="markers[dateFor(year, month, date)]?.source" :class="{ 'life-event-marker': Boolean(markers[dateFor(year, month, date)]?.emoji) }" :src="markers[dateFor(year, month, date)]?.source" alt="">
           <span v-else-if="markers[dateFor(year, month, date)]?.emoji" class="life-event-marker">{{ markers[dateFor(year, month, date)]?.emoji }}</span>
@@ -571,8 +568,6 @@ function selectDate(date: string, event: MouseEvent) {
 }
 
 @media (max-width: 600px) {
-  /* Two full-size markers use nearly the whole narrow date-cell track. */
-  .life-marker--with-event-task { gap: 0; }
   .diary-life-calendar :deep(.n-calendar-header) { flex-basis: 72px; }
   .diary-life-calendar :deep(.n-calendar-header__title) { grid-template-rows: 48px 24px; }
   .life-month-control { width: 200px; height: 40px; }
