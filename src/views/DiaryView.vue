@@ -5,7 +5,7 @@ import { NButton, NIcon, NModal, NSpin } from 'naive-ui'
 import { Plus, X } from '@vicons/tabler'
 import { Temporal } from '@js-temporal/polyfill'
 import { DiaryAccessContextKey } from '../composables/diary/diaryAccessContext'
-import { AppShellContextKey } from '../composables/appShellContext'
+import { AppShellContextKey, type DiaryCalendarMode } from '../composables/appShellContext'
 import { captureDiarySessionGeneration, isDiarySessionGenerationCurrent, subscribeDiaryTeardown, useDiaryAccessSession } from '../composables/diary/useDiaryAccessSession'
 import { useDiaryMoodIconPreferences } from '../composables/diary/useDiaryMoodIconPreferences'
 import { useAuth } from '../composables/useAuth'
@@ -55,7 +55,7 @@ async function confirm(message: string) {
     if (cancelConfirmation === pending.cancel) cancelConfirmation = undefined
   }
 }
-const mode = ref<'diary' | 'events'>('diary')
+const mode = ref<DiaryCalendarMode>('diary')
 const month = ref(`${localToday().slice(0, 7)}-01`)
 const calendarRevision = ref(0)
 const days = ref<DiaryDaySummary[]>([])
@@ -107,7 +107,7 @@ const undatedTaskCandidate = ref<DiaryTask | null>(null)
 const undatedTaskLoading = ref(false)
 const undatedTaskOpening = ref(false)
 const undatedTaskError = ref('')
-const calendarError = computed(() => mode.value === 'diary' ? diaryCalendarError.value : eventCalendarError.value)
+const calendarError = computed(() => mode.value === 'diary' ? diaryCalendarError.value : mode.value === 'events' ? eventCalendarError.value : calendarTaskError.value)
 const busyTaskIds = ref(new Set<string>())
 const taskFormError = ref('')
 const taskConflictNeedsReload = ref(false)
@@ -183,7 +183,7 @@ function onDiaryVisibilityChange() {
 type CalendarLoadContext = {
   start: string
   end: string
-  mode: 'diary' | 'events'
+  mode: DiaryCalendarMode
   owner: string
   generation: number
   key: string
@@ -218,7 +218,8 @@ const dirty = computed(() => {
 const storageKey = computed(() => auth.user.value ? ownerScopedStorageKey(NUVYN_BROWSER_STORAGE_KEYS.diaryLifeView, auth.user.value) : null)
 watch(storageKey, (key, previousKey) => {
   if (previousKey && key !== previousKey) clearPrivateData()
-  mode.value = key && readStorageKey(key) === 'events' ? 'events' : 'diary'
+  const savedMode = key ? readStorageKey(key) : null
+  mode.value = savedMode === 'events' || savedMode === 'tasks' ? savedMode : 'diary'
 }, { immediate: true, flush: 'sync' })
 watch(mode, value => { if (storageKey.value) writeStorageKey(storageKey.value, value) })
 watch(mode, value => { if (appShell?.diaryViewMode) appShell.diaryViewMode.value = value }, { immediate: true })
@@ -243,15 +244,16 @@ const markers = computed(() => {
       if (d.moodId) result[d.date] = { source: preferences.sourceFor(d.moodId), hasAttachments: d.hasAttachments }
       else if (d.hasEntries || d.hasAttachments) result[d.date] = { hasEntries: d.hasEntries, hasAttachments: d.hasAttachments }
     }
-  } else {
+  } else if (mode.value === 'events') {
     for (let date = range.value.start; date <= range.value.end; date = addDays(date, 1)) {
       const matches = events.value.filter(e => occursOn(e, date)).sort(compareEvents)
-      const todoDayState = todoDayVisualState(calendarTasksByDate.value.get(date) ?? [], today.value)
-      const hasTasks = todoDayState !== 'none'
-      if (matches[0]) result[date] = { source: eventEmojiSource(matches[0].emoji), emoji: matches[0].emoji, count: matches.length, hasTasks, todoDayState }
-      else if (hasTasks) result[date] = { hasTasks: true, todoDayState }
+      if (matches[0]) result[date] = { source: eventEmojiSource(matches[0].emoji), emoji: matches[0].emoji, count: matches.length }
     }
-  }
+  } else {
+    for (let date = range.value.start; date <= range.value.end; date = addDays(date, 1)) {
+      const todoDayState = todoDayVisualState(calendarTasksByDate.value.get(date) ?? [], today.value)
+      if (todoDayState !== 'none') result[date] = { hasTasks: true, todoDayState }
+    }
   return result
 })
 function getCalendarLoadContext(): CalendarLoadContext | null {
@@ -382,7 +384,7 @@ function reloadCalendarEvents(): Promise<void> {
 
 function reloadCalendarTasks(): Promise<void> {
   const context = getCalendarLoadContext()
-  if (!context || context.mode !== 'events') return Promise.resolve()
+  if (!context || context.mode !== 'tasks') return Promise.resolve()
   prepareCalendarContext(context)
   return loadCalendarTasks(context, true)
 }
@@ -393,7 +395,9 @@ function retryCalendarStage(): Promise<void> {
   prepareCalendarContext(context)
   return context.mode === 'diary'
     ? loadCalendarDays(context, true)
-    : loadCalendarEvents(context, true)
+    : context.mode === 'events'
+      ? loadCalendarEvents(context, true)
+      : loadCalendarTasks(context, true)
 }
 
 function load(refresh = false): Promise<void> {
@@ -401,10 +405,7 @@ function load(refresh = false): Promise<void> {
   if (!context) return Promise.resolve()
   prepareCalendarContext(context)
   if (context.mode === 'diary') return loadCalendarDays(context, refresh)
-  return Promise.all([
-    loadCalendarEvents(context, refresh),
-    loadCalendarTasks(context, refresh),
-  ]).then(() => undefined)
+  return context.mode === 'events' ? loadCalendarEvents(context, refresh) : loadCalendarTasks(context, refresh)
 }
 function resetForm() {
   detailRequest?.abort()
@@ -533,7 +534,7 @@ function clearShellCommands() {
   if (appShell?.diaryViewToggleCommand?.value === diaryViewToggleCommand) appShell.diaryViewToggleCommand.value = null
 }
 
-const diaryViewToggleCommand = () => { void toggle() }
+const diaryViewToggleCommand = (target?: DiaryCalendarMode) => { void switchMode(target ?? (mode.value === 'diary' ? 'events' : 'diary')) }
 
 function syncCalendarToDate(date: string) {
   const targetMonth = `${date.slice(0, 7)}-01`
@@ -662,7 +663,7 @@ async function openUndatedTaskRepair() {
     }
     const date = today.value
     const returnTo: TaskReturnContext = { kind: 'day-list', date, taskId: currentTask.id, restoreFocus: false }
-    mode.value = 'events'
+    mode.value = 'tasks'
     syncCalendarToDate(date)
     selected.value = date
     eventSurface.value = { kind: 'day-list', date }
@@ -1036,7 +1037,7 @@ async function open(date: string, options: { skipLeaveCheck?: boolean; searchRes
   detailRequest?.abort()
   const scope = new AbortController(); detailRequest = scope
   selected.value = date
-  eventSurface.value = mode.value === 'events' ? { kind: 'day-list', date } : null
+  eventSurface.value = mode.value !== 'diary' ? { kind: 'day-list', date } : null
   formError.value = ''
   initial.value = 'null'
   serverToday.value = null
@@ -1158,7 +1159,7 @@ async function openDiaryRecordSearchIntent(intent: DiaryEventSearchOpenIntent | 
       if (!current.dueDate) {
         const date = today.value
         resetForm()
-        mode.value = 'events'
+        mode.value = 'tasks'
         syncCalendarToDate(date)
         selected.value = date
         eventSurface.value = { kind: 'day-list', date }
@@ -1181,14 +1182,14 @@ async function openDiaryRecordSearchIntent(intent: DiaryEventSearchOpenIntent | 
     }
 
     resetForm()
-    mode.value = 'events'
+    mode.value = intent.kind === 'event' ? 'events' : 'tasks'
     syncCalendarToDate(targetDate)
     await nextTick()
     if (!isCurrent()) return
     await load()
     if (!isCurrent()) return
 
-    if (calendarTaskError.value || eventCalendarError.value) {
+    if (intent.kind === 'event' ? eventCalendarError.value : calendarTaskError.value) {
       toast.error('加载日程失败，请重试。')
       consumeDiarySearchOpen(intent.id)
       return
@@ -1243,11 +1244,11 @@ async function refreshDayPolicy() {
     // Keep the last known boundary. The server checks every write independently.
   }
 }
-async function toggle() {
-  if (!(await canLeave())) return
+async function switchMode(target: DiaryCalendarMode) {
+  if (mode.value === target || !await canLeave()) return
   await discardPendingAttachments()
   resetForm()
-  mode.value = mode.value === 'diary' ? 'events' : 'diary'
+  mode.value = target
 }
 function createEvent() {
   const surface = eventSurface.value
@@ -1561,14 +1562,14 @@ onBeforeUnmount(() => {
         <div v-if="calendarError" class="diary-life-error" role="alert">{{ calendarError }} <NButton text @click="retryCalendarStage()">重试</NButton></div>
         <DiaryLifeCalendar :markers="markers" :today="today" :selected-date="selected" :month="month" :revision="calendarRevision" @select="open" @month="month = $event" />
       </div>
-      <div v-if="undatedTaskCount > 0" class="diary-undated-task-notice" data-testid="diary-undated-task-notice" role="status">
+      <div v-if="mode === 'tasks' && undatedTaskCount > 0" class="diary-undated-task-notice" data-testid="diary-undated-task-notice" role="status">
         <span>发现 {{ undatedTaskCount }} 条历史待办缺少截止日期，补充后会显示在日历中。</span>
         <span class="diary-undated-task-actions">
           <NButton text type="primary" :disabled="undatedTaskLoading || undatedTaskOpening" @click="openUndatedTaskRepair">补充截止日期</NButton>
           <NButton v-if="undatedTaskError" text @click="refreshUndatedTaskSummary">重试</NButton>
         </span>
       </div>
-      <div v-else-if="undatedTaskError" class="diary-life-error" role="alert">
+      <div v-else-if="mode === 'tasks' && undatedTaskError" class="diary-life-error" role="alert">
         {{ undatedTaskError }} <NButton text @click="refreshUndatedTaskSummary">重试</NButton>
       </div>
       <DiaryDayDialog
