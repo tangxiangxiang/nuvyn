@@ -275,7 +275,8 @@ test('phone amount accepts a subtraction expression and saves its exact result',
   await expect(amount).toHaveValue('20-5.28')
   await expect(sheet.getByRole('button', { name: '加法' })).toHaveCount(0)
   await expect(sheet.getByRole('button', { name: '减法' })).toHaveCount(0)
-  await expect(sheet.getByTestId('ledger-amount-expression-preview')).toHaveText('计算结果：¥14.72')
+  await expect(sheet.locator('.ledger-amount-label-row').getByTestId('ledger-amount-expression-preview')).toHaveText('计算结果：¥14.72')
+  await expect(sheet.locator('.ledger-amount-expression-row')).toHaveCount(0)
 
   await selectOptionContaining(page, '账户', account!.name)
   await selectOptionContaining(page, '分类', '餐饮')
