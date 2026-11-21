@@ -902,6 +902,45 @@ describe('Ledger live transaction history workspace', () => {
     })
   })
 
+  it('evaluates amount expressions when editing an existing transaction', async () => {
+    const wrapper = await mountView()
+    await wrapper.get('[data-testid="ledger-transaction-row-tx-expense"]').trigger('click')
+    await flushPromises()
+    await getDetail().findAll('button').find((button) => button.text() === '编辑交易')!.trigger('click')
+
+    const form = getDetail().get('[data-testid="ledger-transaction-edit-form"]')
+    const amount = form.get('input[name="amount"]')
+    await amount.setValue('20-5.28')
+    expect(form.get('[data-testid="ledger-amount-expression-preview"]').text()).toBe('计算结果：¥14.72')
+    await form.trigger('submit')
+    await flushPromises()
+
+    expect(api.patchLedgerTransaction).toHaveBeenCalledWith('tx-expense', expect.objectContaining({
+      expectedVersion: 3,
+      amountMinor: 1472,
+    }))
+  })
+
+  it('discards an arithmetic draft on confirmed edit cancellation and restores the saved amount', async () => {
+    const wrapper = await mountView()
+    await wrapper.get('[data-testid="ledger-transaction-row-tx-expense"]').trigger('click')
+    await flushPromises()
+    await getDetail().findAll('button').find((button) => button.text() === '编辑交易')!.trigger('click')
+
+    let form = getDetail().get('[data-testid="ledger-transaction-edit-form"]')
+    await form.get('input[name="amount"]').setValue('20-5.28')
+    confirm.mockResolvedValueOnce(true)
+    await form.findAll('button').find((button) => button.text() === '取消')!.trigger('click')
+    await flushPromises()
+
+    expect(confirm).toHaveBeenCalledWith('放弃这笔尚未保存的修改？', '已填写的内容将不会保存。')
+    expect(api.patchLedgerTransaction).not.toHaveBeenCalled()
+    await getDetail().findAll('button').find((button) => button.text() === '编辑交易')!.trigger('click')
+    form = getDetail().get('[data-testid="ledger-transaction-edit-form"]')
+    expect((form.get('input[name="amount"]').element as HTMLInputElement).value).toBe('38.00')
+    expect(form.find('[data-testid="ledger-amount-expression-preview"]').exists()).toBe(false)
+  })
+
   it('shows the stored withdrawal fee payee in the table and detail sheet', async () => {
     setup(
       { transactions: [withdrawalFee, withdrawal], page: { nextCursor: null } },

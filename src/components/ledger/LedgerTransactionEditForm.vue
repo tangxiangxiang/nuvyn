@@ -7,7 +7,7 @@ import type {
   LedgerTransferKind,
 } from '../../../shared/ledgerProtocol'
 import { ledgerErrorMessage } from '../../features/ledger/ledgerErrors'
-import { ledgerDecimalFromMinor, parseLedgerMoney } from '../../features/ledger/money'
+import { evaluateLedgerAmountExpression, ledgerDecimalFromMinor, parseLedgerMoney } from '../../features/ledger/money'
 import { useLedgerStore } from '../../features/ledger/ledgerStore'
 import { instantFromLocalDateTime, localDateTimeInputFromInstant } from '../../features/ledger/time'
 import LedgerTransactionFormFields from './LedgerTransactionFormFields.vue'
@@ -207,13 +207,13 @@ function validateFinancialFields(): {
     error.value = '账本设置尚未加载完成。'
     return null
   }
-  let amountMinor: number
-  try {
-    amountMinor = parseLedgerMoney(amount.value, settings.baseCurrency)
-  } catch {
+  const amountResult = evaluateLedgerAmountExpression(amount.value, settings.baseCurrency)
+  if (amountResult.status !== 'complete') {
     error.value = `请输入有效的${settings.baseCurrency}金额。`
     return null
   }
+  const amountMinor = amountResult.amountMinor
+  if (amountMinor > 0 && /[+-]/.test(amount.value)) amount.value = amountResult.normalized
   if (amountMinor <= 0) {
     error.value = '金额必须大于 0。'
     return null

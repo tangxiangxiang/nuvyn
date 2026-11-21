@@ -11,6 +11,71 @@ export function parseLedgerMoney(value: string, currency: string): number {
   return parseDecimalToMinor(value.trim(), currency)
 }
 
+export type LedgerAmountExpressionResult =
+  | { status: 'complete'; amountMinor: number; normalized: string }
+  | { status: 'incomplete' }
+  | { status: 'invalid' }
+
+/**
+ * Evaluate a simple + / - amount expression without passing through floating
+ * point arithmetic. Each operand is parsed using the currency's minor unit,
+ * and the running total is kept as a BigInt until its safe-number boundary is
+ * checked.
+ */
+export function evaluateLedgerAmountExpression(
+  expression: string,
+  currency: string,
+): LedgerAmountExpressionResult {
+  const value = expression.trim()
+  if (!value) return { status: 'incomplete' }
+  if (/[^\d.+-]/.test(value) || /[+-]{2,}/.test(value) || /^[+-]/.test(value)) {
+    return { status: 'invalid' }
+  }
+  if (/[+-]$/.test(value) || /[+-]\.$/.test(value)) {
+    return { status: 'incomplete' }
+  }
+
+  const parts = value.split(/([+-])/)
+  const operands = parts.filter((_, index) => index % 2 === 0)
+  const operators = parts.filter((_, index) => index % 2 === 1)
+  if (operands.length !== operators.length + 1 || operands.some((operand) => !operand)) {
+    return { status: 'invalid' }
+  }
+
+  let total = 0n
+  try {
+    for (let index = 0; index < operands.length; index += 1) {
+      const operand = operands[index]!
+      if (operand === '.') {
+        if (index === operands.length - 1) return { status: 'incomplete' }
+        return { status: 'invalid' }
+      }
+      if (!/^(?:\d+(?:\.\d*)?|\.\d+)$/.test(operand)) {
+        return { status: 'invalid' }
+      }
+      const normalizedOperand = operand.startsWith('.')
+        ? `0${operand}`
+        : operand.endsWith('.') ? operand.slice(0, -1) : operand
+      const minor = parseLedgerMoney(normalizedOperand, currency)
+      const signedMinor = BigInt(minor)
+      if (index === 0) total = signedMinor
+      else total += operators[index - 1] === '+' ? signedMinor : -signedMinor
+    }
+  } catch {
+    return { status: 'invalid' }
+  }
+
+  if (total > BigInt(Number.MAX_SAFE_INTEGER) || total < -BigInt(Number.MAX_SAFE_INTEGER)) {
+    return { status: 'invalid' }
+  }
+  const amountMinor = Number(total)
+  return {
+    status: 'complete',
+    amountMinor,
+    normalized: ledgerDecimalFromMinor(amountMinor, currency),
+  }
+}
+
 export function ledgerDecimalFromMinor(value: number, currency: string): string {
   return formatMinorToDecimal(value, currency)
 }

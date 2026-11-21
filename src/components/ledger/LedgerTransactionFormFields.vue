@@ -1,8 +1,8 @@
 <script setup lang="ts">
-import { computed, ref, watch, type VNodeChild } from 'vue'
+import { computed, nextTick, ref, watch, type VNodeChild } from 'vue'
 import { NButton, NFormItem, NInput, NPopover, NRadioButton, NRadioGroup, type InputInst, type SelectGroupOption, type SelectOption } from 'naive-ui'
 import type { LedgerTransferFeeMode, LedgerTransferKind } from '../../../shared/ledgerProtocol'
-import { formatLedgerMoney, parseLedgerMoney } from '../../features/ledger/money'
+import { evaluateLedgerAmountExpression, formatLedgerMoney, parseLedgerMoney } from '../../features/ledger/money'
 import LedgerDateTimePicker from './LedgerDateTimePicker.vue'
 import LedgerTransactionSelect from './LedgerTransactionSelect.vue'
 
@@ -50,8 +50,18 @@ const payee = defineModel<string>('payee', { required: true })
 const note = defineModel<string>('note', { required: true })
 
 const amountInput = ref<InputInst | null>(null)
+const amountContainer = ref<HTMLElement | null>(null)
+const amountElement = ref<HTMLInputElement | null>(null)
+const amountFocused = ref(false)
 const feeModePopoverOpen = ref(false)
 const idPrefix = props.mode === 'create' ? 'ledger-transaction' : 'ledger-edit-transaction'
+
+const amountExpressionResult = computed(() => evaluateLedgerAmountExpression(amount.value, props.currency))
+const amountExpressionPreview = computed(() => {
+  if (!/[+-]/.test(amount.value) || amountExpressionResult.value.status !== 'complete') return null
+  return formatLedgerMoney(amountExpressionResult.value.amountMinor, props.currency)
+})
+const canAppendAmountOperator = computed(() => amountExpressionResult.value.status === 'complete' && Boolean(amount.value.trim()))
 
 const hasPositiveTransferFee = computed(() => {
   if (props.type !== 'transfer' || transferKind.value !== 'withdrawal' || !transferFeeAmount.value.trim()) return false
@@ -69,7 +79,9 @@ const transferFeeModeLabel = computed(() => transferFeeMode.value === 'deducted'
 const withdrawalReceivedAmount = computed(() => {
   if (props.type !== 'transfer' || transferKind.value !== 'withdrawal') return null
   try {
-    const amountMinor = parseLedgerMoney(amount.value, props.currency)
+    const amountResult = evaluateLedgerAmountExpression(amount.value, props.currency)
+    if (amountResult.status !== 'complete') return null
+    const amountMinor = amountResult.amountMinor
     const feeMinor = transferFeeAmount.value.trim()
       ? parseLedgerMoney(transferFeeAmount.value, props.currency)
       : 0
@@ -85,7 +97,9 @@ const withdrawalReceivedAmount = computed(() => {
 const repaymentTotalAmount = computed(() => {
   if (props.type !== 'transfer' || transferKind.value !== 'repayment') return null
   try {
-    const amountMinor = parseLedgerMoney(amount.value, props.currency)
+    const amountResult = evaluateLedgerAmountExpression(amount.value, props.currency)
+    if (amountResult.status !== 'complete') return null
+    const amountMinor = amountResult.amountMinor
     const feeMinor = transferFeeAmount.value.trim()
       ? parseLedgerMoney(transferFeeAmount.value, props.currency)
       : 0
@@ -115,6 +129,53 @@ function allowTransferFeeInput(value: string): boolean {
   return allowAmountInput(value)
 }
 
+function allowAmountExpressionInput(value: string): boolean {
+  return evaluateLedgerAmountExpression(value, props.currency).status !== 'invalid'
+}
+
+function normalizeAmountExpression(): void {
+  if (!/[+-]/.test(amount.value)) return
+  const result = evaluateLedgerAmountExpression(amount.value, props.currency)
+  if (result.status === 'complete' && result.amountMinor > 0) amount.value = result.normalized
+}
+
+function onAmountKeydown(event: KeyboardEvent): void {
+  if (event.key !== 'Enter' || !/[+-]/.test(amount.value)) return
+  // Enter commits an expression rather than submitting the surrounding form.
+  event.preventDefault()
+  normalizeAmountExpression()
+}
+
+function onAmountFocus(event: FocusEvent): void {
+  amountFocused.value = true
+  if (event.target instanceof HTMLInputElement) amountElement.value = event.target
+}
+
+function onAmountFocusOut(): void {
+  queueMicrotask(() => {
+    if (amountContainer.value?.contains(document.activeElement)) return
+    amountFocused.value = false
+    normalizeAmountExpression()
+  })
+}
+
+function insertAmountOperator(operator: '+' | '-'): void {
+  const input = amountElement.value
+  const currentValue = amount.value
+  if (!input || !currentValue.trim()) return
+  const start = input.selectionStart ?? currentValue.length
+  const end = input.selectionEnd ?? start
+  const nextValue = `${currentValue.slice(0, start)}${operator}${currentValue.slice(end)}`
+  if (!allowAmountExpressionInput(nextValue)) return
+  amount.value = nextValue
+  amountFocused.value = true
+  void nextTick(() => {
+    input.focus()
+    const caret = start + 1
+    input.setSelectionRange(caret, caret)
+  })
+}
+
 defineExpose({
   focusAmount: () => amountInput.value?.focus(),
 })
@@ -136,20 +197,32 @@ defineExpose({
               <span v-if="withdrawalReceivedAmount" class="ledger-received-amount">实际到账 {{ withdrawalReceivedAmount }}</span>
             </div>
           </template>
-          <div class="ledger-money-input">
-            <span>{{ currency }}</span>
-            <NInput
-              ref="amountInput"
-              v-model:value="amount"
-              class="ledger-money-control"
-              type="text"
-              size="small"
-              :allow-input="allowAmountInput"
-              :bordered="false"
-              :input-props="{ id: `${idPrefix}-amount`, name: 'amount', inputmode: 'decimal', autocomplete: 'off', required: true }"
-              placeholder="0.00"
-              :disabled="saving"
-            />
+          <div ref="amountContainer" class="ledger-money-field-control" @focusin="onAmountFocus" @focusout="onAmountFocusOut">
+            <div class="ledger-money-input">
+              <span>{{ currency }}</span>
+              <NInput
+                ref="amountInput"
+                v-model:value="amount"
+                class="ledger-money-control"
+                type="text"
+                size="small"
+                :allow-input="allowAmountExpressionInput"
+                :bordered="false"
+                :input-props="{ id: `${idPrefix}-amount`, name: 'amount', inputmode: 'decimal', autocomplete: 'off', required: true }"
+                placeholder="0.00"
+                :disabled="saving"
+                @keydown="onAmountKeydown"
+              />
+            </div>
+            <div v-if="amountExpressionPreview || (amountFocused && amount.trim())" class="ledger-amount-expression-row">
+              <span v-if="amountExpressionPreview" class="ledger-amount-expression-preview" data-testid="ledger-amount-expression-preview" aria-live="polite">
+                计算结果：{{ amountExpressionPreview }}
+              </span>
+              <div v-if="amountFocused && amount.trim()" class="ledger-amount-expression-operators" aria-label="金额计算操作">
+                <button type="button" aria-label="加法" :disabled="saving || !canAppendAmountOperator" @pointerdown.prevent @click="insertAmountOperator('+')">+</button>
+                <button type="button" aria-label="减法" :disabled="saving || !canAppendAmountOperator" @pointerdown.prevent @click="insertAmountOperator('-')">−</button>
+              </div>
+            </div>
           </div>
         </NFormItem>
 
@@ -377,6 +450,13 @@ defineExpose({
 .ledger-money-input:focus-within { border-color: var(--accent); box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 18%, transparent); }
 .ledger-money-input > span { color: var(--accent); font-size: .78rem; font-weight: 750; }
 .ledger-money-control { flex: 1; min-width: 0; font-size: .95rem; font-weight: 650; }
+.ledger-money-field-control { display: grid; min-width: 0; gap: 4px; }
+.ledger-amount-expression-row { display: flex; min-height: 20px; align-items: center; justify-content: space-between; gap: 8px; padding: 0 2px; }
+.ledger-amount-expression-preview { min-width: 0; color: var(--text-muted); font-size: .72rem; line-height: 1.35; }
+.ledger-amount-expression-operators { display: flex; flex: 0 0 auto; gap: 4px; }
+.ledger-amount-expression-operators button { width: 25px; height: 21px; padding: 0; border: 1px solid color-mix(in srgb, var(--accent) 22%, var(--border)); border-radius: 6px; background: color-mix(in srgb, var(--bg) 75%, transparent); color: var(--accent); cursor: pointer; font: inherit; font-size: .82rem; line-height: 1; }
+.ledger-amount-expression-operators button:hover:not(:disabled) { background: color-mix(in srgb, var(--accent) 10%, var(--bg)); }
+.ledger-amount-expression-operators button:disabled { cursor: default; opacity: .45; }
 .ledger-readonly-fields { display: flex; flex-wrap: wrap; gap: 8px; color: var(--text-muted); font-size: .78rem; }
 .ledger-readonly-fields span { padding: 6px 9px; border: 1px solid color-mix(in srgb, var(--border) 68%, transparent); border-radius: 7px; background: color-mix(in srgb, var(--bg-soft) 60%, transparent); }
 .ledger-transaction-form-fields :deep(.n-base-selection-label__render-label),

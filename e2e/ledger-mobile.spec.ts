@@ -1,5 +1,5 @@
 import { expect, test } from './fixtures/auth'
-import { ensureLedgerDashboardFixtures, ensurePeriodNavigationFixtures } from './helpers/ledger-live'
+import { ensureLedgerDashboardFixtures, ensurePeriodNavigationFixtures, getAccounts, getTransactions, selectOptionContaining } from './helpers/ledger-live'
 
 const phoneViewports = [
   { width: 320, height: 700 },
@@ -258,6 +258,35 @@ test('the create sheet focuses amount only on wider screens', async ({ page, req
     await save.tap({ trial: true })
     await cancel.tap({ trial: true })
   }
+})
+
+test('phone amount expression controls enter a subtraction and save its exact result', async ({ page, request }) => {
+  await ensureLedgerDashboardFixtures(request)
+  const existingIds = new Set((await getTransactions(request)).transactions.map((item) => item.id))
+  const account = (await getAccounts(request)).find((item) => item.archivedAt === null)
+  expect(account).toBeTruthy()
+
+  await page.setViewportSize({ width: 390, height: 844 })
+  await page.goto('/ledger')
+  await page.getByTestId('ledger-record-button').tap()
+  const sheet = page.getByTestId('ledger-transaction-sheet')
+  const amount = sheet.locator('input[name="amount"]')
+  await amount.fill('20')
+  await sheet.getByRole('button', { name: '减法' }).tap()
+  await expect(amount).toHaveValue('20-')
+  await amount.pressSequentially('5.28')
+  await expect(amount).toHaveValue('20-5.28')
+  await expect(sheet.getByTestId('ledger-amount-expression-preview')).toHaveText('计算结果：¥14.72')
+
+  await selectOptionContaining(page, '账户', account!.name)
+  await selectOptionContaining(page, '分类', '餐饮')
+  await sheet.getByRole('button', { name: '保存', exact: true }).tap()
+
+  await expect(sheet).toBeHidden()
+  await expect.poll(async () => {
+    const latest = await getTransactions(request)
+    return latest.transactions.filter((item) => !existingIds.has(item.id)).map((item) => item.amountMinor)
+  }).toContain(1472)
 })
 
 const dateTimeViewports = [

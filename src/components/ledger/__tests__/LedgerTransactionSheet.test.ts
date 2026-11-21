@@ -223,6 +223,85 @@ describe('Ledger transaction creation sheet', () => {
     expect(document.body.querySelector('.ledger-sheet')).toBeNull()
   })
 
+  it('previews amount arithmetic, commits it with Enter, and saves the evaluated minor units', async () => {
+    await openSheet()
+    const sheet = getSheet()
+    const amountInput = sheet.get('input[name="amount"]')
+
+    await amountInput.setValue('20-5.28')
+    expect(sheet.get('[data-testid="ledger-amount-expression-preview"]').text()).toBe('计算结果：¥14.72')
+    await amountInput.trigger('keydown', { key: 'Enter' })
+    await nextTick()
+    expect((amountInput.element as HTMLInputElement).value).toBe('14.72')
+    expect(api.createLedgerTransaction).not.toHaveBeenCalled()
+
+    await amountInput.setValue('12.5+3.2')
+    await amountInput.trigger('focusin')
+    await amountInput.trigger('focusout')
+    await flushPromises()
+    expect((amountInput.element as HTMLInputElement).value).toBe('15.70')
+
+    await amountInput.setValue('20-5.28')
+    await setNaiveSelect(sheet, '账户', 'bank-1')
+    await setNaiveSelect(sheet, '分类', 'food')
+    await setLedgerDateTime(sheet, '2026-09-05T12:30')
+    api.createLedgerTransaction.mockResolvedValue(savedTransaction)
+    await sheet.get('form').trigger('submit')
+    await flushPromises()
+
+    expect(api.createLedgerTransaction).toHaveBeenCalledWith(expect.objectContaining({
+      type: 'expense',
+      amountMinor: 1472,
+    }), expect.any(String))
+  })
+
+  it('uses the focused operator controls to append a mobile-friendly subtraction', async () => {
+    await openSheet()
+    const sheet = getSheet()
+    const amountInput = sheet.get('input[name="amount"]')
+    await amountInput.setValue('20')
+    await amountInput.trigger('focusin')
+    ;(amountInput.element as HTMLInputElement).setSelectionRange(2, 2)
+    await sheet.get('[aria-label="减法"]').trigger('click')
+    await nextTick()
+    expect((amountInput.element as HTMLInputElement).value).toBe('20-')
+    await amountInput.setValue('20-5.28')
+    expect(sheet.get('[data-testid="ledger-amount-expression-preview"]').text()).toContain('¥14.72')
+  })
+
+  it('does not submit an earlier preview when the current expression is incomplete', async () => {
+    await openSheet()
+    const sheet = getSheet()
+    const amountInput = sheet.get('input[name="amount"]')
+    await amountInput.setValue('20-5.28')
+    expect(sheet.find('[data-testid="ledger-amount-expression-preview"]').exists()).toBe(true)
+    await amountInput.setValue('20-')
+    expect(sheet.find('[data-testid="ledger-amount-expression-preview"]').exists()).toBe(false)
+    await setNaiveSelect(sheet, '账户', 'bank-1')
+    await setNaiveSelect(sheet, '分类', 'food')
+    await setLedgerDateTime(sheet, '2026-09-05T12:30')
+    await sheet.get('form').trigger('submit')
+    await flushPromises()
+
+    expect(api.createLedgerTransaction).not.toHaveBeenCalled()
+    expect(document.body.querySelector('.ledger-sheet')).not.toBeNull()
+  })
+
+  it.each(['5-20', '20-20'])('rejects a non-positive evaluated amount without replacing the input: %s', async (expression) => {
+    await openSheet()
+    const sheet = getSheet()
+    const amountInput = sheet.get('input[name="amount"]')
+    await amountInput.setValue(expression)
+    await setNaiveSelect(sheet, '账户', 'bank-1')
+    await setNaiveSelect(sheet, '分类', 'food')
+    await setLedgerDateTime(sheet, '2026-09-05T12:30')
+    await sheet.get('form').trigger('submit')
+    await flushPromises()
+
+    expect(api.createLedgerTransaction).not.toHaveBeenCalled()
+    expect((amountInput.element as HTMLInputElement).value).toBe(expression)
+  })
+
   it('keeps category groups stable on reopen and switches to the other kind without selecting a category', async () => {
     categories.push(category('shop', 'expense', '购物'), category('travel', 'expense', '交通'), category('bonus', 'income', '奖金'))
     recordCategoryUsage(owner, savedTransaction as LedgerTransactionDto, 'expense-key')

@@ -23,7 +23,7 @@ import { useAuth } from '../../composables/useAuth'
 import { useToast } from '../../composables/useToast'
 import { recentCategoryIds } from '../../features/ledger/categoryUsage'
 import { ledgerErrorMessage } from '../../features/ledger/ledgerErrors'
-import { currencyExponentFor, parseLedgerMoney } from '../../features/ledger/money'
+import { currencyExponentFor, evaluateLedgerAmountExpression, parseLedgerMoney } from '../../features/ledger/money'
 import { useLedgerStore } from '../../features/ledger/ledgerStore'
 import { readRecentTransactionAccount } from '../../features/ledger/recentTransactionAccount'
 import { instantFromLocalDateTime, localDateTimeInputFromInstant } from '../../features/ledger/time'
@@ -283,12 +283,12 @@ function validate(): { amountMinor: number; occurredAtMs: number; feeMinor: numb
   if (!amount.value.trim()) {
     return validationFailure('请输入金额。')
   }
-  let amountMinor: number
-  try {
-    amountMinor = parseLedgerMoney(amount.value, settings.value.baseCurrency)
-  } catch {
+  const amountResult = evaluateLedgerAmountExpression(amount.value, settings.value.baseCurrency)
+  if (amountResult.status !== 'complete') {
     return validationFailure(`请输入有效的${settings.value.baseCurrency}金额。`)
   }
+  const amountMinor = amountResult.amountMinor
+  if (amountMinor > 0 && /[+-]/.test(amount.value)) amount.value = amountResult.normalized
   if (amountMinor <= 0) {
     return validationFailure('金额必须大于 0。')
   }

@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { describe, expect, it } from 'vitest'
-import { formatLedgerCompactMoney, formatLedgerMoney, formatLedgerWholeMoney, parseLedgerMoney } from '../money'
+import { evaluateLedgerAmountExpression, formatLedgerCompactMoney, formatLedgerMoney, formatLedgerWholeMoney, parseLedgerMoney } from '../money'
 
 describe('Ledger money presentation boundary', () => {
   it.each([
@@ -58,5 +58,40 @@ describe('Ledger money presentation boundary', () => {
     expect(digitsOnly(formatLedgerMoney(maxSafeMinor, 'CNY', 'en-US'))).toBe('90071992547409.91')
     expect(digitsOnly(formatLedgerMoney(maxSafeMinor, 'JPY', 'en-US'))).toBe('9007199254740991')
     expect(digitsOnly(formatLedgerMoney(maxSafeMinor, 'KWD', 'en-US'))).toBe('9007199254740.991')
+  })
+})
+
+describe('Ledger amount expressions', () => {
+  it.each([
+    ['20-5.28', 'CNY', 1472, '14.72'],
+    ['12.5+3.2', 'CNY', 1570, '15.70'],
+    ['100-20-5', 'CNY', 7500, '75.00'],
+    ['10+5-2.5', 'CNY', 1250, '12.50'],
+    ['1.005+0.001', 'KWD', 1006, '1.006'],
+    ['100-20', 'JPY', 80, '80'],
+    ['.5+1.', 'CNY', 150, '1.50'],
+  ])('evaluates %s exactly in %s minor units', (expression, currency, amountMinor, normalized) => {
+    expect(evaluateLedgerAmountExpression(expression, currency)).toEqual({
+      status: 'complete',
+      amountMinor,
+      normalized,
+    })
+  })
+
+  it.each(['', '20-', '20+.', '20-.'])('keeps incomplete input editable: %s', (expression) => {
+    expect(evaluateLedgerAmountExpression(expression, 'CNY')).toEqual({ status: 'incomplete' })
+  })
+
+  it.each(['1.234', '1++2', '1--2', '1+-2', '2*3', '3/2', '(1+2)', '1  +2'])('rejects unsupported or malformed input: %s', (expression) => {
+    expect(evaluateLedgerAmountExpression(expression, 'CNY')).toEqual({ status: 'invalid' })
+  })
+
+  it('returns complete negative and zero results for the form to reject as transaction amounts', () => {
+    expect(evaluateLedgerAmountExpression('5-20', 'CNY')).toMatchObject({ status: 'complete', amountMinor: -1500 })
+    expect(evaluateLedgerAmountExpression('20-20', 'CNY')).toMatchObject({ status: 'complete', amountMinor: 0 })
+  })
+
+  it('rejects results that exceed the safe minor-unit range', () => {
+    expect(evaluateLedgerAmountExpression('90071992547409.91+0.01', 'CNY')).toEqual({ status: 'invalid' })
   })
 })
