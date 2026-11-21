@@ -254,6 +254,7 @@ const markers = computed(() => {
       const todoDayState = todoDayVisualState(calendarTasksByDate.value.get(date) ?? [], today.value)
       if (todoDayState !== 'none') result[date] = { hasTasks: true, todoDayState }
     }
+  }
   return result
 })
 function getCalendarLoadContext(): CalendarLoadContext | null {
