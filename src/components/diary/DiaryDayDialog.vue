@@ -119,13 +119,22 @@ function onMoodOutsidePointerDown(event: PointerEvent): void {
   closeMoodPicker(false)
 }
 
+function onMoodPickerKeydown(event: KeyboardEvent): void {
+  if (!picker.value || event.key !== 'Escape') return
+  event.preventDefault()
+  event.stopPropagation()
+  closeMoodPicker()
+}
+
 onMounted(() => {
   document.addEventListener('pointerdown', onMoodOutsidePointerDown, true)
+  document.addEventListener('keydown', onMoodPickerKeydown, true)
   window.addEventListener('resize', scheduleMoodPickerPosition)
   window.addEventListener('scroll', scheduleMoodPickerPosition, true)
 })
 onBeforeUnmount(() => {
   document.removeEventListener('pointerdown', onMoodOutsidePointerDown, true)
+  document.removeEventListener('keydown', onMoodPickerKeydown, true)
   window.removeEventListener('resize', scheduleMoodPickerPosition)
   window.removeEventListener('scroll', scheduleMoodPickerPosition, true)
   if (moodPositionFrame !== null) cancelAnimationFrame(moodPositionFrame)

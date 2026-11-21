@@ -1293,13 +1293,18 @@ test('mood-only Diary day stays compact in read and edit modes across themes', a
   await unlockDiary(page)
   const cell = page.locator('.diary-life-calendar [data-date$="-01-26"]')
   await openEmptyDiaryDay(page, cell)
+  const dialog = page.getByTestId('diary-day-dialog')
   const moodTrigger = page.getByRole('button', { name: '选择心情' })
   const moodPopover = page.getByTestId('diary-mood-picker')
   await moodTrigger.click()
   await expect(moodPopover).toBeVisible()
+  // Naive UI's modal focus trap can keep focus on its own controls while the
+  // picker is teleported inside the modal. Escape must still close the picker.
+  await dialog.getByTestId('diary-cancel-edit').focus()
+  await expect(dialog.getByTestId('diary-cancel-edit')).toBeFocused()
   await page.keyboard.press('Escape')
   await expect(moodPopover).toBeHidden()
-  await expect(page.getByTestId('diary-day-dialog')).toBeVisible()
+  await expect(dialog).toBeVisible()
   await expect(moodTrigger).toBeFocused()
 
   await moodTrigger.click()
@@ -1312,7 +1317,6 @@ test('mood-only Diary day stays compact in read and edit modes across themes', a
   await moodPopover.locator('[data-mood-id="happy"]').click()
   await saveDiaryDay(page)
 
-  const dialog = page.getByTestId('diary-day-dialog')
   await expectDiaryGlassModal(page, dialog)
   await expect(dialog.getByTestId('diary-day-mood')).toBeVisible()
   await expect(dialog.getByTestId('diary-empty-reading')).toBeVisible()
@@ -1339,6 +1343,54 @@ test('mood-only Diary day stays compact in read and edit modes across themes', a
   await page.getByRole('button', { name: '关闭日记' }).click()
   await page.locator('.theme-toggle').click()
 })
+
+for (const viewport of [{ width: 390, height: 844 }, { width: 768, height: 1024 }]) {
+  test.describe(`Diary mood picker touch behavior at ${viewport.width}px`, () => {
+    test.use({ viewport, hasTouch: true })
+
+    test('Escape closes only the picker, outside touch closes it, and Diary Escape resumes', async ({ page }) => {
+      await page.goto('/diary')
+      await unlockDiary(page)
+      const cell = page.locator('.diary-life-calendar [data-date$="-01-27"]')
+      await openEmptyDiaryDay(page, cell, () => cell.tap())
+
+      const dialog = page.getByTestId('diary-day-dialog')
+      const moodTrigger = page.getByRole('button', { name: '选择心情' })
+      const moodPopover = page.getByTestId('diary-mood-picker')
+      const entry = page.getByRole('textbox', { name: '第 1 条日记', exact: true })
+      await entry.fill(`保留触屏草稿 ${viewport.width}`)
+
+      await moodTrigger.tap()
+      await expect(moodPopover).toBeVisible()
+      await dialog.getByTestId('diary-cancel-edit').focus()
+      await page.keyboard.press('Escape')
+      await expect(moodPopover).toBeHidden()
+      await expect(dialog).toBeVisible()
+      await expect(entry).toHaveValue(`保留触屏草稿 ${viewport.width}`)
+      await expect(moodTrigger).toBeFocused()
+
+      await moodTrigger.tap()
+      await expect(moodPopover).toBeVisible()
+      await dialog.locator('.diary-day-heading > strong').tap()
+      await expect(moodPopover).toBeHidden()
+      await expect(dialog).toBeVisible()
+      await expect(entry).toHaveValue(`保留触屏草稿 ${viewport.width}`)
+
+      await moodTrigger.tap()
+      await expect(moodPopover).toBeVisible()
+      await page.keyboard.press('Escape')
+      await expect(moodPopover).toBeHidden()
+      await expect(moodTrigger).toBeFocused()
+
+      await page.keyboard.press('Escape')
+      const confirmation = page.getByRole('dialog', { name: '放弃未保存的修改？' })
+      await expect(confirmation).toBeVisible()
+      await confirmation.getByRole('button', { name: /^(Cancel|取消)$/ }).tap()
+      await expect(dialog).toBeVisible()
+      await expect(entry).toHaveValue(`保留触屏草稿 ${viewport.width}`)
+    })
+  })
+}
 
 test('closes the active day dialog when a save discovers the Diary was locked', async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 })
