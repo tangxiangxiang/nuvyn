@@ -72,6 +72,10 @@ const hasPositiveTransferFee = computed(() => {
     return false
   }
 })
+const repaymentFeeIsDiscount = computed(() => transferFeeAmount.value.trim().startsWith('-'))
+const transferFeeLabel = computed(() => transferKind.value === 'repayment'
+  ? repaymentFeeIsDiscount.value ? '优惠（可选）' : '利息（可选）'
+  : '手续费（可选）')
 const transferFeeModeLabel = computed(() => transferFeeMode.value === 'deducted'
   ? '从提现金额中扣除'
   : transferFeeMode.value === 'extra'
@@ -231,7 +235,7 @@ defineExpose({
         <NFormItem v-if="type === 'transfer' && transferKind !== 'general'" class="ledger-form-field" :show-feedback="false">
           <template #label>
             <div class="ledger-fee-label-row">
-              <span>{{ transferKind === 'repayment' ? '利息 / 优惠（可选）' : '手续费（可选）' }}</span>
+              <span>{{ transferFeeLabel }}</span>
               <NPopover
                 v-if="hasPositiveTransferFee"
                 v-model:show="feeModePopoverOpen"
