@@ -255,23 +255,22 @@ describe('Ledger transaction creation sheet', () => {
     }), expect.any(String))
   })
 
-  it('uses the focused operator controls to append a mobile-friendly subtraction', async () => {
+  it('shows the amount expression result beside its label without an extra row or operator buttons', async () => {
     await openSheet()
     const sheet = getSheet()
     const amountInput = sheet.get('input[name="amount"]')
-    await amountInput.setValue('20')
-    await amountInput.trigger('focusin')
-    ;(amountInput.element as HTMLInputElement).setSelectionRange(2, 2)
-    await sheet.get('[aria-label="减法"]').trigger('click')
-    await nextTick()
-    expect((amountInput.element as HTMLInputElement).value).toBe('20-')
     await amountInput.setValue('20-5.28')
-    expect(sheet.get('[data-testid="ledger-amount-expression-preview"]').text()).toContain('¥14.72')
+
+    const label = sheet.get('.ledger-amount-label-row')
+    expect(label.get('[data-testid="ledger-amount-expression-preview"]').text()).toBe('计算结果：¥14.72')
+    expect(sheet.find('.ledger-amount-expression-row').exists()).toBe(false)
+    expect(sheet.find('[aria-label="加法"]').exists()).toBe(false)
+    expect(sheet.find('[aria-label="减法"]').exists()).toBe(false)
+
     await amountInput.trigger('focusout')
     await flushPromises()
     expect((amountInput.element as HTMLInputElement).value).toBe('14.72')
-    expect(sheet.find('.ledger-amount-expression-row').exists()).toBe(true)
-    expect(sheet.find('[aria-label="减法"]').exists()).toBe(false)
+    expect(label.find('[data-testid="ledger-amount-expression-preview"]').exists()).toBe(false)
   })
 
   it('does not submit an earlier preview when the current expression is incomplete', async () => {
