@@ -163,6 +163,7 @@ defineExpose({
           <template #label>
             <div class="ledger-amount-label-row">
               <span>{{ type === 'transfer' && transferKind === 'repayment' ? '还款本金' : type === 'transfer' && transferKind === 'withdrawal' ? '提现金额' : '金额' }}</span>
+              <span v-if="amountExpressionPreview" class="ledger-amount-expression-preview" data-testid="ledger-amount-expression-preview" aria-live="polite">计算结果：{{ amountExpressionPreview }}</span>
               <span v-if="repaymentTotalAmount" class="ledger-received-amount">实际扣款 {{ repaymentTotalAmount }}</span>
               <span v-if="withdrawalReceivedAmount" class="ledger-received-amount">实际到账 {{ withdrawalReceivedAmount }}</span>
             </div>
@@ -183,11 +184,6 @@ defineExpose({
                 :disabled="saving"
                 @keydown="onAmountKeydown"
               />
-            </div>
-            <div v-if="amountExpressionPreview" class="ledger-amount-expression-row">
-              <span v-if="amountExpressionPreview" class="ledger-amount-expression-preview" data-testid="ledger-amount-expression-preview" aria-live="polite">
-                计算结果：{{ amountExpressionPreview }}
-              </span>
             </div>
           </div>
         </NFormItem>
@@ -405,7 +401,7 @@ defineExpose({
 .ledger-transfer-kinds :deep(.n-radio-button--focus:not(.n-radio-button--disabled)) { outline: none; }
 .ledger-transfer-kinds :deep(.n-radio-button:has(.n-radio-input:focus-visible):not(.n-radio-button--disabled)) { outline: 2px solid var(--accent); outline-offset: 2px; z-index: 2; }
 .ledger-fee-label-row { display: flex; width: 100%; align-items: center; justify-content: space-between; gap: 8px; }
-.ledger-amount-label-row { display: flex; width: 100%; align-items: center; justify-content: space-between; gap: 8px; }
+.ledger-amount-label-row { display: flex; width: 100%; min-width: 0; align-items: center; justify-content: space-between; gap: 8px; }
 .ledger-received-amount { color: var(--accent); font-size: .72rem; font-weight: 650; }
 .ledger-fee-mode-trigger { color: var(--accent); font-size: .72rem; font-weight: 650; }
 .ledger-fee-mode-options { display: grid; gap: 2px; }
@@ -417,8 +413,7 @@ defineExpose({
 .ledger-money-input > span { color: var(--accent); font-size: .78rem; font-weight: 750; }
 .ledger-money-control { flex: 1; min-width: 0; font-size: .95rem; font-weight: 650; }
 .ledger-money-field-control { display: grid; width: 100%; min-width: 0; gap: 4px; }
-.ledger-amount-expression-row { display: flex; min-height: 21px; align-items: center; justify-content: space-between; gap: 8px; padding: 0 2px; }
-.ledger-amount-expression-preview { min-width: 0; color: var(--text-muted); font-size: .72rem; line-height: 1.35; }
+.ledger-amount-expression-preview { min-width: 0; overflow: hidden; color: var(--accent); font-size: .72rem; font-weight: 650; line-height: 1.35; text-overflow: ellipsis; white-space: nowrap; }
 .ledger-readonly-fields { display: flex; flex-wrap: wrap; gap: 8px; color: var(--text-muted); font-size: .78rem; }
 .ledger-readonly-fields span { padding: 6px 9px; border: 1px solid color-mix(in srgb, var(--border) 68%, transparent); border-radius: 7px; background: color-mix(in srgb, var(--bg-soft) 60%, transparent); }
 .ledger-transaction-form-fields :deep(.n-base-selection-label__render-label),
