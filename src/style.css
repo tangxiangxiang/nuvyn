@@ -885,6 +885,8 @@ body.brand-constellation-active * {
   flex: 0 0 auto;
   gap: 6px;            /* search and theme toggle sit close together as a unit */
 }
+.diary-view-switch { display: inline-flex; align-items: center; gap: 1px; padding: 1px; border-radius: 8px; background: color-mix(in srgb, var(--bg-soft) 68%, transparent); }
+.diary-view-switch .diary-view-toggle.is-active { color: var(--accent); background: color-mix(in srgb, var(--accent) 10%, transparent); }
 .nav-search,
 .diary-view-toggle,
 .nav-diary-plan,
