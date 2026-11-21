@@ -1653,7 +1653,10 @@ onBeforeUnmount(() => {
           />
         </div>
         <div v-else class="day-list-content">
-          <section class="day-list-section day-tasks">
+          <section
+            class="day-list-section day-tasks"
+            :class="{ 'day-list-section--empty': !selectedTasks.length && !calendarTasksLoading && !calendarTaskError }"
+          >
             <div class="day-list-section-header">
               <h3>待办事项</h3>
               <NButton quaternary circle class="day-list-section-action" data-testid="diary-add-task" aria-label="新增待办" title="新增待办" :disabled="busy || attachmentBusy" @click="createTaskFromDay()">
@@ -1675,9 +1678,11 @@ onBeforeUnmount(() => {
               @toggle="toggleTask($event, { kind: 'day-list', date: selected ?? '', taskId: $event.id, restoreFocus: true })"
               @edit="editTaskFromDay"
             />
-            <p v-else-if="!calendarTasksLoading && !calendarTaskError" class="day-list-empty">暂无待办事项</p>
           </section>
-          <section class="day-list-section day-events">
+          <section
+            class="day-list-section day-events"
+            :class="{ 'day-list-section--empty': !selectedEvents.length && !calendarEventLoading && !eventCalendarError }"
+          >
             <div class="day-list-section-header">
               <h3>重要日程</h3>
               <NButton quaternary circle class="day-list-section-action" data-testid="diary-add-event" aria-label="新增重要日程" title="新增重要日程" :disabled="busy || attachmentBusy" @click="createEvent()">
@@ -1702,7 +1707,6 @@ onBeforeUnmount(() => {
             >
               <small class="diary-task-detail diary-event-distance">{{ selectedEventDistance(event) }}</small>
             </DiaryEventRow>
-            <p v-if="!selectedEvents.length && !calendarEventLoading && !eventCalendarError" class="day-list-empty">暂无重要日程</p>
           </section>
         </div>
 
@@ -1758,8 +1762,8 @@ onBeforeUnmount(() => {
 .diary-undated-task-actions { display: flex; flex: 0 0 auto; align-items: center; gap: 8px; }
 .diary-event-form-error { margin: 0 0 14px; color: var(--danger, #dc2626); }
 .diary-task-reload { margin: -4px 0 12px; }
-.day-list-empty { display: flex; min-height: 48px; box-sizing: border-box; align-items: center; justify-content: center; margin: 0; padding: 8px 0; color: var(--text-muted, #6b7280); font-size: 14px; line-height: 20px; text-align: center; }
 .day-list-section { min-width: 0; }
+.day-list-section--empty .day-list-section-header { height: 32px; }
 .day-list-section-header { position: relative; display: flex; min-width: 0; height: 16px; align-items: center; padding-inline-end: 40px; }
 .day-list-section-header h3 { min-width: 0; margin: 0; }
 .day-list-section-action.n-button { position: absolute; inset-inline-end: 0; top: 50%; width: 32px; min-width: 32px; height: 32px; padding: 0; border-radius: 50%; color: var(--text-muted, #6b7280); font-weight: 400; transform: translateY(-50%); }
@@ -1782,6 +1786,7 @@ onBeforeUnmount(() => {
   .day-list-section:focus-within .day-list-section-action { opacity: 1; }
 }
 @media (hover: none), (pointer: coarse) {
+  .day-list-section--empty .day-list-section-header { height: 40px; }
   .day-list-section-action.n-button { width: 40px; min-width: 40px; height: 40px; opacity: .68; }
   .day-list-section-action.n-button:focus-visible { opacity: 1; }
 }
