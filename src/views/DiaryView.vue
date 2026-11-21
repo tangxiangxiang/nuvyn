@@ -5,7 +5,7 @@ import { NButton, NIcon, NModal, NSpin } from 'naive-ui'
 import { Plus, X } from '@vicons/tabler'
 import { Temporal } from '@js-temporal/polyfill'
 import { DiaryAccessContextKey } from '../composables/diary/diaryAccessContext'
-import { AppShellContextKey } from '../composables/appShellContext'
+import { AppShellContextKey, type DiaryCalendarMode } from '../composables/appShellContext'
 import { captureDiarySessionGeneration, isDiarySessionGenerationCurrent, subscribeDiaryTeardown, useDiaryAccessSession } from '../composables/diary/useDiaryAccessSession'
 import { useDiaryMoodIconPreferences } from '../composables/diary/useDiaryMoodIconPreferences'
 import { useAuth } from '../composables/useAuth'
@@ -55,7 +55,7 @@ async function confirm(message: string) {
     if (cancelConfirmation === pending.cancel) cancelConfirmation = undefined
   }
 }
-const mode = ref<'diary' | 'events'>('diary')
+const mode = ref<DiaryCalendarMode>('diary')
 const month = ref(`${localToday().slice(0, 7)}-01`)
 const calendarRevision = ref(0)
 const days = ref<DiaryDaySummary[]>([])
@@ -107,7 +107,7 @@ const undatedTaskCandidate = ref<DiaryTask | null>(null)
 const undatedTaskLoading = ref(false)
 const undatedTaskOpening = ref(false)
 const undatedTaskError = ref('')
-const calendarError = computed(() => mode.value === 'diary' ? diaryCalendarError.value : eventCalendarError.value)
+const calendarError = computed(() => mode.value === 'diary' ? diaryCalendarError.value : mode.value === 'events' ? eventCalendarError.value : calendarTaskError.value)
 const busyTaskIds = ref(new Set<string>())
 const taskFormError = ref('')
 const taskConflictNeedsReload = ref(false)
@@ -183,7 +183,7 @@ function onDiaryVisibilityChange() {
 type CalendarLoadContext = {
   start: string
   end: string
-  mode: 'diary' | 'events'
+  mode: DiaryCalendarMode
   owner: string
   generation: number
   key: string
@@ -218,7 +218,8 @@ const dirty = computed(() => {
 const storageKey = computed(() => auth.user.value ? ownerScopedStorageKey(NUVYN_BROWSER_STORAGE_KEYS.diaryLifeView, auth.user.value) : null)
 watch(storageKey, (key, previousKey) => {
   if (previousKey && key !== previousKey) clearPrivateData()
-  mode.value = key && readStorageKey(key) === 'events' ? 'events' : 'diary'
+  const savedMode = key ? readStorageKey(key) : null
+  mode.value = savedMode === 'events' || savedMode === 'tasks' ? savedMode : 'diary'
 }, { immediate: true, flush: 'sync' })
 watch(mode, value => { if (storageKey.value) writeStorageKey(storageKey.value, value) })
 watch(mode, value => { if (appShell?.diaryViewMode) appShell.diaryViewMode.value = value }, { immediate: true })
@@ -243,13 +244,15 @@ const markers = computed(() => {
       if (d.moodId) result[d.date] = { source: preferences.sourceFor(d.moodId), hasAttachments: d.hasAttachments }
       else if (d.hasEntries || d.hasAttachments) result[d.date] = { hasEntries: d.hasEntries, hasAttachments: d.hasAttachments }
     }
-  } else {
+  } else if (mode.value === 'events') {
     for (let date = range.value.start; date <= range.value.end; date = addDays(date, 1)) {
       const matches = events.value.filter(e => occursOn(e, date)).sort(compareEvents)
+      if (matches[0]) result[date] = { source: eventEmojiSource(matches[0].emoji), emoji: matches[0].emoji, count: matches.length }
+    }
+  } else {
+    for (let date = range.value.start; date <= range.value.end; date = addDays(date, 1)) {
       const todoDayState = todoDayVisualState(calendarTasksByDate.value.get(date) ?? [], today.value)
-      const hasTasks = todoDayState !== 'none'
-      if (matches[0]) result[date] = { source: eventEmojiSource(matches[0].emoji), emoji: matches[0].emoji, count: matches.length, hasTasks, todoDayState }
-      else if (hasTasks) result[date] = { hasTasks: true, todoDayState }
+      if (todoDayState !== 'none') result[date] = { hasTasks: true, todoDayState }
     }
   }
   return result
@@ -382,7 +385,7 @@ function reloadCalendarEvents(): Promise<void> {
 
 function reloadCalendarTasks(): Promise<void> {
   const context = getCalendarLoadContext()
-  if (!context || context.mode !== 'events') return Promise.resolve()
+  if (!context || context.mode !== 'tasks') return Promise.resolve()
   prepareCalendarContext(context)
   return loadCalendarTasks(context, true)
 }
@@ -393,7 +396,9 @@ function retryCalendarStage(): Promise<void> {
   prepareCalendarContext(context)
   return context.mode === 'diary'
     ? loadCalendarDays(context, true)
-    : loadCalendarEvents(context, true)
+    : context.mode === 'events'
+      ? loadCalendarEvents(context, true)
+      : loadCalendarTasks(context, true)
 }
 
 function load(refresh = false): Promise<void> {
@@ -401,10 +406,7 @@ function load(refresh = false): Promise<void> {
   if (!context) return Promise.resolve()
   prepareCalendarContext(context)
   if (context.mode === 'diary') return loadCalendarDays(context, refresh)
-  return Promise.all([
-    loadCalendarEvents(context, refresh),
-    loadCalendarTasks(context, refresh),
-  ]).then(() => undefined)
+  return context.mode === 'events' ? loadCalendarEvents(context, refresh) : loadCalendarTasks(context, refresh)
 }
 function resetForm() {
   detailRequest?.abort()
@@ -533,7 +535,7 @@ function clearShellCommands() {
   if (appShell?.diaryViewToggleCommand?.value === diaryViewToggleCommand) appShell.diaryViewToggleCommand.value = null
 }
 
-const diaryViewToggleCommand = () => { void toggle() }
+const diaryViewToggleCommand = (target?: DiaryCalendarMode) => { void switchMode(target ?? (mode.value === 'diary' ? 'events' : 'diary')) }
 
 function syncCalendarToDate(date: string) {
   const targetMonth = `${date.slice(0, 7)}-01`
@@ -662,7 +664,7 @@ async function openUndatedTaskRepair() {
     }
     const date = today.value
     const returnTo: TaskReturnContext = { kind: 'day-list', date, taskId: currentTask.id, restoreFocus: false }
-    mode.value = 'events'
+    mode.value = 'tasks'
     syncCalendarToDate(date)
     selected.value = date
     eventSurface.value = { kind: 'day-list', date }
@@ -1036,7 +1038,7 @@ async function open(date: string, options: { skipLeaveCheck?: boolean; searchRes
   detailRequest?.abort()
   const scope = new AbortController(); detailRequest = scope
   selected.value = date
-  eventSurface.value = mode.value === 'events' ? { kind: 'day-list', date } : null
+  eventSurface.value = mode.value !== 'diary' ? { kind: 'day-list', date } : null
   formError.value = ''
   initial.value = 'null'
   serverToday.value = null
@@ -1158,7 +1160,7 @@ async function openDiaryRecordSearchIntent(intent: DiaryEventSearchOpenIntent | 
       if (!current.dueDate) {
         const date = today.value
         resetForm()
-        mode.value = 'events'
+        mode.value = 'tasks'
         syncCalendarToDate(date)
         selected.value = date
         eventSurface.value = { kind: 'day-list', date }
@@ -1181,14 +1183,14 @@ async function openDiaryRecordSearchIntent(intent: DiaryEventSearchOpenIntent | 
     }
 
     resetForm()
-    mode.value = 'events'
+    mode.value = intent.kind === 'event' ? 'events' : 'tasks'
     syncCalendarToDate(targetDate)
     await nextTick()
     if (!isCurrent()) return
     await load()
     if (!isCurrent()) return
 
-    if (calendarTaskError.value || eventCalendarError.value) {
+    if (intent.kind === 'event' ? eventCalendarError.value : calendarTaskError.value) {
       toast.error('加载日程失败，请重试。')
       consumeDiarySearchOpen(intent.id)
       return
@@ -1243,11 +1245,11 @@ async function refreshDayPolicy() {
     // Keep the last known boundary. The server checks every write independently.
   }
 }
-async function toggle() {
-  if (!(await canLeave())) return
+async function switchMode(target: DiaryCalendarMode) {
+  if (mode.value === target || !await canLeave()) return
   await discardPendingAttachments()
   resetForm()
-  mode.value = mode.value === 'diary' ? 'events' : 'diary'
+  mode.value = target
 }
 function createEvent() {
   const surface = eventSurface.value
@@ -1561,14 +1563,14 @@ onBeforeUnmount(() => {
         <div v-if="calendarError" class="diary-life-error" role="alert">{{ calendarError }} <NButton text @click="retryCalendarStage()">重试</NButton></div>
         <DiaryLifeCalendar :markers="markers" :today="today" :selected-date="selected" :month="month" :revision="calendarRevision" @select="open" @month="month = $event" />
       </div>
-      <div v-if="undatedTaskCount > 0" class="diary-undated-task-notice" data-testid="diary-undated-task-notice" role="status">
+      <div v-if="mode === 'tasks' && undatedTaskCount > 0" class="diary-undated-task-notice" data-testid="diary-undated-task-notice" role="status">
         <span>发现 {{ undatedTaskCount }} 条历史待办缺少截止日期，补充后会显示在日历中。</span>
         <span class="diary-undated-task-actions">
           <NButton text type="primary" :disabled="undatedTaskLoading || undatedTaskOpening" @click="openUndatedTaskRepair">补充截止日期</NButton>
           <NButton v-if="undatedTaskError" text @click="refreshUndatedTaskSummary">重试</NButton>
         </span>
       </div>
-      <div v-else-if="undatedTaskError" class="diary-life-error" role="alert">
+      <div v-else-if="mode === 'tasks' && undatedTaskError" class="diary-life-error" role="alert">
         {{ undatedTaskError }} <NButton text @click="refreshUndatedTaskSummary">重试</NButton>
       </div>
       <DiaryDayDialog
@@ -1619,7 +1621,16 @@ onBeforeUnmount(() => {
         </template>
         <template #header-extra>
           <div class="diary-event-header-actions">
-            <NButton quaternary circle class="diary-event-close-button" :disabled="busy || attachmentBusy" :aria-label="eventSurface?.kind === 'edit' ? '关闭事件编辑' : '关闭当天事件'" @click="closeEventSurface($event)">
+            <NButton
+              v-if="eventSurface?.kind === 'day-list'"
+              quaternary circle class="diary-day-list-add-button"
+              :data-testid="mode === 'tasks' ? 'diary-add-task' : 'diary-add-event'"
+              :aria-label="mode === 'tasks' ? '新增待办' : '新增重要日程'"
+              :title="mode === 'tasks' ? '新增待办' : '新增重要日程'"
+              :disabled="busy || attachmentBusy"
+              @click="mode === 'tasks' ? createTaskFromDay() : createEvent()"
+            ><NIcon aria-hidden="true" :size="16"><Plus /></NIcon></NButton>
+            <NButton quaternary circle class="diary-event-close-button" :disabled="busy || attachmentBusy" :aria-label="eventSurface?.kind === 'edit' ? '关闭事件编辑' : eventSurface?.kind === 'task-edit' ? '关闭待办编辑' : mode === 'tasks' ? '关闭当天待办' : '关闭当天事件'" @click="closeEventSurface($event)">
               <NIcon aria-hidden="true" :size="16"><X /></NIcon>
             </NButton>
           </div>
@@ -1652,17 +1663,12 @@ onBeforeUnmount(() => {
             @update:model-value="updateTaskDraft"
           />
         </div>
-        <div v-else class="day-list-content">
-          <section
-            class="day-list-section day-tasks"
-            :class="{ 'day-list-section--empty': !selectedTasks.length && !calendarTasksLoading && !calendarTaskError }"
-          >
-            <div class="day-list-section-header">
-              <h3>待办事项</h3>
-              <NButton quaternary circle class="day-list-section-action" data-testid="diary-add-task" aria-label="新增待办" title="新增待办" :disabled="busy || attachmentBusy" @click="createTaskFromDay()">
-                <NIcon aria-hidden="true" :size="16"><Plus /></NIcon>
-              </NButton>
-            </div>
+        <div
+          v-else
+          class="day-list-content"
+          :class="{ 'day-list-content--empty': mode === 'tasks' ? !selectedTasks.length && !calendarTasksLoading && !calendarTaskError : !selectedEvents.length && !calendarEventLoading && !eventCalendarError }"
+        >
+          <section v-if="mode === 'tasks'" class="day-list-section day-tasks">
             <div v-if="calendarTasksLoading && !selectedTasks.length" class="diary-day-status" role="status"><NSpin size="small" /><span>正在加载待办…</span></div>
             <div v-if="calendarTaskError" class="diary-day-status" role="alert">
               <span>{{ calendarTaskError }}</span>
@@ -1679,16 +1685,7 @@ onBeforeUnmount(() => {
               @edit="editTaskFromDay"
             />
           </section>
-          <section
-            class="day-list-section day-events"
-            :class="{ 'day-list-section--empty': !selectedEvents.length && !calendarEventLoading && !eventCalendarError }"
-          >
-            <div class="day-list-section-header">
-              <h3>重要日程</h3>
-              <NButton quaternary circle class="day-list-section-action" data-testid="diary-add-event" aria-label="新增重要日程" title="新增重要日程" :disabled="busy || attachmentBusy" @click="createEvent()">
-                <NIcon aria-hidden="true" :size="16"><Plus /></NIcon>
-              </NButton>
-            </div>
+          <section v-else-if="mode === 'events'" class="day-list-section day-events">
             <div v-if="calendarEventLoading && !selectedEvents.length" class="diary-day-status" role="status"><NSpin size="small" /><span>正在加载事件…</span></div>
             <div v-if="eventCalendarError" class="diary-day-status" role="alert">
               <span>{{ eventCalendarError }}</span>
@@ -1763,13 +1760,10 @@ onBeforeUnmount(() => {
 .diary-event-form-error { margin: 0 0 14px; color: var(--danger, #dc2626); }
 .diary-task-reload { margin: -4px 0 12px; }
 .day-list-section { min-width: 0; }
-.day-list-section--empty .day-list-section-header { height: 32px; }
-.day-list-section-header { position: relative; display: flex; min-width: 0; height: 16px; align-items: center; padding-inline-end: 40px; }
-.day-list-section-header h3 { min-width: 0; margin: 0; }
-.day-list-section-action.n-button { position: absolute; inset-inline-end: 0; top: 50%; width: 32px; min-width: 32px; height: 32px; padding: 0; border-radius: 50%; color: var(--text-muted, #6b7280); font-weight: 400; transform: translateY(-50%); }
-.day-list-section-action :deep(svg) { stroke-width: 1.6px; }
-.day-list-section-action.n-button:hover:not(:disabled) { background-color: color-mix(in srgb, var(--text) 4%, transparent); }
-.day-list-section-action.n-button:focus-visible { outline: 2px solid var(--primary, #6366f1); outline-offset: 2px; }
+.diary-day-list-add-button.n-button { width: 32px; min-width: 32px; height: 32px; border-radius: 50%; color: var(--text-muted, #6b7280); }
+.diary-day-list-add-button :deep(svg) { stroke-width: 1.6px; }
+.diary-day-list-add-button.n-button:hover:not(:disabled) { background-color: color-mix(in srgb, var(--text) 4%, transparent); }
+.diary-day-list-add-button.n-button:focus-visible { outline: 2px solid var(--primary, #6366f1); outline-offset: 2px; }
 .life-actions { display: flex; align-items: center; gap: 8px; }.life-actions > span { flex: 1; }
 .diary-task-footer { display: flex; flex-direction: column; gap: 8px; }
 .diary-task-series-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; }
@@ -1781,19 +1775,18 @@ onBeforeUnmount(() => {
   .diary-undated-task-notice { align-items: flex-start; flex-direction: column; gap: 4px; }
 }
 @media (hover: hover) and (pointer: fine) and (not (any-pointer: coarse)) {
-  .day-list-section-action { opacity: 0; transition: opacity 140ms ease; }
-  .day-list-section:hover .day-list-section-action,
-  .day-list-section:focus-within .day-list-section-action { opacity: 1; }
+  .diary-day-list-add-button { opacity: 0; transition: opacity 140ms ease; }
+  .diary-event-header-actions:hover .diary-day-list-add-button,
+  .diary-event-header-actions:focus-within .diary-day-list-add-button { opacity: 1; }
 }
 @media (hover: none), (pointer: coarse) {
-  .day-list-section--empty .day-list-section-header { height: 40px; }
-  .day-list-section-action.n-button { width: 40px; min-width: 40px; height: 40px; opacity: .68; }
-  .day-list-section-action.n-button:focus-visible { opacity: 1; }
+  .diary-day-list-add-button.n-button { width: 40px; min-width: 40px; height: 40px; opacity: .68; }
 }
-@media (prefers-reduced-motion: reduce) { .day-list-section-action { transition: none; } }
+@media (prefers-reduced-motion: reduce) { .diary-day-list-add-button { transition: none; } }
 @media (max-width: 600px) { .diary-life { padding: 16px 8px clamp(16px, 3dvh, 32px); } }
 </style>
 <style>
+.diary-life-dialog:has(.day-list-content--empty) .n-card__content { padding-top: 0; padding-bottom: 0; }
 .diary-life-dialog.n-card { width: min(640px, calc(100vw - 32px)); max-height: calc(100dvh - 32px); overflow: auto; scrollbar-width: none; }
 .diary-life-dialog.n-card::-webkit-scrollbar { display: none; }
 .diary-event-edit-dialog.n-card {
@@ -1819,7 +1812,8 @@ onBeforeUnmount(() => {
   border-top: 1px solid var(--border, #8883);
   background: var(--card-color, var(--bg));
 }
-.diary-life-dialog .diary-event-close-button.n-button {
+.diary-life-dialog .diary-event-close-button.n-button,
+.diary-life-dialog .diary-day-list-add-button.n-button {
   width: 32px;
   height: 32px;
   min-width: 32px;
@@ -1828,16 +1822,18 @@ onBeforeUnmount(() => {
   color: var(--text-muted, #6b7280);
   background-color: transparent;
 }
-.diary-life-dialog .diary-event-close-button.n-button:hover {
+.diary-life-dialog .diary-event-close-button.n-button:hover,
+.diary-life-dialog .diary-day-list-add-button.n-button:hover {
   background-color: color-mix(in srgb, var(--text) 4%, transparent);
 }
-.diary-life-dialog .diary-event-close-button.n-button:focus-visible {
+.diary-life-dialog .diary-event-close-button.n-button:focus-visible,
+.diary-life-dialog .diary-day-list-add-button.n-button:focus-visible {
   outline: 2px solid var(--primary, #6366f1);
   outline-offset: 2px;
 }
 @media (max-width: 600px) {
   .diary-life-dialog.n-card { position: fixed; bottom: 0; left: 0; width: 100%; max-height: 90dvh; margin: 0; border-radius: 18px 18px 0 0; padding-bottom: env(safe-area-inset-bottom); }
-  .diary-life-dialog .diary-event-close-button.n-button { width: 40px; height: 40px; min-width: 40px; }
+  .diary-life-dialog .diary-event-close-button.n-button, .diary-life-dialog .diary-day-list-add-button.n-button { width: 40px; height: 40px; min-width: 40px; }
   .diary-event-edit-dialog.n-card { max-height: 90dvh; }
   .diary-event-edit-dialog .n-card__footer { padding-inline: 16px; }
 }

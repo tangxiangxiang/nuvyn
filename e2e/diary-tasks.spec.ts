@@ -12,7 +12,7 @@ test.beforeEach(async ({ page }, testInfo) => {
 test('creates a dated task, completes it, restores it, and moves it to a new calendar date', async ({ page }) => {
   await page.goto('/diary')
   await unlockDiary(page)
-  await page.getByTestId('diary-view-toggle').click()
+  await page.getByTestId('diary-view-mode-tasks').click()
 
   const date = `${testYear}-11-16`
   const nextDate = `${testYear}-11-19`
@@ -201,7 +201,7 @@ test('creates a dated task, completes it, restores it, and moves it to a new cal
   await expect(page.getByRole('checkbox', { name: `完成待办：${title}`, exact: true })).toHaveCount(0)
   const nextCell = page.locator(`.diary-life-calendar [data-date="${nextDate}"]`)
   await expect(nextCell.locator('.life-task-marker')).toBeVisible()
-  await page.getByRole('button', { name: '关闭当天事件' }).click()
+  await page.getByRole('button', { name: '关闭当天待办' }).click()
   await nextCell.click()
   await expect(nextCell.locator('.life-task-marker')).toHaveAttribute('src', '/emoji/stopwatch.svg')
   await page.getByRole('button', { name: `编辑待办：${title}`, exact: true }).click()
@@ -262,6 +262,7 @@ test('repairs a legacy undated task from the conditional notice without inferrin
 
   await page.goto('/diary')
   await unlockDiary(page)
+  await page.getByTestId('diary-view-mode-tasks').click()
   const notice = page.getByTestId('diary-undated-task-notice')
   await expect(notice).toContainText('1 条历史待办缺少截止日期')
   await notice.getByRole('button', { name: '补充截止日期' }).click()
@@ -286,7 +287,7 @@ test('repairs a legacy undated task from the conditional notice without inferrin
 test('overdue Todos use Bomb and return to Party when completed late', async ({ page }) => {
   await page.goto('/diary')
   await unlockDiary(page)
-  await page.getByTestId('diary-view-toggle').click()
+  await page.getByTestId('diary-view-mode-tasks').click()
 
   const dueDate = `${testYear}-11-15`
   const cell = page.locator(`.diary-life-calendar [data-date="${dueDate}"]`)
@@ -319,7 +320,7 @@ test('overdue Todos use Bomb and return to Party when completed late', async ({ 
 test('starts a new recurring task on its explicit start date and ignores hidden one-off time validation', async ({ page }) => {
   await page.goto('/diary')
   await unlockDiary(page)
-  await page.getByTestId('diary-view-toggle').click()
+  await page.getByTestId('diary-view-mode-tasks').click()
 
   const selectedDate = `${testYear}-11-16`
   const startDate = `${testYear}-11-18`
@@ -347,7 +348,7 @@ test('starts a new recurring task on its explicit start date and ignores hidden 
   await expect(editor).toBeHidden()
   await expect(selectedCell.locator('.life-task-marker')).toHaveCount(0)
   await expect(startCell.locator('.life-task-marker')).toBeVisible()
-  await page.getByRole('button', { name: '关闭当天事件' }).click()
+  await page.getByRole('button', { name: '关闭当天待办' }).click()
   await startCell.click()
   await expect(page.getByRole('checkbox', { name: `完成待办：${title}` })).toBeVisible()
   await expect(page.locator('.diary-task-title').filter({ hasText: title })).toContainText('↻')
@@ -358,27 +359,15 @@ test('starts a new recurring task on its explicit start date and ignores hidden 
   await expect(startCell.locator('.life-task-marker')).toHaveCount(0)
 })
 
-test('lays out an Event, event count and deadline icon within one calendar date on all viewport sizes', async ({ page }) => {
+test('keeps Event and Todo markers visually separate across viewport sizes', async ({ page }) => {
   await page.goto('/diary')
   await unlockDiary(page)
   const date = `${testYear}-11-16`
   const event = (id: string, title: string, type: 'birthday' | 'schedule', isPrimary = false) => ({
-    id,
-    title,
-    description: '',
-    emoji: type === 'birthday' ? '🎂' : '💼',
-    type,
-    startDate: date,
-    endDate: date,
-    startTime: null,
-    endTime: null,
-    allDay: true,
-    recurrence: 'none',
-    showCountdown: false,
-    isPrimary,
-    version: 1,
-    createdAt: 1,
-    updatedAt: 1,
+    id, title, description: '', emoji: type === 'birthday' ? '🎂' : '💼', type,
+    startDate: date, endDate: date, startTime: null, endTime: null, allDay: true,
+    recurrence: 'none', showCountdown: false, isPrimary, version: 1,
+    createdAt: 1, updatedAt: 1,
   })
   await page.route('**/api/diary/life/**', async route => {
     const request = route.request()
@@ -389,54 +378,54 @@ test('lays out an Event, event count and deadline icon within one calendar date 
         event('schedule-1', '日程一', 'schedule'),
         event('schedule-2', '日程二', 'schedule'),
       ], next: null } })
-      return
-    }
-    if (request.method() === 'GET' && pathname === '/api/diary/life/task-occurrences') {
+    } else if (request.method() === 'GET' && pathname === '/api/diary/life/task-occurrences') {
       await route.fulfill({ json: { items: [{
-        id: 'deadline-task',
-        title: '临期待办',
-        description: '',
-        startDate: null,
-        startTime: null,
-        dueDate: date,
-        dueTime: null,
-        completedAt: null,
-        version: 1,
-        createdAt: 1,
-        updatedAt: 1,
+        id: 'deadline-task', title: '临期待办', description: '', startDate: null,
+        startTime: null, dueDate: date, dueTime: null, completedAt: null,
+        version: 1, createdAt: 1, updatedAt: 1,
       }], nextCursor: null } })
-      return
-    }
-    await route.continue()
+    } else await route.continue()
   })
 
-  await page.getByTestId('diary-view-toggle').click()
   const calendar = page.locator('.diary-life-calendar')
   const cell = calendar.locator(`[data-date="${date}"]`)
-  const marker = cell.locator('.life-marker')
-  await expect(marker.locator('.life-event-marker')).toHaveAttribute('src', '/emoji/event-birthday.svg')
-  await expect(marker.locator('.life-task-marker')).toHaveAttribute('src', '/emoji/alarm-clock-animated.png')
-  await expect(marker.locator('small')).toHaveText('+2')
-
   const originalViewport = page.viewportSize()
+
+  await page.getByTestId('diary-view-mode-events').click()
+  await expect(cell.locator('.life-event-marker')).toHaveAttribute('src', '/emoji/event-birthday.svg')
+  await expect(cell.locator('.life-marker small')).toHaveText('+2')
+  await expect(cell.locator('.life-task-marker')).toHaveCount(0)
+
   for (const width of [320, 390, 430, 768, 1280]) {
     await page.setViewportSize({ width, height: 900 })
     const cellBounds = await cell.boundingBox()
-    const eventBounds = await marker.locator('.life-event-marker').boundingBox()
-    const taskBounds = await marker.locator('.life-task-marker').boundingBox()
+    const eventBounds = await cell.locator('.life-event-marker').boundingBox()
     expect(cellBounds).not.toBeNull()
     expect(eventBounds).not.toBeNull()
-    expect(taskBounds).not.toBeNull()
     expect(eventBounds!.width).toBe(width <= 420 ? 18 : 21)
     expect(eventBounds!.height).toBe(width <= 420 ? 18 : 21)
+    expect(eventBounds!.x).toBeGreaterThanOrEqual(cellBounds!.x)
+    expect(eventBounds!.x + eventBounds!.width).toBeLessThanOrEqual(cellBounds!.x + cellBounds!.width)
+    await expect(cell.locator('.life-task-marker')).toHaveCount(0)
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true)
+  }
+
+  await page.getByTestId('diary-view-mode-tasks').click()
+  await expect(cell.locator('.life-event-marker')).toHaveCount(0)
+  await expect(cell.locator('.life-marker small')).toHaveCount(0)
+  await expect(cell.locator('.life-task-marker')).toHaveAttribute('src', '/emoji/alarm-clock-animated.png')
+
+  for (const width of [320, 390, 430, 768, 1280]) {
+    await page.setViewportSize({ width, height: 900 })
+    const cellBounds = await cell.boundingBox()
+    const taskBounds = await cell.locator('.life-task-marker').boundingBox()
+    expect(cellBounds).not.toBeNull()
+    expect(taskBounds).not.toBeNull()
     expect(taskBounds!.width).toBe(width <= 420 ? 18 : 21)
     expect(taskBounds!.height).toBe(width <= 420 ? 18 : 21)
-    expect(eventBounds!.x).toBeGreaterThanOrEqual(cellBounds!.x)
+    expect(taskBounds!.x).toBeGreaterThanOrEqual(cellBounds!.x)
     expect(taskBounds!.x + taskBounds!.width).toBeLessThanOrEqual(cellBounds!.x + cellBounds!.width)
-    expect(eventBounds!.x + eventBounds!.width).toBeLessThanOrEqual(taskBounds!.x)
-    expect(Math.abs((eventBounds!.y + eventBounds!.height / 2) - (taskBounds!.y + taskBounds!.height / 2))).toBeLessThanOrEqual(1)
-    if (width <= 420) await expect(marker.locator('small')).toBeHidden()
-    else await expect(marker.locator('small')).toBeVisible()
+    await expect(cell.locator('.life-event-marker')).toHaveCount(0)
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true)
   }
   if (originalViewport) await page.setViewportSize(originalViewport)
@@ -446,7 +435,7 @@ test('uses the static Alarm Clock when reduced motion is enabled', async ({ page
   await page.emulateMedia({ reducedMotion: 'reduce' })
   await page.goto('/diary')
   await unlockDiary(page)
-  await page.getByTestId('diary-view-toggle').click()
+  await page.getByTestId('diary-view-mode-tasks').click()
 
   const date = `${testYear}-11-16`
   const cell = page.locator(`.diary-life-calendar [data-date="${date}"]`)
@@ -471,7 +460,7 @@ test('uses the static Alarm Clock when reduced motion is enabled', async ({ page
 test('keeps long task titles and due times aligned without horizontal overflow', async ({ page }) => {
   await page.goto('/diary')
   await unlockDiary(page)
-  await page.getByTestId('diary-view-toggle').click()
+  await page.getByTestId('diary-view-mode-tasks').click()
 
   const date = `${testYear}-11-16`
   const cell = page.locator(`.diary-life-calendar [data-date="${date}"]`)
@@ -527,7 +516,7 @@ test('keeps long task titles and due times aligned without horizontal overflow',
 test('shows a cross-day Todo only on its due date and preserves its start plan', async ({ page }) => {
   await page.goto('/diary')
   await unlockDiary(page)
-  await page.getByTestId('diary-view-toggle').click()
+  await page.getByTestId('diary-view-mode-tasks').click()
 
   const startDate = `${testYear}-11-19`
   const middleDate = `${testYear}-11-20`
@@ -576,10 +565,10 @@ test('shows a cross-day Todo only on its due date and preserves its start plan',
   await page.getByRole('button', { name: '保存', exact: true }).click()
 
   await expect(startCell.locator('.life-task-marker')).toHaveCount(0)
-  await page.getByRole('button', { name: '关闭当天事件' }).click()
+  await page.getByRole('button', { name: '关闭当天待办' }).click()
   await middleCell.click()
   await expect(middleCell.locator('.life-task-marker')).toHaveCount(0)
-  await page.getByRole('button', { name: '关闭当天事件' }).click()
+  await page.getByRole('button', { name: '关闭当天待办' }).click()
   await dueCell.click()
   const checkbox = page.getByRole('checkbox', { name: `完成待办：${title}` })
   await expect(checkbox).toBeVisible()
@@ -589,7 +578,7 @@ test('shows a cross-day Todo only on its due date and preserves its start plan',
   await expect(dueCell.locator('.life-task-marker')).toHaveAttribute('data-todo-day-state', 'completed-late')
   await expect(dueCell.locator('.life-task-marker')).toHaveClass(/life-task-marker--completed-late/)
 
-  await page.getByRole('button', { name: '关闭当天事件' }).click()
+  await page.getByRole('button', { name: '关闭当天待办' }).click()
   await dueCell.click()
   const completedRow = page.getByRole('button', { name: `编辑待办：${title}` })
   await expect(completedRow).toBeVisible()
@@ -609,19 +598,19 @@ test('calendar Todo actions remain available without the Recent Items list', asy
   await page.goto('/diary')
   await unlockDiary(page)
   await expect(page.getByTestId('diary-event-list-toggle')).toHaveCount(0)
-  await page.getByTestId('diary-view-toggle').click()
+  await page.getByTestId('diary-view-mode-tasks').click()
 
   const date = `${testYear}-11-19`
   const cell = page.locator(`.diary-life-calendar [data-date="${date}"]`)
   await cell.click()
-  const closeButton = page.getByRole('button', { name: '关闭当天事件' })
+  const closeButton = page.getByRole('button', { name: '关闭当天待办' })
   const addTaskButton = page.getByTestId('diary-add-task')
   await expect(closeButton).toHaveCSS('width', '32px')
   await expect(closeButton).toHaveCSS('border-radius', '50%')
   await expect(addTaskButton).toHaveCSS('width', '32px')
   await expect(addTaskButton).toHaveCSS('border-radius', '50%')
   await expect(addTaskButton).toBeVisible()
-  await expect(page.getByTestId('diary-add-event')).toBeVisible()
+  await expect(page.getByTestId('diary-add-event')).toHaveCount(0)
   await expect(page.getByRole('button', { name: '更多当天事件操作' })).toHaveCount(0)
   await page.getByTestId('diary-add-task').click()
 
@@ -647,77 +636,67 @@ test('calendar Todo actions remain available without the Recent Items list', asy
   await expect(page.getByRole('checkbox', { name: `完成待办：${title}` })).toHaveCount(0)
 })
 
-test('a failed calendar Todo request preserves birthday Events and retries only Todos', async ({ page }) => {
+test('a failed Todo request remains isolated from Events and retries only Todos', async ({ page }) => {
   await page.goto('/diary')
   await unlockDiary(page)
   const date = `${testYear}-11-16`
   const event = {
     id: 'e3000000-0000-4000-8000-000000000001',
-    title: '独立加载的生日事件',
-    description: '',
-    emoji: '🎂',
-    type: 'birthday',
-    startDate: date,
-    endDate: date,
-    startTime: null,
-    endTime: null,
-    allDay: true,
-    dateRule: { calendar: 'gregory' },
-    recurrence: 'none',
-    showCountdown: false,
-    isPrimary: false,
-    version: 1,
-    createdAt: 1,
-    updatedAt: 1,
+    title: '独立加载的生日事件', description: '', emoji: '🎂', type: 'birthday',
+    startDate: date, endDate: date, startTime: null, endTime: null, allDay: true,
+    dateRule: { calendar: 'gregory' }, recurrence: 'none', showCountdown: false,
+    isPrimary: false, version: 1, createdAt: 1, updatedAt: 1,
   }
   let eventRequests = 0
   let taskRequests = 0
   let releaseTaskFailure!: () => void
-  const taskFailureGate = new Promise<void>(resolve => { releaseTaskFailure = resolve })
+  const gate = new Promise<void>(resolve => { releaseTaskFailure = resolve })
   await page.route('**/api/diary/life/**', async route => {
-    const request = route.request()
-    const url = new URL(request.url())
-    if (request.method() === 'GET' && url.pathname === '/api/diary/life/events') {
+    const url = new URL(route.request().url())
+    if (route.request().method() === 'GET' && url.pathname === '/api/diary/life/events') {
       eventRequests += 1
       await route.fulfill({ json: { items: [event], next: null } })
-      return
-    }
-    if (request.method() === 'GET' && url.pathname === '/api/diary/life/task-occurrences') {
+    } else if (route.request().method() === 'GET' && url.pathname === '/api/diary/life/task-occurrences') {
       taskRequests += 1
       if (taskRequests === 1) {
-        await taskFailureGate
+        await gate
         await route.fulfill({ status: 503, json: { code: 'diary-unavailable' } })
-      }
-      else await route.fulfill({ json: { items: [], nextCursor: null } })
-      return
-    }
-    await route.continue()
+      } else await route.fulfill({ json: { items: [], nextCursor: null } })
+    } else await route.continue()
   })
 
   try {
-    await page.getByTestId('diary-view-toggle').click()
+    await page.getByTestId('diary-view-mode-tasks').click()
     const cell = page.locator(`.diary-life-calendar [data-date="${date}"]`)
     await expect.poll(() => taskRequests).toBe(1)
-    await expect(cell.locator('.life-marker img')).toHaveAttribute('src', '/emoji/event-birthday.svg')
+    expect(eventRequests).toBe(0)
+    await expect(cell.locator('.life-event-marker')).toHaveCount(0)
     await cell.click()
     const dayDialog = page.locator('.diary-life-dialog')
-    await expect(dayDialog.locator(`[data-event-id="${event.id}"]`)).toBeVisible()
     await expect(dayDialog.locator('.day-tasks [role="status"]')).toBeVisible()
+    await expect(dayDialog.locator('.day-events')).toHaveCount(0)
 
     releaseTaskFailure()
-    const taskError = dayDialog.locator('.day-tasks [role="alert"]')
-    await expect(taskError).toContainText('待办加载失败')
-    await taskError.getByRole('button', { name: '重试' }).click()
-    await expect(taskError).toHaveCount(0)
-    await expect(dayDialog.locator(`[data-event-id="${event.id}"]`)).toBeVisible()
-    expect(eventRequests).toBe(1)
+    const error = dayDialog.locator('.day-tasks [role="alert"]')
+    await expect(error).toContainText('待办加载失败')
+    await error.getByRole('button', { name: '重试' }).click()
+    await expect(error).toHaveCount(0)
     expect(taskRequests).toBe(2)
+    expect(eventRequests).toBe(0)
+
+    await page.getByRole('button', { name: '关闭当天待办' }).click()
+    await page.getByTestId('diary-view-mode-events').click()
+    await expect.poll(() => eventRequests).toBe(1)
+    await expect(cell.locator('.life-event-marker')).toBeVisible()
+    await expect(cell.locator('.life-task-marker')).toHaveCount(0)
+    await cell.click()
+    await expect(page.locator(`[data-event-id="${event.id}"]`)).toBeVisible()
   } finally {
     releaseTaskFailure()
   }
 })
 
-test('a failed calendar Event request preserves interactive Todos and retries only Events', async ({ page }) => {
+test('a failed Event request remains isolated from Todos and retries only Events', async ({ page }) => {
   await page.goto('/diary')
   await unlockDiary(page)
   const date = `${testYear}-11-16`
@@ -727,61 +706,56 @@ test('a failed calendar Event request preserves interactive Todos and retries on
   let eventRequests = 0
   let taskRequests = 0
   let releaseEventFailure!: () => void
-  const eventFailureGate = new Promise<void>(resolve => { releaseEventFailure = resolve })
+  const gate = new Promise<void>(resolve => { releaseEventFailure = resolve })
   await page.route('**/api/diary/life/**', async route => {
-    const request = route.request()
-    const url = new URL(request.url())
-    if (request.method() === 'GET' && url.pathname === '/api/diary/life/events') {
+    const url = new URL(route.request().url())
+    if (route.request().method() === 'GET' && url.pathname === '/api/diary/life/events') {
       eventRequests += 1
       if (eventRequests === 1) {
-        await eventFailureGate
+        await gate
         await route.fulfill({ status: 503, json: { code: 'diary-unavailable' } })
-      }
-      else await route.fulfill({ json: { items: [], next: null } })
-      return
-    }
-    if (request.method() === 'GET' && url.pathname === '/api/diary/life/task-occurrences') {
+      } else await route.fulfill({ json: { items: [], next: null } })
+    } else if (route.request().method() === 'GET' && url.pathname === '/api/diary/life/task-occurrences') {
       taskRequests += 1
       await route.fulfill({ json: {
-        items: [{ id: taskId, title: 'Events 失败时仍可勾选', description: '', startDate: null, startTime: null, dueDate: date, dueTime: null, completedAt, version: taskVersion, createdAt: 1, updatedAt: taskVersion }],
+        items: [{ id: taskId, title: 'Events 失败时独立的待办', description: '', startDate: null, startTime: null, dueDate: date, dueTime: null, completedAt, version: taskVersion, createdAt: 1, updatedAt: taskVersion }],
         nextCursor: null,
       } })
-      return
-    }
-    if (request.method() === 'POST' && url.pathname === `/api/diary/life/tasks/${taskId}/complete`) {
+    } else if (route.request().method() === 'POST' && url.pathname === `/api/diary/life/tasks/${taskId}/complete`) {
       completedAt = Date.now()
       taskVersion += 1
-      await route.fulfill({ json: { task: { id: taskId, title: 'Events 失败时仍可勾选', description: '', startDate: null, startTime: null, dueDate: date, dueTime: null, completedAt, version: taskVersion, createdAt: 1, updatedAt: taskVersion } } })
-      return
-    }
-    await route.continue()
+      await route.fulfill({ json: { task: { id: taskId, title: 'Events 失败时独立的待办', description: '', startDate: null, startTime: null, dueDate: date, dueTime: null, completedAt, version: taskVersion, createdAt: 1, updatedAt: taskVersion } } })
+    } else await route.continue()
   })
 
   try {
-    await page.getByTestId('diary-view-toggle').click()
+    await page.getByTestId('diary-view-mode-events').click()
     const cell = page.locator(`.diary-life-calendar [data-date="${date}"]`)
-    await expect(cell.locator('.life-task-marker')).toBeVisible()
+    await expect.poll(() => eventRequests).toBe(1)
+    expect(taskRequests).toBe(0)
+    await expect(cell.locator('.life-task-marker')).toHaveCount(0)
     await cell.click()
     const dayDialog = page.locator('.diary-life-dialog')
-    const taskCheckbox = dayDialog.getByRole('checkbox', { name: '完成待办：Events 失败时仍可勾选' })
-    await expect(taskCheckbox).toBeVisible()
     await expect(dayDialog.locator('.day-events [role="status"]')).toBeVisible()
+    await expect(dayDialog.locator('.day-tasks')).toHaveCount(0)
 
     releaseEventFailure()
-    const eventError = dayDialog.locator('.day-events [role="alert"]')
-    await expect(eventError).toContainText('加载事件失败')
-    await eventError.getByRole('button', { name: '重试' }).click()
-    await expect(eventError).toHaveCount(0)
-    await expect(taskCheckbox).toBeVisible()
+    const error = dayDialog.locator('.day-events [role="alert"]')
+    await expect(error).toContainText('加载事件失败')
+    await error.getByRole('button', { name: '重试' }).click()
+    await expect(error).toHaveCount(0)
     expect(eventRequests).toBe(2)
-    expect(taskRequests).toBe(1)
+    expect(taskRequests).toBe(0)
 
-    await taskCheckbox.click()
-    await expect(dayDialog.locator('.diary-task-row.is-completed')).toContainText('Events 失败时仍可勾选')
-    await expect(cell.locator('.life-task-marker')).toHaveAttribute('src', '/emoji/party-popper.svg')
-    await expect(cell.locator('.life-task-marker')).toHaveAttribute('data-todo-day-state', 'completed-late')
-    expect(eventRequests).toBe(2)
-    expect(taskRequests).toBe(2)
+    await page.getByRole('button', { name: '关闭当天事件' }).click()
+    await page.getByTestId('diary-view-mode-tasks').click()
+    await expect.poll(() => taskRequests).toBe(1)
+    await expect(cell.locator('.life-task-marker')).toBeVisible()
+    await expect(cell.locator('.life-event-marker')).toHaveCount(0)
+    await cell.click()
+    const checkbox = page.getByRole('checkbox', { name: '完成待办：Events 失败时独立的待办' })
+    await checkbox.click()
+    await expect(page.locator('.diary-task-row.is-completed')).toContainText('Events 失败时独立的待办')
   } finally {
     releaseEventFailure()
   }
@@ -830,7 +804,7 @@ test('a delayed Todo page from the previous month cannot replace current calenda
   })
 
   try {
-    await page.getByTestId('diary-view-toggle').click()
+    await page.getByTestId('diary-view-mode-tasks').click()
     await expect.poll(() => taskRequests).toBe(1)
     const calendar = page.locator('.diary-life-calendar')
     const arrows = calendar.locator('.n-calendar-header').getByRole('button')
@@ -895,7 +869,7 @@ test('a Todo response from a locked Diary session cannot enter the next unlocked
   })
 
   try {
-    await page.getByTestId('diary-view-toggle').click()
+    await page.getByTestId('diary-view-mode-tasks').click()
     await staleStarted
     await page.getByTestId('account-button').click()
     await page.getByTestId('account-lock-diary').click()
@@ -920,7 +894,7 @@ test('a Todo response from a locked Diary session cannot enter the next unlocked
 test('recurring Todo completion and skipping are scoped to one date', async ({ page }) => {
   await page.goto('/diary')
   await unlockDiary(page)
-  await page.getByTestId('diary-view-toggle').click()
+  await page.getByTestId('diary-view-mode-tasks').click()
 
   const startDate = `${testYear}-11-16`
   const skippedDate = `${testYear}-11-17`
@@ -956,7 +930,7 @@ test('recurring Todo completion and skipping are scoped to one date', async ({ p
   await expect(completedOccurrence).toContainText('逾期')
   await page.getByRole('button', { name: '取消', exact: true }).click()
 
-  await page.getByRole('button', { name: '关闭当天事件' }).click()
+  await page.getByRole('button', { name: '关闭当天待办' }).click()
   const skippedCell = calendar.locator(`[data-date="${skippedDate}"]`)
   await skippedCell.click()
   await expect(page.getByRole('checkbox', { name: `完成待办：${title}` })).toBeVisible()
@@ -986,7 +960,7 @@ test('recurring Todo completion and skipping are scoped to one date', async ({ p
   await expect(page.locator('.diary-task-row.is-skipped')).not.toContainText('已完成')
   await expect(page.locator('.diary-task-row.is-skipped')).not.toContainText('已逾期')
   await expect(skippedCell.locator('.life-task-marker')).toHaveCount(0)
-  await page.getByRole('button', { name: '关闭当天事件' }).click()
+  await page.getByRole('button', { name: '关闭当天待办' }).click()
   const followingCell = calendar.locator(`[data-date="${followingDate}"]`)
   await followingCell.click()
   await expect(page.getByRole('checkbox', { name: `完成待办：${title}` })).toBeVisible()
@@ -995,12 +969,12 @@ test('recurring Todo completion and skipping are scoped to one date', async ({ p
   const stopConfirmation = page.getByRole('dialog', { name: '结束后续重复安排？当前这次和之前的记录会保留。' })
   await stopConfirmation.getByRole('button', { name: /^(Confirm|确认|确定)$/ }).click()
 
-  await page.getByRole('button', { name: '关闭当天事件' }).click()
+  await page.getByRole('button', { name: '关闭当天待办' }).click()
   const stoppedCell = calendar.locator(`[data-date="${stoppedAfterDate}"]`)
   await stoppedCell.click()
   await expect(page.getByRole('checkbox', { name: `完成待办：${title}` })).toHaveCount(0)
 
-  await page.getByRole('button', { name: '关闭当天事件' }).click()
+  await page.getByRole('button', { name: '关闭当天待办' }).click()
   await followingCell.click()
   await page.getByRole('button', { name: `编辑待办：${title}` }).click()
   await page.getByRole('button', { name: '删除', exact: true }).click()
@@ -1012,7 +986,7 @@ test('recurring Todo completion and skipping are scoped to one date', async ({ p
 test('editing a recurring Todo changes future occurrences and preserves completed history', async ({ page }) => {
   await page.goto('/diary')
   await unlockDiary(page)
-  await page.getByTestId('diary-view-toggle').click()
+  await page.getByTestId('diary-view-mode-tasks').click()
 
   const firstDate = `${testYear}-11-20`
   const effectiveDate = `${testYear}-11-21`
@@ -1033,14 +1007,14 @@ test('editing a recurring Todo changes future occurrences and preserves complete
   await page.getByRole('checkbox', { name: `完成待办：${title}` }).click()
   await expect(page.locator('.diary-task-row.is-completed')).toContainText(title)
 
-  await page.getByRole('button', { name: '关闭当天事件' }).click()
+  await page.getByRole('button', { name: '关闭当天待办' }).click()
   await effectiveCell.click()
   await page.getByRole('button', { name: `编辑待办：${title}` }).click()
   await selectNaiveOption(page, '重复规则', '每周')
   await page.getByRole('button', { name: '保存', exact: true }).click()
   await expect(page.getByRole('checkbox', { name: `完成待办：${title}` })).toBeVisible()
 
-  await page.getByRole('button', { name: '关闭当天事件' }).click()
+  await page.getByRole('button', { name: '关闭当天待办' }).click()
   await firstCell.click()
   await expect(page.locator('.diary-task-row.is-completed')).toContainText(title)
   await page.getByRole('button', { name: `编辑待办：${title}` }).click()
@@ -1057,7 +1031,7 @@ test('editing a recurring Todo changes future occurrences and preserves complete
   const discardTaskChanges = page.getByRole('dialog', { name: '放弃未保存的修改？' })
   await discardTaskChanges.getByRole('button', { name: /^(Confirm|确认|确定)$/ }).click()
   await expect(oldSeriesEditor).toBeHidden()
-  await page.getByRole('button', { name: '关闭当天事件' }).click()
+  await page.getByRole('button', { name: '关闭当天待办' }).click()
   await expect(firstCell.locator('.life-task-marker')).toHaveAttribute('src', '/emoji/party-popper.svg')
   await expect(firstCell.locator('.life-task-marker')).toHaveAttribute('data-todo-day-state', 'completed-late')
 
@@ -1065,63 +1039,62 @@ test('editing a recurring Todo changes future occurrences and preserves complete
   await expect(page.getByRole('checkbox', { name: `完成待办：${title}` })).toBeVisible()
 })
 
-test('date-coincident Todo and Event remain independent records', async ({ page }) => {
+test('date-coincident Todo and Event use separate views without altering each other', async ({ page }) => {
   await page.goto('/diary')
   await unlockDiary(page)
-  await page.getByTestId('diary-view-toggle').click()
+  await page.getByTestId('diary-view-mode-events').click()
 
   const date = `${testYear}-11-21`
   const eventTitle = `Checkup ${Math.random().toString(36).slice(2, 8)}`
   const taskTitle = `Prepare ID ${Math.random().toString(36).slice(2, 8)}`
   const cell = page.locator(`.diary-life-calendar [data-date="${date}"]`)
   await cell.click()
-  await expect(page.getByRole('button', { name: '更多当天事件操作' })).toHaveCount(0)
   await page.getByTestId('diary-add-event').click()
   await page.getByTestId('event-type-schedule').click()
-  await expect(diaryEventDateInput(page, '开始日期')).toHaveValue(date)
-  await expect(diaryEventDateInput(page, '结束日期')).toHaveValue(date)
   await page.getByRole('textbox', { name: '事件名称' }).fill(eventTitle)
   await fillDiaryEventDate(page, '开始日期', date)
   await fillDiaryEventDate(page, '结束日期', date)
   await page.getByRole('button', { name: '保存', exact: true }).click()
+  const eventButton = page.getByRole('button', { name: eventTitle, exact: true })
+  await expect(eventButton).toBeVisible()
+  await expect(eventButton.locator('.diary-event-distance')).toHaveText('还剩5天')
+  await expect(page.getByTestId('diary-add-task')).toHaveCount(0)
+  await expect(cell.locator('.life-event-marker')).toBeVisible()
+  await expect(cell.locator('.life-task-marker')).toHaveCount(0)
 
-  await expect(page.getByRole('button', { name: eventTitle, exact: true })).toBeVisible()
+  await page.getByRole('button', { name: '关闭当天事件' }).click()
+  await page.getByTestId('diary-view-mode-tasks').click()
+  await expect(cell.locator('.life-event-marker')).toHaveCount(0)
+  await cell.click()
+  await expect(eventButton).toHaveCount(0)
   await page.getByTestId('diary-add-task').click()
   await page.getByRole('textbox', { name: '待办名称' }).fill(taskTitle)
   await expect(diaryTaskDateInput(page, '截止日期')).toHaveValue(date)
-  await fillDiaryTaskDate(page, '截止日期', date)
   await page.getByRole('button', { name: '保存', exact: true }).click()
-
-  const eventButton = page.getByRole('button', { name: eventTitle, exact: true })
-  await expect(eventButton).toBeVisible()
   await expect(page.getByRole('checkbox', { name: `完成待办：${taskTitle}`, exact: true })).toBeVisible()
-
-  const dayDialog = page.locator('.diary-life-dialog')
-  const dayHeadingColor = await dayDialog.getByRole('heading', { name: '待办事项' }).evaluate(heading => getComputedStyle(heading).color)
-  await expect(eventButton).toHaveCSS('height', '48px')
-  await expect(eventButton.locator('.diary-event-distance')).toHaveText('还剩5天')
-  await expect(eventButton.locator('.diary-event-distance')).toHaveCSS('font-size', '12px')
-  await expect(eventButton.locator('.diary-event-distance')).toHaveCSS('white-space', 'nowrap')
-  await expect(dayDialog.getByRole('heading', { name: '重要日程' })).toHaveCSS('color', dayHeadingColor)
-  await page.getByRole('button', { name: '关闭当天事件' }).click()
-  await cell.click()
+  await expect(cell.locator('.life-task-marker')).toBeVisible()
 
   await page.getByRole('button', { name: `编辑待办：${taskTitle}` }).click()
   await page.getByRole('button', { name: '删除', exact: true }).click()
-  const taskDeleteConfirmation = page.getByRole('dialog', { name: '删除这条待办？' })
-  await taskDeleteConfirmation.getByRole('button', { name: /^(Confirm|确认|确定)$/ }).click()
-  await expect(eventButton).toBeVisible()
-
-  const remainingTaskTitle = `${taskTitle} independent`
+  await page.getByRole('dialog', { name: '删除这条待办？' }).getByRole('button', { name: /^(Confirm|确认|确定)$/ }).click()
+  const remainingTask = `${taskTitle} independent`
   await page.getByTestId('diary-add-task').click()
-  await page.getByRole('textbox', { name: '待办名称' }).fill(remainingTaskTitle)
-  await fillDiaryTaskDate(page, '截止日期', date)
+  await page.getByRole('textbox', { name: '待办名称' }).fill(remainingTask)
   await page.getByRole('button', { name: '保存', exact: true }).click()
-  await expect(page.getByRole('checkbox', { name: `完成待办：${remainingTaskTitle}`, exact: true })).toBeVisible()
+  await expect(page.getByRole('checkbox', { name: `完成待办：${remainingTask}`, exact: true })).toBeVisible()
 
+  await page.getByRole('button', { name: '关闭当天待办' }).click()
+  await page.getByTestId('diary-view-mode-events').click()
+  await expect(cell.locator('.life-event-marker')).toBeVisible()
+  await cell.click()
+  await expect(eventButton).toBeVisible()
   await eventButton.click()
   await page.getByRole('button', { name: '删除事件', exact: true }).click()
-  const eventDeleteConfirmation = page.getByRole('dialog', { name: '删除这条事件？' })
-  await eventDeleteConfirmation.getByRole('button', { name: /^(Confirm|确认|确定)$/ }).click()
-  await expect(page.getByRole('checkbox', { name: `完成待办：${remainingTaskTitle}`, exact: true })).toBeVisible()
+  await page.getByRole('dialog', { name: '删除这条事件？' }).getByRole('button', { name: /^(Confirm|确认|确定)$/ }).click()
+  await expect(eventButton).toHaveCount(0)
+
+  await page.getByRole('button', { name: '关闭当天事件' }).click()
+  await page.getByTestId('diary-view-mode-tasks').click()
+  await cell.click()
+  await expect(page.getByRole('checkbox', { name: `完成待办：${remainingTask}`, exact: true })).toBeVisible()
 })

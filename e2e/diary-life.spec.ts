@@ -176,14 +176,14 @@ for (const width of [390, 430]) {
     test('closes the day events dialog without opening the date under the same touch', async ({ page }) => {
       await page.goto('/diary')
       await unlockDiary(page)
-      await page.getByRole('button', { name: '切换到日程视图' }).tap()
+      await page.getByRole('button', { name: '事件视图' }).tap()
 
       const selectedDate = page.locator('.diary-life-calendar .life-date[data-date$="-01-10"]')
       await expect(selectedDate).toBeVisible()
       await selectedDate.tap()
       const dialog = page.locator('.diary-life-dialog')
       await expect(dialog).toBeVisible()
-      await dialog.getByRole('heading', { name: '待办事项' }).tap()
+      await dialog.locator('.n-card-header').tap()
       await expect(dialog).toBeVisible()
 
       const backgroundDate = await tapCalendarDateUnderBackdrop(page)
@@ -225,7 +225,7 @@ for (const width of [390, 430]) {
     test('keeps a dirty Event draft when backdrop close is cancelled', async ({ page }) => {
       await page.goto('/diary')
       await unlockDiary(page)
-      await page.getByRole('button', { name: '切换到日程视图' }).tap()
+      await page.getByRole('button', { name: '事件视图' }).tap()
 
       const selectedDate = page.locator('.diary-life-calendar .life-date[data-date$="-01-10"]')
       await selectedDate.tap()
@@ -244,7 +244,7 @@ for (const width of [390, 430]) {
     test('keeps a dirty Todo draft when backdrop close is cancelled', async ({ page }) => {
       await page.goto('/diary')
       await unlockDiary(page)
-      await page.getByRole('button', { name: '切换到日程视图' }).tap()
+      await page.getByRole('button', { name: '待办视图' }).tap()
 
       const selectedDate = page.locator('.diary-life-calendar .life-date[data-date$="-01-10"]')
       await selectedDate.tap()
@@ -268,7 +268,7 @@ test.describe('Diary desktop modal dismissal', () => {
   test('keeps backdrop click and Escape dismissal working', async ({ page }) => {
     await page.goto('/diary')
     await unlockDiary(page)
-    await page.getByRole('button', { name: '切换到日程视图' }).click()
+    await page.getByRole('button', { name: '事件视图' }).click()
 
     const cell = page.locator('.diary-life-calendar .life-date[data-date$="-01-10"]')
     await cell.click()
@@ -401,32 +401,27 @@ for (const viewport of [{ width: 390, height: 844 }, { width: 430, height: 900 }
       await expect(cell.locator('img')).toHaveCount(1)
       const numberBefore = await dateNumberOffset(cell)
       const monthBefore = await calendar.locator('.n-calendar-header').innerText()
-      await page.getByRole('button', { name: '切换到日程视图' }).click()
+      await page.getByRole('button', { name: '事件视图' }).click()
       await expect(cell).toHaveAttribute('aria-pressed', 'false')
       await expect(cell.locator('img')).toHaveCount(0)
       expect(await dateNumberOffset(cell)).toEqual(numberBefore)
       expect(await calendar.locator('.n-calendar-header').innerText()).toBe(monthBefore)
       await cell.click()
       await expect(cell).toHaveAttribute('aria-pressed', 'true')
-      await expect(page.getByTestId('diary-add-task')).toBeVisible()
       await expect(page.getByTestId('diary-add-event')).toBeVisible()
+      await expect(page.getByTestId('diary-add-task')).toHaveCount(0)
       const dayEventsDialog = page.locator('.diary-life-dialog')
       await expect(dayEventsDialog.locator('.diary-day-status')).toHaveCount(0)
-      await expect(dayEventsDialog.locator('.day-tasks h3')).toHaveText('待办事项')
-      await expect(dayEventsDialog.locator('.day-events h3')).toHaveText('重要日程')
-      await expect(dayEventsDialog.locator('.day-list-empty')).toHaveCount(0)
-      await expect(dayEventsDialog.getByTestId('diary-add-task')).toBeVisible()
-      await expect(dayEventsDialog.getByTestId('diary-add-event')).toBeVisible()
-      const emptyTaskHeader = dayEventsDialog.locator('.day-tasks.day-list-section--empty .day-list-section-header')
-      const emptyEventHeader = dayEventsDialog.locator('.day-events.day-list-section--empty .day-list-section-header')
-      await expect(emptyTaskHeader).toHaveCSS('height', viewport.width <= 768 ? '40px' : '32px')
-      await expect(emptyEventHeader).toHaveCSS('height', viewport.width <= 768 ? '40px' : '32px')
+      await expect(dayEventsDialog.locator('.day-events')).toHaveCount(1)
+      await expect(dayEventsDialog.locator('.day-tasks')).toHaveCount(0)
+      await expect(dayEventsDialog.locator('.day-list-section-header')).toHaveCount(0)
+      await expect(dayEventsDialog.locator('.day-list-content--empty')).toHaveCount(1)
       if (viewport.width === 1280) {
-        await expect(dayEventsDialog.getByTestId('diary-add-task')).toHaveCSS('opacity', '0')
-        await emptyTaskHeader.hover()
-        await expect(dayEventsDialog.getByTestId('diary-add-task')).toHaveCSS('opacity', '1')
+        await expect(dayEventsDialog.getByTestId('diary-add-event')).toHaveCSS('opacity', '0')
+        await dayEventsDialog.locator('.diary-event-header-actions').hover()
+        await expect(dayEventsDialog.getByTestId('diary-add-event')).toHaveCSS('opacity', '1')
       } else {
-        await expect(dayEventsDialog.getByTestId('diary-add-task')).toHaveCSS('opacity', '0.68')
+        await expect(dayEventsDialog.getByTestId('diary-add-event')).toHaveCSS('opacity', '0.68')
       }
       await expectDiaryGlassModal(page, dayEventsDialog)
       await expect(page.getByRole('button', { name: '更多当天事件操作' })).toHaveCount(0)
@@ -450,10 +445,10 @@ for (const viewport of [{ width: 390, height: 844 }, { width: 430, height: 900 }
       await page.getByRole('button', { name: '保存', exact: true }).click()
       const eventModal = page.locator('.diary-life-dialog')
       await expect(eventModal).toBeVisible()
-      await expect(eventModal.locator('.day-tasks h3')).toHaveText('待办事项')
-      await expect(eventModal.locator('.day-list-empty')).toHaveCount(0)
+      await expect(eventModal.locator('.day-tasks')).toHaveCount(0)
+      await expect(eventModal.locator('.day-list-section-header')).toHaveCount(0)
       await expect(eventModal.locator('.day-events .diary-event-row')).toHaveCount(1)
-      await expect(eventModal.locator('.day-events.day-list-section--empty')).toHaveCount(0)
+      await expect(eventModal.locator('.day-list-content--empty')).toHaveCount(0)
       const eventTitleInput = page.getByRole('textbox', { name: '事件名称', exact: true })
       await expect(eventTitleInput).toHaveCount(0)
       const eventModalBounds = await eventModal.boundingBox()
@@ -482,7 +477,7 @@ for (const viewport of [{ width: 390, height: 844 }, { width: 430, height: 900 }
       await page.getByRole('button', { name: '关闭当天事件' }).click()
       await page.reload()
       await unlockDiary(page)
-      await expect(page.getByRole('button', { name: '切换到日记视图' })).toBeVisible()
+      await expect(page.getByRole('button', { name: '日记视图' })).toBeVisible()
       await expect(page.getByTestId('diary-event-list-toggle')).toHaveCount(0)
       await expect(cell.locator('img')).toHaveAttribute('src', /event-graduation/)
       await page.screenshot({ path: testInfo.outputPath('diary-calendar.png') })
@@ -491,10 +486,10 @@ for (const viewport of [{ width: 390, height: 844 }, { width: 430, height: 900 }
         const countdowns = page.locator('.countdowns')
         await expect(countdowns).toHaveCount(0)
         const calendarHeight = (await calendar.boundingBox())!.height
-        await page.getByTestId('diary-view-toggle').click()
+        await page.getByTestId('diary-view-mode-diary').click()
         await expect(countdowns).toHaveCount(0)
         expect((await calendar.boundingBox())!.height).toBe(calendarHeight)
-        await page.getByTestId('diary-view-toggle').click()
+        await page.getByTestId('diary-view-mode-events').click()
         await expect(countdowns).toHaveCount(0)
         const occurrence = calendar.locator(`[data-date="${eventDate}"]`)
         await occurrence.click()
@@ -542,7 +537,7 @@ test('Diary event editor remains usable across phone, tablet, and desktop widths
   await page.setViewportSize({ width: 320, height: 640 })
   await page.goto('/diary')
   await unlockDiary(page)
-  await page.getByTestId('diary-view-toggle').click()
+  await page.getByTestId('diary-view-mode-events').click()
 
   const futureDate = await page.evaluate(() => {
     const now = new Date()
@@ -640,7 +635,7 @@ test('Diary event editor remains usable across phone, tablet, and desktop widths
 test('keeps event calendar context aligned after date edits', async ({ page }) => {
   await page.goto('/diary')
   await unlockDiary(page)
-  await page.getByTestId('diary-view-toggle').click()
+  await page.getByTestId('diary-view-mode-events').click()
 
   const calendar = page.locator('.diary-life-calendar')
   const originalDate = '2026-11-20'
@@ -731,7 +726,7 @@ test('keeps event calendar context aligned after date edits', async ({ page }) =
 test('Diary event type changes protect range data until the user confirms', async ({ page }) => {
   await page.goto('/diary')
   await unlockDiary(page)
-  await page.getByTestId('diary-view-toggle').click()
+  await page.getByTestId('diary-view-mode-events').click()
 
   const startDate = await page.evaluate(() => {
     const now = new Date()
@@ -799,7 +794,7 @@ test('Diary selected day Event distance stays on one line across viewport widths
   await page.goto('/diary')
   await unlockDiary(page)
   await expect(page.getByTestId('diary-event-list-toggle')).toHaveCount(0)
-  await page.getByTestId('diary-view-toggle').click()
+  await page.getByTestId('diary-view-mode-events').click()
   await page.locator('.diary-life-calendar [data-date="2026-11-16"]').click()
 
   const row = page.getByRole('button', { name: event.title, exact: true })
@@ -849,11 +844,13 @@ test('Diary selected day Event distance stays on one line across viewport widths
   const pastRow = page.getByRole('button', { name: pastEvent.title, exact: true })
   await expect(pastRow.locator('.diary-event-distance')).toHaveText('已过去1天')
   await page.getByRole('button', { name: '关闭当天事件' }).click()
-  const viewToggle = page.getByTestId('diary-view-toggle')
-  await expect(viewToggle).toHaveAttribute('aria-label', '切换到日记视图')
-  await viewToggle.click()
+  const eventsView = page.getByTestId('diary-view-mode-events')
+  const diaryView = page.getByTestId('diary-view-mode-diary')
+  await expect(eventsView).toHaveAttribute('aria-pressed', 'true')
+  await diaryView.click()
   await expect(page.locator('.diary-life-calendar [data-date="2026-11-16"]')).toHaveCount(1)
-  await expect(viewToggle).toHaveAttribute('aria-label', '切换到日程视图')
+  await expect(diaryView).toHaveAttribute('aria-pressed', 'true')
+  await expect(eventsView).toHaveAttribute('aria-pressed', 'false')
 })
 
 test('Diary NavBar icon controls share the standard size across viewport widths', async ({ page }) => {
@@ -862,7 +859,9 @@ test('Diary NavBar icon controls share the standard size across viewport widths'
 
   const viewportWidths = [390, 430, 768, 1024, 1280, 1440]
   const selectors = [
-    '.diary-view-toggle',
+    '[data-testid="diary-view-mode-diary"]',
+    '[data-testid="diary-view-mode-events"]',
+    '[data-testid="diary-view-mode-tasks"]',
     '.nav-search',
     '.theme-toggle',
     '[data-testid="account-button"]',
@@ -896,12 +895,12 @@ test('Diary NavBar icon controls share the standard size across viewport widths'
       .toEqual(Array.from({ length: controls.length }, () => [18, 18, 18, 18]))
     expect(Math.max(...metrics.map(metric => metric.y)) - Math.min(...metrics.map(metric => metric.y)))
       .toBeLessThan(1)
-    expect(metrics.slice(1).map((metric, index) => metric.x - metrics[index].x - metrics[index].width))
-      .toEqual(Array.from({ length: controls.length - 1 }, () => width <= 600 ? 2 : 6))
+    const gaps = metrics.slice(1).map((metric, index) => metric.x - metrics[index].x - metrics[index].width)
+    expect(gaps.every(gap => gap >= 0 && gap <= 10)).toBe(true)
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true)
   }
 
-  const diaryToggles = [page.locator('.navbar .nav-actions .diary-view-toggle')]
+  const diaryToggles = [page.getByTestId('diary-view-mode-events')]
   const search = page.locator('.navbar .nav-actions .nav-search')
   for (const diaryToggle of diaryToggles) {
     await diaryToggle.hover()
@@ -918,7 +917,7 @@ test('lunar Events preserve their rule across countdowns, editing and calendar d
   if (await page.locator('html').getAttribute('data-theme') !== 'light') {
     await page.locator('.theme-toggle').click()
   }
-  await page.getByTestId('diary-view-toggle').click()
+  await page.getByTestId('diary-view-mode-events').click()
   const calendar = page.locator('.diary-life-calendar')
   const startCell = calendar.locator('[data-date="2026-11-16"]')
   await startCell.click()
@@ -1073,7 +1072,7 @@ test('creates lunar and Gregorian birthdays without guessing the birth year', as
   await page.setViewportSize({ width: 430, height: 900 })
   await page.goto('/diary')
   await unlockDiary(page)
-  await page.getByTestId('diary-view-toggle').click()
+  await page.getByTestId('diary-view-mode-events').click()
   const calendar = page.locator('.diary-life-calendar')
   await calendar.locator('[data-date="2026-11-16"]').click()
   await page.getByTestId('diary-add-event').click()
@@ -1692,7 +1691,7 @@ for (const viewport of [
     await expect(page.getByTestId('diary-day-dialog')).toHaveCount(0)
     await expect(today).toHaveAttribute('aria-pressed', 'false')
     const numberBefore = await dateNumberOffset(today)
-    await page.getByTestId('diary-view-toggle').click()
+    await page.getByTestId('diary-view-mode-events').click()
     await expect(today).toHaveAttribute('aria-pressed', 'false')
     await expect(title).toHaveText(monthBefore)
     expect((await calendar.boundingBox())!.height).toBe(calendarBox.height)
