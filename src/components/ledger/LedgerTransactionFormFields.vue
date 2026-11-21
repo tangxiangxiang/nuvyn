@@ -431,9 +431,9 @@ defineExpose({
 .ledger-transfer-amount-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; margin-top: 12px; }
 .ledger-transfer-amount-grid .ledger-amount-field { margin-top: 0; }
 .ledger-transfer-kind-field { grid-column: 1 / -1; }
-.ledger-transfer-kinds { display: flex; width: 100%; height: auto; box-sizing: border-box; gap: 2px; padding: 3px; border: 1px solid color-mix(in srgb, var(--border) 82%, transparent); border-radius: 9px; background: color-mix(in srgb, var(--bg) 54%, transparent); line-height: normal; white-space: normal; }
+.ledger-transfer-kinds { display: flex; width: 100%; height: 34px; box-sizing: border-box; gap: 2px; padding: 2px; border: 1px solid color-mix(in srgb, var(--border) 82%, transparent); border-radius: 9px; background: color-mix(in srgb, var(--bg) 54%, transparent); line-height: normal; white-space: normal; }
 .ledger-transfer-kinds :deep(.n-radio-group__splitor) { display: none; }
-.ledger-transfer-kinds :deep(.n-radio-button) { display: flex; height: 32px; min-width: 0; flex: 1 1 0; align-items: center; justify-content: center; box-sizing: border-box; padding: 0 8px; border: 0; border-radius: 7px; background: transparent; color: var(--text-muted); line-height: 32px; transition: background-color .18s ease, color .18s ease; }
+.ledger-transfer-kinds :deep(.n-radio-button) { display: flex; height: 28px; min-width: 0; flex: 1 1 0; align-items: center; justify-content: center; box-sizing: border-box; padding: 0 8px; border: 0; border-radius: 7px; background: transparent; color: var(--text-muted); line-height: 28px; transition: background-color .18s ease, color .18s ease; }
 .ledger-transfer-kinds :deep(.n-radio-button__state-border) { display: none; }
 .ledger-transfer-kinds :deep(.n-radio__label) { width: 100%; text-align: center; }
 .ledger-transfer-kinds :deep(.n-radio-button--checked) { background: color-mix(in srgb, var(--accent) 11%, transparent); color: var(--accent); font-weight: 700; }
@@ -452,7 +452,7 @@ defineExpose({
 .ledger-money-input:focus-within { border-color: var(--accent); box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 18%, transparent); }
 .ledger-money-input > span { color: var(--accent); font-size: .78rem; font-weight: 750; }
 .ledger-money-control { flex: 1; min-width: 0; font-size: .95rem; font-weight: 650; }
-.ledger-money-field-control { display: grid; min-width: 0; gap: 4px; }
+.ledger-money-field-control { display: grid; width: 100%; min-width: 0; gap: 4px; }
 .ledger-amount-expression-row { display: flex; min-height: 21px; align-items: center; justify-content: space-between; gap: 8px; padding: 0 2px; }
 .ledger-amount-expression-preview { min-width: 0; color: var(--text-muted); font-size: .72rem; line-height: 1.35; }
 .ledger-amount-expression-operators { display: flex; flex: 0 0 auto; gap: 4px; }
