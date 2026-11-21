@@ -3,6 +3,33 @@
 All notable changes to Nuvyn are documented in this file. Entries dated before
 the Nuvyn brand baseline may refer to Nuvyn as the historical product name.
 
+## Nuvyn v0.1.0-alpha.16 — 2026-11-21
+
+Changes since `v0.1.0-alpha.15`.
+
+### Added
+
+- Added Ledger account and category selection dialogs, with account balances in the account list.
+- Added `+` and `-` amount expressions to Ledger transaction entry. Valid expressions are evaluated in integer minor units and saved as the resulting amount; the calculation preview stays beside the amount label.
+- Added repayment rebates. A negative repayment interest/discount is stored as a positive linked income companion and interpreted as a negative expense adjustment, so repayment principal, actual account debit and expense statistics reconcile.
+
+### Changed
+
+- Refined Ledger date/time controls and transaction form sizing across expense, income, transfer and repayment flows.
+- Simplified Workspace switching on phones and tablets while keeping direct workspace navigation on desktop. Refined Note tablet drawers and the more-actions menu.
+
+### Fixed
+
+- Diary now derives its day boundary from a validated browser IANA timezone and server time, consistently across day policy, day reads/writes, attachments and date-based search. Clients without a timezone use UTC as a container-independent compatibility default.
+- Prevented touch dismissal of Diary dialogs from opening a background calendar date, while retaining unsaved-change confirmation.
+- Corrected Ledger repayment projections, grouped transaction filtering, account balances and statistics for linked rebate adjustments. Added coverage for the v51-to-v52 migration and responsive transaction controls.
+- Improved Note and Ledger responsive interactions, including tablet drawer dismissal and mobile amount-expression editing.
+
+### Migration
+
+- SQLite schema advances from v51 to v52. Migration `0052_ledger_repayment_rebate_groups.sql` replaces Ledger group-validation triggers to permit an income companion only when it belongs to an active repayment group. It does not rewrite historical transactions or add tables or columns; the migration runner applies each version transactionally.
+- **Alpha.16 includes a Ledger database migration. Back up the complete Content directory and the complete `nuvyn-data` volume, including SQLite WAL/SHM, attachments and matching key material, before upgrading production.** Alpha.15 does not understand the linked rebate semantics, so do not treat switching only to the older image as a safe rollback after creating rebate records; restore the matching pre-upgrade backup if rollback is needed.
+
 ## Nuvyn v0.1.0-alpha.15 — 2026-11-19
 
 Changes since `v0.1.0-alpha.14`.
