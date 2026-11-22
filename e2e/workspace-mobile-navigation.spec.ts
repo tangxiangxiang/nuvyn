@@ -6,7 +6,33 @@ const RUN_ID = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
 const MOBILE_VIEWPORT = { width: 375, height: 812 }
 const DESKTOP_VIEWPORT = { width: 1280, height: 800 }
 const WORKSPACE_NAMES = { note: '笔记', diary: '日程', ledger: '账本', board: '白板' } as const
-const WORKSPACE_MENU_LABEL = /^(切换模块|Switch workspace)$/
+const WORKSPACE_MENU_LABEL = /^(切换工作区|Switch workspace)$/
+
+async function expectWorkspacePicker(page: Page, current: string): Promise<void> {
+  const selector = page.getByTestId('mobile-workspace-selector')
+  await selector.click()
+  const dialog = page.getByRole('dialog', { name: WORKSPACE_MENU_LABEL })
+  await expect(dialog).toBeVisible()
+  const modalCard = page.locator('.workspace-switcher-modal')
+  const modalBounds = await modalCard.boundingBox()
+  expect(modalBounds).not.toBeNull()
+  expect(modalBounds!.width).toBeLessThanOrEqual(340)
+  expect(modalBounds!.x).toBeGreaterThanOrEqual(16)
+  expect(modalBounds!.x + modalBounds!.width).toBeLessThanOrEqual(await page.evaluate(() => window.innerWidth) - 16)
+  const cards = dialog.locator('.workspace-switcher-card')
+  await expect(cards).toHaveCount(4)
+  const columns = await dialog.locator('.workspace-switcher-grid').evaluate((grid) => (
+    getComputedStyle(grid).gridTemplateColumns.split(' ').filter(Boolean).length
+  ))
+  expect(columns).toBe(2)
+  await expect(cards.filter({ hasText: current })).toHaveAttribute('aria-current', 'page')
+  for (const name of Object.values(WORKSPACE_NAMES)) {
+    await expect(cards.filter({ hasText: name })).toBeVisible()
+  }
+  await page.keyboard.press('Escape')
+  await expect(dialog).toBeHidden()
+  await expect(selector).toBeFocused()
+}
 
 async function createNote(request: APIRequestContext, path: string): Promise<void> {
   const response = await request.post('/api/posts', {
@@ -52,15 +78,7 @@ async function expectMobileNavigation(page: Page): Promise<void> {
   expect(await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth))
     .toBeLessThanOrEqual(1)
 
-  await selector.click()
-  const menu = page.getByRole('menu', { name: WORKSPACE_MENU_LABEL })
-  await expect(menu).toBeVisible()
-  await expect(menu.getByRole('menuitem')).toHaveCount(4)
-  await expect(menu.getByRole('menuitem', { name: current })).toHaveAttribute('aria-current', 'page')
-  for (const name of Object.values(WORKSPACE_NAMES)) {
-    await expect(menu.getByRole('menuitem', { name })).toBeVisible()
-  }
-  await page.keyboard.press('Escape')
+  await expectWorkspacePicker(page, current)
 }
 
 async function expectTabletWorkspaceNavigation(page: Page): Promise<void> {
@@ -81,18 +99,10 @@ async function expectTabletWorkspaceNavigation(page: Page): Promise<void> {
   expect(await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth))
     .toBeLessThanOrEqual(1)
 
-  await selector.click()
-  const menu = page.getByRole('menu', { name: WORKSPACE_MENU_LABEL })
-  await expect(menu).toBeVisible()
-  await expect(menu.getByRole('menuitem')).toHaveCount(4)
-  await expect(menu.getByRole('menuitem', { name: current })).toHaveAttribute('aria-current', 'page')
-  for (const name of Object.values(WORKSPACE_NAMES)) {
-    await expect(menu.getByRole('menuitem', { name })).toBeVisible()
-  }
-  await page.keyboard.press('Escape')
+  await expectWorkspacePicker(page, current)
 }
 
-test('workspace names stay Chinese across mobile, tablet and desktop', async ({ page }) => {
+test('workspace picker stays consistent across mobile, tablet and desktop', async ({ page }) => {
   const navigation = page.locator('.workspace-navigation')
   for (const width of [320, 390, 430, 600, 601, 768, 1280, 1920]) {
     await page.setViewportSize({ width, height: 900 })
@@ -102,21 +112,58 @@ test('workspace names stay Chinese across mobile, tablet and desktop', async ({ 
     } else if (width <= 1199) {
       await expectTabletWorkspaceNavigation(page)
     } else {
-      await expect(navigation.locator('.scope-chip-label')).toHaveText([
-        WORKSPACE_NAMES.note,
-        WORKSPACE_NAMES.diary,
-        WORKSPACE_NAMES.ledger,
-      ])
-      await expect(navigation.locator('.workspace-board-link')).toHaveAttribute('aria-label', WORKSPACE_NAMES.board)
-      await expect(navigation.locator('.workspace-board-link-label')).toHaveText(WORKSPACE_NAMES.board)
-      await expect(navigation.locator('.scope-chip-icon, .workspace-board-link-icon')).toHaveCount(0)
-      for (const [index, name] of [WORKSPACE_NAMES.note, WORKSPACE_NAMES.diary, WORKSPACE_NAMES.ledger].entries()) {
-        await expect(navigation.locator('.scope-chip').nth(index)).toHaveAttribute('aria-label', new RegExp(name))
-        await expect(navigation.locator('.scope-chip-label').nth(index)).toBeVisible()
-      }
+      await expect(page.getByTestId('mobile-workspace-selector')).toHaveText(WORKSPACE_NAMES.board)
+      await expect(page.locator('.navbar .brand-wordmark')).toBeVisible()
+      await expect(navigation.locator('.scope-chip, .workspace-board-link')).toHaveCount(0)
+      await expectWorkspacePicker(page, WORKSPACE_NAMES.board)
     }
     expect(await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth)).toBeLessThanOrEqual(1)
   }
+})
+
+test('workspace picker closes from selection, close button and mask with focus restored', async ({ page }) => {
+  for (const width of [390, 768, 1280]) {
+    await page.setViewportSize({ width, height: 900 })
+    await page.goto('/ledger')
+    const selector = page.getByTestId('mobile-workspace-selector')
+    const initialUrl = page.url()
+
+    await selector.click()
+    const dialog = page.getByRole('dialog', { name: WORKSPACE_MENU_LABEL })
+    await dialog.getByTestId('workspace-switcher-ledger').click()
+    await expect(dialog).toBeHidden()
+    expect(page.url()).toBe(initialUrl)
+    await expect(selector).toBeFocused()
+
+    await selector.click()
+    await dialog.locator('.n-card-header__close').click()
+    await expect(dialog).toBeHidden()
+    await expect(selector).toBeFocused()
+
+    await selector.click()
+    await page.mouse.click(2, 2)
+    await expect(dialog).toBeHidden()
+    await expect(selector).toBeFocused()
+  }
+})
+
+test('workspace picker follows both theme palettes without changing its grid', async ({ page }) => {
+  await page.addInitScript(() => localStorage.setItem('nuvyn.theme', 'dark'))
+  await page.setViewportSize({ width: 430, height: 900 })
+  await page.goto('/ledger')
+  await expect(page.locator('html')).toHaveAttribute('data-theme', 'dark')
+  const selector = page.getByTestId('mobile-workspace-selector')
+  await selector.click()
+  const dialog = page.getByRole('dialog', { name: WORKSPACE_MENU_LABEL })
+  await expect(dialog).toBeVisible()
+  await expect(dialog.locator('.workspace-switcher-grid')).toHaveCSS('display', 'grid')
+  await page.keyboard.press('Escape')
+
+  await page.locator('.theme-toggle').click()
+  await expect(page.locator('html')).toHaveAttribute('data-theme', 'light')
+  await selector.click()
+  await expect(dialog.locator('.workspace-switcher-card')).toHaveCount(4)
+  await expect(dialog.locator('.workspace-switcher-grid')).toHaveCSS('display', 'grid')
 })
 
 async function brandWorkspaceGap(page: Page): Promise<number> {
@@ -138,8 +185,7 @@ async function navbarGeometry(page: Page) {
     const inner = root.querySelector<HTMLElement>('.navbar-inner')
     const brand = root.querySelector<HTMLElement>('.brand')
     const workspaceNavigation = root.querySelector<HTMLElement>('.workspace-navigation')
-    const workspaceControl = root.querySelector<HTMLElement>('.mobile-workspace-selector')
-      ?? root.querySelector<HTMLElement>('.scope-chip')
+    const workspaceControl = root.querySelector<HTMLElement>('.workspace-switcher-trigger')
     if (!inner || !brand || !workspaceNavigation || !workspaceControl) {
       throw new Error('Workspace navigation is incomplete')
     }
@@ -235,9 +281,7 @@ test('mobile nav shows all four workspaces at the 600px boundary and common phon
   await page.setViewportSize(DESKTOP_VIEWPORT)
   await page.goto('/vault')
 
-  const navigation = page.locator('.workspace-navigation')
-  await expect(navigation.locator('.scope-chip')).toHaveCount(3)
-  await expect(navigation.locator('.workspace-board-link')).toBeVisible()
+  await expect(page.getByTestId('mobile-workspace-selector')).toBeVisible()
 
   for (const width of [320, 375, 390, 430, 600]) {
     await page.setViewportSize({ width, height: MOBILE_VIEWPORT.height })
@@ -250,22 +294,19 @@ test('workspace navigation remains available on resize without reloading', async
   await page.goto('/vault')
   const navigation = page.locator('.workspace-navigation')
 
-  await expect(navigation.locator('.scope-chip')).toHaveCount(3)
-  await expect(navigation.locator('.workspace-board-link')).toBeVisible()
+  await expect(page.getByTestId('mobile-workspace-selector')).toBeVisible()
 
   await page.setViewportSize(MOBILE_VIEWPORT)
   await expectMobileNavigation(page)
   await page.getByTestId('mobile-workspace-selector').click()
-  const mobileMenu = page.getByRole('menu', { name: WORKSPACE_MENU_LABEL })
-  await expect(mobileMenu.getByRole('menuitem', { name: WORKSPACE_NAMES.note })).toHaveAttribute('aria-current', 'page')
-  await expect(mobileMenu.getByRole('menuitem', { name: WORKSPACE_NAMES.diary })).not.toHaveAttribute('aria-current', 'page')
-  await expect(mobileMenu.getByRole('menuitem', { name: WORKSPACE_NAMES.ledger })).not.toHaveAttribute('aria-current', 'page')
+  const workspaceDialog = page.getByRole('dialog', { name: WORKSPACE_MENU_LABEL })
+  await expect(workspaceDialog.getByTestId('workspace-switcher-note')).toHaveAttribute('aria-current', 'page')
+  await expect(workspaceDialog.getByTestId('workspace-switcher-diary')).not.toHaveAttribute('aria-current', 'page')
+  await expect(workspaceDialog.getByTestId('workspace-switcher-ledger')).not.toHaveAttribute('aria-current', 'page')
   await page.keyboard.press('Escape')
 
   await page.setViewportSize(DESKTOP_VIEWPORT)
-  await expect(navigation.locator('.scope-chip')).toHaveCount(3)
-  await expect(navigation.locator('.workspace-board-link')).toBeVisible()
-  await expect(navigation.locator('.scope-chip[aria-pressed="true"]')).toHaveCount(1)
+  await expect(page.getByTestId('mobile-workspace-selector')).toHaveText(WORKSPACE_NAMES.note)
 })
 
 test('mobile direct Note route selects Note without activating Diary or Ledger', async ({ page, request }) => {

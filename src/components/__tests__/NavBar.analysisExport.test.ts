@@ -69,11 +69,8 @@ describe('NavBar hidden Ledger analysis gesture', () => {
         },
       },
     })
-    const chip = mobileWidth
-      ? wrapper.get('[data-testid="mobile-workspace-selector"]')
-      : wrapper.findAll('.scope-chip').find((item) => item.text().includes('账本'))!
-    const otherChip = wrapper.findAll('.scope-chip').find((item) => item.text().includes('日程'))!
-    return { command, otherCommand, chip, otherChip, router, calendarVisible, commandRef }
+    const chip = wrapper.get('[data-testid="mobile-workspace-selector"]')
+    return { command, otherCommand, chip, router, calendarVisible, commandRef }
   }
 
   function key(options: KeyboardEventInit = {}, target: EventTarget = window): KeyboardEvent {
@@ -101,9 +98,14 @@ describe('NavBar hidden Ledger analysis gesture', () => {
     expect(wrapper!.text()).not.toMatch(/export|download/i)
   })
 
-  it('never invokes another module, even when its command and unlocked session are available', async () => {
-    const { command, otherCommand, otherChip } = await setup()
-    await otherChip.trigger('mouseenter')
+  it('does not invoke the export gesture from a different workspace card', async () => {
+    const { command, otherCommand, chip } = await setup()
+    await chip.trigger('mouseenter')
+    await chip.trigger('mouseleave')
+    await chip.trigger('click')
+    await flushPromises()
+    const diary = document.body.querySelector<HTMLElement>('[data-workspace="diary"]')!
+    await diary.dispatchEvent(new MouseEvent('mouseenter'))
     key()
     expect(command).not.toHaveBeenCalled()
     expect(otherCommand).not.toHaveBeenCalled()
@@ -137,7 +139,7 @@ describe('NavBar hidden Ledger analysis gesture', () => {
     expect(command).not.toHaveBeenCalled()
   })
 
-  it('uses pointer capability rather than viewport width', async () => {
+  it('keeps the workspace trigger independent from viewport width', async () => {
     mobileWidth = true
     const { command, chip } = await setup()
     await chip.trigger('mouseenter')

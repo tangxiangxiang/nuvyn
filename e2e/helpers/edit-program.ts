@@ -254,8 +254,8 @@ export async function waitForVaultReady(page: Page) {
   // Compact Note layouts intentionally unmount the tree until the Files drawer
   // is opened. On those layouts, the workspace selector is the shell's stable
   // readiness signal; gotoVaultReady additionally waits for the initial data.
-  const compactSelector = page.getByTestId('mobile-workspace-selector')
-  if (await compactSelector.isVisible()) {
+  if (await page.evaluate(() => window.matchMedia('(max-width: 1199px)').matches)) {
+    const compactSelector = page.getByTestId('mobile-workspace-selector')
     await expect(compactSelector).toBeVisible({ timeout: VAULT_READY_TIMEOUT_MS })
     return
   }

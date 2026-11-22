@@ -110,6 +110,12 @@ function mountNavBar(
   return { wrapper, api, zenModeBrandTransitioning }
 }
 
+function clearWorkspacePickerTeleports(): void {
+  document.body.querySelectorAll('.workspace-switcher-modal').forEach((modal) => {
+    modal.closest('.n-modal-container, .v-binder-follower-container')?.remove()
+  })
+}
+
 describe('NavBar — view-toggle button', () => {
   beforeEach(() => {
     useScopeFilter().activeScope.value = 'note'
@@ -118,7 +124,10 @@ describe('NavBar — view-toggle button', () => {
     useTheme().set('light')
     __resetVaultLayoutState()
   })
-  afterEach(() => useI18n().setLocale('zh'))
+  afterEach(() => {
+    clearWorkspacePickerTeleports()
+    useI18n().setLocale('zh')
+  })
 
   it('renders a view-toggle button', () => {
     const { wrapper } = mountNavBar()
@@ -238,22 +247,57 @@ describe('NavBar — view-toggle button', () => {
   })
 })
 
-describe('NavBar — scope chips', () => {
+describe('NavBar — workspace picker', () => {
   beforeEach(() => {
     useI18n().setLocale('en')
     useScopeFilter().activeScope.value = 'note'
   })
-  afterEach(() => useI18n().setLocale('zh'))
+  afterEach(() => {
+    clearWorkspacePickerTeleports()
+    useI18n().setLocale('zh')
+  })
 
-  it('shows the content-oriented scope names', () => {
+  it('opens a centered workspace picker with a 2×2 set of named choices', async () => {
     const { wrapper } = mountNavBar()
+    const trigger = wrapper.get('[data-testid="mobile-workspace-selector"]')
 
-    expect(wrapper.findAll('.scope-chip')[0].attributes('aria-pressed')).toBe('true')
-    expect(wrapper.findAll('.scope-chip-label').map((chip) => chip.text())).toEqual([
-      '笔记',
-      '日程',
-      '账本',
-    ])
+    expect(trigger.text()).toBe('笔记')
+    expect(trigger.attributes('aria-haspopup')).toBe('dialog')
+    await trigger.trigger('click')
+    await flushPromises()
+
+    const dialog = document.body.querySelector('.workspace-switcher-modal')
+    const cards = [...document.body.querySelectorAll<HTMLButtonElement>('.workspace-switcher-card')]
+    expect(dialog).not.toBeNull()
+    expect(cards.map((card) => card.textContent?.trim())).toEqual(['笔记', '日程', '账本', '白板'])
+    expect(cards.filter((card) => card.getAttribute('aria-current') === 'page').map((card) => card.textContent?.trim()))
+      .toEqual(['笔记'])
+    expect(cards[0]?.classList.contains('is-active')).toBe(true)
+    wrapper.unmount()
+  })
+
+  it('closes when the current workspace is selected without navigating again', async () => {
+    const router = createRouter({
+      history: createMemoryHistory(),
+      routes: [{ path: '/vault', name: 'vault', component: { template: '<div />' } }],
+    })
+    await router.push('/vault')
+    const push = vi.spyOn(router, 'push')
+    const wrapper = mount(NavBar, {
+      props: { workspaceKind: 'vault' },
+      global: { plugins: [router] },
+    })
+    const trigger = wrapper.get('[data-testid="mobile-workspace-selector"]')
+
+    await trigger.trigger('click')
+    await flushPromises()
+    document.body.querySelector<HTMLButtonElement>('[data-workspace="note"]')?.click()
+    await flushPromises()
+
+    expect(push).not.toHaveBeenCalled()
+    expect(trigger.attributes('aria-expanded')).toBe('false')
+    expect(router.currentRoute.value.name).toBe('vault')
+    wrapper.unmount()
   })
 
   it('shows Diary controls after unlocking and offers locking from the account menu', async () => {
@@ -322,17 +366,7 @@ describe('NavBar — scope chips', () => {
     wrapper.unmount()
   })
 
-  it('uses content scopes instead of exposing individual vault roots', async () => {
-    const { wrapper } = mountNavBar()
-    const chips = wrapper.findAll('.scope-chip')
-
-    await chips[1].trigger('click')
-
-    expect(chips[1].attributes('aria-pressed')).toBe('true')
-    expect(chips[1].attributes('aria-label')).toBe('Current scope: 日程')
-  })
-
-  it('uses the ledger scope chip as the canonical Ledger entry', async () => {
+  it('uses the Ledger workspace card to open the canonical Ledger route', async () => {
     const api = makeViewModeApi()
     const router = createRouter({
       history: createMemoryHistory(),
@@ -352,8 +386,9 @@ describe('NavBar — scope chips', () => {
       },
     })
 
-    expect(wrapper.findAll('.scope-chip')[2].text()).toContain('账本')
-    await wrapper.findAll('.scope-chip')[2].trigger('click')
+    await wrapper.get('[data-testid="mobile-workspace-selector"]').trigger('click')
+    await flushPromises()
+    document.body.querySelector<HTMLButtonElement>('[data-workspace="ledger"]')?.click()
     await new Promise((resolve) => setTimeout(resolve, 0))
 
     expect(router.currentRoute.value.name).toBe('ledger')
@@ -380,13 +415,15 @@ describe('NavBar — scope chips', () => {
     })
 
     expect(wrapper.find('.navbar').classes()).toContain('is-vault')
-    expect(wrapper.findAll('.scope-chip')[2].attributes('aria-pressed')).toBe('true')
+    expect(wrapper.get('[data-testid="mobile-workspace-selector"]').text()).toBe('账本')
     expect(wrapper.find('.nav-search').exists()).toBe(false)
     expect(wrapper.find('[data-testid="view-toggle"]').exists()).toBe(false)
     expect(wrapper.find('.right-rail-toggle').exists()).toBe(false)
     expect(wrapper.find('[data-testid="account-button"]').exists()).toBe(true)
 
-    await wrapper.findAll('.scope-chip')[0].trigger('click')
+    await wrapper.get('[data-testid="mobile-workspace-selector"]').trigger('click')
+    await flushPromises()
+    document.body.querySelector<HTMLButtonElement>('[data-workspace="note"]')?.click()
     await new Promise((resolve) => setTimeout(resolve, 0))
     expect(router.currentRoute.value.name).toBe('vault')
     expect(useScopeFilter().activeScope.value).toBe('note')
@@ -402,7 +439,7 @@ describe('NavBar — scope chips', () => {
     wrapper.unmount()
   })
 
-  it('only renders scope chips in the Vault chrome', () => {
+  it('only renders the workspace picker trigger in workspace chrome', () => {
     const api = makeViewModeApi()
     const wrapper = mount(NavBar, {
       props: { isVault: false },
@@ -411,10 +448,11 @@ describe('NavBar — scope chips', () => {
       },
     })
 
-    expect(wrapper.find('.scope-chips').exists()).toBe(false)
+    expect(wrapper.find('.workspace-navigation').exists()).toBe(false)
+    expect(wrapper.find('.mobile-workspace-selector').exists()).toBe(false)
   })
 
-  it('renders Board as the active workspace entry with shared workspace navigation', async () => {
+  it('renders Board as current and switches to Note from the shared picker', async () => {
     const router = createRouter({
       history: createMemoryHistory(),
       routes: [
@@ -431,17 +469,15 @@ describe('NavBar — scope chips', () => {
     })
 
     expect(wrapper.find('.navbar').classes()).toContain('is-workspace')
-    expect(wrapper.find('.workspace-board-link').classes()).toContain('active')
-    expect(wrapper.find('.workspace-board-link').attributes('aria-current')).toBe('page')
-    expect(wrapper.find('.workspace-board-link-label').text()).toBe('白板')
-    expect(wrapper.find('.scope-chips').exists()).toBe(true)
-    expect(wrapper.findAll('.scope-chip')).toHaveLength(3)
-    expect(wrapper.findAll('.scope-chip.active')).toHaveLength(0)
+    expect(wrapper.get('[data-testid="mobile-workspace-selector"]').text()).toBe('白板')
+    await wrapper.get('[data-testid="mobile-workspace-selector"]').trigger('click')
+    await flushPromises()
+    expect(document.body.querySelector('[data-workspace="board"]')?.getAttribute('aria-current')).toBe('page')
     expect(wrapper.find('[data-testid="view-toggle"]').exists()).toBe(false)
     expect(wrapper.find('.left-panel-toggle').exists()).toBe(false)
     await wrapper.find('.nav-search').trigger('click')
     expect(wrapper.emitted('open-search')).toHaveLength(1)
-    await wrapper.findAll('.scope-chip')[0].trigger('click')
+    document.body.querySelector<HTMLButtonElement>('[data-workspace="note"]')?.click()
     await new Promise((resolve) => setTimeout(resolve, 0))
     expect(router.currentRoute.value.name).toBe('vault')
     expect(useScopeFilter().activeScope.value).toBe('note')
@@ -1350,32 +1386,33 @@ describe('NavBar — brand constellation', () => {
   })
 })
 
-describe('NavBar — workspace compact availability', () => {
+describe('NavBar — workspace picker responsive availability', () => {
   beforeEach(() => {
     useI18n().setLocale('en')
     useScopeFilter().activeScope.value = 'note'
   })
-  afterEach(() => useI18n().setLocale('zh'))
+  afterEach(() => {
+    clearWorkspacePickerTeleports()
+    useI18n().setLocale('zh')
+  })
 
-  it('keeps all workspaces available across the compact boundary', async () => {
+  it('keeps one current-workspace entry and the same four choices across breakpoints', async () => {
     const media = installWorkspaceCompactMediaQuery(true)
     const { wrapper } = mountNavBar()
-    const assertMobileSelector = () => {
-      expect(wrapper.find('.mobile-workspace-selector').text()).toContain('笔记')
+    const assertWorkspacePicker = () => {
+      expect(wrapper.find('.mobile-workspace-selector').text()).toBe('笔记')
       expect(wrapper.findAll('.scope-chip, .workspace-board-link')).toHaveLength(0)
     }
-    assertMobileSelector()
+    assertWorkspacePicker()
     media.resize(false)
     await nextTick()
-    expect(wrapper.find('.mobile-workspace-selector').exists()).toBe(false)
-    expect(wrapper.findAll('.scope-chip-label').map((label) => label.text())).toEqual([
-      '笔记', '日程', '账本',
-    ])
-    expect(wrapper.find('.workspace-board-link').exists()).toBe(true)
-    expect(wrapper.findAll('.scope-chip[aria-pressed="true"]')).toHaveLength(1)
+    assertWorkspacePicker()
+    await wrapper.get('.mobile-workspace-selector').trigger('click')
+    await flushPromises()
+    expect(document.body.querySelectorAll('.workspace-switcher-card')).toHaveLength(4)
     media.resize(true)
     await nextTick()
-    assertMobileSelector()
+    expect(document.body.querySelectorAll('.workspace-switcher-card')).toHaveLength(4)
 
     wrapper.unmount()
     media.restore()

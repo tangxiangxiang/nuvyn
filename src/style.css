@@ -956,11 +956,7 @@ body.brand-constellation-active * {
   line-height: 1;
 }
 
-/* Scope navigation chips (note / diary / ledger).
-   Rendered in the navbar because the file tree's header is too narrow on
-   150px sidebars to fit three chips alongside the folder icon. In Vault the
-   chips filter content; Ledger also has a dedicated workspace route. Sits
-   between the brand and the nav-spacer and inherits the navbar palette. */
+/* The current Workspace remains in the navbar and opens a shared picker. */
 .navbar .workspace-navigation {
   display: inline-flex;
   align-items: center;
@@ -968,61 +964,101 @@ body.brand-constellation-active * {
   margin-left: 0;
   white-space: nowrap;
 }
-.navbar .mobile-workspace-selector { display: none; }
-.mobile-workspace-menu [data-current='true'] {
-  color: var(--accent);
-  font-weight: 600;
-}
-.navbar .scope-chips {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-}
-.navbar .nav-workspace-link {
-  /* Keep the workspace destinations compact and text-led. */
-  position: relative;
+.navbar .mobile-workspace-selector {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  padding: 4px 10px;
-  background: transparent;
+  height: 28px;
+  padding: 0 10px;
   border: 1px solid transparent;
   border-radius: 8px;
-  color: var(--text-muted);
-  cursor: pointer;
-  transition: color 0.15s, background 0.15s, border-color 0.15s;
-}
-.navbar .nav-workspace-link:hover {
-  color: var(--text-h);
-  background: color-mix(in srgb, var(--accent) 5%, transparent);
-}
-/* A mouse click on a locked Diary opens the access dialog without changing
-   the active scope. Do not leave the clicked chip looking selected while it
-   retains ordinary focus; keyboard focus remains visibly outlined. */
-.navbar .nav-workspace-link:not(.active):focus:not(:focus-visible) {
-  color: var(--text-muted);
-  background: transparent;
-  border-color: transparent;
-}
-.navbar .nav-workspace-link.active {
   color: var(--accent);
   background: color-mix(in srgb, var(--accent) 8%, transparent);
   font-weight: 600;
+  transition: color 0.15s, background-color 0.15s, border-color 0.15s;
 }
-.navbar .scope-chip-label,
-.navbar .workspace-board-link-label {
-  font-family: inherit;
-  font-size: 14px;
-  line-height: 1;
-  font-weight: 400;
-  white-space: nowrap;
+.navbar .mobile-workspace-selector:hover {
+  color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
+}
+.navbar .mobile-workspace-selector:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+.navbar .mobile-workspace-label {
+  display: block;
+  max-width: 120px;
   overflow: hidden;
   text-overflow: ellipsis;
-  min-width: 0;
+  white-space: nowrap;
+  font: inherit;
+  line-height: 1;
 }
-.navbar .nav-workspace-link.active .scope-chip-label,
-.navbar .nav-workspace-link.active .workspace-board-link-label { font-weight: 600; }
-.navbar .nav-workspace-link:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+
+.workspace-switcher-modal.n-card {
+  box-sizing: border-box;
+  overflow: hidden;
+  color: var(--text);
+  background: var(--bg-soft);
+  border: 1px solid color-mix(in srgb, var(--border) 82%, transparent);
+  border-radius: 22px;
+  box-shadow: 0 18px 42px color-mix(in srgb, var(--text) 14%, transparent);
+}
+.workspace-switcher-modal.n-card .n-card-header {
+  padding: 18px 20px 10px;
+  border-bottom: 0;
+}
+.workspace-switcher-modal.n-card .n-card-header__main {
+  color: var(--text-h);
+  font-size: 18px;
+  font-weight: 650;
+}
+.workspace-switcher-modal.n-card .n-card__content { padding: 8px 20px 20px; }
+.workspace-switcher-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+.workspace-switcher-card {
+  display: flex;
+  min-width: 0;
+  min-height: 112px;
+  box-sizing: border-box;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  padding: 14px 10px;
+  border: 1px solid color-mix(in srgb, var(--border) 86%, transparent);
+  border-radius: 16px;
+  color: var(--text);
+  background: var(--bg);
+  font: inherit;
+  cursor: pointer;
+  transition: color 0.15s ease, background-color 0.15s ease, border-color 0.15s ease;
+}
+.workspace-switcher-card .n-icon { color: var(--text-muted); }
+.workspace-switcher-card:hover {
+  background: color-mix(in srgb, var(--accent) 5%, var(--bg));
+  border-color: color-mix(in srgb, var(--accent) 30%, var(--border));
+}
+.workspace-switcher-card.is-active {
+  color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 9%, var(--bg));
+  border-color: color-mix(in srgb, var(--accent) 58%, var(--border));
+  font-weight: 600;
+}
+.workspace-switcher-card.is-active .n-icon { color: var(--accent); }
+.workspace-switcher-card:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+@media (prefers-reduced-motion: reduce) {
+  .workspace-switcher-modal,
+  .workspace-switcher-modal *,
+  .n-modal-container:has(.workspace-switcher-modal) :is(.n-modal, .n-modal-mask) {
+    animation: none !important;
+    transition: none !important;
+  }
+}
 
 /* Layout */
 main.container {
@@ -1704,10 +1740,6 @@ main.container.auth-page-shell {
     overflow: visible;
   }
 
-  .navbar.is-workspace :where(.scope-chips, .workspace-board-link) {
-    display: none;
-  }
-
   .navbar.is-workspace .mobile-workspace-selector {
     display: inline-flex;
     align-items: center;
@@ -1827,8 +1859,8 @@ main.container.auth-page-shell {
 /* Diary Calendar shares the same global navbar spacing as every Workspace;
    the common <=600px compact rules below also cover Diary on phones. */
 
-/* Phone navigation replaces the crowded workspace strip with one compact
-   current-workspace menu while keeping the existing single-row header. */
+/* Phone navigation keeps one compact current-workspace trigger in the
+   existing single-row header. */
 @media (max-width: 600px) {
   .navbar.is-workspace .navbar-inner {
     box-sizing: border-box;

@@ -6,8 +6,7 @@ test('canonical Ledger renders inside the shared Nuvyn App Shell', async ({ page
 
   await expect(page.getByTestId('ledger-page')).toBeVisible()
   await expect(page.locator('.navbar')).toHaveCount(1)
-  await expect(page.locator('.scope-chips')).toBeVisible()
-  await expect(page.locator('.scope-chip').filter({ hasText: '账本' })).toHaveAttribute('aria-pressed', 'true')
+  await expect(page.getByTestId('mobile-workspace-selector')).toHaveText('账本')
   await expect(page.locator('body')).toHaveClass(/ledger-mode/)
   await expect(page.locator('html')).toHaveClass(/ledger-mode/)
   await expect(page.locator('body')).not.toHaveClass(/bills-mode/)
@@ -43,7 +42,7 @@ test('Ledger scope switches back to the shared Vault body', async ({ page }) => 
   await expect(page.locator('body')).not.toHaveClass(/ledger-mode/)
   await expect(page.locator('html')).not.toHaveClass(/ledger-mode/)
   await expect(page.locator('.navbar')).toHaveCount(1)
-  await expect(page.locator('.scope-chip').filter({ hasText: '笔记' })).toHaveAttribute('aria-pressed', 'true')
+  await expect(page.getByTestId('mobile-workspace-selector')).toHaveText('笔记')
 })
 
 test('Ledger keeps the shared theme readable', async ({ page }) => {

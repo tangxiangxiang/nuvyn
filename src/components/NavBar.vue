@@ -1,8 +1,9 @@
 <script setup lang="ts">
 import { computed, h, inject, nextTick, onBeforeUnmount, onMounted, ref, watch, type ComponentPublicInstance } from 'vue'
-import { NButton, NDropdown, NIcon, type DropdownOption } from 'naive-ui'
+import { NButton, NDropdown, NIcon, NModal, type DropdownOption } from 'naive-ui'
 import {
   CalendarEvent,
+  FileText,
   ListCheck,
   Edit,
   Eye,
@@ -15,6 +16,7 @@ import {
   Search,
   Sun,
   Volume,
+  Wallet,
 } from '@vicons/tabler'
 import { useRoute, useRouter } from 'vue-router'
 import { useTheme } from '../composables/useTheme'
@@ -72,18 +74,12 @@ const workspaceCompactMediaQuery = typeof window !== 'undefined' && typeof windo
   ? window.matchMedia(workspaceCompactNavigationQuery)
   : null
 const isCompactWorkspaceViewport = ref(workspaceCompactMediaQuery?.matches ?? false)
-const workspaceNavigationRef = ref<HTMLElement | null>(null)
-let workspaceNavigationResizeFrame = 0
 
 function onWorkspaceViewportChange(event: MediaQueryListEvent): void {
   isCompactWorkspaceViewport.value = event.matches
 }
 
 const workspaceNavigationViewport = computed(() => isCompactWorkspaceViewport.value ? 'compact' : 'desktop')
-const showBoardNavigation = computed(() => (
-  isWorkspaceNavigationAvailable('board', workspaceNavigationViewport.value)
-))
-
 const effectiveWorkspaceKind = computed<WorkspaceKind>(() => {
   if (props.workspaceKind !== null && props.workspaceKind !== undefined) return props.workspaceKind
   return props.isVault ? 'vault' : null
@@ -105,7 +101,6 @@ const isLedger = computed(() => (
 ))
 const isBoard = computed(() => effectiveWorkspaceKind.value === 'board')
 const isImmersive = computed(() => props.chromeStyle === 'immersive')
-const showScopeChips = computed(() => isWorkspace.value && !isImmersive.value)
 const showSearchButton = computed(() => (
   isWorkspace.value
   && !isImmersive.value
@@ -122,77 +117,37 @@ const themeTitle = computed<string>(() => {
   return t('nav.theme', { current, next })
 })
 
-const scopeChips = computed(() => {
-  const chips = [
-    { scope: 'note', label: workspaceDisplayNames.note },
-    { scope: 'diary', label: workspaceDisplayNames.diary },
-    { scope: 'ledger', label: workspaceDisplayNames.ledger },
-  ] as const
-  return chips.filter((chip) => (
-    isWorkspaceNavigationAvailable(chip.scope, workspaceNavigationViewport.value)
-  ))
-})
-
-const mobileWorkspaceKey = computed<WorkspaceNavigationKey>(() => {
+const activeWorkspaceKey = computed<WorkspaceNavigationKey>(() => {
   if (isBoard.value) return 'board'
   return (['note', 'diary', 'ledger'] as const).find(isScopeActive) ?? 'note'
 })
-const mobileWorkspaceLabel = computed(() => workspaceDisplayNames[mobileWorkspaceKey.value])
-const mobileWorkspaceMenuOpen = ref(false)
-const mobileWorkspaceOptions = computed<DropdownOption[]>(() => [
-  { key: 'note', label: workspaceDisplayNames.note },
-  { key: 'diary', label: workspaceDisplayNames.diary },
-  { key: 'ledger', label: workspaceDisplayNames.ledger },
-  { key: 'board', label: workspaceDisplayNames.board },
-])
+const activeWorkspaceLabel = computed(() => workspaceDisplayNames[activeWorkspaceKey.value])
+const workspacePickerOpen = ref(false)
+const workspacePickerTrigger = ref<ComponentPublicInstance | null>(null)
+const workspaceCards = computed(() => ([
+  { key: 'note', label: workspaceDisplayNames.note, icon: FileText },
+  { key: 'diary', label: workspaceDisplayNames.diary, icon: CalendarEvent },
+  { key: 'ledger', label: workspaceDisplayNames.ledger, icon: Wallet },
+  { key: 'board', label: workspaceDisplayNames.board, icon: LayoutGrid },
+] as const).filter(({ key }) => (
+  isWorkspaceNavigationAvailable(key, workspaceNavigationViewport.value)
+)))
 
-function mobileWorkspaceOptionProps(option: DropdownOption) {
-  const current = option.key === mobileWorkspaceKey.value
-  return {
-    role: 'menuitem',
-    'aria-current': current ? 'page' as const : undefined,
-    'data-current': current ? 'true' : undefined,
-  }
-}
-
-function onMobileWorkspaceSelect(key: string): void {
+function onWorkspaceSelect(key: WorkspaceNavigationKey): void {
+  workspacePickerOpen.value = false
+  if (key === activeWorkspaceKey.value) return
   if (key === 'board') {
     void router.push({ name: 'board' })
     return
   }
-  if (key === 'note' || key === 'diary' || key === 'ledger') onScopeClick(key)
+  onScopeClick(key)
 }
 
-function revealActiveWorkspaceNavigation(): void {
-  const navigation = workspaceNavigationRef.value
-  if (!navigation || navigation.scrollWidth <= navigation.clientWidth) return
-
-  const activeLink = navigation.querySelector<HTMLElement>(
-    '.nav-workspace-link.active, .workspace-board-link[aria-current="page"]',
-  )
-  if (!activeLink) return
-
-  const navigationBounds = navigation.getBoundingClientRect()
-  const linkBounds = activeLink.getBoundingClientRect()
-  if (linkBounds.left < navigationBounds.left) {
-    navigation.scrollLeft -= navigationBounds.left - linkBounds.left
-  } else if (linkBounds.right > navigationBounds.right) {
-    navigation.scrollLeft += linkBounds.right - navigationBounds.right
-  }
-}
-
-function onWorkspaceWindowResize(): void {
-  if (workspaceNavigationResizeFrame) cancelAnimationFrame(workspaceNavigationResizeFrame)
-  workspaceNavigationResizeFrame = requestAnimationFrame(() => {
-    workspaceNavigationResizeFrame = 0
-    revealActiveWorkspaceNavigation()
+function restoreWorkspacePickerFocus(): void {
+  void nextTick(() => {
+    const trigger = workspacePickerTrigger.value?.$el as HTMLElement | undefined
+    trigger?.focus({ preventScroll: true })
   })
-}
-
-function scopeLabel(scope: ScopeKey, label: string): string {
-  return isScopeActive(scope)
-    ? t('nav.scope_active', { scope: label })
-    : t('nav.scope_only', { scope: label })
 }
 
 /* View-mode toggle. The button shows the icon of the *opposite*
@@ -272,10 +227,6 @@ function onAnalysisExportKeydown(event: KeyboardEvent): void {
   const command = appShell?.ledgerAnalysisExportCommand?.value
   if (command) void runAnalysisExport(command)
 }
-
-watch(showScopeChips, (visible) => {
-  if (!visible) leaveAnalysisScopeChip()
-}, { flush: 'sync' })
 
 function requestGlobalSearch(): void {
   if (appShell?.openGlobalSearch) appShell.openGlobalSearch()
@@ -996,17 +947,10 @@ watch(() => route?.fullPath, () => {
   navigationSelectedScope.value = null
   leaveAnalysisScopeChip()
   stopBrandConstellation()
-  void nextTick(revealActiveWorkspaceNavigation)
-})
-
-watch(workspaceNavigationViewport, () => {
-  void nextTick(revealActiveWorkspaceNavigation)
 })
 
 onMounted(() => {
   workspaceCompactMediaQuery?.addEventListener('change', onWorkspaceViewportChange)
-  window.addEventListener('resize', onWorkspaceWindowResize)
-  void nextTick(revealActiveWorkspaceNavigation)
   reducedMotionMediaQuery = typeof window.matchMedia === 'function'
     ? window.matchMedia('(prefers-reduced-motion: reduce)')
     : null
@@ -1021,8 +965,6 @@ onBeforeUnmount(() => {
   analysisExportDisposed = true
   leaveAnalysisScopeChip()
   workspaceCompactMediaQuery?.removeEventListener('change', onWorkspaceViewportChange)
-  window.removeEventListener('resize', onWorkspaceWindowResize)
-  if (workspaceNavigationResizeFrame) cancelAnimationFrame(workspaceNavigationResizeFrame)
   reducedMotionMediaQuery?.removeEventListener('change', onReducedMotionChange)
   stopBrandConstellation()
   if (brandClickSuppressTimer) clearTimeout(brandClickSuppressTimer)
@@ -1063,73 +1005,61 @@ onBeforeUnmount(() => {
           <span class="brand-wordmark">Nuvyn</span>
         </span>
       </NButton>
-      <!-- Keep workspace switching in the global header; phones and tablets
-           use one current-workspace menu while desktop keeps direct links. -->
-      <div v-if="isWorkspace" ref="workspaceNavigationRef" class="workspace-navigation">
-        <NDropdown
-          v-if="isCompactWorkspaceViewport"
-          v-model:show="mobileWorkspaceMenuOpen"
-          trigger="click"
-          placement="bottom-start"
-          :options="mobileWorkspaceOptions"
-          :menu-props="() => ({ role: 'menu', class: 'mobile-workspace-menu', 'aria-label': t('nav.workspace_switch') })"
-          :node-props="mobileWorkspaceOptionProps"
-          @select="onMobileWorkspaceSelect"
+      <!-- A single workspace entry opens the same picker at every viewport. -->
+      <div v-if="isWorkspace" class="workspace-navigation">
+        <NButton
+          ref="workspacePickerTrigger"
+          class="mobile-workspace-selector workspace-switcher-trigger"
+          attr-type="button"
+          size="small"
+          quaternary
+          :bordered="false"
+          :aria-label="t('nav.workspace_current', { workspace: activeWorkspaceLabel })"
+          :title="t('nav.workspace_current', { workspace: activeWorkspaceLabel })"
+          aria-haspopup="dialog"
+          :aria-expanded="workspacePickerOpen"
+          aria-controls="workspace-switcher-dialog"
+          data-testid="mobile-workspace-selector"
+          @click="workspacePickerOpen = true"
+          @mouseenter="isLedger && enterScopeChip('ledger')"
+          @mouseleave="leaveAnalysisScopeChip"
         >
-          <NButton
-            class="mobile-workspace-selector"
-            attr-type="button"
-            size="small"
-            quaternary
-            :bordered="false"
-            :aria-label="t('nav.workspace_current', { workspace: mobileWorkspaceLabel })"
-            :title="t('nav.workspace_current', { workspace: mobileWorkspaceLabel })"
-            aria-haspopup="menu"
-            :aria-expanded="mobileWorkspaceMenuOpen"
-            data-testid="mobile-workspace-selector"
-            @mouseenter="isLedger && enterScopeChip('ledger')"
-            @mouseleave="leaveAnalysisScopeChip"
-          >
-            <span class="mobile-workspace-label">{{ mobileWorkspaceLabel }}</span>
-          </NButton>
-        </NDropdown>
-        <template v-else>
-          <div v-if="showScopeChips" class="scope-chips" role="tablist" :aria-label="t('nav.scope_label')">
-            <NButton
-              v-for="chip in scopeChips"
-              :key="chip.scope"
-              class="nav-workspace-link scope-chip"
-              :class="{ active: isScopeActive(chip.scope) }"
-              attr-type="button"
-              size="small"
-              quaternary
-              :bordered="false"
-              :aria-pressed="isScopeActive(chip.scope)"
-              :aria-label="scopeLabel(chip.scope, chip.label)"
-              :title="scopeLabel(chip.scope, chip.label)"
-              @click="onScopeClick(chip.scope)"
-              @mouseenter="enterScopeChip(chip.scope)"
-              @mouseleave="leaveAnalysisScopeChip"
-            >
-              <span class="scope-chip-label">{{ chip.label }}</span>
-            </NButton>
-          </div>
-          <NButton
-            v-if="showBoardNavigation"
-            class="nav-workspace-link workspace-board-link"
-            :class="{ active: isBoard }"
-            attr-type="button"
-            size="small"
-            quaternary
-            :bordered="false"
-            :aria-current="isBoard ? 'page' : undefined"
-            :aria-label="workspaceDisplayNames.board"
-            @click="router.push({ name: 'board' })"
-          >
-            <span class="workspace-board-link-label">{{ workspaceDisplayNames.board }}</span>
-          </NButton>
-        </template>
+          <span class="mobile-workspace-label">{{ activeWorkspaceLabel }}</span>
+        </NButton>
       </div>
+      <NModal
+        v-model:show="workspacePickerOpen"
+        id="workspace-switcher-dialog"
+        preset="card"
+        class="workspace-switcher-modal"
+        :title="t('nav.workspace_switch')"
+        :style="{ width: 'min(340px, calc(100vw - 32px))' }"
+        :z-index="10000"
+        :mask-closable="true"
+        :close-on-esc="true"
+        :auto-focus="true"
+        :aria-label="t('nav.workspace_switch')"
+        @after-leave="restoreWorkspacePickerFocus"
+      >
+        <div class="workspace-switcher-grid" role="group" :aria-label="t('nav.workspace_switch')">
+          <button
+            v-for="workspace in workspaceCards"
+            :key="workspace.key"
+            type="button"
+            class="workspace-switcher-card"
+            :class="{ 'is-active': workspace.key === activeWorkspaceKey }"
+            :aria-current="workspace.key === activeWorkspaceKey ? 'page' : undefined"
+            :data-workspace="workspace.key"
+            :data-testid="`workspace-switcher-${workspace.key}`"
+            @click="onWorkspaceSelect(workspace.key)"
+          >
+            <NIcon aria-hidden="true" :size="24">
+              <component :is="workspace.icon" />
+            </NIcon>
+            <span>{{ workspace.label }}</span>
+          </button>
+        </div>
+      </NModal>
       <div class="nav-spacer" />
       <div class="nav-actions">
         <div

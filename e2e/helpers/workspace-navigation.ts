@@ -17,17 +17,15 @@ const workspacePaths: Record<WorkspaceName, RegExp> = {
   board: /\/board(?:\/|$)/,
 }
 
+async function isCompactWorkspaceViewport(page: Page): Promise<boolean> {
+  return page.evaluate(() => window.matchMedia('(max-width: 1199px)').matches)
+}
+
 /** Switches Workspace through the active responsive navigation surface. */
 export async function selectWorkspace(page: Page, workspace: WorkspaceName): Promise<void> {
-  const compactSelector = page.getByTestId('mobile-workspace-selector')
-  if (await compactSelector.isVisible()) {
-    await compactSelector.click()
-    await page.getByRole('menuitem', { name: workspaceLabels[workspace], exact: true }).click()
-  } else if (workspace === 'board') {
-    await page.locator('.workspace-board-link').click()
-  } else {
-    await page.locator('.scope-chip').filter({ hasText: workspaceLabels[workspace] }).click()
-  }
+  const selector = page.getByTestId('mobile-workspace-selector')
+  await selector.click()
+  await page.getByTestId(`workspace-switcher-${workspace}`).click()
 
   // Diary access is gated before the router switches scopes. Callers that
   // exercise Diary should unlock the pending access dialog, then assert the
@@ -38,9 +36,7 @@ export async function selectWorkspace(page: Page, workspace: WorkspaceName): Pro
   }
 
   await expect(page).toHaveURL(workspacePaths[workspace])
-  if (await compactSelector.isVisible()) {
-    await expect(compactSelector).toContainText(workspaceLabels[workspace])
-  }
+  await expect(selector).toContainText(workspaceLabels[workspace])
 }
 
 export type CompactNoteAction = 'left-panel' | 'right-panel' | 'insert-image' | 'read-all' | 'read-selection'
@@ -64,8 +60,7 @@ export async function selectCompactNoteAction(page: Page, action: CompactNoteAct
 
 export async function ensureVaultLeftDrawerOpen(page: Page): Promise<void> {
   const desktopToggle = page.getByTestId('left-panel-toggle')
-  const compact = page.getByTestId('mobile-workspace-selector')
-  if (await compact.isVisible()) {
+  if (await isCompactWorkspaceViewport(page)) {
     const backdrop = page.getByTestId('note-tablet-backdrop')
     if (await backdrop.isVisible() && !await page.locator('.file-tree').isVisible()) {
       await page.keyboard.press('Escape')
@@ -83,9 +78,7 @@ export async function toggleNotePanel(page: Page, side: 'left' | 'right'): Promi
   const panel = page.locator(side === 'left' ? '.file-tree' : '.right-rail')
   const desktopToggle = page.getByTestId('left-panel-toggle')
   const desktopRightToggle = page.locator('.right-rail-toggle')
-  const compact = page.getByTestId('mobile-workspace-selector')
-
-  if (await compact.isVisible()) {
+  if (await isCompactWorkspaceViewport(page)) {
     const backdrop = page.getByTestId('note-tablet-backdrop')
     if (await backdrop.isVisible()) {
       if (await panel.isVisible()) {
