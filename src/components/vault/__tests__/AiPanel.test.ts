@@ -20,6 +20,9 @@ vi.mock('../../../composables/vault/useAiHistory', async () => {
     isLoading: vueRef(false),
     busy: vueRef(false),
     errorState: vueRef(null),
+    ledgerApproval: vueRef(null),
+    ledgerReading: vueRef(false),
+    decideLedgerAnalysis: vi.fn(),
     configured: vueRef(true),
     model: vueRef('test-model'),
     loadActive: vi.fn(async () => {}),
@@ -122,7 +125,7 @@ describe('global AI panel', () => {
     const sendSpy = vi.spyOn(history, 'sendAndStream').mockImplementation(async () => {
       events.push('send')
     })
-    const { wrapper } = mountPanel(captureSpy)
+    const { wrapper } = mountPanel(captureSpy, { workspaceKind: 'vault' })
     await nextTick()
     events.length = 0
     captureSpy.mockClear()
@@ -140,10 +143,11 @@ describe('global AI panel', () => {
 
   it('sends ordinary AI messages without Note, Diary, Ledger, or Board context', async () => {
     const sendSpy = vi.spyOn(history, 'sendAndStream').mockImplementation(async () => {})
-    const { wrapper, bridge } = mountPanel()
-    bridge.value = null
+    const capture = vi.fn(() => documentCapture())
+    const { wrapper } = mountPanel(capture, { workspaceKind: 'ledger' })
     await typeAndSend(wrapper, 'hello from another workspace')
     expect(sendSpy).toHaveBeenCalledWith('hello from another workspace', {})
+    expect(capture).not.toHaveBeenCalled()
   })
 
   it('uses only the send-time Note snapshot when the workspace changes during a stream', async () => {
@@ -153,7 +157,7 @@ describe('global AI panel', () => {
     const sendSpy = vi.spyOn(history, 'sendAndStream').mockImplementation(
       () => new Promise<void>((resolve) => { settle = resolve }),
     )
-    const { wrapper, bridge } = mountPanel(capture)
+    const { wrapper, bridge } = mountPanel(capture, { workspaceKind: 'vault' })
     await nextTick()
     capture.mockClear()
 
@@ -199,14 +203,54 @@ describe('global AI panel', () => {
   })
 
   it('displays Note-specific prompts only with a live Note context', () => {
-    const note = mountPanel(() => documentCapture())
+    const note = mountPanel(() => documentCapture(), { workspaceKind: 'vault' })
     const notePrompts = note.wrapper.findComponent(AiChatMessages).props('quickPrompts')
     expect(notePrompts[0]?.text).toBe(useI18n().t('quick_prompts.with_note.summarize.text'))
 
-    const otherWorkspace = mountPanel()
+    const otherWorkspace = mountPanel(() => documentCapture(), { workspaceKind: 'ledger' })
     const genericPrompts = otherWorkspace.wrapper.findComponent(AiChatMessages).props('quickPrompts')
-    expect(genericPrompts[0]?.text).toBe(useI18n().t('quick_prompts.no_note.browse.text'))
+    expect(genericPrompts[0]?.text).toBe(useI18n().t('quick_prompts.ledger.review.text'))
     expect(otherWorkspace.wrapper.findComponent(AiChatMessages).props('currentPath')).toBeNull()
+    expect(otherWorkspace.wrapper.findComponent(AiChatMessages).props('emptyHint')).toBe(useI18n().t('ai.empty_hint_ledger'))
+  })
+
+  it('updates prompts with the workspace and Diary view while preserving the draft and conversation', async () => {
+    history.messages.value = []
+    const capture = vi.fn(() => documentCapture())
+    const wrapper = mount(AiPanel, {
+      props: { open: true, workspaceKind: 'vault' },
+      global: { provide: { [AppShellContextKey as symbol]: { settingsRequestTick: ref(0), noteAiContext: ref({
+        capture,
+        publishFileChange: vi.fn(),
+        linkPaths: () => [],
+        openLink: vi.fn(async () => {}),
+      }) } } },
+    })
+
+    expect(capture).toHaveBeenCalled()
+    capture.mockClear()
+    await wrapper.setProps({ workspaceKind: 'ledger' })
+    expect(wrapper.findComponent(AiChatMessages).props('quickPrompts').map(prompt => prompt.label)).toEqual([
+      'Analyze this month’s cashflow', 'Analyze spending breakdown', 'Review financial trends',
+    ])
+    expect(wrapper.findComponent(AiChatMessages).props('currentPath')).toBeNull()
+    expect(capture).not.toHaveBeenCalled()
+
+    const prompt = wrapper.findAll('.ai-quick-prompt')[0]
+    await prompt.trigger('click')
+    const expectedDraft = useI18n().t('quick_prompts.ledger.review.text')
+    expect(wrapper.findComponent(AiComposer).props('modelValue')).toBe(expectedDraft)
+    expect(history.sendAndStream).not.toHaveBeenCalled()
+
+    const conversation = [{ id: 1, sessionId: 1, role: 'assistant' as const, content: 'kept', createdAt: 1 }]
+    history.messages.value = conversation
+    await wrapper.setProps({ workspaceKind: 'diary', diaryViewMode: 'events' })
+    expect(wrapper.findComponent(AiChatMessages).props('quickPrompts').map(prompt => prompt.label)).toEqual([
+      'Plan an important date', 'Plan a birthday or anniversary', 'Plan an activity',
+    ])
+    expect(wrapper.findComponent(AiChatMessages).props('messages')).toEqual(conversation)
+    expect(wrapper.findComponent(AiComposer).props('modelValue')).toBe(expectedDraft)
+    expect(wrapper.findComponent(AiChatMessages).props('emptyHint')).toBe('I can help you plan important dates and activities.')
   })
 
   it('ignores ordinary DOM changes and scans for external overlays only while open', async () => {

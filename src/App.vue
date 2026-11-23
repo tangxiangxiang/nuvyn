@@ -575,6 +575,8 @@ provide(VaultViewModeKey, { mode: viewMode, set: setViewMode, toggle: toggleView
     v-if="auth.state.value === 'authenticated'"
     :key="globalAiPositionStorageKey ?? 'anonymous'"
     :open="globalAiOpen"
+    :workspace-kind="workspaceKind"
+    :diary-view-mode="diaryViewMode"
     :position-storage-key="globalAiPositionStorageKey"
     @close="closeGlobalAi"
   />

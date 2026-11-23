@@ -3,6 +3,7 @@ import {
   cleanupCreatedPaths,
   createDoc,
   gotoVaultReady,
+  interceptAiChat,
   interceptAiChatGated,
   jsonResponse,
   sse,
@@ -10,6 +11,7 @@ import {
 } from './helpers/edit-program'
 import type { AnyRecord } from './helpers/edit-program'
 import { ensureVaultLeftDrawerOpen, selectWorkspace } from './helpers/workspace-navigation'
+import { unlockDiary } from './helpers/diary-life'
 
 test.describe('AI history keyboard interaction', () => {
   test.beforeEach(async ({ page }) => {
@@ -103,6 +105,7 @@ test('global AI drag position persists, stays in view, and resets on title doubl
   const panel = page.getByTestId('global-ai-panel')
   await expect(panel).toBeVisible()
   await expect(panel).toHaveCSS('transform', 'none')
+  await expect(panel.locator('.ai-quick-prompt')).toHaveCount(3)
 
   const initial = await panel.evaluate((element) => {
     const rect = element.getBoundingClientRect()
@@ -178,6 +181,7 @@ test('an in-flight Note response survives a workspace switch and later requests 
     await page.getByTestId('global-ai-trigger').click()
     const panel = page.getByTestId('global-ai-panel')
     await expect(panel).toBeVisible()
+    await expect(panel.locator('.ai-quick-prompt')).toHaveCount(3)
 
     await sendAi(page, 'capture the current Note')
     await expect.poll(() => chatBodies.length).toBe(1)
@@ -238,6 +242,122 @@ test('a workspace modal takes priority over the floating AI panel and consumes t
   await expect(trigger).toBeFocused()
 })
 
+test('quick prompts follow the active workspace and Diary view without replacing the draft or sending', async ({ page }) => {
+  await page.setViewportSize({ width: 1024, height: 768 })
+  await page.addInitScript(() => {
+    Object.defineProperty(navigator, 'language', { configurable: true, get: () => 'zh-CN' })
+  })
+  await gotoVaultReady(page)
+  const trigger = page.getByTestId('global-ai-trigger')
+  await trigger.click()
+  const panel = page.getByTestId('global-ai-panel')
+  const prompts = panel.locator('.ai-quick-prompt')
+  const composer = panel.locator('textarea')
+  let chatRequests = 0
+  page.on('request', (request) => {
+    if (new URL(request.url()).pathname === '/api/ai/chat') chatRequests += 1
+  })
+
+  await expect(prompts).toHaveCount(3)
+  const selectedPromptText = await prompts.first().getAttribute('title')
+  expect(selectedPromptText).toBeTruthy()
+  await prompts.first().click()
+  await expect(composer).toHaveValue(selectedPromptText!)
+  expect(chatRequests).toBe(0)
+  await composer.fill('草稿在切换工作区后仍要保留')
+
+  await selectWorkspace(page, 'ledger')
+  await expect(panel).toBeVisible()
+  await expect(prompts).toHaveText(['分析本月收支', '分析消费结构', '查看财务趋势'])
+  await expect(panel.locator('.ai-empty-hint')).toHaveText('经你授权后，可以分析指定日期的账本收支。')
+  await expect(composer).toHaveValue('草稿在切换工作区后仍要保留')
+  expect(chatRequests).toBe(0)
+
+  await selectWorkspace(page, 'board')
+  await expect(panel).toBeVisible()
+  await expect(prompts).toHaveText(['头脑风暴', '整理思路', '设计信息结构'])
+  await expect(panel.locator('.ai-empty-hint')).toHaveText('可以帮助你头脑风暴和整理思路。')
+  await expect(composer).toHaveValue('草稿在切换工作区后仍要保留')
+
+  await selectWorkspace(page, 'diary')
+  await unlockDiary(page)
+  await expect(panel).toBeVisible()
+  await expect(prompts).toHaveText(['梳理心情', '自我反思', '培养记录习惯'])
+  await expect(panel.locator('.ai-empty-hint')).toHaveText('可以帮你梳理心情和思考，不会读取你的日记。')
+
+  await page.getByTestId('diary-view-mode-events').click()
+  await expect(prompts).toHaveText(['规划重要日程', '准备生日纪念日', '制定活动计划'])
+  await expect(panel.locator('.ai-empty-hint')).toHaveText('可以帮你规划重要日期和活动安排。')
+  await page.getByTestId('diary-view-mode-tasks').click()
+  await expect(prompts).toHaveText(['拆解复杂任务', '梳理任务优先级', '制定执行计划'])
+  await expect(panel.locator('.ai-empty-hint')).toHaveText('可以帮你拆解任务、梳理优先级。')
+  await expect(composer).toHaveValue('草稿在切换工作区后仍要保留')
+  expect(chatRequests).toBe(0)
+})
+
+test('Ledger analysis asks for each approval and keeps the conversation across workspaces', async ({ page }) => {
+  await interceptAiChat(page, [])
+  await page.addInitScript(() => {
+    const originalFetch = window.fetch.bind(window)
+    let pending: { scope: { kind: string; from: string; to: string }; stream: ReadableStreamDefaultController<Uint8Array> } | null = null
+    let turn = 0
+    const encoder = new TextEncoder()
+    const event = (name: string, data: unknown) => encoder.encode(
+      'event: ' + name + '\ndata: ' + JSON.stringify(data) + '\n\n',
+    )
+    window.fetch = async (input, init) => {
+      const path = new URL(input instanceof Request ? input.url : String(input), location.href).pathname
+      if (path !== '/api/ai/chat' && path !== '/api/ai/chat/ledger-approval') return originalFetch(input, init)
+      const body = JSON.parse(String(init?.body ?? '{}'))
+      if (path.endsWith('/ledger-approval')) {
+        if (!pending || body.id !== 'test-approval-' + turn || body.sessionId !== 1) return new Response(null, { status: 409 })
+        const { stream } = pending
+        if (body.allowed) stream.enqueue(event('ledger_reading', {}))
+        stream.enqueue(event('user', { id: turn * 2 - 1 }))
+        stream.enqueue(event('token', { text: body.allowed ? 'Confirmed Ledger analysis' : 'No Ledger data was read' }))
+        stream.enqueue(event('done', { userId: turn * 2 - 1, assistantId: turn * 2 }))
+        stream.close()
+        pending = null
+        return Response.json({ ok: true })
+      }
+      turn++
+      const stream = new ReadableStream<Uint8Array>({
+        start(controller) {
+          if (!body.ledgerAnalysis || body.liveContext) {
+            controller.enqueue(event('error', { reason: 'expected-ledger-scope' }))
+            controller.close()
+            return
+          }
+          pending = { scope: body.ledgerAnalysis, stream: controller }
+          controller.enqueue(event('ledger_approval', { id: 'test-approval-' + turn, scope: pending.scope }))
+        },
+      })
+      return new Response(stream, { headers: { 'Content-Type': 'text/event-stream' } })
+    }
+  })
+  await gotoVaultReady(page)
+  await selectWorkspace(page, 'ledger')
+  await page.getByTestId('global-ai-trigger').click()
+  const panel = page.getByTestId('global-ai-panel')
+  const approval = page.getByTestId('ai-ledger-approval')
+  await sendAi(page, '分析 2026-11-01 到 2026-11-30 的收入和支出')
+  await expect(approval).toContainText('2026-11-01 – 2026-11-30')
+  await expect(panel.getByText('Confirmed Ledger analysis')).toHaveCount(0)
+  await approval.getByRole('button', { name: /取消|Cancel/ }).click()
+  await expect(panel.getByText('No Ledger data was read')).toBeVisible()
+  await expect(approval).toBeHidden()
+
+  await sendAi(page, '分析 2026-10-01 到 2026-10-31 的收入和支出')
+  await expect(approval).toContainText('2026-10-01 – 2026-10-31')
+  await selectWorkspace(page, 'board')
+  await expect(approval).toBeVisible()
+  await approval.getByRole('button', { name: /允许分析|Allow analysis/ }).click()
+  await expect(panel.getByText('Confirmed Ledger analysis')).toBeVisible()
+  await panel.getByTestId('global-ai-close').click()
+  await page.getByTestId('global-ai-trigger').click()
+  await expect(panel.getByText('Confirmed Ledger analysis')).toBeVisible()
+})
+
 test.describe('tablet global AI panel', () => {
   test.use({ hasTouch: true, isMobile: false, viewport: { width: 1024, height: 768 } })
 
@@ -287,6 +407,7 @@ test.describe('mobile global AI panel', () => {
     const panel = page.getByTestId('global-ai-panel')
     await expect(panel).toBeVisible()
     await expect(panel).toHaveCSS('position', 'fixed')
+    await expect(panel.locator('.ai-quick-prompt')).toHaveCount(3)
     await expect(panel.locator('.ai-floating-drag-region')).toHaveCSS('cursor', 'default')
     await panel.getByTestId('global-ai-close').tap()
     await expect(panel).toBeHidden()

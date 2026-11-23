@@ -11,6 +11,7 @@ const props = defineProps<{
   currentPath: string | null
   noteLinkContext?: { paths: string[]; openLink: (path: string, anchor?: string) => Promise<void> } | null
   quickPrompts: Array<{ label: string; text: string }>
+  emptyHint?: string
 }>()
 
 const emit = defineEmits<{
@@ -49,7 +50,7 @@ const { t } = useI18n()
       </div>
 
       <div class="ai-empty-hint">
-        {{ t(props.currentPath ? 'ai.empty_hint_note' : 'ai.empty_hint_vault') }}
+        {{ props.emptyHint ?? t(props.currentPath ? 'ai.empty_hint_note' : 'ai.empty_hint_vault') }}
       </div>
     </div>
 

@@ -18,7 +18,7 @@ describe('AiChatMessages', () => {
       },
     })
 
-    expect(wrapper.text()).toContain('I can answer questions about the current note.')
+    expect(wrapper.text()).toContain('I can help using the current note and knowledge base.')
     expect(wrapper.text()).not.toContain('archive/example.md')
     await wrapper.get('.ai-quick-prompt').trigger('click')
     expect(wrapper.emitted('prompt')).toEqual([['Summarize this note']])
@@ -123,7 +123,7 @@ describe('AiChatMessages empty presentation', () => {
     expect(wrapper.get('.ai-suggestion-heading').text()).toBe('可以试试')
     expect(wrapper.find('.ai-quick-prompts').exists()).toBe(true)
     expect(wrapper.findAll('.ai-quick-prompt')).toHaveLength(3)
-    expect(wrapper.get('.ai-empty-hint').text()).toBe('我可以基于当前笔记回答问题。')
+    expect(wrapper.get('.ai-empty-hint').text()).toBe('可以结合当前笔记和知识库提供帮助。')
     expect(wrapper.find('.ai-context-block').exists()).toBe(false)
     expect(wrapper.text()).not.toContain('archive/nuvyn-deployment-guide')
     expect(children.map((child) => child.className)).toEqual([
@@ -137,7 +137,7 @@ describe('AiChatMessages empty presentation', () => {
     const wrapper = mountMessages([], null)
 
     expect(wrapper.find('.ai-quick-prompts').exists()).toBe(true)
-    expect(wrapper.get('.ai-empty-hint').text()).toBe('我可以基于当前工作区回答问题。')
+    expect(wrapper.get('.ai-empty-hint').text()).toBe('可以帮助你查找知识和整理笔记。')
   })
 
   it('hides the empty presentation once messages exist', () => {
