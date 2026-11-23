@@ -504,7 +504,9 @@ onBeforeUnmount(() => {
         :show-icon="false"
         class="ai-ledger-status"
       >{{ t(history.errorState.value === 'ledger-analysis-uninitialized' ? 'ai.ledger_uninitialized' : 'ai.ledger_unavailable') }}</NAlert>
-      <p v-else-if="history.ledgerReading.value" class="ai-ledger-status" role="status">{{ t('ai.ledger_reading') }}</p>
+      <p v-else-if="isLedger && ledgerHistory.financePhase.value" class="ai-ledger-status" role="status" data-testid="finance-agent-progress">
+        {{ t(`ai.finance_phase_${ledgerHistory.financePhase.value}`) }}
+      </p>
 
       <p v-if="isLedger && commandStatus" class="ai-ledger-status" role="status">
         {{ t(`ai.ledger_command_${commandStatus}`) }}

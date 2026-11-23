@@ -1,3 +1,5 @@
+import type { FinanceAgentProgress } from '../../shared/ledgerAiAnalysis.js'
+import { createFinanceAgent, financeCoverageNotice } from './finance-agent.js'
 import { ledgerReadTool, type createLedgerAnalysis } from './ledger-analysis.js'
 import { getAiRuntimeConfig, type AiRuntimeConfig } from './settings.js'
 // AI chat orchestrator. Pure functions of (db, ...args) — no
@@ -191,6 +193,7 @@ const LIVE_CONTEXT_KIND_NOTES: Record<AiLiveContextSnapshot['kind'], string> = {
 // route translates each event into one SSE frame. Same shape
 // (subset) as `ChatEvent` on the client side in src/lib/ai-api.ts.
 export type ChatEvent =
+  | FinanceAgentProgress
   | { type: 'user'; id: number }
   | { type: 'token'; text: string }
   | { type: 'tool_use'; id: string; name: string; input: Record<string, unknown> }
@@ -232,6 +235,9 @@ export async function runChat(opts: RunChatOpts): Promise<{
 }> {
   if (opts.userContent.trim().length === 0) {
     throw new ChatError('empty')
+  }
+  if (opts.ledgerAnalysis && (opts.signal?.aborted || !opts.canUseLedgerAnalysis?.())) {
+    throw new ChatError('aborted')
   }
   const runtimeConfig = opts.runtimeConfig ?? getAiRuntimeConfig(opts.db)
   const sess = sessions.getSession(opts.db, opts.sessionId)
@@ -312,64 +318,78 @@ export async function runChat(opts: RunChatOpts): Promise<{
   const toolCtxSignal = opts.signal ?? new AbortController().signal
 
   let ledgerReplyInterrupted = false
-  let ledgerRounds = 0
-  let ledgerBytesRemaining = 48_000
+  const finance = opts.ledgerAnalysis && createFinanceAgent(opts.ledgerAnalysis)
+  const requireFinanceAccess = () => {
+    if (opts.signal?.aborted || !opts.canUseLedgerAnalysis?.()) throw new ChatError('aborted')
+  }
+  const finalFinanceInstruction = {
+    role: 'user' as const,
+    content: 'The Ledger tool budget for this turn is closed. Answer from the observations already returned. Identify any scope that could not be verified.',
+  }
   try {
+    if (finance) await emit(opts.onEvent, { type: 'finance_progress', phase: 'analyzing' })
     while (true) {
-      if (opts.signal?.aborted || (opts.ledgerAnalysis && !opts.canUseLedgerAnalysis?.())) {
-        throw new ChatError('aborted')
-      }
+      if (finance) requireFinanceAccess()
+      else if (opts.signal?.aborted) throw new ChatError('aborted')
 
+      const canRead = finance?.canQuery()
       const result = await backend.streamRound({
         db: opts.db,
         model: opts.model, runtimeConfig,
         system,
         messages: convo,
-        tools: opts.ledgerAnalysis ? (ledgerRounds < 8 && ledgerBytesRemaining > 0 ? [ledgerReadTool] : []) : TOOL_DEFINITIONS,
+        tools: finance ? (canRead ? [ledgerReadTool] : []) : TOOL_DEFINITIONS,
         signal: opts.signal,
-        onToken: async (text) => {
+        onToken: finance ? () => {} : async (text) => {
           fullText += text
           await emit(opts.onEvent, { type: 'token', text })
         },
       })
 
-      // Capture this round for persistence. Text + any tool_use calls.
-      if (opts.ledgerAnalysis) {
+      if (finance) {
+        requireFinanceAccess()
         if (result.finishReason !== 'tool_calls') {
           ledgerReplyInterrupted = result.finishReason === 'length'
+          await emit(opts.onEvent, { type: 'finance_progress', phase: 'verifying' })
+          requireFinanceAccess()
+          // Only the final answer can leave the server. Tool-round text and
+          // observations may contain private data or provisional conclusions.
+          const chinese = /\p{Script=Han}/u.test(result.text || opts.userContent)
+          const coverage = finance.limitations()
+          let answer = result.text
+          if (coverage.noEvidence) {
+            answer = chinese
+              ? '目前无法根据账本核对这次问题。可以缩小日期范围后再试。'
+              : 'I could not verify this question against Ledger. Try again with a narrower date range.'
+          }
+          if (!answer.trim()) throw new ChatError('ledger-analysis-unavailable')
+          fullText = answer + financeCoverageNotice(coverage, chinese)
+          await emit(opts.onEvent, { type: 'token', text: fullText })
+          requireFinanceAccess()
           break
         }
-        if (ledgerRounds >= 8 || ledgerBytesRemaining <= 0 || !result.toolCalls.length || result.toolCalls.length > 8) {
-          throw new ChatError('ledger-analysis-unavailable')
+        if (!canRead) throw new ChatError('ledger-analysis-unavailable')
+        if (!finance.beginBatch(result.toolCalls.length)) {
+          convo.push(finalFinanceInstruction)
+          continue
         }
-        ledgerRounds += 1
         convo.push({ role: 'assistant', content: result.toolCalls.map((tc) => ({
           type: 'tool_use', id: tc.id, name: tc.name, input: tc.input,
         })) })
-        for (const tc of result.toolCalls) {
-          if (!opts.canUseLedgerAnalysis?.()) throw new ChatError('aborted')
-          let content: string
-          try {
-            content = tc.name === ledgerReadTool.name
-              ? JSON.stringify(opts.ledgerAnalysis.read(tc.input))
-              : '{"error":"Only read_ledger is available."}'
-            const bytes = Buffer.byteLength(content)
-            if (bytes > ledgerBytesRemaining) {
-              ledgerBytesRemaining = 0
-              content = '{"error":"Ledger analysis reached the tool context budget. Report which data was unavailable."}'
-            } else if (bytes > 12_000) {
-              content = '{"error":"Result exceeds the context budget. Ask for a bounded date range or a smaller group of results."}'
-            } else {
-              ledgerBytesRemaining -= bytes
+        let reading = false
+        for (const [ordinal, tc] of result.toolCalls.entries()) {
+          requireFinanceAccess()
+          const content = await finance.execute(tc, result.toolCalls.length, ordinal, async () => {
+            if (!reading) {
+              await emit(opts.onEvent, { type: 'finance_progress', phase: 'reading' })
+              reading = true
             }
-          } catch {
-            content = '{"error":"Ledger could not calculate this query. Check the dates and inputs. If the error persists, report the data as unavailable."}'
-          }
+            requireFinanceAccess()
+          })
           convo.push({ role: 'tool', tool_call_id: tc.id, content })
         }
-        if (ledgerRounds === 8 || ledgerBytesRemaining <= 0) {
-          convo.push({ role: 'user', content: 'Answer using the available Ledger results. If any range or detail was unavailable, state that explicitly.' })
-        }
+        if (!finance.canQuery()) convo.push(finalFinanceInstruction)
+        await emit(opts.onEvent, { type: 'finance_progress', phase: 'analyzing' })
         continue
       }
       const roundText = result.text
@@ -468,7 +488,8 @@ export async function runChat(opts: RunChatOpts): Promise<{
   } catch (err) {
     // Persist whatever streamed so far (typically '' or a few tokens)
     // and re-throw a tagged error so the route can emit SSE error.
-    const partial = fullText || '[stream interrupted]'
+    const financeAborted = finance && (opts.signal?.aborted || !opts.canUseLedgerAnalysis?.())
+    const partial = (financeAborted ? '' : fullText) || '[stream interrupted]'
     const assistantResult = messages.appendMessage(
       opts.db,
       opts.sessionId,
@@ -476,6 +497,7 @@ export async function runChat(opts: RunChatOpts): Promise<{
       privateLedgerAnalysis ? persistLedgerText(partial, true) : partial,
     )
     const assistantId = assistantResult.ok ? assistantResult.message.id : -1
+    if (financeAborted) throw new ChatError('aborted', undefined, assistantId)
     if (err instanceof ChatError) {
       throw new ChatError(err.reason, err.message, assistantId, err.code)
     }

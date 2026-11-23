@@ -347,7 +347,10 @@ test('AI Finance isolates its transcript and executes local commands without sen
         return route.fulfill({
           status: 200,
           contentType: 'text/event-stream',
-          body: sse('user', { id: userId }) + sse('token', { text: reply }) + sse('done', { userId, assistantId }),
+          ...(number === 1 ? { headers: { 'x-finance-progress-fixture': '1' } } : {}),
+          body: sse('user', { id: userId })
+            + (number === 1 ? sse('finance_progress', { phase: 'reading' }) : '')
+            + sse('token', { text: reply }) + sse('done', { userId, assistantId }),
         })
       }
       default: return route.fallback()
@@ -355,6 +358,25 @@ test('AI Finance isolates its transcript and executes local commands without sen
   })
   await page.addInitScript(() => {
     Object.defineProperty(navigator, 'language', { configurable: true, get: () => 'zh-CN' })
+    // Hold the final SSE frames so the test can interact with a running
+    // request without depending on an arbitrary provider delay.
+    const fetch = window.fetch.bind(window)
+    window.fetch = async (...args) => {
+      const response = await fetch(...args)
+      if (response.headers.get('x-finance-progress-fixture') !== '1') return response
+      const body = await response.text()
+      const final = body.indexOf('event: token')
+      const encoder = new TextEncoder()
+      return new Response(new ReadableStream({
+        start(controller) {
+          controller.enqueue(encoder.encode(body.slice(0, final)))
+          window.addEventListener('finance-fixture-answer', () => {
+            controller.enqueue(encoder.encode(body.slice(final)))
+            controller.close()
+          }, { once: true })
+        },
+      }), { headers: response.headers })
+    }
   })
   await gotoVaultReady(page)
   await page.getByTestId('global-ai-trigger').click()
@@ -366,7 +388,16 @@ test('AI Finance isolates its transcript and executes local commands without sen
   await expect(panel.getByTestId('global-ai-history')).toHaveCount(0)
   await expect(panel.getByText('Previous Note conversation')).toHaveCount(0)
   await sendAi(page, '分析本月的收入和支出')
+  const progress = panel.getByTestId('finance-agent-progress')
+  await expect(progress).toHaveText('正在查询账本…')
+  await expect(panel.getByText('Ledger analysis 1')).toHaveCount(0)
+  await selectWorkspace(page, 'board')
+  await expect(progress).toHaveCount(0)
+  await selectWorkspace(page, 'ledger')
+  await expect(progress).toHaveText('正在查询账本…')
+  await page.evaluate(() => window.dispatchEvent(new Event('finance-fixture-answer')))
   await expect(panel.getByText('Ledger analysis 1')).toBeVisible()
+  await expect(progress).toHaveCount(0)
   await sendAi(page, '那上个月呢？')
   await expect(panel.getByText('Ledger analysis 2')).toBeVisible()
   await expect(panel.getByTestId('ai-ledger-approval')).toHaveCount(0)

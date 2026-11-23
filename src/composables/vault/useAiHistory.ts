@@ -1,3 +1,4 @@
+import type { FinanceAgentPhase } from '../../../shared/ledgerAiAnalysis.js'
 // AI history state + actions. Each VaultContext owns the instance shared by
 // AiPanel, the session picker, and settings. Persistence is server-side; this
 // composable is just a
@@ -51,7 +52,7 @@ export interface AiHistory {
   errorState: Ref<string | null>
   configured: Ref<boolean>
   model: Ref<string>
-  ledgerReading: Ref<boolean>
+  financePhase: Ref<FinanceAgentPhase | null>
 
   // actions
   loadActive(): Promise<void>
@@ -123,7 +124,7 @@ function createAiHistory(publishChange: (event: FileChangeEvent) => void, ledger
   const isLoading = ref(false)
   const busy = ref(false)
   const errorState = ref<string | null>(null)
-  const ledgerReading = ref(false)
+  const financePhase = ref<FinanceAgentPhase | null>(null)
   const configured = ledgerSettings?.configured ?? ref(false)
   const model = ledgerSettings?.model ?? ref('')
 
@@ -333,9 +334,11 @@ function createAiHistory(publishChange: (event: FileChangeEvent) => void, ledger
         },
         ac.signal,
       )) {
+        if (ledgerSettings) ac.signal.throwIfAborted()
         applyEvent(event, userMessage, assistantMessage, options?.publishFileChange ?? publishChange)
         if (event.type === 'done' || event.type === 'error') break
       }
+      if (ledgerSettings) ac.signal.throwIfAborted()
       if (!options?.threadScope && !ledgerSettings) await refreshSessions()
     } catch (e) {
       // Abort is the expected path when the user clicks Stop; surface
@@ -358,7 +361,7 @@ function createAiHistory(publishChange: (event: FileChangeEvent) => void, ledger
         throw e
       }
     } finally {
-      ledgerReading.value = false
+      financePhase.value = null
       activeController = null
       busy.value = false
       settleStream?.()
@@ -367,6 +370,7 @@ function createAiHistory(publishChange: (event: FileChangeEvent) => void, ledger
   }
 
   function stop(): void {
+    financePhase.value = null
     // Just trigger the signal; the catch above handles the
     // visible side-effect. No busy-flag manipulation here —
     // that's the for-await's finally's job.
@@ -379,10 +383,9 @@ function createAiHistory(publishChange: (event: FileChangeEvent) => void, ledger
     optimisticAssistant: Message,
     publishFileChange: (event: FileChangeEvent) => void,
   ): void {
-    if (event.type === 'ledger_reading') {
-      ledgerReading.value = true
+    if (event.type === 'finance_progress') {
+      if (ledgerSettings) financePhase.value = event.phase
     } else if (event.type === 'user') {
-      ledgerReading.value = false
       messages.value = messages.value.map((m) =>
         m === optimisticUser ? { ...m, id: event.id } : m
       )
@@ -462,7 +465,7 @@ function createAiHistory(publishChange: (event: FileChangeEvent) => void, ledger
     errorState,
     configured,
     model,
-    ledgerReading,
+    financePhase,
     loadActive,
     loadSettings,
     loadThread,

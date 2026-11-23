@@ -1,3 +1,4 @@
+import type { FinanceAgentProgress } from '../../shared/ledgerAiAnalysis'
 import type { SpeechVoiceId } from '../../shared/aiProfiles'
 // Wire types + typed fetch wrappers for /api/ai/*. The shapes
 // (Session, Message) are the single source of truth — the server
@@ -217,7 +218,7 @@ export interface FileChangeEvent {
 }
 
 export type ChatEvent =
-  | { type: 'ledger_reading' }
+  | FinanceAgentProgress
   | { type: 'user'; id: number }
   | { type: 'token'; text: string }
   | { type: 'tool_use'; id: string; name: string; input: Record<string, unknown> }

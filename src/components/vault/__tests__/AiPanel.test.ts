@@ -26,7 +26,7 @@ vi.mock('../../../composables/vault/useAiHistory', async () => {
     isLoading: vueRef(false),
     busy: vueRef(false),
     errorState: vueRef(null),
-    ledgerReading: vueRef(false),
+    financePhase: vueRef(null),
     configured: vueRef(true),
     model: vueRef('test-model'),
     loadActive: vi.fn(async () => {}),

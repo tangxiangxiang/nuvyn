@@ -5,7 +5,7 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest'
 import { defineComponent, h, type Ref } from 'vue'
 import { mount } from '@vue/test-utils'
-import { useAiHistory, __resetForTesting, type AiHistory } from '../useAiHistory'
+import { useAiHistory, useLedgerAiHistory, __resetForTesting, type AiHistory } from '../useAiHistory'
 import { toolCallStatus, type ToolCallRecord } from '../../../lib/ai-api'
 
 interface Harness {
@@ -319,6 +319,34 @@ describe('sendAndStream', () => {
     expect(assistant.content).toContain('[aborted]')
     // No errorState — abort is a user action, not an error.
     expect(h.errorState.value).toBeNull()
+  })
+
+  it('holds Finance progress only for the active request and clears it when stopped', async () => {
+    const { streamChat } = await import('../../../lib/ai-api')
+    const { api } = setup()
+    api.configured.value = true
+    const finance = useLedgerAiHistory(api)
+    finance.activeSession.value = { id: 31, title: 'AI Finance', createdAt: 0, updatedAt: 0 }
+    vi.mocked(streamChat).mockImplementationOnce(async function* (_request, signal) {
+      yield { type: 'finance_progress', phase: 'preparing' }
+      yield { type: 'user', id: 7 }
+      yield { type: 'finance_progress', phase: 'reading' }
+      await new Promise<void>((resolve) => {
+        if (signal?.aborted) resolve()
+        else signal?.addEventListener('abort', () => resolve(), { once: true })
+      })
+      yield { type: 'finance_progress', phase: 'verifying' }
+    })
+    const request = finance.sendAndStream('Read cashflow', { ledgerAnalysis: true })
+    await vi.waitFor(() => expect(finance.financePhase.value).toBe('reading'))
+    expect(api.financePhase.value).toBeNull()
+    expect(finance.messages.value[1]?.content).toBe('')
+    finance.stop()
+    expect(finance.financePhase.value).toBeNull()
+    await request
+    expect(finance.financePhase.value).toBeNull()
+    expect(finance.busy.value).toBe(false)
+    expect(finance.messages.value[1]?.content).toContain('[aborted]')
   })
 
   it('stop() is a no-op when nothing is in flight', async () => {

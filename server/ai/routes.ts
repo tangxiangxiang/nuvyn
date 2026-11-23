@@ -1096,9 +1096,13 @@ ai.post('/chat', async (c) => {
   // ChatError('not-found') and the route maps it to an SSE error
   // event so the client can show a chip rather than a generic 404.
   return streamSSE(c, async (stream) => {
+    let authCheck: ReturnType<typeof setInterval> | undefined
     try {
       const writeEvent = async (e: ChatEvent) => {
         switch (e.type) {
+          case 'finance_progress':
+            await stream.writeSSE({ event: e.type, data: JSON.stringify({ phase: e.phase }) })
+            break
           case 'user':
             await stream.writeSSE({ event: 'user', data: JSON.stringify({ id: e.id }) })
             break
@@ -1158,11 +1162,20 @@ ai.post('/chat', async (c) => {
       const signal = AbortSignal.any([controller.signal, c.req.raw.signal])
       const ledgerSessionIsCurrent = () => {
         if (signal.aborted) return false
-        return ledgerAuthIsCurrent(db, ledgerUser.id, ledgerAuthSession)
+        try {
+          return ledgerAuthIsCurrent(db, ledgerUser.id, ledgerAuthSession)
+        } catch {
+          return false
+        }
       }
       if (ledgerRequested) {
         if (!ledgerSessionIsCurrent()) throw new ChatError('aborted')
-        await stream.writeSSE({ event: 'ledger_reading', data: '{}' })
+        // The synchronous checks guard tool reads and final output. This
+        // also aborts a provider request that is waiting when auth expires.
+        authCheck = setInterval(() => {
+          if (!ledgerSessionIsCurrent()) controller.abort()
+        }, 1000)
+        await writeEvent({ type: 'finance_progress', phase: 'preparing' })
         if (!ledgerSessionIsCurrent()) throw new ChatError('aborted')
         try {
           ledgerAnalysis = createLedgerAnalysis(syncLedgerAiContext(db, ledgerUser.id))
@@ -1211,6 +1224,7 @@ ai.post('/chat', async (c) => {
         // Best-effort: ignore.
       }
     } finally {
+      clearInterval(authCheck)
       release?.()
     }
   })
