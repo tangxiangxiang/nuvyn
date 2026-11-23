@@ -4,11 +4,96 @@ import {
   createDoc,
   gotoVaultReady,
   interceptAiChatGated,
+  jsonResponse,
   sse,
   sendAi,
 } from './helpers/edit-program'
 import type { AnyRecord } from './helpers/edit-program'
 import { ensureVaultLeftDrawerOpen, selectWorkspace } from './helpers/workspace-navigation'
+
+test.describe('AI history keyboard interaction', () => {
+  test.beforeEach(async ({ page }) => {
+    let session = { id: 21, title: 'Saved conversation', createdAt: 1, updatedAt: 1 }
+    await page.route('**/api/ai/**', async (route) => {
+      const request = route.request()
+      switch (new URL(request.url()).pathname) {
+        case '/api/ai/active': return route.fulfill(jsonResponse({ activeId: session.id, activeSession: session, configured: true }))
+        case '/api/ai/sessions': return route.fulfill(jsonResponse([session]))
+        case '/api/ai/sessions/21/messages': return route.fulfill(jsonResponse([]))
+        case '/api/ai/sessions/21':
+          expect(request.method()).toBe('PATCH')
+          session = { ...session, title: request.postDataJSON().title }
+          return route.fulfill(jsonResponse(session))
+        default: return route.fallback()
+      }
+    })
+    await gotoVaultReady(page)
+    await page.getByTestId('global-ai-trigger').click()
+    await page.getByTestId('global-ai-history').click()
+    await expect(page.locator('.ai-sp-name')).toHaveText('Saved conversation')
+  })
+
+  test('Escape cancels rename, then closes history, then closes the panel', async ({ page }) => {
+    const history = page.locator('.ai-sp-dialog')
+    const panel = page.getByTestId('global-ai-panel')
+    await history.getByRole('button', { name: /重命名|Rename/ }).click()
+    const input = history.getByRole('textbox')
+    await expect(input).toBeFocused()
+    await input.fill('Discard this name')
+    await page.keyboard.press('Escape')
+    await expect(history).toBeVisible()
+    await expect(history.locator('.ai-sp-name')).toHaveText('Saved conversation')
+    await expect(history.locator('.ai-sp-close')).toBeFocused()
+
+    await page.keyboard.press('Shift+Tab')
+    await expect(history.locator('.ai-sp-new')).toBeFocused()
+    await page.keyboard.press('Tab')
+    await expect(history.locator('.ai-sp-close')).toBeFocused()
+    await page.keyboard.press('Escape')
+    await expect(history).toBeHidden()
+    await expect(panel).toBeVisible()
+    await expect(panel.getByTestId('global-ai-history')).toBeFocused()
+
+    await page.keyboard.press('Escape')
+    await expect(panel).toBeHidden()
+    await expect(page.getByTestId('global-ai-trigger')).toBeFocused()
+  })
+
+  test('Escape closes delete confirmation before history and Enter renames once', async ({ page }) => {
+    const history = page.locator('.ai-sp-dialog')
+    const writes: string[] = []
+    page.on('request', (request) => {
+      if (new URL(request.url()).pathname === '/api/ai/sessions/21') writes.push(request.method())
+    })
+    await history.getByRole('button', { name: /删除|Delete/ }).click()
+    const confirmation = page.getByRole('dialog', { name: /Saved conversation/ })
+    const cancel = confirmation.getByRole('button', { name: /取消|Cancel/ })
+    await expect(cancel).toBeFocused()
+    await page.keyboard.press('Tab')
+    await expect(confirmation.locator('button:focus')).toHaveCount(1)
+    await page.keyboard.press('Escape')
+    await expect(confirmation).toBeHidden()
+    await expect(history).toBeVisible()
+    await expect(history.getByRole('button', { name: /删除|Delete/ })).toBeFocused()
+    await expect(history.locator('.ai-sp-name')).toHaveText('Saved conversation')
+    expect(writes).toEqual([])
+    await page.keyboard.press('Escape')
+    await expect(history).toBeHidden()
+    await expect(page.getByTestId('global-ai-panel')).toBeVisible()
+    await page.getByTestId('global-ai-history').click()
+
+    await history.getByRole('button', { name: /重命名|Rename/ }).click()
+    const input = history.getByRole('textbox')
+    await input.fill('Updated conversation')
+    await input.press('Enter')
+    await expect(history.locator('.ai-sp-name')).toHaveText('Updated conversation')
+    expect(writes).toEqual(['PATCH'])
+    await expect(history.locator('.ai-sp-close')).toBeFocused()
+    await page.keyboard.press('Escape')
+    await expect(history).toBeHidden()
+    await expect(page.getByTestId('global-ai-panel')).toBeVisible()
+  })
+})
 
 test('global AI drag position persists, stays in view, and resets on title double-click', async ({ page }) => {
   await page.setViewportSize({ width: 1280, height: 900 })
@@ -101,7 +186,7 @@ test('an in-flight Note response survives a workspace switch and later requests 
     const historyButton = panel.getByTestId('global-ai-history')
     await historyButton.click()
     const historyDialog = page.locator('.ai-sp-dialog')
-    await expect(historyDialog).toBeFocused()
+    await expect(historyDialog.locator('.ai-sp-close')).toBeFocused()
     await expect(historyDialog.locator('.ai-sp-new')).toBeDisabled()
     await page.keyboard.press('Escape')
     await expect(historyDialog).toBeHidden()

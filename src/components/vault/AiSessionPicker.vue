@@ -10,7 +10,7 @@
 // Delete uses the shared useConfirm composable so the confirmation
 // matches the rest of the app's destructive prompts instead of the
 // jarring jump to a native window.confirm.
-import { computed, ref, onMounted, onBeforeUnmount } from 'vue'
+import { computed, nextTick, ref, onMounted } from 'vue'
 import { NButton, NInput } from 'naive-ui'
 import { useAiHistory } from '../../composables/vault/useAiHistory'
 import { useConfirm } from '../../composables/useConfirm'
@@ -20,7 +20,7 @@ import { useI18n } from '../../composables/useI18n'
 const emit = defineEmits<{ close: [] }>()
 
 const history = useAiHistory()
-const { confirm } = useConfirm()
+const { confirm, queue } = useConfirm()
 const trap = useFocusTrap()
 const { t } = useI18n()
 
@@ -49,9 +49,17 @@ function cancelEdit() {
   editingTitle.value = ''
 }
 
+function focusCloseButton(): void {
+  dialogRef.value?.querySelector<HTMLButtonElement>('.ai-sp-close')?.focus({ preventScroll: true })
+}
+
 function onEditingKeydown(event: KeyboardEvent): void {
+  if (event.isComposing || (event.key !== 'Enter' && event.key !== 'Escape')) return
+  event.preventDefault()
+  event.stopPropagation()
   if (event.key === 'Enter') commitEdit()
-  else if (event.key === 'Escape') cancelEdit()
+  else cancelEdit()
+  void nextTick(focusCloseButton)
 }
 
 async function onDelete(id: number, title: string) {
@@ -63,6 +71,8 @@ async function onDelete(id: number, title: string) {
   )
   if (!ok || sessionControlsDisabled.value) return
   await history.deleteSession(id)
+  await nextTick()
+  if (document.activeElement === document.body) focusCloseButton()
 }
 
 async function onSwitch(id: number) {
@@ -79,13 +89,26 @@ async function onNewSession() {
 }
 
 function onKeyDown(e: KeyboardEvent) {
-  if (e.key === 'Tab' && dialogRef.value) {
+  // The shared confirmation owns the keyboard as soon as it is queued.
+  if (e.defaultPrevented || e.isComposing || queue.value.length > 0) return
+  if (e.key === 'Tab') {
+    if (e.target === dialogRef.value) {
+      // A click on the dialog itself can focus its non-tabbable container.
+      focusCloseButton()
+      if (!e.shiftKey) {
+        e.preventDefault()
+        return
+      }
+    }
     trap.onTab(() => dialogRef.value, e)
     return
   }
   if (e.key === 'Escape') {
+    e.preventDefault()
+    e.stopPropagation()
     if (editingId.value !== null) {
       cancelEdit()
+      void nextTick(focusCloseButton)
     } else {
       emit('close')
     }
@@ -93,16 +116,8 @@ function onKeyDown(e: KeyboardEvent) {
 }
 
 onMounted(() => {
-  document.addEventListener('keydown', onKeyDown)
-  // Default focus: the dialog itself (tabindex=-1 on the box). This
-  // keeps the user inside the trap without biasing them toward
-  // either the destructive delete or the new-session button.
-  dialogRef.value?.focus()
+  focusCloseButton()
   void history.refreshSessions().catch(() => {})
-})
-
-onBeforeUnmount(() => {
-  document.removeEventListener('keydown', onKeyDown)
 })
 </script>
 
@@ -119,6 +134,7 @@ onBeforeUnmount(() => {
         aria-modal="true"
         :aria-label="t('ai.sessions')"
         tabindex="-1"
+        @keydown="onKeyDown"
       >
         <header class="ai-sp-header">
           <span class="ai-sp-title">{{ t('ai.sessions') }}</span>
