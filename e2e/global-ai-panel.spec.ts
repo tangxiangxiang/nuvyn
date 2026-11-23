@@ -98,6 +98,15 @@ test('an in-flight Note response survives a workspace switch and later requests 
     await expect.poll(() => chatBodies.length).toBe(1)
     expect(chatBodies[0]?.liveContext?.identity?.path).toBe(slug)
 
+    const historyButton = panel.getByTestId('global-ai-history')
+    await historyButton.click()
+    const historyDialog = page.locator('.ai-sp-dialog')
+    await expect(historyDialog).toBeFocused()
+    await expect(historyDialog.locator('.ai-sp-new')).toBeDisabled()
+    await page.keyboard.press('Escape')
+    await expect(historyDialog).toBeHidden()
+    await expect(historyButton).toBeFocused()
+
     await selectWorkspace(page, 'ledger')
     await expect(page).toHaveURL(/\/ledger(?:\/|$)/)
     await expect(panel).toBeVisible()
@@ -120,6 +129,28 @@ test('an in-flight Note response survives a workspace switch and later requests 
     releaseStream()
     await cleanupCreatedPaths(request, created)
   }
+})
+
+test('a workspace modal takes priority over the floating AI panel and consumes the first Escape', async ({ page }) => {
+  await page.setViewportSize({ width: 1024, height: 768 })
+  await gotoVaultReady(page)
+  const trigger = page.getByTestId('global-ai-trigger')
+  await trigger.click()
+  const panel = page.getByTestId('global-ai-panel')
+  await expect(panel).toBeVisible()
+
+  await page.locator('.mobile-workspace-selector').click()
+  const workspaceDialog = page.locator('#workspace-switcher-dialog')
+  await expect(workspaceDialog).toBeVisible()
+  await expect(panel).toBeHidden()
+  await page.keyboard.press('Escape')
+  await expect(workspaceDialog).toBeHidden()
+  await expect(panel).toBeVisible()
+  await expect(trigger).toHaveAttribute('aria-pressed', 'true')
+
+  await page.keyboard.press('Escape')
+  await expect(panel).toBeHidden()
+  await expect(trigger).toBeFocused()
 })
 
 test.describe('tablet global AI panel', () => {

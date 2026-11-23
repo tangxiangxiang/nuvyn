@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { defineComponent, h, nextTick, provide, ref, type Ref } from 'vue'
-import { mount, type VueWrapper } from '@vue/test-utils'
+import { enableAutoUnmount, mount, type VueWrapper } from '@vue/test-utils'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { AppShellContextKey, type NoteAiContextBridge } from '../../../composables/appShellContext'
 import type { AiLiveContextCapture, AiDocumentContext, AiLiveContextSnapshot } from '../../../composables/vault/aiLiveContext'
@@ -87,6 +87,7 @@ async function typeAndSend(wrapper: VueWrapper, text: string): Promise<void> {
 }
 
 const history = useAiHistory()
+enableAutoUnmount(afterEach)
 
 describe('global AI panel', () => {
   beforeEach(() => {
@@ -206,5 +207,49 @@ describe('global AI panel', () => {
     const genericPrompts = otherWorkspace.wrapper.findComponent(AiChatMessages).props('quickPrompts')
     expect(genericPrompts[0]?.text).toBe(useI18n().t('quick_prompts.no_note.browse.text'))
     expect(otherWorkspace.wrapper.findComponent(AiChatMessages).props('currentPath')).toBeNull()
+  })
+
+  it('ignores ordinary DOM changes and scans for external overlays only while open', async () => {
+    const workspace = document.createElement('div')
+    const overlay = document.createElement('div')
+    overlay.className = 'n-modal-mask'
+    overlay.style.opacity = '0'
+    vi.spyOn(overlay, 'getClientRects').mockReturnValue([{}] as unknown as DOMRectList)
+    document.body.append(workspace)
+    const query = vi.spyOn(document, 'querySelectorAll')
+    const overlayScans = () => query.mock.calls.filter(([selector]) => selector.includes('.n-modal-mask')).length
+    const wrapper = mount(AiPanel, { props: { open: false } })
+    const panel = wrapper.get('[data-testid="global-ai-panel"]')
+
+    try {
+      expect(overlayScans()).toBe(0)
+      await wrapper.setProps({ open: true })
+      expect(overlayScans()).toBe(1)
+
+      const canvas = document.createElement('div')
+      workspace.append(canvas)
+      canvas.style.transform = 'translateX(4px)'
+      canvas.className = 'dragging'
+      await Promise.resolve()
+      expect(overlayScans()).toBe(1)
+
+      workspace.append(overlay)
+      await nextTick()
+      await nextTick()
+      expect(overlayScans()).toBe(2)
+      expect(panel.attributes('aria-hidden')).toBe('true')
+      overlay.remove()
+      await nextTick()
+      await nextTick()
+      expect(overlayScans()).toBe(3)
+      expect(panel.attributes('aria-hidden')).toBeUndefined()
+
+      await wrapper.setProps({ open: false })
+      workspace.append(overlay)
+      await nextTick()
+      expect(overlayScans()).toBe(3)
+    } finally {
+      workspace.remove()
+    }
   })
 })

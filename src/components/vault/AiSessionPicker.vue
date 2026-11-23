@@ -1,8 +1,8 @@
 <script setup lang="ts">
 // AI session picker — modal Dialog (not a popover). Renders a
 // centered overlay with a backdrop, focuses a known entry point on
-// open, traps Tab inside, and restores focus to the trigger on
-// close. Replaces the older top-anchored popover so the user gets a
+// open and traps Tab inside. The panel restores focus on close.
+// Replaces the older top-anchored popover so the user gets a
 // spacious, scrollable list regardless of AI-panel width.
 //
 // Mounted by the parent (AiPanel) via v-if, so presence == open.
@@ -10,7 +10,7 @@
 // Delete uses the shared useConfirm composable so the confirmation
 // matches the rest of the app's destructive prompts instead of the
 // jarring jump to a native window.confirm.
-import { ref, onMounted, onBeforeUnmount, nextTick } from 'vue'
+import { computed, ref, onMounted, onBeforeUnmount } from 'vue'
 import { NButton, NInput } from 'naive-ui'
 import { useAiHistory } from '../../composables/vault/useAiHistory'
 import { useConfirm } from '../../composables/useConfirm'
@@ -27,6 +27,7 @@ const { t } = useI18n()
 const dialogRef = ref<HTMLElement | null>(null)
 const editingId = ref<number | null>(null)
 const editingTitle = ref('')
+const sessionControlsDisabled = computed(() => history.busy.value || history.isLoading.value)
 
 function startEdit(id: number, currentTitle: string) {
   editingId.value = id
@@ -54,21 +55,24 @@ function onEditingKeydown(event: KeyboardEvent): void {
 }
 
 async function onDelete(id: number, title: string) {
+  if (sessionControlsDisabled.value) return
   const label = title.trim() || t('ai.new_session')
   const ok = await confirm(
     t('ai.delete_session_title', { title: label }),
     t('ai.delete_session_detail'),
   )
-  if (!ok) return
+  if (!ok || sessionControlsDisabled.value) return
   await history.deleteSession(id)
 }
 
 async function onSwitch(id: number) {
+  if (sessionControlsDisabled.value) return
   await history.switchSession(id)
   emit('close')
 }
 
 async function onNewSession() {
+  if (sessionControlsDisabled.value) return
   await history.createSession()
   await history.refreshSessions()
   emit('close')
@@ -88,22 +92,17 @@ function onKeyDown(e: KeyboardEvent) {
   }
 }
 
-onMounted(async () => {
-  await history.refreshSessions()
-  // Capture focus BEFORE the dialog paints so deactivate() can
-  // restore it to the history button in the AI header.
-  trap.activate()
+onMounted(() => {
   document.addEventListener('keydown', onKeyDown)
-  await nextTick()
   // Default focus: the dialog itself (tabindex=-1 on the box). This
   // keeps the user inside the trap without biasing them toward
   // either the destructive delete or the new-session button.
   dialogRef.value?.focus()
+  void history.refreshSessions().catch(() => {})
 })
 
-onBeforeUnmount(async () => {
+onBeforeUnmount(() => {
   document.removeEventListener('keydown', onKeyDown)
-  await trap.deactivate()
 })
 </script>
 
@@ -142,6 +141,7 @@ onBeforeUnmount(async () => {
             :class="{ active: history.activeSession.value?.id === s.id }"
             role="option"
             :aria-selected="history.activeSession.value?.id === s.id"
+            :aria-disabled="sessionControlsDisabled || undefined"
             @click="onSwitch(s.id)"
           >
             <span class="ai-sp-dot" aria-hidden="true" />
@@ -178,6 +178,7 @@ onBeforeUnmount(async () => {
                   :bordered="false"
                   :title="t('ai.delete')"
                   :aria-label="t('ai.delete')"
+                  :disabled="sessionControlsDisabled"
                   @click.stop="onDelete(s.id, s.title)"
                 >×</NButton>
               </span>
@@ -193,6 +194,7 @@ onBeforeUnmount(async () => {
             class="ai-sp-new"
             attr-type="button"
             :bordered="false"
+            :disabled="sessionControlsDisabled"
             @click="onNewSession"
           >+ {{ t('ai.new_session') }}</NButton>
         </footer>

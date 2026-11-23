@@ -800,6 +800,37 @@ describe('POST /api/ai/chat', () => {
       expect(chatModule.runChat).not.toHaveBeenCalled()
     })
 
+    it('continues a saved Note thread by session ID without treating its scope as live context', async () => {
+      const scope = { kind: 'document', vaultId: 'vault-a', documentId: 'doc-a', path: 'notes/a', title: 'Original Note' } as const
+      const scoped = aiSessions.ensureAiThread(testDbRef.value!, scope)
+      const sessionId = scoped.session.id
+      const saved = { role: 'user', content: 'Existing Note conversation' }
+      expect((await call('POST', `/sessions/${sessionId}/messages`, saved)).status).toBe(201)
+      expect(await (await call('GET', '/sessions')).json()).toContainEqual(expect.objectContaining({ id: sessionId }))
+      expect((await call('PUT', '/active', { sessionId })).status).toBe(200)
+      expect(await (await call('GET', '/active')).json()).toMatchObject({ activeId: sessionId })
+      expect(await (await call('GET', `/sessions/${sessionId}/messages`)).json())
+        .toEqual([expect.objectContaining(saved)])
+
+      const ordinary = await call('POST', '/chat', { sessionId, content: 'Outside Note' })
+      expect(ordinary.status).toBe(200)
+      await ordinary.text()
+      expect(chatModule.runChat.mock.calls[0][0]).toMatchObject({ sessionId, ctx: { kind: 'none' } })
+
+      const liveContext = liveDocument({ workspaceTabId: 'notes/b', identity: { documentId: 'doc-b', path: 'notes/b' } })
+      const withNote = await call('POST', '/chat', { sessionId, content: 'In another Note', liveContext })
+      expect(withNote.status).toBe(200)
+      await withNote.text()
+      expect(chatModule.runChat.mock.calls[1][0]).toMatchObject({ sessionId, ctx: { kind: 'live', liveContext } })
+
+      const fresh = await (await call('POST', '/sessions')).json() as { id: number }
+      expect(fresh.id).not.toBe(sessionId)
+      expect((await call('PUT', '/active', { sessionId: fresh.id })).status).toBe(200)
+      expect(await (await call('GET', `/sessions/${fresh.id}/messages`)).json()).toEqual([])
+      expect(await (await call('GET', `/thread?scope=${encodeURIComponent(JSON.stringify(scope))}`)).json())
+        .toMatchObject({ session: { id: sessionId }, messages: [expect.objectContaining(saved)] })
+    })
+
     it('accepts a workspace thread with no live context', async () => {
       const scope = { kind: 'workspace', vaultId: 'vault-a' }
       const thread = await (await call('POST', '/thread', { scope })).json() as { id: number }

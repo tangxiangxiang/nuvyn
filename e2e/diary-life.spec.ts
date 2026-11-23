@@ -871,12 +871,13 @@ test('Diary NavBar icon controls share the standard size across viewport widths'
   await page.goto('/diary')
   await unlockDiary(page)
 
-  const viewportWidths = [390, 430, 768, 1024, 1280, 1440]
+  const viewportWidths = [320, 390, 430, 768, 1024, 1280, 1440]
   const selectors = [
     '[data-testid="diary-view-mode-diary"]',
     '[data-testid="diary-view-mode-events"]',
     '[data-testid="diary-view-mode-tasks"]',
     '.nav-search',
+    '[data-testid="global-ai-trigger"]',
     '.theme-toggle',
     '[data-testid="account-button"]',
   ]
@@ -886,6 +887,7 @@ test('Diary NavBar icon controls share the standard size across viewport widths'
     await expect(page.getByTestId('diary-event-list-toggle')).toHaveCount(0)
     const controls = selectors.map(selector => page.locator(`.navbar .nav-actions ${selector}`))
     for (const control of controls) await expect(control).toBeVisible()
+    await expect(page.locator('.navbar .nav-actions button:visible')).toHaveCount(controls.length)
 
     const metrics = await Promise.all(controls.map(control => control.evaluate(button => {
       const bounds = button.getBoundingClientRect()
@@ -904,17 +906,18 @@ test('Diary NavBar icon controls share the standard size across viewport widths'
     })))
 
     expect(metrics.map(({ width: buttonWidth, height }) => [buttonWidth, height]))
-      .toEqual(Array.from({ length: controls.length }, () => [28, 28]))
+      // The compact toolbar narrows its controls at <=360px, except the account button.
+      .toEqual(selectors.map(selector => [width <= 360 && !selector.includes('account-button') ? 26 : 28, 28]))
     expect(metrics.map(({ iconWidth, iconHeight, svgWidth, svgHeight }) => [iconWidth, iconHeight, svgWidth, svgHeight]))
       .toEqual(Array.from({ length: controls.length }, () => [18, 18, 18, 18]))
     expect(Math.max(...metrics.map(metric => metric.y)) - Math.min(...metrics.map(metric => metric.y)))
       .toBeLessThan(1)
     const gaps = metrics.slice(1).map((metric, index) => metric.x - metrics[index].x - metrics[index].width)
-    const searchThemeGap = gaps[3]!
     const expectedGap = width <= 360 ? 0 : width <= 600 ? 2 : 6
     // Diary mode buttons and utility buttons must share exactly one spacing rhythm.
-    expect(Math.round(searchThemeGap)).toBe(expectedGap)
-    expect(gaps.every(gap => Math.abs(gap - searchThemeGap) < 1)).toBe(true)
+    expect(gaps.map(gap => Math.round(gap))).toEqual(Array(controls.length - 1).fill(expectedGap))
+    expect(metrics[0]!.x).toBeGreaterThanOrEqual(0)
+    expect(metrics.at(-1)!.x + metrics.at(-1)!.width).toBeLessThanOrEqual(width)
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true)
   }
 

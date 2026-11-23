@@ -30,6 +30,7 @@ const showSessionPicker = ref(false)
 const isDragging = ref(false)
 const isMobileViewport = ref(typeof window !== 'undefined' && window.innerWidth <= 640)
 const blockingOverlay = ref(false)
+const panelObscured = computed(() => blockingOverlay.value || showSessionPicker.value)
 const position = ref<{ left: number; top: number } | null>(null)
 
 let drag: {
@@ -41,7 +42,7 @@ let drag: {
   element: HTMLElement
 } | null = null
 let resizeObserver: ResizeObserver | null = null
-let overlayObserver: MutationObserver | null = null
+let historyTrigger: HTMLElement | null = null
 
 function captureNoteContext(): AiLiveContextCapture {
   return appShell?.noteAiContext?.value?.capture() ?? { status: 'none' }
@@ -238,15 +239,17 @@ async function useQuickPrompt(text: string): Promise<void> {
   await composer.value?.focus()
 }
 
-function hasBlockingOverlay(): boolean {
-  const candidates = document.querySelectorAll<HTMLElement>(
-    '[aria-modal="true"], [role="dialog"], .n-modal-mask, .n-drawer-mask, .confirm-backdrop, .prompt-backdrop, .ai-sp-backdrop',
-  )
-  return [...candidates].some((element) => {
-    if (panelRef.value?.contains(element)) return false
-    const style = getComputedStyle(element)
-    return style.display !== 'none' && style.visibility !== 'hidden' && Number(style.opacity || 1) > 0
-  })
+function openSessionPicker(event: MouseEvent): void {
+  historyTrigger = event.currentTarget instanceof HTMLElement ? event.currentTarget : null
+  showSessionPicker.value = true
+}
+
+async function closeSessionPicker(): Promise<void> {
+  showSessionPicker.value = false
+  const trigger = historyTrigger
+  historyTrigger = null
+  await nextTick()
+  if (props.open && !panelObscured.value) trigger?.focus()
 }
 
 function onGlobalKeydown(event: KeyboardEvent): void {
@@ -267,8 +270,58 @@ watch(() => props.positionStorageKey, async () => {
 
 watch(() => props.open, (open) => {
   if (open) void normalizePosition()
-  else showSessionPicker.value = false
+  else {
+    showSessionPicker.value = false
+    historyTrigger = null
+  }
 })
+
+// The history picker is already tracked by showSessionPicker. The observer
+// only looks for external overlays, and only while the panel is open.
+const overlaySelector = '[aria-modal="true"]:not(.ai-sp-dialog), [role="dialog"]:not(.ai-sp-dialog), .n-modal-mask, .n-drawer-mask, .confirm-backdrop, .prompt-backdrop'
+
+watch(() => props.open, (open, _previous, onCleanup) => {
+  if (!open) {
+    blockingOverlay.value = false
+    return
+  }
+  const overlayAncestors = new Set<Element>()
+  function refreshOverlays(): void {
+    overlayAncestors.clear()
+    let visible = false
+    for (const overlay of document.querySelectorAll(overlaySelector)) {
+      if (panelRef.value?.contains(overlay)) continue
+      for (let node: Element | null = overlay; node; node = node.parentElement) {
+        overlayAncestors.add(node)
+      }
+      // A modal that is fading in already blocks input, even at zero opacity.
+      if (overlay.getClientRects().length && getComputedStyle(overlay).visibility === 'visible') visible = true
+    }
+    blockingOverlay.value = visible
+  }
+  function containsOverlay(node: Node): boolean {
+    return node instanceof Element && (node.matches(overlaySelector) || Boolean(node.querySelector(overlaySelector)))
+  }
+  const observer = new MutationObserver((records) => {
+    if (records.some((record) => {
+      if (panelRef.value?.contains(record.target)) return false
+      if (record.type === 'attributes') {
+        return record.target instanceof Element
+          && (overlayAncestors.has(record.target) || record.target.matches(overlaySelector))
+      }
+      return Array.from(record.addedNodes).some(containsOverlay)
+        || Array.from(record.removedNodes).some(containsOverlay)
+    })) refreshOverlays()
+  })
+  observer.observe(document.body, {
+    subtree: true,
+    childList: true,
+    attributes: true,
+    attributeFilter: ['class', 'style', 'aria-modal', 'role', 'hidden'],
+  })
+  refreshOverlays()
+  onCleanup(() => observer.disconnect())
+}, { immediate: true, flush: 'post' })
 
 onMounted(() => {
   void history.loadActive().catch(() => {})
@@ -276,16 +329,6 @@ onMounted(() => {
   window.addEventListener('resize', syncViewport)
   window.visualViewport?.addEventListener('resize', syncViewport)
   document.addEventListener('keydown', onGlobalKeydown)
-  blockingOverlay.value = hasBlockingOverlay()
-  overlayObserver = new MutationObserver(() => {
-    blockingOverlay.value = hasBlockingOverlay()
-  })
-  overlayObserver.observe(document.body, {
-    subtree: true,
-    childList: true,
-    attributes: true,
-    attributeFilter: ['class', 'style', 'aria-modal', 'role'],
-  })
   if (typeof ResizeObserver !== 'undefined' && panelRef.value) {
     resizeObserver = new ResizeObserver(() => {
       if (props.open) void normalizePosition()
@@ -300,7 +343,6 @@ onBeforeUnmount(() => {
   window.visualViewport?.removeEventListener('resize', syncViewport)
   document.removeEventListener('keydown', onGlobalKeydown)
   resizeObserver?.disconnect()
-  overlayObserver?.disconnect()
   if (drag) {
     try { drag.element.releasePointerCapture(drag.pointerId) } catch { /* already released */ }
     drag = null
@@ -315,11 +357,11 @@ onBeforeUnmount(() => {
       ref="panelRef"
       v-show="props.open"
       class="ai-panel ai-floating-panel"
-      :class="{ 'is-dragging': isDragging, 'is-mobile': isMobileViewport, 'is-obscured': blockingOverlay }"
+      :class="{ 'is-dragging': isDragging, 'is-mobile': isMobileViewport, 'is-obscured': panelObscured }"
       :style="panelStyle"
       :aria-label="t('ai.assistant')"
-      :aria-hidden="blockingOverlay || undefined"
-      :inert="blockingOverlay || undefined"
+      :aria-hidden="panelObscured || undefined"
+      :inert="panelObscured || undefined"
       data-testid="global-ai-panel"
     >
       <header class="ai-header ai-floating-header">
@@ -355,7 +397,7 @@ onBeforeUnmount(() => {
             :title="t('ai.sessions')"
             :aria-label="t('ai.sessions')"
             data-testid="global-ai-history"
-            @click="showSessionPicker = true"
+            @click="openSessionPicker"
           ><NIcon aria-hidden="true"><History /></NIcon></NButton>
           <NButton
             class="ai-header-btn ai-floating-close"
@@ -394,7 +436,7 @@ onBeforeUnmount(() => {
         @stop="history.stop"
       />
 
-      <AiSessionPicker v-if="showSessionPicker" @close="showSessionPicker = false" />
+      <AiSessionPicker v-if="showSessionPicker" @close="closeSessionPicker" />
     </aside>
   </Transition>
 </template>
