@@ -8,6 +8,7 @@ import { resolveWikiTarget } from '../../../shared/linkResolve'
 const props = defineProps<{
   content: string
   sourcePath?: string | null
+  noteLinkContext?: { paths: string[]; openLink: (path: string, anchor?: string) => Promise<void> } | null
 }>()
 
 const vaultContext = useOptionalVaultContext()
@@ -15,16 +16,22 @@ const linkIndex = getLinkIndex(vaultContext?.fileChanges)
 const html = computed(() => renderAiMarkdown(props.content, {
   sourcePath: props.sourcePath ?? undefined,
   resolver: (ref, _anchor, context) => ({
-    target: resolveWikiTarget(ref, context?.sourcePath ?? props.sourcePath ?? '', [...linkIndex.value.paths]),
+    target: resolveWikiTarget(
+      ref,
+      context?.sourcePath ?? props.sourcePath ?? '',
+      vaultContext ? [...linkIndex.value.paths] : props.noteLinkContext?.paths ?? [],
+    ),
   }),
 }))
 
 function onLinkClick(event: MouseEvent) {
-  if (event.button !== 0 || !vaultContext) return
+  if (event.button !== 0) return
+  const openLink = vaultContext?.editor.openLink ?? props.noteLinkContext?.openLink
+  if (!openLink) return
   const anchor = (event.target as HTMLElement | null)?.closest<HTMLAnchorElement>('a.wiki-link')
   if (!anchor?.dataset.target) return
   event.preventDefault()
-  void vaultContext.editor.openLink(anchor.dataset.target, anchor.dataset.anchor)
+  void openLink(anchor.dataset.target, anchor.dataset.anchor)
 }
 </script>
 

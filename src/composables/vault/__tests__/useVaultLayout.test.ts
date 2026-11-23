@@ -118,7 +118,7 @@ describe('useVaultLayout', () => {
     expect(layout.rightRailTab.value).toBe('toc')
   })
 
-  it('migrates an open legacy AI panel to the AI tab', () => {
+  it('migrates a legacy AI selection to the Note directory tab', () => {
     localStorage.setItem(STORAGE_KEY, JSON.stringify({
       activePanel: 'files',
       aiOpen: true,
@@ -126,7 +126,7 @@ describe('useVaultLayout', () => {
       rightRailCollapsed: true,
     }))
     const { layout } = setup()
-    expect(layout.rightRailTab.value).toBe('ai')
+    expect(layout.rightRailTab.value).toBe('toc')
     expect(layout.rightRailWidth.value).toBe(470)
     expect(layout.rightRailCollapsed.value).toBe(false)
   })
@@ -294,8 +294,8 @@ describe('useVaultLayout', () => {
   it('shares the selected tab across consumers', () => {
     const first = setup().layout
     const second = setup().layout
-    first.rightRailTab.value = 'ai'
-    expect(second.rightRailTab.value).toBe('ai')
+    first.rightRailTab.value = 'history'
+    expect(second.rightRailTab.value).toBe('history')
   })
 
   it('drops unknown fields from persisted layout (forward-compat with old previewOpen)', async () => {
@@ -313,7 +313,7 @@ describe('useVaultLayout', () => {
     // And it never re-emerges when the layout is rewritten. The
     // persistence watcher only fires on real mutations, so toggle a tab
     // and await a tick to flush the rewrite.
-    layout.rightRailTab.value = 'ai'
+    layout.rightRailTab.value = 'links'
     await nextTick()
     expect(localStorage.getItem(STORAGE_KEY)!).not.toContain('previewOpen')
   })

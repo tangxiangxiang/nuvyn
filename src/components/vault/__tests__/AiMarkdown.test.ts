@@ -27,6 +27,24 @@ describe('AiMarkdown navigation', () => {
     },
   )
 
+  it('resolves and opens Note links through the app-shell bridge when globally mounted', () => {
+    const openLink = vi.fn(async () => {})
+    const wrapper = mount(AiMarkdown, {
+      props: {
+        content: '[Note](target.md#section)',
+        sourcePath: 'notes/source',
+        noteLinkContext: { paths: ['notes/target'], openLink },
+      },
+    })
+    const link = wrapper.get('a')
+    expect(link.attributes('href')).toBe('/vault/notes/target#section')
+    const event = new MouseEvent('click', { bubbles: true, cancelable: true })
+    link.element.dispatchEvent(event)
+    expect(event.defaultPrevented).toBe(true)
+    expect(openLink).toHaveBeenCalledWith('notes/target', 'section')
+    wrapper.unmount()
+  })
+
   it('does not intercept external URLs', () => {
     const openLink = vi.fn()
     const wrapper = mount(AiMarkdown, {

@@ -25,7 +25,7 @@ import { useScopeFilter } from './useScopeFilter'
 import { NUVYN_BROWSER_STORAGE_KEYS } from '../../technicalNamespace'
 
 export type ActivePanel = SidePanel | null
-export type RightRailTab = 'toc' | 'links' | 'ai' | 'properties' | 'history'
+export type RightRailTab = 'toc' | 'links' | 'properties' | 'history'
 
 export interface VaultLayout {
   activePanel: ActivePanel
@@ -202,8 +202,8 @@ export function useVaultLayout(options: UseVaultLayoutOptions = {}) {
           const legacyAiOpen = d.aiOpen === true
           const storedTab = d.rightRailTab
           const rightRailTab: RightRailTab = legacyAiOpen
-            ? 'ai'
-            : storedTab === 'links' || storedTab === 'ai' || storedTab === 'properties' || storedTab === 'history' ? storedTab : 'toc'
+            ? 'toc'
+            : storedTab === 'links' || storedTab === 'properties' || storedTab === 'history' ? storedTab : 'toc'
           const rightRailWidth = typeof d.rightRailWidth === 'number'
             ? d.rightRailWidth
             : typeof d.aiPanelWidth === 'number' ? d.aiPanelWidth

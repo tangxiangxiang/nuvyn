@@ -1,4 +1,6 @@
 import type { InjectionKey, Ref } from 'vue'
+import type { FileChangeEvent } from '../lib/ai-api'
+import type { AiLiveContextCapture } from './vault/aiLiveContext'
 
 /**
  * Small bridge between the global app chrome and the Vault-owned settings
@@ -8,8 +10,26 @@ import type { InjectionKey, Ref } from 'vue'
  */
 export type DiaryCalendarMode = 'diary' | 'events' | 'tasks'
 
+export interface NoteAiContextBridge {
+  /** Capture one immutable Note workspace snapshot at the moment of send. */
+  capture: () => AiLiveContextCapture
+  /** Publish tool-driven file changes to the Note editor bus captured for this turn. */
+  publishFileChange: (event: FileChangeEvent) => void
+  /** Resolve AI Markdown links only against the active Note workspace. */
+  linkPaths: () => string[]
+  /** Open a resolved AI Markdown link through the active Note editor. */
+  openLink: (path: string, anchor?: string) => Promise<void>
+}
+
 export interface AppShellContext {
   readonly settingsRequestTick: Readonly<Ref<number>>
+  /** Global AI panel visibility and toolbar actions. */
+  readonly globalAiOpen?: Readonly<Ref<boolean>>
+  readonly toggleGlobalAi?: () => void
+  readonly closeGlobalAi?: () => void
+  /** The active Note workspace registers its context only while mounted. */
+  readonly noteAiContext?: Readonly<Ref<NoteAiContextBridge | null>>
+  readonly registerNoteAiContext?: (context: NoteAiContextBridge) => () => void
   /** Open the single App-level search surface from global chrome. */
   readonly openGlobalSearch?: () => void
   /** Current Note's full-text read-aloud action. */

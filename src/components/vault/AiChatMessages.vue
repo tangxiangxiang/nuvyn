@@ -9,6 +9,7 @@ import { useI18n } from '../../composables/useI18n'
 const props = defineProps<{
   messages: Message[]
   currentPath: string | null
+  noteLinkContext?: { paths: string[]; openLink: (path: string, anchor?: string) => Promise<void> } | null
   quickPrompts: Array<{ label: string; text: string }>
 }>()
 
@@ -69,6 +70,7 @@ const { t } = useI18n()
           v-if="message.role === 'assistant' && message.content && message.id !== 0"
           :content="message.content"
           :source-path="currentPath"
+          :note-link-context="props.noteLinkContext"
         />
         <div v-else-if="message.content" class="ai-text" :class="{ 'ai-streaming-text': message.role === 'assistant' && message.id === 0 }">
           {{ message.content }}

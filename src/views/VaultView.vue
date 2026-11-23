@@ -1417,6 +1417,13 @@ captureWorkspaceAiContext = () => captureAiLiveContext({
 }, {
   liveDocument: (path) => liveEditorForPath(tabs.value, path),
 })
+const unregisterNoteAiContext = appShell?.registerNoteAiContext?.({
+  capture: () => captureWorkspaceAiContext(),
+  publishFileChange: (event) => vaultContext.fileChanges.publish(event),
+  linkPaths: () => [...getLinkIndex(fileChanges).value.paths],
+  openLink: (path, anchor) => vaultContext.editor.openLink(path, anchor),
+})
+if (unregisterNoteAiContext) onBeforeUnmount(unregisterNoteAiContext)
 
 async function reorderWorkspaceTabs(request: WorkspaceTabReorderRequest): Promise<void> {
   const availableIds = workspaceTabs.value.map((tab) => tab.id)

@@ -2,6 +2,7 @@
 
 export const NUVYN_BROWSER_STORAGE_KEYS = {
   theme: 'nuvyn.theme',
+  aiPanelPosition: 'nuvyn.ai.panel-position',
   vaultViewMode: 'nuvyn.vault.viewMode',
   vaultExpandedPaths: 'nuvyn.vault.expandedPaths',
   vaultActiveScope: 'nuvyn.vault.activeScope',

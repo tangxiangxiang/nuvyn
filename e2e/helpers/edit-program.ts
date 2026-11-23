@@ -329,21 +329,16 @@ export async function appendEditorText(page: Page, text: string) {
 }
 
 export async function openAiRail(page: Page) {
-  const toggle = page.locator('button.right-rail-toggle')
+  const toggle = page.getByTestId('global-ai-trigger')
   await expect(toggle).toBeVisible()
-  if ((await toggle.getAttribute('aria-pressed')) !== 'true') {
-    await toggle.click()
-  }
-  const aiTab = page.locator('.sidebar-tabs button[data-tab="ai"]')
-  await expect(aiTab).toBeVisible()
-  await aiTab.click()
+  if ((await toggle.getAttribute('aria-pressed')) !== 'true') await toggle.click()
   await expect(page.locator('textarea.ai-input')).toBeVisible()
 }
 
 export async function sendAi(page: Page, message: string) {
   const input = page.locator('textarea.ai-input')
   await input.fill(message)
-  // AiPanel loads settings/active-session state asynchronously. The
+  // The global AiPanel loads settings/active-session state asynchronously. The
   // composer is visible before that request resolves, but onSend
   // intentionally ignores input while `configured` is still false.
   // Gate sends on the same readiness signal a user sees.

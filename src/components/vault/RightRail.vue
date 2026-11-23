@@ -1,7 +1,7 @@
 <script setup lang="ts">
 // Unified right rail. Lightweight tabs switch one shared content
 // region between the TOC, bi-directional links, document properties,
-// single-file history, and AI assistant.
+// and single-file history. AI lives in the App shell.
 //
 // Components:
 //   - The TOC list comes from ReadingPane via Vault-scoped useTocState
@@ -18,7 +18,6 @@ import { useVaultTocState } from '../../composables/vault/useTocState'
 import { useI18n } from '../../composables/useI18n'
 import type { DocumentMetadata, PostSummary } from '../../lib/api'
 import LinksPanel from './LinksPanel.vue'
-import AiPanel from './AiPanel.vue'
 import DocumentMetadataForm from './DocumentMetadataForm.vue'
 import type { MetadataContext } from './metadataDraftStore'
 import RightRailHistory from './RightRailHistory.vue'
@@ -58,8 +57,6 @@ const emit = defineEmits<{
 // Keep the rail outline compact while matching the rendered h2-h4 TOC.
 const visibleHeadings = computed(() => tocHeadings.value.filter((heading) => heading.level >= 2 && heading.level <= 4))
 const hasHeadings = computed(() => visibleHeadings.value.length > 0)
-const currentPost = computed(() => props.posts.find((post) => post.path === props.path) ?? null)
-const aiHasOpened = ref(props.activeTab === 'ai')
 const tabsRef = ref<HTMLElement | null>(null)
 const metadataDirty = ref(false)
 
@@ -69,12 +66,7 @@ async function scrollActiveTabIntoView(tab: RightRailTab): Promise<void> {
   active?.scrollIntoView?.({ block: 'nearest', inline: 'nearest' })
 }
 
-// Mount AI only when the user first visits it, then keep it mounted while
-// switching tabs so its conversation, draft, picker, and scroll position
-// remain intact. The immediate run also handles a tab restored from
-// localStorage before the rail first paints.
 watch(() => props.activeTab, (tab) => {
-  if (tab === 'ai') aiHasOpened.value = true
   void scrollActiveTabIntoView(tab)
 }, { immediate: true })
 
@@ -134,19 +126,6 @@ function onHistoryTabClick(): void {
 <template>
   <div class="right-rail">
     <nav ref="tabsRef" class="sidebar-tabs" role="tablist" :aria-label="t('rail.navigation')">
-      <!-- Edit-10.3: the old "no AI in read-only views" gate is lifted —
-           History/Diff/Recovery views now transport their own live
-           context (readOnly snapshots) instead of being cut off. -->
-      <NButton
-        attr-type="button"
-        text
-        :bordered="false"
-        role="tab"
-        data-tab="ai"
-        :aria-selected="activeTab === 'ai'"
-        :class="{ active: activeTab === 'ai' }"
-        @click="emit('update:activeTab', 'ai')"
-      >{{ t('rail.ai') }}</NButton>
       <NButton attr-type="button" text :bordered="false" role="tab" data-tab="toc" :aria-selected="activeTab === 'toc'" :class="{ active: activeTab === 'toc' }" @click="emit('update:activeTab', 'toc')">{{ t('rail.toc') }}</NButton>
       <NButton attr-type="button" text :bordered="false" role="tab" data-tab="links" :aria-selected="activeTab === 'links'" :class="{ active: activeTab === 'links' }" @click="emit('update:activeTab', 'links')">{{ t('rail.links') }}</NButton>
       <NButton
@@ -220,13 +199,6 @@ function onHistoryTabClick(): void {
         @open-revision="emit('open-history-revision', $event)"
       />
       <div v-else class="right-rail-history-empty right-rail-empty-state">{{ t('rail.history_empty') }}</div>
-    </section>
-    <section v-if="aiHasOpened" v-show="activeTab === 'ai'" class="ai-slot" role="tabpanel" :aria-label="t('rail.ai')">
-      <AiPanel
-        :current-path="path"
-        :current-document-id="currentPost?.documentId ?? null"
-        :current-title="currentPost?.title ?? null"
-      />
     </section>
   </div>
 </template>
@@ -303,13 +275,6 @@ function onHistoryTabClick(): void {
   overflow-y: auto;
   scrollbar-width: thin;
 }
-.ai-slot {
-  height: calc(100% - 36px);
-  min-width: 0;
-  min-height: 0;
-  overflow: hidden;
-}
-.ai-slot :deep(.ai-panel) { height: 100%; }
 .toc-panel {
   padding-top: 0;
   padding-bottom: 0;

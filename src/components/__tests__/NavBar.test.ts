@@ -137,10 +137,11 @@ describe('NavBar — view-toggle button', () => {
   it('places the theme toggle before the view toggle', () => {
     const { wrapper } = mountNavBar()
     expect(wrapper.findAll('.nav-actions > button').map((button) => (
-      ['nav-search', 'theme-toggle', 'view-toggle', 'left-panel-toggle', 'right-rail-toggle']
+      ['nav-search', 'global-ai-trigger', 'theme-toggle', 'view-toggle', 'left-panel-toggle', 'right-rail-toggle']
         .find((className) => button.classes().includes(className))
     ))).toEqual([
       'nav-search',
+      'global-ai-trigger',
       'theme-toggle',
       'view-toggle',
       'left-panel-toggle',

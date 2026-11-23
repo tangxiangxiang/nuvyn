@@ -29,7 +29,6 @@ function mountPanel(activeTab: RightRailTab = 'toc', isReadMode = true) {
           emits: ['navigate'],
           template: '<button class="stub-link" @click="$emit(\'navigate\', \'archive/target\')">引用</button>',
         },
-        AiPanel: { template: '<div class="stub-ai"><input value="draft"></div>' },
         DocumentMetadataForm: {
           emits: ['saved'],
           props: ['readonly', 'context', 'summarySource'],
@@ -80,10 +79,11 @@ describe('unified document sidebar', () => {
     expect(wrapper.find('a[href="#note"]').attributes('aria-current')).toBeUndefined()
   })
 
-  it('renders tabs in 助手 → 目录 → 引用 → 属性 → 历史 order', () => {
+  it('renders only the Note sidebar tabs after moving AI into the app shell', () => {
     const wrapper = mountPanel()
     const labels = wrapper.findAll('[role="tab"]').map((tab) => tab.text())
-    expect(labels).toEqual(['助手', '目录', '引用', '属性', '历史'])
+    expect(labels).toEqual(['目录', '引用', '属性', '历史'])
+    expect(wrapper.find('.ai-slot').exists()).toBe(false)
   })
 
   it('emits update:activeTab with the matching key for each tab', async () => {
@@ -93,46 +93,15 @@ describe('unified document sidebar', () => {
     await tabs[1].trigger('click')
     await tabs[2].trigger('click')
     await tabs[3].trigger('click')
-    await tabs[4].trigger('click')
-    expect(wrapper.emitted('update:activeTab')).toEqual([['ai'], ['toc'], ['links'], ['properties'], ['history']])
+    expect(wrapper.emitted('update:activeTab')).toEqual([['toc'], ['links'], ['properties'], ['history']])
   })
 
   it('reflects the controlled activeTab via aria-selected and the .active class', async () => {
     const wrapper = mountPanel('toc')
+    expect(wrapper.get('[role="tab"]:nth-of-type(1)').attributes('aria-selected')).toBe('true')
+    await wrapper.setProps({ activeTab: 'links' })
     expect(wrapper.get('[role="tab"]:nth-of-type(2)').attributes('aria-selected')).toBe('true')
     expect(wrapper.get('[role="tab"]:nth-of-type(2)').classes()).toContain('active')
-
-    await wrapper.setProps({ activeTab: 'ai' })
-    expect(wrapper.get('[role="tab"]:nth-of-type(1)').attributes('aria-selected')).toBe('true')
-    expect(wrapper.get('[role="tab"]:nth-of-type(1)').classes()).toContain('active')
-
-    await wrapper.setProps({ activeTab: 'links' })
-    expect(wrapper.get('[role="tab"]:nth-of-type(3)').attributes('aria-selected')).toBe('true')
-    expect(wrapper.get('[role="tab"]:nth-of-type(3)').classes()).toContain('active')
-  })
-
-  it('mounts AI on first selection and keeps it mounted across later tab switches', async () => {
-    const wrapper = mountPanel('ai')
-    expect(wrapper.find('.toc-panel').exists()).toBe(true)
-    expect(wrapper.find('.links-slot').exists()).toBe(true)
-    expect(wrapper.find('.stub-ai').exists()).toBe(true)
-    expect(wrapper.get('.ai-slot').isVisible()).toBe(true)
-    expect(wrapper.get('.toc-panel').attributes('style')).toContain('display: none')
-
-    await wrapper.setProps({ activeTab: 'links' })
-    expect(wrapper.find('.stub-ai').exists()).toBe(true)
-  })
-
-  it('keeps AI available in read-only views but defers its mount until selected', async () => {
-    const wrapper = mountPanel('toc', true)
-    const aiTab = wrapper.findAll('[role="tab"]')[0]!
-
-    expect(aiTab.attributes('disabled')).toBeUndefined()
-    expect(aiTab.attributes('aria-disabled')).toBeUndefined()
-    expect(wrapper.find('.stub-ai').exists()).toBe(false)
-    await aiTab.trigger('click')
-    await wrapper.setProps({ activeTab: 'ai' })
-    expect(wrapper.find('.stub-ai').exists()).toBe(true)
   })
 
   it('navigates headings and forwards link navigation', async () => {
@@ -170,7 +139,6 @@ describe('unified document sidebar', () => {
     const wrapper = mount(RightRail, {
       props: { path: 'inbox/english/subject', posts, activeTab: 'properties', metadataReadonly: true, metadataContext: 'history' },
       global: { stubs: {
-        AiPanel: { template: '<div />' },
         LinksPanel: { template: '<div />' },
         RightRailHistory: { template: '<div />' },
         DocumentMetadataForm: { props: ['readonly', 'context'], template: '<div class="stub-metadata-form" :data-readonly="readonly" :data-context="context" />' },
@@ -199,7 +167,7 @@ describe('unified document sidebar', () => {
     wrapper.unmount()
   })
 
-  it('renders the single-file history view in the fifth tab', () => {
+  it('renders the single-file history view in the fourth tab', () => {
     const fileHistory = {
       target: ref(null),
       commits: ref([]),
@@ -220,7 +188,6 @@ describe('unified document sidebar', () => {
       props: { path: 'inbox/english/subject', posts, activeTab: 'history', fileHistory },
       global: { stubs: {
         LinksPanel: { template: '<div />' },
-        AiPanel: { template: '<div />' },
         DocumentMetadataForm: { template: '<div />' },
       } },
     })
@@ -253,7 +220,6 @@ describe('unified document sidebar', () => {
       global: {
         stubs: {
           LinksPanel: { template: '<div />' },
-          AiPanel: { template: '<div />' },
           DocumentMetadataForm: { template: '<div />' },
           RightRailHistory: { template: '<div />' },
         },
@@ -316,7 +282,6 @@ describe('unified document sidebar', () => {
       props: { path: 'inbox/english/subject', posts, activeTab: 'history', fileHistory },
       global: { stubs: {
         LinksPanel: { template: '<div />' },
-        AiPanel: { template: '<div />' },
         DocumentMetadataForm: { template: '<div />' },
       } },
     })

@@ -1,8 +1,9 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, provide, ref, watch, watchEffect } from 'vue'
-import { NButton } from 'naive-ui'
+import { NButton, NIcon } from 'naive-ui'
 import { useRoute, useRouter } from 'vue-router'
 import NavBar from './components/NavBar.vue'
+import AiPanel from './components/vault/AiPanel.vue'
 import GlobalSearchHost from './components/search/GlobalSearchHost.vue'
 import ToastHost from './components/ToastHost.vue'
 import ConfirmHost from './components/ConfirmHost.vue'
@@ -19,7 +20,7 @@ import { useZenMode } from './composables/vault/useZenMode'
 import { createZenModeChord } from './views/zenModeChord'
 import { useDiaryAccessSession } from './composables/diary/useDiaryAccessSession'
 import { DiaryAccessContextKey } from './composables/diary/diaryAccessContext'
-import { AppShellContextKey } from './composables/appShellContext'
+import { AppShellContextKey, type NoteAiContextBridge } from './composables/appShellContext'
 import DiaryAccessDialog from './components/diary/DiaryAccessDialog.vue'
 import type { ScopeKey } from '../shared/scopeProtocol'
 import { boardMetadataSource } from './features/board/boardMetadataSource'
@@ -30,7 +31,9 @@ import { workspaceKindForPath, type ChromeStyle, type WorkspaceKind } from './li
 import { createLedgerAnalysisExportCommand } from './features/ledger/ledgerAnalysisExport'
 import { preventNativePullRefresh } from './lib/preventNativePullRefresh'
 import { createIndexedDbBoardCheckpointStore } from './features/board/checkpointStore'
-import { NUVYN_BROWSER_STORAGE_KEYS, readStorageKey, writeStorageKey } from './technicalNamespace'
+import { NUVYN_BROWSER_STORAGE_KEYS, ownerScopedStorageKey, readStorageKey, writeStorageKey } from './technicalNamespace'
+import { resetLegacyAiHistory } from './composables/vault/useAiHistory'
+import { Stars } from '@vicons/tabler'
 import type { AttachmentReference } from '../shared/attachmentProtocol'
 
 const route = useRoute()
@@ -65,7 +68,29 @@ const noteSpeechReadAllCommand = ref<(() => void) | null>(null)
 const noteSpeechReadSelectionCommand = ref<(() => void) | null>(null)
 const zenModeBrandTransitioning = ref(false)
 const globalSearchHost = ref<{ show: () => void } | null>(null)
+const globalAiOpen = ref(false)
+const noteAiContext = ref<NoteAiContextBridge | null>(null)
 const boardRecoveryStore = createIndexedDbBoardCheckpointStore()
+
+function registerNoteAiContext(context: NoteAiContextBridge): () => void {
+  noteAiContext.value = context
+  return () => {
+    if (noteAiContext.value === context) noteAiContext.value = null
+  }
+}
+
+function toggleGlobalAi(): void {
+  globalAiOpen.value = !globalAiOpen.value
+}
+
+function closeGlobalAi(): void {
+  if (!globalAiOpen.value) return
+  globalAiOpen.value = false
+  void nextTick(() => {
+    document.querySelector<HTMLElement>('[data-testid="global-ai-trigger"], [data-testid="immersive-global-ai-trigger"]')
+      ?.focus({ preventScroll: true })
+  })
+}
 
 function requestSettings(): void {
   settingsRequestTick.value += 1
@@ -92,6 +117,11 @@ function onOpenSearch(): void {
 
 provide(AppShellContextKey, {
   settingsRequestTick,
+  globalAiOpen,
+  toggleGlobalAi,
+  closeGlobalAi,
+  noteAiContext,
+  registerNoteAiContext,
   noteTabletImageCommand,
   ledgerAnalysisExportCommand,
   vaultScopeChangeCommand,
@@ -121,6 +151,9 @@ const isVaultRoute = computed(() => (
   && auth.state.value === 'authenticated'
   && vaultIdentity.state.value === 'ready'
 ))
+watch(isVaultRoute, (isVault) => {
+  if (!isVault) noteAiContext.value = null
+}, { flush: 'sync' })
 const isDiaryRoute = computed(() => workspaceKind.value === 'diary')
 const isLedgerRoute = computed(() => workspaceKind.value === 'ledger')
 const isBoardHomeRoute = computed(() => route.name === 'board' || route.name === 'board-folder')
@@ -233,6 +266,33 @@ const showRoutedContent = computed(() => initialRouteReady.value && !diaryScopeB
   && (isPublicDevPreview.value
     || (auth.state.value !== 'unknown'
       && (!route.meta.workspace || !requiresVaultIdentity.value || vaultIdentity.state.value === 'ready'))))
+
+const globalAiPositionStorageKey = computed(() => {
+  const owner = auth.user.value
+  return owner ? ownerScopedStorageKey(NUVYN_BROWSER_STORAGE_KEYS.aiPanelPosition, owner) : null
+})
+const showImmersiveBoardAiTrigger = computed(() => (
+  showRoutedContent.value
+  && auth.state.value === 'authenticated'
+  && workspaceKind.value === 'board'
+  && chromeStyle.value === 'immersive'
+))
+
+let globalAiOwner: string | null = null
+watch(
+  [() => auth.state.value, () => auth.user.value?.id ?? null, () => auth.user.value?.username ?? null],
+  ([state, id, username]) => {
+    const nextOwner = state === 'authenticated' && id !== null && username !== null
+      ? `${id}:${username}`
+      : null
+    if (nextOwner === globalAiOwner) return
+    globalAiOwner = nextOwner
+    resetLegacyAiHistory()
+    noteAiContext.value = null
+    globalAiOpen.value = false
+  },
+  { immediate: true, flush: 'sync' },
+)
 const routeLoading = computed(() => !initialRouteReady.value)
 const authLoading = computed(() => routeLoading.value || auth.hydrating.value || (auth.state.value === 'unknown' && !auth.hydrationError.value))
 const authFailureMessage = computed(() => {
@@ -495,6 +555,28 @@ provide(VaultViewModeKey, { mode: viewMode, set: setViewMode, toggle: toggleView
     @open-settings="requestSettings"
     @logout="onLogout"
     @lock-diary="lockDiary"
+  />
+  <NButton
+    v-if="showImmersiveBoardAiTrigger"
+    class="global-ai-immersive-trigger"
+    attr-type="button"
+    size="small"
+    quaternary
+    :bordered="false"
+    :title="t('ai.assistant')"
+    :aria-label="t('ai.assistant')"
+    :aria-pressed="globalAiOpen"
+    data-testid="immersive-global-ai-trigger"
+    @click="toggleGlobalAi"
+  >
+    <NIcon aria-hidden="true"><Stars /></NIcon>
+  </NButton>
+  <AiPanel
+    v-if="auth.state.value === 'authenticated'"
+    :key="globalAiPositionStorageKey ?? 'anonymous'"
+    :open="globalAiOpen"
+    :position-storage-key="globalAiPositionStorageKey"
+    @close="closeGlobalAi"
   />
   <SettingsModal
     v-if="isLedgerRoute"

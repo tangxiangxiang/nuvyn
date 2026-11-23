@@ -894,6 +894,7 @@ body.brand-constellation-active * {
 }
 .diary-view-switch .diary-view-toggle.is-active { color: var(--accent); background: color-mix(in srgb, var(--accent) 10%, transparent); }
 .nav-search,
+.global-ai-trigger,
 .diary-view-toggle,
 .nav-diary-plan,
 .note-speech-read-all,
@@ -917,6 +918,7 @@ body.brand-constellation-active * {
   transition: color 0.15s, border-color 0.15s, background 0.15s;
 }
 .nav-search:hover,
+.global-ai-trigger:hover,
 .diary-view-toggle:hover,
 .nav-diary-plan:hover,
 .note-speech-read-all:hover,
@@ -926,6 +928,10 @@ body.brand-constellation-active * {
   border-color: var(--border);
   background: var(--bg-soft);
 }
+.global-ai-trigger.is-active {
+  color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
+}
 .nav-actions .nav-diary-plan.has-plans {
   color: var(--accent);
 }
@@ -933,7 +939,7 @@ body.brand-constellation-active * {
   outline: 2px solid var(--accent);
   outline-offset: 1px;
 }
-.nav-actions :where(.diary-view-toggle, .nav-search, .nav-diary-plan, .note-speech-read-all, .nav-more-actions, .theme-toggle, .account-menu-root .ab-btn-account, .left-panel-toggle, .right-rail-toggle, .view-toggle) .n-icon {
+.nav-actions :where(.diary-view-toggle, .nav-search, .global-ai-trigger, .nav-diary-plan, .note-speech-read-all, .nav-more-actions, .theme-toggle, .account-menu-root .ab-btn-account, .left-panel-toggle, .right-rail-toggle, .view-toggle) .n-icon {
   display: flex;
   align-items: center;
   justify-content: center;
@@ -941,13 +947,13 @@ body.brand-constellation-active * {
   height: 18px;
   line-height: 1;
 }
-.nav-actions :where(.diary-view-toggle, .nav-search, .nav-diary-plan, .note-speech-read-all, .nav-more-actions, .theme-toggle, .account-menu-root .ab-btn-account, .left-panel-toggle, .right-rail-toggle, .view-toggle) svg {
+.nav-actions :where(.diary-view-toggle, .nav-search, .global-ai-trigger, .nav-diary-plan, .note-speech-read-all, .nav-more-actions, .theme-toggle, .account-menu-root .ab-btn-account, .left-panel-toggle, .right-rail-toggle, .view-toggle) svg {
   display: block;
   width: 18px;
   height: 18px;
 }
 .nav-actions .account-menu-root .ab-btn-account .ab-btn-icon { transform: translateY(0.5px); }
-.nav-actions :where(.diary-view-toggle, .nav-search, .nav-diary-plan, .note-speech-read-all, .nav-more-actions, .theme-toggle, .account-menu-root .ab-btn-account) .n-button__content {
+.nav-actions :where(.diary-view-toggle, .nav-search, .global-ai-trigger, .nav-diary-plan, .note-speech-read-all, .nav-more-actions, .theme-toggle, .account-menu-root .ab-btn-account) .n-button__content {
   display: flex;
   align-items: center;
   justify-content: center;
@@ -976,6 +982,30 @@ body.brand-constellation-active * {
   background: color-mix(in srgb, var(--accent) 8%, transparent);
   font-weight: 600;
   transition: color 0.15s, background-color 0.15s, border-color 0.15s;
+}
+
+.global-ai-immersive-trigger {
+  position: fixed;
+  z-index: 1501;
+  top: max(env(safe-area-inset-top, 0px), 8px);
+  right: max(env(safe-area-inset-right, 0px), 8px);
+  display: inline-flex;
+  width: 32px;
+  height: 32px;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--bg) 88%, transparent);
+  color: var(--text-muted);
+  -webkit-backdrop-filter: blur(12px);
+  backdrop-filter: blur(12px);
+}
+.global-ai-immersive-trigger:hover,
+.global-ai-immersive-trigger[aria-pressed='true'] {
+  color: var(--accent);
+  background: var(--bg-soft);
 }
 .navbar .mobile-workspace-selector:hover {
   color: var(--accent);
@@ -1954,6 +1984,7 @@ main.container.auth-page-shell {
   .navbar.is-workspace .nav-actions :where(
     .diary-view-toggle,
     .nav-search,
+    .global-ai-trigger,
     .note-speech-read-all,
     .nav-more-actions,
     .theme-toggle,
@@ -6424,6 +6455,107 @@ body:has(.ledger-detail-sheet-card) .n-modal-mask {
   background: var(--vs-bg-1);
   color: var(--vs-text-1);
   overflow: hidden;
+}
+
+/* The application-level AI assistant reuses the Note chat surface while
+   supplying the same token family outside `.vault`. It stays above ordinary
+   workspace content but below modal, confirmation, and picker layers. */
+.ai-panel.ai-floating-panel {
+  --vs-bg-1: var(--bg);
+  --vs-bg-2: var(--bg-soft);
+  --vs-bg-3: var(--bg-soft);
+  --vs-bg-4: var(--bg-soft);
+  --vs-tabs-bg: var(--bg-soft);
+  --vs-border: var(--border);
+  --vs-table-border: var(--border);
+  --vs-text-1: var(--text);
+  --vs-text-2: var(--text-muted);
+  --vs-text-3: var(--text-muted);
+  --vs-accent: var(--accent);
+  --vs-accent-hover: var(--accent-hover);
+  --vs-accent-bg: var(--accent-bg);
+  --vs-active-bg: var(--bg-soft);
+  --vs-tab-active-bg: var(--bg);
+  --vs-tab-inactive-bg: var(--bg-soft);
+  --vs-hover-bg: var(--bg-soft);
+  --vs-status-bg: var(--accent);
+  --vs-status-fg: #fff;
+  --code-bg: var(--bg-soft);
+  position: fixed;
+  z-index: 1500;
+  width: min(460px, calc(100vw - 24px));
+  height: min(80dvh, 720px);
+  min-height: min(320px, calc(100dvh - var(--ai-floating-chrome-bottom, 0px) - 16px));
+  max-height: calc(100dvh - var(--ai-floating-chrome-bottom, 0px) - 16px);
+  box-sizing: border-box;
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  background: var(--bg);
+  color: var(--text);
+  box-shadow: 0 18px 54px rgb(0 0 0 / 22%);
+}
+.ai-panel.ai-floating-panel.is-dragging {
+  user-select: none;
+}
+.ai-panel.ai-floating-panel.is-obscured {
+  visibility: hidden;
+  pointer-events: none;
+}
+.ai-panel .ai-floating-header {
+  height: 42px;
+  padding-left: 16px;
+  border-bottom-color: var(--border);
+}
+.ai-floating-drag-region {
+  display: flex;
+  min-width: 0;
+  height: 100%;
+  flex: 1 1 auto;
+  align-items: center;
+  cursor: grab;
+  touch-action: none;
+  user-select: none;
+}
+.ai-floating-drag-region.is-dragging { cursor: grabbing; }
+.ai-floating-title {
+  overflow: hidden;
+  color: var(--vs-text-1);
+  font-size: .84rem;
+  font-weight: 620;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.ai-panel .ai-floating-header .ai-header-actions {
+  margin-left: auto;
+}
+.ai-panel .ai-floating-close { margin-left: 2px; }
+.ai-floating-enter-active,
+.ai-floating-leave-active {
+  transition: opacity 150ms ease, transform 150ms ease;
+}
+.ai-floating-enter-from,
+.ai-floating-leave-to {
+  opacity: 0;
+  transform: translateY(-4px);
+}
+@media (max-width: 640px) {
+  .ai-panel.ai-floating-panel {
+    inset: env(safe-area-inset-top, 0px) 0 env(safe-area-inset-bottom, 0px);
+    width: auto;
+    height: auto;
+    min-height: 0;
+    max-height: none;
+    border: 0;
+    border-radius: 0;
+    box-shadow: none;
+  }
+  .ai-floating-drag-region { cursor: default; touch-action: auto; }
+  .ai-floating-enter-active,
+  .ai-floating-leave-active { transition-duration: 120ms; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .ai-floating-enter-active,
+  .ai-floating-leave-active { transition: none; }
 }
 
 .ai-panel .ai-header {

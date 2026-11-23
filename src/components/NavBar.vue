@@ -15,6 +15,7 @@ import {
   Photo,
   Search,
   Sun,
+  Stars,
   Volume,
   Wallet,
 } from '@vicons/tabler'
@@ -1122,6 +1123,22 @@ onBeforeUnmount(() => {
           @click="requestGlobalSearch"
         >
           <NIcon class="nav-search-icon" aria-hidden="true"><Search /></NIcon>
+        </NButton>
+        <NButton
+          v-if="isWorkspace && !isImmersive"
+          class="global-ai-trigger"
+          :class="{ 'is-active': appShell?.globalAiOpen?.value }"
+          attr-type="button"
+          size="small"
+          quaternary
+          :bordered="false"
+          :title="t('ai.assistant')"
+          :aria-label="t('ai.assistant')"
+          :aria-pressed="appShell?.globalAiOpen?.value ?? false"
+          data-testid="global-ai-trigger"
+          @click="appShell?.toggleGlobalAi?.()"
+        >
+          <NIcon aria-hidden="true"><Stars /></NIcon>
         </NButton>
         <NButton
           v-if="!(isVault && noteTablet)"

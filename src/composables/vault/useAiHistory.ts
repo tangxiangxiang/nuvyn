@@ -35,6 +35,8 @@ import type { VaultContext } from './context/types.js'
 export interface SendAndStreamOptions {
   liveContext?: AiLiveContextSnapshot
   threadScope?: AiThreadScope
+  /** Captured from the Note workspace at send time; never follows a later workspace switch. */
+  publishFileChange?: (event: FileChangeEvent) => void
 }
 
 export interface AiHistory {
@@ -81,8 +83,26 @@ const DEFAULT_MODEL_BY_PROVIDER: Record<AiProvider, string> = {
 // from a clean slate. Not exported in the public type — tests reach
 // for it via a re-export declared in __tests__.
 export function __resetForTesting(): void {
+  legacyState?.stop()
   legacyState = null
   stateByVault = new WeakMap()
+}
+
+/** Clear the application-level fallback state when the authenticated owner changes. */
+export function resetLegacyAiHistory(): void {
+  const state = legacyState
+  if (!state) return
+  state.stop()
+  state.activeSession.value = null
+  state.messages.value = []
+  state.threadScope.value = null
+  state.sessions.value = []
+  state.isLoading.value = false
+  state.busy.value = false
+  state.errorState.value = null
+  state.configured.value = false
+  state.model.value = ''
+  legacyState = null
 }
 
 function createAiHistory(publishChange: (event: FileChangeEvent) => void): AiHistory {
@@ -301,7 +321,7 @@ function createAiHistory(publishChange: (event: FileChangeEvent) => void): AiHis
         },
         ac.signal,
       )) {
-        applyEvent(event, userMessage, assistantMessage)
+        applyEvent(event, userMessage, assistantMessage, options?.publishFileChange ?? publishChange)
         if (event.type === 'done' || event.type === 'error') break
       }
       if (!options?.threadScope) await refreshSessions()
@@ -344,6 +364,7 @@ function createAiHistory(publishChange: (event: FileChangeEvent) => void): AiHis
     event: ChatEvent,
     optimisticUser: Message,
     optimisticAssistant: Message,
+    publishFileChange: (event: FileChangeEvent) => void,
   ): void {
     if (event.type === 'user') {
       messages.value = messages.value.map((m) =>
@@ -388,7 +409,7 @@ function createAiHistory(publishChange: (event: FileChangeEvent) => void): AiHis
       // Forward to the file-change bus so the editor can refresh
       // any open tab. We don't mutate the message — the tool card
       // already shows what the AI did.
-      publishChange({
+      publishFileChange({
         path: event.path,
         kind: event.kind,
         newMtime: event.newMtime,
