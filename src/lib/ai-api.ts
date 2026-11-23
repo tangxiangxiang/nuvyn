@@ -1,3 +1,4 @@
+import type { LedgerAiAnalysisApproval, LedgerAiAnalysisScope } from '../../shared/ledgerAiAnalysis'
 import type { SpeechVoiceId } from '../../shared/aiProfiles'
 // Wire types + typed fetch wrappers for /api/ai/*. The shapes
 // (Session, Message) are the single source of truth — the server
@@ -191,6 +192,7 @@ export interface AiCredentialStatus {
 export interface ChatRequest {
   sessionId: number
   content: string
+  ledgerAnalysis?: LedgerAiAnalysisScope
   /** Document/workspace identity for Nuvyn's one-thread-per-note model. */
   threadScope?: AiThreadScope
   // Edit-10.3: the ONE live-context authority on the new wire. When
@@ -216,6 +218,8 @@ export interface FileChangeEvent {
 }
 
 export type ChatEvent =
+  | ({ type: 'ledger_approval' } & LedgerAiAnalysisApproval)
+  | { type: 'ledger_reading' }
   | { type: 'user'; id: number }
   | { type: 'token'; text: string }
   | { type: 'tool_use'; id: string; name: string; input: Record<string, unknown> }
@@ -436,6 +440,15 @@ export async function suggestSummary(input: {
   }))
 }
 
+export async function decideLedgerAnalysis(
+  id: string, sessionId: number, allowed: boolean, signal: AbortSignal,
+): Promise<boolean> {
+  const response = await authFetch('/api/ai/chat/ledger-approval', {
+    method: 'POST', ...jsonBody({ id, sessionId, allowed }), signal,
+  })
+  return response.ok
+}
+
 /**
  * Open a streaming chat request and yield typed ChatEvent objects.
  * Yields exactly one {type: 'error'} event and returns on any HTTP
@@ -471,23 +484,28 @@ export async function* streamChat(
   const reader = res.body.getReader()
   const decoder = new TextDecoder()
   let buffer = ''
-  while (true) {
-    const { done, value } = await reader.read()
-    if (done) break
-    buffer += decoder.decode(value, { stream: true })
-    let idx: number
-    while ((idx = buffer.indexOf('\n\n')) !== -1) {
-      const block = buffer.slice(0, idx)
-      buffer = buffer.slice(idx + 2)
-      const eventLine = block.match(/^event:\s*(.+)$/m)
-      const dataLine = block.match(/^data:\s*(.+)$/m)
-      if (!eventLine || !dataLine) continue
-      try {
-        const parsed = JSON.parse(dataLine[1])
-        yield { type: eventLine[1].trim(), ...parsed } as ChatEvent
-      } catch {
-        // Ignore malformed blocks — the test will assert what we expect.
+  try {
+    while (true) {
+      const { done, value } = await reader.read()
+      if (done) break
+      buffer += decoder.decode(value, { stream: true })
+      let idx: number
+      while ((idx = buffer.indexOf('\n\n')) !== -1) {
+        const block = buffer.slice(0, idx)
+        buffer = buffer.slice(idx + 2)
+        const eventLine = block.match(/^event:\s*(.+)$/m)
+        const dataLine = block.match(/^data:\s*(.+)$/m)
+        if (!eventLine || !dataLine) continue
+        try {
+          const parsed = JSON.parse(dataLine[1])
+          yield { type: eventLine[1].trim(), ...parsed } as ChatEvent
+        } catch {
+          // Ignore malformed blocks — the test will assert what we expect.
+        }
       }
     }
+  } finally {
+    await reader.cancel().catch(() => {})
+    reader.releaseLock()
   }
 }

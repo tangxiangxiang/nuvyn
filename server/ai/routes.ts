@@ -1,3 +1,9 @@
+import { findSessionById } from '../auth/session.js'
+import { createLedgerRepository } from '../ledger/repository.js'
+import { createLedgerProjections } from '../ledger/projections.js'
+import { LedgerError } from '../ledger/errors.js'
+import type { LedgerAiAnalysisSnapshot } from '../../shared/ledgerAiAnalysis.js'
+import { decideLedgerAnalysisApproval, parseLedgerAiAnalysisScope, requestLedgerAnalysisApproval } from './ledger-analysis.js'
 import { isSpeechVoiceId } from '../../shared/aiProfiles.js'
 // Hono sub-router for /api/ai. The handlers are intentionally thin:
 // parse the request, call the matching service function, translate
@@ -897,6 +903,20 @@ ai.post('/commit-message', async (c) => {
   }
 })
 
+ai.post('/chat/ledger-approval', async (c) => {
+  const user = c.get('authUser')
+  const authSessionId = c.get('authSessionId')
+  const body = await c.req.json().catch(() => null)
+  if (!user || !authSessionId || !body || Object.keys(body).length !== 3 || typeof body.id !== 'string'
+    || !Number.isSafeInteger(body.sessionId) || typeof body.allowed !== 'boolean') {
+    return c.json({ ok: false }, 400)
+  }
+  const accepted = decideLedgerAnalysisApproval(body.id, {
+    userId: user.id, authSessionId, chatSessionId: body.sessionId,
+  }, body.allowed)
+  return c.json({ ok: accepted }, accepted ? 200 : 409)
+})
+
 // ---- /chat ----
 ai.post('/chat', async (c) => {
   c.header('Cache-Control', 'no-store')
@@ -908,6 +928,7 @@ ai.post('/chat', async (c) => {
         liveContext?: unknown
         currentNotePath?: unknown
         threadScope?: unknown
+        ledgerAnalysis?: unknown
       }
     | null
   if (
@@ -917,6 +938,17 @@ ai.post('/chat', async (c) => {
   ) {
     return c.json({ ok: false, reason: 'invalid' }, 400)
   }
+  const ledgerScope = body.ledgerAnalysis === undefined ? null : parseLedgerAiAnalysisScope(body.ledgerAnalysis)
+  const ledgerUser = c.get('authUser')
+  const ledgerAuthSession = c.get('authSessionId')
+  if (body.ledgerAnalysis !== undefined && (!ledgerScope || body.liveContext !== undefined
+    || body.currentNotePath !== undefined || body.threadScope !== undefined || !body.content.trim())) {
+    return c.json({ ok: false, reason: 'invalid-ledger-analysis-scope' }, 400)
+  }
+  if (ledgerScope && (!ledgerUser || !ledgerAuthSession)) {
+    return c.json({ ok: false, reason: 'ledger-analysis-auth-required' }, 403)
+  }
+
   // Bind to locals so the narrowed types survive into runChat().
   const sessionId = body.sessionId
   const userContent = body.content
@@ -1055,6 +1087,47 @@ ai.post('/chat', async (c) => {
         }
       }
 
+      let ledgerAnalysis: LedgerAiAnalysisSnapshot | 'declined' | undefined
+      const controller = new AbortController()
+      stream.onAbort(() => controller.abort())
+      const signal = AbortSignal.any([controller.signal, c.req.raw.signal])
+      const ledgerSessionIsCurrent = () => {
+        if (signal.aborted) return false
+        const lookup = findSessionById(db, ledgerAuthSession)
+        return lookup.status === 'valid' && lookup.user?.id === ledgerUser?.id
+          && Boolean(sessions.getSession(db, sessionId))
+      }
+      if (ledgerScope) {
+        if (!ledgerSessionIsCurrent()) throw new ChatError('aborted')
+        const allowed = await requestLedgerAnalysisApproval(
+          { userId: ledgerUser.id, authSessionId: ledgerAuthSession, chatSessionId: sessionId },
+          ledgerScope,
+          signal,
+          async (approval) => {
+            await stream.writeSSE({ event: 'ledger_approval', data: JSON.stringify(approval) })
+          },
+        )
+        if (!ledgerSessionIsCurrent()) throw new ChatError('aborted')
+        ledgerAnalysis = 'declined'
+        if (allowed) {
+          await stream.writeSSE({ event: 'ledger_reading', data: '{}' })
+          if (!ledgerSessionIsCurrent()) throw new ChatError('aborted')
+          try {
+            const start = performance.now()
+            ledgerAnalysis = createLedgerProjections(createLedgerRepository(db)).getAnalysisSnapshot(ledgerScope)
+            if (performance.now() - start > 2_000 || Buffer.byteLength(JSON.stringify(ledgerAnalysis)) > 16_384) {
+              throw new Error('Ledger snapshot budget exceeded')
+            }
+          } catch (error) {
+            const reason = error instanceof LedgerError && error.code === 'ledger-not-found'
+              ? 'ledger-analysis-uninitialized'
+              : 'ledger-analysis-unavailable'
+            await stream.writeSSE({ event: 'error', data: JSON.stringify({ reason }) })
+            return
+          }
+        }
+      }
+
       await runChat({
         db,
         sessionId,
@@ -1067,7 +1140,9 @@ ai.post('/chat', async (c) => {
           if (!canonical || classifyDiaryPath(canonical) !== 'managed') return true
           return Boolean(authRuntime && hasDiaryBodyAccess(authSessionId, presentedDiaryCapability))
         },
-        signal: c.req.raw.signal,
+        ledgerAnalysis,
+        canUseLedgerAnalysis: ledgerScope ? ledgerSessionIsCurrent : undefined,
+        signal,
         onEvent: writeEvent,
       })
     } catch (err) {
@@ -1079,7 +1154,7 @@ ai.post('/chat', async (c) => {
           data: JSON.stringify({
             reason,
             ...(err instanceof ChatError && err.code ? { code: err.code } : {}),
-            ...(err instanceof ChatError && (err.reason === 'llm-error' || err.reason === 'key-error') && err.message
+            ...(!ledgerScope && err instanceof ChatError && (err.reason === 'llm-error' || err.reason === 'key-error') && err.message
               ? { message: safeProviderMessage(err.message, runtimeConfig.apiKey) }
               : {}),
           }),

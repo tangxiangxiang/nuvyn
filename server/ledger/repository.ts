@@ -219,6 +219,13 @@ const SELECT_STATISTICS_EXCLUDED_TRANSACTION_IDS = `
   ORDER BY transaction_id ASC
 `
 
+const SELECT_STATISTICS_EXCLUDED_TRANSACTION_IDS_IN_RANGE = `
+  SELECT e.transaction_id
+  FROM ledger_transaction_statistics_exclusions e
+  JOIN ledger_transactions t ON t.id = e.transaction_id
+  WHERE t.deleted_at IS NULL AND t.occurred_at >= @from AND t.occurred_at < @to
+`
+
 const INSERT_TRANSACTION = `
   INSERT INTO ledger_transactions (
     id, type, transfer_kind, group_id, transfer_fee_mode, amount_minor, account_id, from_account_id, to_account_id,
@@ -394,6 +401,7 @@ const SELECT_ACTIVE_TRANSACTIONS_IN_RANGE = `
     AND occurred_at >= @from
     AND occurred_at < @to
   ORDER BY occurred_at DESC, created_at DESC, id DESC
+  LIMIT @limit
 `
 
 const SELECT_ACTIVE_TRANSACTIONS_BEFORE = `
@@ -524,6 +532,7 @@ export interface LedgerTransactionQuerySummary {
 }
 
 export interface LedgerTransactionRangeOptions {
+  readonly limit?: number
   readonly from?: number
   readonly to: number
 }
@@ -558,7 +567,7 @@ export interface LedgerRepository {
   isTransactionExcludedFromStatistics(transactionId: string): boolean
   excludeTransactionFromStatistics(transactionId: string, excludedAt: number): void
   restoreTransactionToStatistics(transactionId: string): void
-  listStatisticsExcludedTransactionIds(): readonly string[]
+  listStatisticsExcludedTransactionIds(range?: { from: number; to: number }): readonly string[]
   getAccountBalanceBefore(account: LedgerAccountBalanceQueryAccount, before: number): number
   getAccountBalanceAtPosition(
     account: LedgerAccountBalanceQueryAccount,
@@ -1155,6 +1164,9 @@ export function createLedgerRepository(db: DatabaseT): LedgerRepository {
     excludeTransactionFromStatistics: db.prepare<{ readonly transactionId: string; readonly excludedAt: number }>(INSERT_TRANSACTION_STATISTICS_EXCLUSION),
     restoreTransactionToStatistics: db.prepare<{ readonly transactionId: string }>(DELETE_TRANSACTION_STATISTICS_EXCLUSION),
     listStatisticsExcludedTransactionIds: db.prepare(SELECT_STATISTICS_EXCLUDED_TRANSACTION_IDS),
+    listStatisticsExcludedTransactionIdsInRange: db.prepare<{ from: number; to: number }>(
+      SELECT_STATISTICS_EXCLUDED_TRANSACTION_IDS_IN_RANGE,
+    ),
     listTransactionsByGroupId: db.prepare<{ readonly groupId: string; readonly includeDeleted: number }>(SELECT_TRANSACTIONS_BY_GROUP),
     insertTransaction: db.prepare<TransactionParams>(INSERT_TRANSACTION),
     updateTransaction: db.prepare<TransactionUpdateParams>(UPDATE_TRANSACTION),
@@ -1177,7 +1189,7 @@ export function createLedgerRepository(db: DatabaseT): LedgerRepository {
       readonly to: number
     }>(SELECT_ACTIVE_TRANSACTIONS_FOR_ACCOUNT_IN_RANGE),
     listActiveTransactions: db.prepare(SELECT_ALL_ACTIVE_TRANSACTIONS),
-    listActiveTransactionsInRange: db.prepare<{ readonly from: number; readonly to: number }>(
+    listActiveTransactionsInRange: db.prepare<{ readonly from: number; readonly to: number; readonly limit: number }>(
       SELECT_ACTIVE_TRANSACTIONS_IN_RANGE,
     ),
     listActiveTransactionsBefore: db.prepare<{ readonly to: number }>(
@@ -1312,9 +1324,11 @@ export function createLedgerRepository(db: DatabaseT): LedgerRepository {
       statements.restoreTransactionToStatistics.run({ transactionId })
     },
 
-    listStatisticsExcludedTransactionIds(): readonly string[] {
-      return (statements.listStatisticsExcludedTransactionIds.all() as Array<{ readonly transaction_id: string }>)
-        .map((row) => row.transaction_id)
+    listStatisticsExcludedTransactionIds(range?: { from: number; to: number }): readonly string[] {
+      const rows = range
+        ? statements.listStatisticsExcludedTransactionIdsInRange.all(range)
+        : statements.listStatisticsExcludedTransactionIds.all()
+      return (rows as Array<{ readonly transaction_id: string }>).map(({ transaction_id }) => transaction_id)
     },
 
     getAccountBalanceBefore(account: LedgerAccountBalanceQueryAccount, before: number): number {
@@ -1411,7 +1425,7 @@ export function createLedgerRepository(db: DatabaseT): LedgerRepository {
           throw ledgerValidationError('transaction range from must be earlier than to', { field: 'from' })
         }
         return statements.listActiveTransactionsInRange
-          .all({ from: options.from, to: options.to })
+          .all({ from: options.from, to: options.to, limit: options.limit ?? -1 })
           .map(ledgerTransactionFromRow)
       }
       return statements.listActiveTransactionsBefore

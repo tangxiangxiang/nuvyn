@@ -366,8 +366,7 @@ class AnthropicBackend implements ChatBackend {
       max_tokens: MAX_TOKENS,
       system: opts.system,
       messages: anthropicMessages,
-      tools,
-      tool_choice: { type: 'auto' },
+      ...(tools.length > 0 ? { tools, tool_choice: { type: 'auto' as const } } : {}),
     })
 
     const result = await pumpStream(

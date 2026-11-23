@@ -1,12 +1,17 @@
 <script setup lang="ts">
 import { computed, inject, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
-import { NButton, NIcon } from 'naive-ui'
+import { NAlert, NButton, NIcon } from 'naive-ui'
 import { History, MessagePlus, X } from '@vicons/tabler'
 import { useAiHistory } from '../../composables/vault/useAiHistory'
 import type { AiLiveContextCapture } from '../../composables/vault/aiLiveContext'
 import { AppShellContextKey } from '../../composables/appShellContext'
 import { useI18n } from '../../composables/useI18n'
+import type { DiaryCalendarMode } from '../../composables/appShellContext'
+import type { WorkspaceKind } from '../../lib/workspace'
 import { displayContextForCapture } from './aiContextPaths'
+import { proposeLedgerAiAnalysis } from '../../features/ledger/aiAnalysisScope'
+import { useLedgerStore } from '../../features/ledger/ledgerStore'
+import { resolveAiQuickPrompts } from './aiQuickPrompts'
 import AiChatMessages from './AiChatMessages.vue'
 import AiComposer from './AiComposer.vue'
 import AiSessionPicker from './AiSessionPicker.vue'
@@ -14,14 +19,19 @@ import { readStorageKey, writeStorageKey } from '../../technicalNamespace'
 
 const props = withDefaults(defineProps<{
   open: boolean
+  workspaceKind?: WorkspaceKind
+  diaryViewMode?: DiaryCalendarMode
   positionStorageKey?: string | null
 }>(), {
+  workspaceKind: null,
+  diaryViewMode: 'diary',
   positionStorageKey: null,
 })
 
 const emit = defineEmits<{ close: [] }>()
 const appShell = inject(AppShellContextKey, null)
 const history = useAiHistory()
+const ledgerSettings = useLedgerStore().settings
 const { t } = useI18n()
 const draft = ref('')
 const composer = ref<InstanceType<typeof AiComposer> | null>(null)
@@ -45,6 +55,7 @@ let resizeObserver: ResizeObserver | null = null
 let historyTrigger: HTMLElement | null = null
 
 function captureNoteContext(): AiLiveContextCapture {
+  if (props.workspaceKind !== 'vault') return { status: 'none' }
   return appShell?.noteAiContext?.value?.capture() ?? { status: 'none' }
 }
 
@@ -59,20 +70,14 @@ const noteLinkContext = computed(() => {
   }
 })
 
-const quickPrompts = computed(() => {
-  const hasNote = displayPath.value !== null
-  return hasNote
-    ? [
-        { label: t('quick_prompts.with_note.summarize.label'), text: t('quick_prompts.with_note.summarize.text') },
-        { label: t('quick_prompts.with_note.find_related.label'), text: t('quick_prompts.with_note.find_related.text') },
-        { label: t('quick_prompts.with_note.suggest_tidy.label'), text: t('quick_prompts.with_note.suggest_tidy.text') },
-      ]
-    : [
-        { label: t('quick_prompts.no_note.browse.label'), text: t('quick_prompts.no_note.browse.text') },
-        { label: t('quick_prompts.no_note.find_unprocessed.label'), text: t('quick_prompts.no_note.find_unprocessed.text') },
-        { label: t('quick_prompts.no_note.suggest_tidy.label'), text: t('quick_prompts.no_note.suggest_tidy.text') },
-      ]
-})
+const quickPromptState = computed(() => resolveAiQuickPrompts({
+  workspace: props.workspaceKind,
+  diaryViewMode: props.diaryViewMode,
+  hasActiveNote: props.workspaceKind === 'vault' && displayPath.value !== null,
+  t,
+}))
+const quickPrompts = computed(() => quickPromptState.value.prompts)
+const emptyHint = computed(() => quickPromptState.value.emptyHint)
 
 const panelStyle = computed(() => {
   if (isMobileViewport.value || !position.value) return undefined
@@ -215,12 +220,16 @@ async function onSend(): Promise<void> {
 
   // Snapshot both the Note context and its file-change bus synchronously.
   // A later route change cannot replace this request's security boundary.
-  const noteBridge = appShell?.noteAiContext?.value ?? null
+  const noteBridge = props.workspaceKind === 'vault' ? appShell?.noteAiContext?.value ?? null : null
   const capture = noteBridge?.capture() ?? { status: 'none' as const }
   const snapshot = capture.status === 'ready' ? capture.context : undefined
   const publishFileChange = noteBridge?.publishFileChange
+  const ledgerAnalysis = props.workspaceKind === 'ledger'
+    ? proposeLedgerAiAnalysis(text, ledgerSettings.value?.timezone)
+    : undefined
   draft.value = ''
   await history.sendAndStream(text, {
+    ...(ledgerAnalysis ? { ledgerAnalysis } : {}),
     ...(snapshot ? { liveContext: snapshot } : {}),
     ...(publishFileChange ? { publishFileChange } : {}),
   })
@@ -260,6 +269,11 @@ function onGlobalKeydown(event: KeyboardEvent): void {
     || showSessionPicker.value
     || blockingOverlay.value
   ) return
+  if (history.ledgerApproval.value) {
+    event.preventDefault()
+    void history.decideLedgerAnalysis(false)
+    return
+  }
   emit('close')
 }
 
@@ -421,8 +435,32 @@ onBeforeUnmount(() => {
         :current-path="displayPath"
         :note-link-context="noteLinkContext"
         :quick-prompts="quickPrompts"
+        :empty-hint="emptyHint"
         @prompt="useQuickPrompt"
       />
+
+      <NAlert
+        v-if="history.ledgerApproval.value"
+        :title="t('ai.ledger_approval_title')"
+        :show-icon="false"
+        class="ai-ledger-status"
+        data-testid="ai-ledger-approval"
+      >
+        <div>{{ history.ledgerApproval.value.scope.from }} – {{ history.ledgerApproval.value.scope.to }}</div>
+        <div>{{ t('ai.ledger_scope_' + history.ledgerApproval.value.scope.kind) }}</div>
+        <div>{{ t('ai.ledger_approval_privacy') }}</div>
+        <div class="ai-ledger-approval-actions">
+          <NButton size="small" @click="history.decideLedgerAnalysis(false)">{{ t('ai.ledger_decline') }}</NButton>
+          <NButton size="small" type="primary" @click="history.decideLedgerAnalysis(true)">{{ t('ai.ledger_allow') }}</NButton>
+        </div>
+      </NAlert>
+      <NAlert
+        v-else-if="history.errorState.value?.startsWith('ledger-analysis-')"
+        type="warning"
+        :show-icon="false"
+        class="ai-ledger-status"
+      >{{ t(history.errorState.value === 'ledger-analysis-uninitialized' ? 'ai.ledger_uninitialized' : 'ai.ledger_unavailable') }}</NAlert>
+      <p v-else-if="history.ledgerReading.value" class="ai-ledger-status" role="status">{{ t('ai.ledger_reading') }}</p>
 
       <AiComposer
         ref="composer"
@@ -440,3 +478,18 @@ onBeforeUnmount(() => {
     </aside>
   </Transition>
 </template>
+
+<style scoped>
+.ai-ledger-status {
+  flex: none;
+  margin: 4px 12px;
+}
+
+.ai-ledger-approval-actions {
+  display: flex;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 8px;
+}
+</style>

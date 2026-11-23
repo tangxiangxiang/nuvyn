@@ -172,6 +172,7 @@ function formatMessage(message: Message): string {
   if (parsed.kind !== 'envelope' || message.role !== 'assistant') {
     return `${message.role === 'user' ? 'User' : 'Assistant'}: ${parsed.kind === 'plain' ? parsed.text : message.content}`
   }
+  if (parsed.envelope.privateLedgerAnalysis) return 'Assistant: [Prior private Ledger analysis omitted.]'
   const toolCalls = parsed.envelope.toolCalls.map((call) => {
     const result = excerpt(call.result.content, 5_000)
     return `Tool ${call.name}(${JSON.stringify(call.input)}) returned: ${result}`

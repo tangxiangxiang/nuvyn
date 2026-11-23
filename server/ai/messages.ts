@@ -62,6 +62,7 @@ export type NormalizedRound = {
 /* v: 2 envelope — what new turns are written as. */
 export type AssistantEnvelopeV2 = {
   v: 2
+  privateLedgerAnalysis?: true
   text: string
   rounds: NormalizedRound[]
   toolCalls: ToolCallRecord[]
@@ -143,7 +144,10 @@ export function parseStoredContent(raw: string): StoredContent {
             rounds.push(r as NormalizedRound)
           }
         }
-        return { kind: 'envelope', envelope: { v: 2, text: j.text, rounds, toolCalls: j.toolCalls } }
+        return { kind: 'envelope', envelope: {
+          v: 2, text: j.text, rounds, toolCalls: j.toolCalls,
+          ...(j.privateLedgerAnalysis === true ? { privateLedgerAnalysis: true } : {}),
+        } }
       }
       if (j.v === 1 && typeof j.text === 'string' && Array.isArray(j.rounds)) {
         return { kind: 'envelope', envelope: convertV1ToV2(j as AssistantEnvelopeV1) }

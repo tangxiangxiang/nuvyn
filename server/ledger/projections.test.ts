@@ -1517,3 +1517,92 @@ describe('Ledger Overview and trend projections', () => {
     expectLedgerCode(() => fixture.projections.getTrend(0), 'ledger-validation-failed')
   })
 })
+
+describe('Ledger AI analysis snapshot', () => {
+  it('matches the authoritative month projection and minimizes expense detail', () => {
+    const fixture = freshFixture()
+    const bank = account(fixture, 'ai-bank', { openingBalanceMinor: 1_000_000 })
+    const wallet = account(fixture, 'ai-wallet', { name: 'Wallet' })
+    const loan = account(fixture, 'ai-loan', { name: 'Loan', type: 'loan', nature: 'liability' })
+    const income = firstCategory(fixture, 'income')
+    const food = category(fixture, 'ai-food')
+    const spend = (key: string, amountMinor: number) => transaction(fixture, key, {
+      type: 'expense', accountId: bank.id, categoryId: food.id, amountMinor, payee: 'Coffee',
+      note: 'PRIVATE_TRANSACTION_NOTE',
+    })
+    transaction(fixture, 'ai-income', {
+      type: 'income', accountId: bank.id, categoryId: income.id, amountMinor: 900_000_000_001,
+    })
+    spend('ai-food-1', 10_000)
+    spend('ai-food-2', 250)
+    const excluded = spend('ai-excluded', 200_000)
+    fixture.service.excludeTransactionFromStatistics(excluded.id)
+    const removed = spend('ai-removed', 90_000)
+    fixture.service.deleteTransaction(removed.id, { expectedVersion: removed.version })
+    transaction(fixture, 'ai-transfer', {
+      type: 'transfer', transferKind: 'general', fromAccountId: bank.id, toAccountId: wallet.id, amountMinor: 500,
+    })
+    for (const [key, amountMinor, feeMinor] of [['interest', 180_000, 20], ['rebate', 1000, -1]] as const) {
+      transaction(fixture, 'ai-' + key, {
+        type: 'transfer', transferKind: 'repayment', fromAccountId: bank.id, toAccountId: loan.id,
+        amountMinor, feeMinor,
+      })
+    }
+    for (const feeMode of ['extra', 'deducted'] as const) {
+      transaction(fixture, 'ai-' + feeMode, {
+        type: 'transfer', transferKind: 'withdrawal', fromAccountId: bank.id, toAccountId: wallet.id,
+        amountMinor: 300, feeMinor: 3, feeMode,
+      })
+    }
+    fixture.database.db.prepare('UPDATE ledger_accounts SET archived_at = ? WHERE id = ?').run(TEST_NOW, bank.id)
+    fixture.database.db.prepare('UPDATE ledger_categories SET archived_at = ? WHERE id = ?').run(TEST_NOW, food.id)
+    const period = { from: '2026-09-01', to: '2026-09-30' }
+    const snapshot = fixture.projections.getAnalysisSnapshot({ kind: 'spending', ...period })
+    expect(snapshot.summary).toMatchObject(fixture.projections.getOverview({ scope: 'month' }).cashflow)
+    expect(snapshot.summary).toEqual({
+      incomeMinor: 900_000_000_001, expenseMinor: 10_275, repaymentMinor: 181_000,
+      balanceMinor: 899_999_989_726, balanceAfterRepaymentMinor: 899_999_808_726,
+      repaymentInterestNetMinor: 19, repaymentOutflowMinor: 181_019, withdrawalFeeMinor: 6,
+    })
+    expect(snapshot.excludedFromStatisticsCount).toBe(1)
+    expect(snapshot.largestExpenses?.map(({ amountMinor }) => amountMinor)).toEqual([10_000, 250])
+    expect(snapshot.recurringExpenseExamples).toEqual([
+      { payee: 'Coffee', category: food.name, totalMinor: 10_250, count: 2 },
+    ])
+    expect(snapshot.expenseCategories?.[0]).toEqual({ name: food.name, amountMinor: 10_250, shareBasisPoints: 9975 })
+    expect(JSON.stringify(snapshot)).not.toMatch(/PRIVATE_TRANSACTION_NOTE|Projection account|projection-test-/)
+    expect(snapshot).not.toHaveProperty('accounts')
+
+    const repayment = fixture.projections.getAnalysisSnapshot({ kind: 'repayment', ...period })
+    expect(repayment.summary.actualRepaymentOutflowMinor).toBe(181_019)
+    expect(repayment).not.toHaveProperty('largestExpenses')
+  })
+
+  it('uses six Ledger-local months across the year boundary and clips partial endpoints', () => {
+    const fixture = freshFixture('Asia/Shanghai', Date.parse('2027-01-10T00:00:00Z'))
+    const bank = account(fixture, 'ai-tz-bank')
+    const categoryId = firstCategory(fixture, 'income').id
+    for (const [time, amountMinor] of [
+      ['2026-12-31T15:59:59.999Z', 9],
+      ['2026-12-31T16:00:00.000Z', 11],
+      ['2027-01-02T16:00:00.000Z', 200],
+    ] as const) {
+      transaction(fixture, time, { type: 'income', accountId: bank.id, categoryId, occurredAt: Date.parse(time), amountMinor })
+    }
+    const result = fixture.projections.getAnalysisSnapshot({ kind: 'trend', from: '2026-08-01', to: '2027-01-02' })
+    expect(result.trend?.map(({ month, incomeMinor }) => [month, incomeMinor])).toEqual([
+      ['2026-08', 0], ['2026-09', 0], ['2026-10', 0], ['2026-11', 0], ['2026-12', 9], ['2027-01', 11],
+    ])
+    expect(result.summary.incomeMinor).toBe(20)
+    const empty = fixture.projections.getAnalysisSnapshot({ kind: 'cashflow', from: '2026-08-01', to: '2026-08-01' })
+    expect(empty).toMatchObject({ activeTransactionCount: 0, expenseCategories: [], largestExpenses: [] })
+  })
+
+  it('rejects overflowing result sets instead of aggregating a partial period', () => {
+    const fixture = freshFixture()
+    const query = vi.spyOn(fixture.repository, 'listActiveTransactionsInRange').mockReturnValue(Array(10_001))
+    expect(() => fixture.projections.getAnalysisSnapshot({ kind: 'cashflow', from: '2026-09-01', to: '2026-09-30' }))
+      .toThrow('too many transactions')
+    expect(query).toHaveBeenCalledWith(expect.objectContaining({ limit: 10_001 }))
+  })
+})
