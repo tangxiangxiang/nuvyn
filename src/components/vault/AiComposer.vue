@@ -2,6 +2,7 @@
 import { computed, nextTick, ref, useId, watch } from 'vue'
 import { NButton, NIcon, NInput, type InputInst } from 'naive-ui'
 import { PlayerStop, Send } from '@vicons/tabler'
+import type { LedgerAiCommand } from '../../lib/ai-api'
 import { useI18n } from '../../composables/useI18n'
 
 const props = withDefaults(defineProps<{
@@ -11,6 +12,7 @@ const props = withDefaults(defineProps<{
   canSend?: boolean
   modelName?: string
   prompts?: Array<{ label: string; text: string }>
+  commands?: Array<{ label: string; command: LedgerAiCommand }>
 }>(), {
   canSend: true,
   modelName: '',
@@ -21,6 +23,7 @@ const emit = defineEmits<{
   'update:modelValue': [value: string]
   send: []
   stop: []
+  command: [command: LedgerAiCommand]
 }>()
 const { t } = useI18n()
 
@@ -30,22 +33,35 @@ const menuId = useId()
 const focused = ref(false)
 const dismissed = ref(false)
 const selectedPrompt = ref(0)
-const slashQuery = computed(() => /^\/([^\s/]*)$/.exec(props.modelValue)?.[1] ?? null)
-const matchingPrompts = computed(() => props.prompts.filter(prompt =>
-  prompt.label.toLocaleLowerCase().includes((slashQuery.value ?? '').toLocaleLowerCase()),
-))
-const showPrompts = computed(() => focused.value && !dismissed.value && slashQuery.value !== null && props.prompts.length > 0)
+const composing = ref(false)
+const slashText = computed(() => props.commands ? props.modelValue.trim() : props.modelValue)
+const slashQuery = computed(() => /^\/([^\s/]*)$/.exec(slashText.value)?.[1] ?? null)
+const matchingOptions = computed<Array<{ label: string; text: string; command?: LedgerAiCommand }>>(() => {
+  const query = (slashQuery.value ?? '').toLocaleLowerCase()
+  const commands = (props.commands ?? []).filter(({ command }) => command.startsWith(query))
+    .map(({ label, command }) => ({ label: `/${command} · ${label}`, text: `/${command}`, command }))
+  const prompts = props.prompts.filter(prompt => prompt.label.toLocaleLowerCase().includes(query))
+  return [...commands, ...prompts]
+})
+const showPrompts = computed(() => focused.value && !dismissed.value && slashQuery.value !== null
+  && (props.prompts.length > 0 || !!props.commands?.length))
+const commandInput = computed(() => !!props.commands && slashText.value.startsWith('/'))
 watch(() => props.modelValue, () => {
   selectedPrompt.value = 0
   dismissed.value = false
 })
 watch(() => props.prompts, () => { selectedPrompt.value = 0 })
-const sendEnabled = computed(() => !props.busy && !!props.modelValue.trim() && props.configured && props.canSend)
+const sendEnabled = computed(() => !props.busy && !composing.value
+  && !!props.modelValue.trim() && (props.configured || commandInput.value) && props.canSend)
 
-function choosePrompt(index: number) {
-  const prompt = matchingPrompts.value[index]
-  if (!prompt) return
-  emit('update:modelValue', prompt.text)
+function chooseOption(index: number, executeCommand = false) {
+  const option = matchingOptions.value[index]
+  if (!option || composing.value) return
+  if (option.command && executeCommand) {
+    if (!props.busy && props.canSend) emit('command', option.command)
+  } else {
+    emit('update:modelValue', option.text)
+  }
   dismissed.value = true
   void focus()
 }
@@ -59,7 +75,7 @@ function onInput(value: string) {
 }
 
 function onKeydown(event: KeyboardEvent) {
-  if (event.isComposing || event.keyCode === 229) return
+  if (composing.value || event.isComposing || event.keyCode === 229) return
   if (showPrompts.value) {
     if (event.key === 'Escape') {
       event.preventDefault()
@@ -68,13 +84,18 @@ function onKeydown(event: KeyboardEvent) {
     }
     if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
       event.preventDefault()
-      const count = matchingPrompts.value.length
+      const count = matchingOptions.value.length
       if (count) selectedPrompt.value = (selectedPrompt.value + (event.key === 'ArrowDown' ? 1 : count - 1)) % count
       return
     }
     if ((event.key === 'Enter' && !event.shiftKey) || event.key === 'Tab') {
-      if (event.key === 'Enter' || matchingPrompts.value.length) event.preventDefault()
-      choosePrompt(selectedPrompt.value)
+      if (event.key === 'Enter' || matchingOptions.value.length) event.preventDefault()
+      const option = matchingOptions.value[selectedPrompt.value]
+      if (event.key === 'Enter' && commandInput.value && (!option || option.command)) {
+        if (slashText.value !== '/') send()
+      } else {
+        chooseOption(selectedPrompt.value)
+      }
       return
     }
   }
@@ -101,7 +122,7 @@ defineExpose({ focus })
     <div v-if="showPrompts" :id="menuId" class="ai-prompt-menu" role="listbox" :aria-label="t('ai.prompt_templates')">
       <div class="ai-prompt-menu-heading">{{ t('ai.prompt_templates') }}</div>
       <button
-        v-for="(prompt, index) in matchingPrompts"
+        v-for="(prompt, index) in matchingOptions"
         :id="`${menuId}-${index}`"
         :key="prompt.label"
         type="button"
@@ -109,10 +130,11 @@ defineExpose({ focus })
         :aria-selected="selectedPrompt === index"
         :class="{ 'is-selected': selectedPrompt === index }"
         :title="prompt.text"
+        :disabled="prompt.command && (busy || !canSend)"
         @mousedown.prevent
-        @click="choosePrompt(index)"
+        @click="chooseOption(index, true)"
       >{{ prompt.label }}</button>
-      <div v-if="!matchingPrompts.length" class="ai-prompt-menu-heading">{{ t('ai.no_matching_prompts') }}</div>
+      <div v-if="!matchingOptions.length" class="ai-prompt-menu-heading">{{ t('ai.no_matching_prompts') }}</div>
     </div>
     <div class="ai-composer-card">
       <NInput
@@ -128,11 +150,13 @@ defineExpose({ focus })
           class: 'ai-input',
           'aria-label': t('ai.input_placeholder'),
           'aria-controls': showPrompts ? menuId : undefined,
-          'aria-activedescendant': showPrompts && matchingPrompts.length ? `${menuId}-${selectedPrompt}` : undefined,
+          'aria-activedescendant': showPrompts && matchingOptions.length ? `${menuId}-${selectedPrompt}` : undefined,
         }"
         @focus="focused = true"
         @blur="focused = false"
         @keydown="onKeydown"
+        @compositionstart="composing = true"
+        @compositionend="composing = false"
         @update:value="onInput"
       />
       <div class="ai-toolbar">

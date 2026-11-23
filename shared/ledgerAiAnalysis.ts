@@ -10,11 +10,6 @@ export interface LedgerAiAnalysisScope {
   readonly to: string
 }
 
-export interface LedgerAiAnalysisApproval {
-  readonly id: string
-  readonly scope: LedgerAiAnalysisScope
-}
-
 export interface LedgerAiAnalysisSnapshot {
   readonly version: 1
   readonly generatedAt: string

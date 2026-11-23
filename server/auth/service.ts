@@ -1,3 +1,4 @@
+import { clearLedgerAiContext } from '../ledger/aiContext.js'
 import type { Database as DatabaseT } from 'better-sqlite3'
 import {
   BootstrapState,
@@ -354,6 +355,7 @@ export class AuthService {
     const lookup = findSessionByRawToken(this.db, rawToken, this.now())
     if (lookup.session && lookup.status !== 'revoked') {
       revokeSession(this.db, rawToken, this.now())
+      clearLedgerAiContext(this.db)
     }
   }
 }

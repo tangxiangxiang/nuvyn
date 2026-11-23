@@ -238,3 +238,13 @@ API 以 /api/ledger 为前缀，包含 settings、accounts、categories、transa
 ## 17. Tests
 
 服务端 Ledger 测试覆盖 migration/API/auth/concurrency，以及 balance.test.ts、validation.test.ts、service.test.ts、projections.test.ts、idempotency.test.ts、time.test.ts 和 money.test.ts。客户端测试覆盖 API、store/recovery、时间与金额、初始化、Dashboard/period navigation、transaction sheet、transactions view、accounts view 和 account detail；相关测试位于 src/**/__tests__/ 和 src/views/__tests__/。
+
+## AI 只读上下文
+
+已登录的实例所有者在账本工作区发送消息时，服务端才同步 AI 上下文。每个服务进程为自己的 SQLite 连接维护一个按所有者隔离的内存基线，包含所有有效交易、归档账户和分类、统计排除标记以及账本设置。重启、退出登录、所有者变化、遇到 Revision 缺口或读取失败都会使旧基线失效。每个进程独立从同一份 SQLite 日志追赶，不依赖跨进程缓存消息。
+
+迁移 0053 通过 SQLite 触发器记录影响分析的实体 ID 和 Revision，保留最近 16,384 条变更。日志与账本写入处于同一事务，统计排除 sidecar 和组合交易也适用。第一次在一致性读事务内读取完整状态；后续比较 Revision，并以 256 条为一页读取日志。对同一实体合并变更后，按 ID 读取它在该 Revision 下的最终状态。软删除或实体已不存在时，从基线移除该记录。出现缺口时，在同一读视图内重建基线。
+
+每轮分析固定在发送时同步到的 Revision。模型使用只读工具查询现有财务投影，可取完整历史汇总、指定日期或分批的月度趋势，以及有限的账户余额或交易明细。明细沿用分析导出的还款抵扣转换。工具结果只在本轮模型请求中使用，聊天记录仅保存用户消息和模型回答。其他工作区的请求不带账本工具、交易或该分析轮的聊天内容。
+
+AI 财务使用按所有者隔离的固定会话，沿用 AI 会话表的唯一线程键。旧会话保留在原有历史中。手动 `/compact` 仅总结已完成的财务对话，保留最近两轮和原始消息，全部摘要批次成功后写入 checkpoint。当前财务事实仍以本轮账本工具结果为准。`/clear` 在同一事务中删除固定会话的消息并重置摘要和 checkpoint。两种操作只触及 AI 会话数据，共用服务进程内的会话锁，与该会话的流式响应互斥。

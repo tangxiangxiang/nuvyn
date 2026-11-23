@@ -35,12 +35,12 @@ describe('AI quick prompts by workspace', () => {
     expect(tasks.emptyHint).toBe('可以帮你拆解任务、梳理优先级。')
   })
 
-  it('selects Ledger and Board prompts without implying data access', () => {
+  it('describes Ledger analysis and Board assistance for their workspaces', () => {
     const ledger = resolveAiQuickPrompts({ workspace: 'ledger', diaryViewMode: 'diary', hasActiveNote: false, t })
     const board = resolveAiQuickPrompts({ workspace: 'board', diaryViewMode: 'diary', hasActiveNote: false, t })
 
     expect(ledger.prompts.map(({ label }) => label)).toEqual(['分析本月收支', '分析消费结构', '查看财务趋势'])
-    expect(ledger.emptyHint).toBe('经你授权后，可以分析指定日期的账本收支。')
+    expect(ledger.emptyHint).toBe('可以分析最新账本的收支、还款和账户余额。')
     expect(board.prompts.map(({ label }) => label)).toEqual(['头脑风暴', '整理思路', '设计信息结构'])
     expect(board.emptyHint).toBe('可以帮助你头脑风暴和整理思路。')
   })

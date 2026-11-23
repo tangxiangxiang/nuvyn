@@ -63,6 +63,7 @@ export type NormalizedRound = {
 export type AssistantEnvelopeV2 = {
   v: 2
   privateLedgerAnalysis?: true
+  interrupted?: true
   text: string
   rounds: NormalizedRound[]
   toolCalls: ToolCallRecord[]
@@ -147,6 +148,7 @@ export function parseStoredContent(raw: string): StoredContent {
         return { kind: 'envelope', envelope: {
           v: 2, text: j.text, rounds, toolCalls: j.toolCalls,
           ...(j.privateLedgerAnalysis === true ? { privateLedgerAnalysis: true } : {}),
+          ...(j.interrupted === true ? { interrupted: true } : {}),
         } }
       }
       if (j.v === 1 && typeof j.text === 'string' && Array.isArray(j.rounds)) {
@@ -234,6 +236,7 @@ export function appendMessage(
   sessionId: number,
   role: 'user' | 'assistant',
   content: string,
+  options?: { privateLedgerAnalysis?: true },
 ): AppendResult {
   // Validation before the transaction so the no-op cases don't
   // open a write transaction at all.
@@ -251,9 +254,12 @@ export function appendMessage(
     if (!sess) return { ok: false as const, reason: 'not-found' as const }
 
     const now = Date.now()
+    const storedContent = role === 'user' && options?.privateLedgerAnalysis
+      ? JSON.stringify({ v: 2, text: content, rounds: [], toolCalls: [], privateLedgerAnalysis: true })
+      : content
     const info = db.prepare(
       'INSERT INTO messages (session_id, role, content, created_at) VALUES (?, ?, ?, ?)'
-    ).run(sessionId, role, content, now)
+    ).run(sessionId, role, storedContent, now)
     const message: Message = {
       id: Number(info.lastInsertRowid),
       sessionId,

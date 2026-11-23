@@ -1,9 +1,7 @@
 import { findSessionById } from '../auth/session.js'
-import { createLedgerRepository } from '../ledger/repository.js'
-import { createLedgerProjections } from '../ledger/projections.js'
+import { syncLedgerAiContext } from '../ledger/aiContext.js'
 import { LedgerError } from '../ledger/errors.js'
-import type { LedgerAiAnalysisSnapshot } from '../../shared/ledgerAiAnalysis.js'
-import { decideLedgerAnalysisApproval, parseLedgerAiAnalysisScope, requestLedgerAnalysisApproval } from './ledger-analysis.js'
+import { createLedgerAnalysis } from './ledger-analysis.js'
 import { isSpeechVoiceId } from '../../shared/aiProfiles.js'
 // Hono sub-router for /api/ai. The handlers are intentionally thin:
 // parse the request, call the matching service function, translate
@@ -44,6 +42,7 @@ import { generateSummary, SummaryPromptLimitError } from './summary.js'
 import { generateTags } from './tags.js'
 import { generateTitle } from './title.js'
 import { ChatError } from './errors.js'
+import { compactLedgerAiThread } from './compaction.js'
 import { hasDiaryBodyAccess, requireDiaryBodyAccess } from '../diaryAccess/guard.js'
 import { readDiaryAccessCapability } from '../diaryAccess/service.js'
 import { classifyDiaryPath } from '../../shared/diaryProtocol.js'
@@ -251,9 +250,11 @@ function isValidLegacyNotePath(value: unknown): value is string {
 // transform is a presentation concern, so it lives in the API
 // layer, not the storage layer.
 function rehydrateForClient(m: Message): Message {
-  if (m.role !== 'assistant') return m
   const parsed = messages.parseStoredContent(m.content)
   if (parsed.kind !== 'envelope') return m
+  if (m.role !== 'assistant') {
+    return parsed.envelope.privateLedgerAnalysis ? { ...m, content: parsed.envelope.text } : m
+  }
   const blocks: AssistantBlocks = {
     v: 1,
     text: parsed.envelope.text,
@@ -487,6 +488,61 @@ ai.delete('/thread', async (c) => {
   return c.json({ cleared: true as const })
 })
 
+function ledgerAuthIsCurrent(db: ReturnType<typeof getDb>, ownerId: number, authSessionId: number): boolean {
+  const lookup = findSessionById(db, authSessionId)
+  return lookup.status === 'valid' && lookup.user?.id === ownerId
+}
+
+ai.post('/ledger-session', (c) => {
+  c.header('Cache-Control', 'no-store')
+  const user = c.get('authUser')
+  const authSessionId = c.get('authSessionId')
+  const db = getDb()
+  if (!user || !authSessionId || !ledgerAuthIsCurrent(db, user.id, authSessionId)) {
+    return bad(c, 'Ledger session requires authentication', 403)
+  }
+  const { session } = sessions.ensureLedgerAiThread(db, user.id)
+  const history = messages.listMessages(db, session.id)
+  return c.json({ session, messages: (history ?? []).map(rehydrateForClient) })
+})
+
+ai.post('/ledger-session/command', async (c) => {
+  c.header('Cache-Control', 'no-store')
+  const body = await c.req.json().catch(() => null) as { command?: unknown } | null
+  if (body?.command !== 'compact' && body?.command !== 'clear') return bad(c, 'Unknown Ledger AI command')
+  const user = c.get('authUser')
+  const authSessionId = c.get('authSessionId')
+  const db = getDb()
+  if (!user || !authSessionId || !ledgerAuthIsCurrent(db, user.id, authSessionId)) {
+    return bad(c, 'Ledger session requires authentication', 403)
+  }
+  const thread = sessions.getLedgerAiThread(db, user.id)
+  if (!thread) return c.json({ outcome: body.command === 'clear' ? 'cleared' : 'nothing-to-compact' })
+
+  const release = sessions.acquireLedgerAiOperation(db, thread.session.id)
+  if (!release) return bad(c, 'Ledger AI is busy', 409)
+  try {
+    if (body.command === 'clear') {
+      sessions.clearLedgerAiThread(db, user.id)
+      return c.json({ outcome: 'cleared' })
+    }
+    const runtimeConfig = resolveAiRuntimeConfig(db)
+    const compacted = await compactLedgerAiThread({
+      db,
+      sessionId: thread.session.id,
+      model: runtimeConfig.model,
+      runtimeConfig,
+      signal: c.req.raw.signal,
+      canSave: () => ledgerAuthIsCurrent(db, user.id, authSessionId),
+    })
+    return c.json({ outcome: compacted ? 'compacted' : 'nothing-to-compact' })
+  } catch {
+    return bad(c, 'Ledger AI command failed', 503)
+  } finally {
+    release()
+  }
+})
+
 // ---- /sessions ----
 ai.get('/sessions', (c) => c.json(sessions.listSessions(getDb())))
 
@@ -502,7 +558,9 @@ ai.patch('/sessions/:id', (c) => {
   return body.then((b) => {
     if (!b || typeof b.title !== 'string') return bad(c, 'title required')
     if (b.title.trim().length === 0) return bad(c, 'title must not be empty')
-    const updated = sessions.renameSession(getDb(), id, b.title)
+    const db = getDb()
+    if (sessions.isLedgerAiSession(db, id)) return bad(c, 'not found', 404)
+    const updated = sessions.renameSession(db, id, b.title)
     if (!updated) return bad(c, 'not found', 404)
     return c.json(updated)
   })
@@ -511,7 +569,9 @@ ai.patch('/sessions/:id', (c) => {
 ai.delete('/sessions/:id', (c) => {
   const id = Number(c.req.param('id'))
   if (!Number.isInteger(id) || id <= 0) return bad(c, 'invalid id')
-  const ok = sessions.deleteSession(getDb(), id)
+  const db = getDb()
+  if (sessions.isLedgerAiSession(db, id)) return bad(c, 'not found', 404)
+  const ok = sessions.deleteSession(db, id)
   if (!ok) return bad(c, 'not found', 404)
   return c.json({ ok: true })
 })
@@ -520,7 +580,9 @@ ai.delete('/sessions/:id', (c) => {
 ai.get('/sessions/:id/messages', (c) => {
   const id = Number(c.req.param('id'))
   if (!Number.isInteger(id) || id <= 0) return bad(c, 'invalid id')
-  const list = messages.listMessages(getDb(), id)
+  const db = getDb()
+  if (sessions.isLedgerAiSession(db, id)) return bad(c, 'not found', 404)
+  const list = messages.listMessages(db, id)
   if (list === null) return bad(c, 'not found', 404)
   return c.json(list.map(rehydrateForClient))
 })
@@ -532,7 +594,9 @@ ai.post('/sessions/:id/messages', async (c) => {
   if (!body || typeof body.role !== 'string' || typeof body.content !== 'string') {
     return bad(c, 'role and content required')
   }
-  const result = messages.appendMessage(getDb(), id, body.role as 'user' | 'assistant', body.content)
+  const db = getDb()
+  if (sessions.isLedgerAiSession(db, id)) return bad(c, 'not found', 404)
+  const result = messages.appendMessage(db, id, body.role as 'user' | 'assistant', body.content)
   if (result.ok) return c.json(result.message, 201)
   if (result.reason === 'not-found') return bad(c, 'not found', 404)
   return bad(c, result.reason) // 'empty' or 'invalid-role' → 400
@@ -691,7 +755,8 @@ ai.get('/settings/credential-status', (c) => c.json(getAiCredentialStatus(getDb(
 ai.get('/active', (c) => {
   const db = getDb()
   const storedActiveId = sessions.getActiveSessionId(db)
-  const activeSession = storedActiveId === null ? null : sessions.getSession(db, storedActiveId)
+  const activeSession = storedActiveId === null || sessions.isLedgerAiSession(db, storedActiveId)
+    ? null : sessions.getSession(db, storedActiveId)
   let configured: boolean
   let model: string
   try {
@@ -719,8 +784,9 @@ ai.put('/active', async (c) => {
   const id = body.sessionId as number | null
   // Setting to null always succeeds; setting to a number requires the session to exist.
   if (id !== null) {
-    const exists = sessions.getSession(getDb(), id)
-    if (!exists) return bad(c, 'session not found', 404)
+    const db = getDb()
+    const exists = sessions.getSession(db, id)
+    if (!exists || sessions.isLedgerAiSession(db, id)) return bad(c, 'session not found', 404)
   }
   sessions.setActiveSessionId(getDb(), id)
   return c.json({ sessionId: id })
@@ -903,20 +969,6 @@ ai.post('/commit-message', async (c) => {
   }
 })
 
-ai.post('/chat/ledger-approval', async (c) => {
-  const user = c.get('authUser')
-  const authSessionId = c.get('authSessionId')
-  const body = await c.req.json().catch(() => null)
-  if (!user || !authSessionId || !body || Object.keys(body).length !== 3 || typeof body.id !== 'string'
-    || !Number.isSafeInteger(body.sessionId) || typeof body.allowed !== 'boolean') {
-    return c.json({ ok: false }, 400)
-  }
-  const accepted = decideLedgerAnalysisApproval(body.id, {
-    userId: user.id, authSessionId, chatSessionId: body.sessionId,
-  }, body.allowed)
-  return c.json({ ok: accepted }, accepted ? 200 : 409)
-})
-
 // ---- /chat ----
 ai.post('/chat', async (c) => {
   c.header('Cache-Control', 'no-store')
@@ -938,20 +990,30 @@ ai.post('/chat', async (c) => {
   ) {
     return c.json({ ok: false, reason: 'invalid' }, 400)
   }
-  const ledgerScope = body.ledgerAnalysis === undefined ? null : parseLedgerAiAnalysisScope(body.ledgerAnalysis)
+  const ledgerRequested = body.ledgerAnalysis === true
   const ledgerUser = c.get('authUser')
   const ledgerAuthSession = c.get('authSessionId')
-  if (body.ledgerAnalysis !== undefined && (!ledgerScope || body.liveContext !== undefined
+  if (body.ledgerAnalysis !== undefined && (!ledgerRequested || body.liveContext !== undefined
     || body.currentNotePath !== undefined || body.threadScope !== undefined || !body.content.trim())) {
-    return c.json({ ok: false, reason: 'invalid-ledger-analysis-scope' }, 400)
+    return c.json({ ok: false, reason: 'invalid-ledger-analysis-request' }, 400)
   }
-  if (ledgerScope && (!ledgerUser || !ledgerAuthSession)) {
+  if (ledgerRequested && (!ledgerUser || !ledgerAuthSession)) {
     return c.json({ ok: false, reason: 'ledger-analysis-auth-required' }, 403)
   }
 
   // Bind to locals so the narrowed types survive into runChat().
   const sessionId = body.sessionId
   const userContent = body.content
+  if (ledgerRequested) {
+    if (sessions.getLedgerAiThread(db, ledgerUser.id)?.session.id !== sessionId) {
+      return c.json({ ok: false, reason: 'ledger-session-mismatch' }, 404)
+    }
+    if (userContent.trimStart().startsWith('/')) {
+      return c.json({ ok: false, reason: 'invalid-ledger-command' }, 400)
+    }
+  } else if (sessions.isLedgerAiSession(db, sessionId)) {
+    return c.json({ ok: false, reason: 'not-found' }, 404)
+  }
   const threadScope = body.threadScope === undefined
     ? null
     : sessions.parseAiThreadScope(body.threadScope)
@@ -1027,7 +1089,10 @@ ai.post('/chat', async (c) => {
     return c.json({ ok: false, reason: 'no-api-key' }, 503)
   }
 
-  // We don't pre-validate the session here — runChat throws
+  const release = ledgerRequested ? sessions.acquireLedgerAiOperation(db, sessionId) : null
+  if (ledgerRequested && !release) return c.json({ ok: false, reason: 'ledger-session-busy' }, 409)
+
+  // Ordinary sessions are validated in runChat, which throws
   // ChatError('not-found') and the route maps it to an SSE error
   // event so the client can show a chip rather than a generic 404.
   return streamSSE(c, async (stream) => {
@@ -1087,44 +1152,26 @@ ai.post('/chat', async (c) => {
         }
       }
 
-      let ledgerAnalysis: LedgerAiAnalysisSnapshot | 'declined' | undefined
+      let ledgerAnalysis: ReturnType<typeof createLedgerAnalysis> | undefined
       const controller = new AbortController()
       stream.onAbort(() => controller.abort())
       const signal = AbortSignal.any([controller.signal, c.req.raw.signal])
       const ledgerSessionIsCurrent = () => {
         if (signal.aborted) return false
-        const lookup = findSessionById(db, ledgerAuthSession)
-        return lookup.status === 'valid' && lookup.user?.id === ledgerUser?.id
-          && Boolean(sessions.getSession(db, sessionId))
+        return ledgerAuthIsCurrent(db, ledgerUser.id, ledgerAuthSession)
       }
-      if (ledgerScope) {
+      if (ledgerRequested) {
         if (!ledgerSessionIsCurrent()) throw new ChatError('aborted')
-        const allowed = await requestLedgerAnalysisApproval(
-          { userId: ledgerUser.id, authSessionId: ledgerAuthSession, chatSessionId: sessionId },
-          ledgerScope,
-          signal,
-          async (approval) => {
-            await stream.writeSSE({ event: 'ledger_approval', data: JSON.stringify(approval) })
-          },
-        )
+        await stream.writeSSE({ event: 'ledger_reading', data: '{}' })
         if (!ledgerSessionIsCurrent()) throw new ChatError('aborted')
-        ledgerAnalysis = 'declined'
-        if (allowed) {
-          await stream.writeSSE({ event: 'ledger_reading', data: '{}' })
-          if (!ledgerSessionIsCurrent()) throw new ChatError('aborted')
-          try {
-            const start = performance.now()
-            ledgerAnalysis = createLedgerProjections(createLedgerRepository(db)).getAnalysisSnapshot(ledgerScope)
-            if (performance.now() - start > 2_000 || Buffer.byteLength(JSON.stringify(ledgerAnalysis)) > 16_384) {
-              throw new Error('Ledger snapshot budget exceeded')
-            }
-          } catch (error) {
-            const reason = error instanceof LedgerError && error.code === 'ledger-not-found'
-              ? 'ledger-analysis-uninitialized'
-              : 'ledger-analysis-unavailable'
-            await stream.writeSSE({ event: 'error', data: JSON.stringify({ reason }) })
-            return
-          }
+        try {
+          ledgerAnalysis = createLedgerAnalysis(syncLedgerAiContext(db, ledgerUser.id))
+        } catch (error) {
+          const reason = error instanceof LedgerError && error.code === 'ledger-not-found'
+            ? 'ledger-analysis-uninitialized'
+            : 'ledger-analysis-unavailable'
+          await stream.writeSSE({ event: 'error', data: JSON.stringify({ reason }) })
+          return
         }
       }
 
@@ -1141,7 +1188,7 @@ ai.post('/chat', async (c) => {
           return Boolean(authRuntime && hasDiaryBodyAccess(authSessionId, presentedDiaryCapability))
         },
         ledgerAnalysis,
-        canUseLedgerAnalysis: ledgerScope ? ledgerSessionIsCurrent : undefined,
+        canUseLedgerAnalysis: ledgerRequested ? ledgerSessionIsCurrent : undefined,
         signal,
         onEvent: writeEvent,
       })
@@ -1154,7 +1201,7 @@ ai.post('/chat', async (c) => {
           data: JSON.stringify({
             reason,
             ...(err instanceof ChatError && err.code ? { code: err.code } : {}),
-            ...(!ledgerScope && err instanceof ChatError && (err.reason === 'llm-error' || err.reason === 'key-error') && err.message
+            ...(!ledgerRequested && err instanceof ChatError && (err.reason === 'llm-error' || err.reason === 'key-error') && err.message
               ? { message: safeProviderMessage(err.message, runtimeConfig.apiKey) }
               : {}),
           }),
@@ -1163,6 +1210,8 @@ ai.post('/chat', async (c) => {
         // The stream may already be closed (client disconnect).
         // Best-effort: ignore.
       }
+    } finally {
+      release?.()
     }
   })
 })

@@ -2,15 +2,14 @@
 import { computed, inject, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { NAlert, NButton, NIcon } from 'naive-ui'
 import { History, MessagePlus, X } from '@vicons/tabler'
-import { useAiHistory } from '../../composables/vault/useAiHistory'
+import { useAiHistory, useLedgerAiHistory } from '../../composables/vault/useAiHistory'
 import type { AiLiveContextCapture } from '../../composables/vault/aiLiveContext'
 import { AppShellContextKey } from '../../composables/appShellContext'
 import { useI18n } from '../../composables/useI18n'
 import type { DiaryCalendarMode } from '../../composables/appShellContext'
 import type { WorkspaceKind } from '../../lib/workspace'
+import { runLedgerAiCommand, type LedgerAiCommand, type LedgerAiCommandOutcome } from '../../lib/ai-api'
 import { displayContextForCapture } from './aiContextPaths'
-import { proposeLedgerAiAnalysis } from '../../features/ledger/aiAnalysisScope'
-import { useLedgerStore } from '../../features/ledger/ledgerStore'
 import { resolveAiQuickPrompts } from './aiQuickPrompts'
 import AiChatMessages from './AiChatMessages.vue'
 import AiComposer from './AiComposer.vue'
@@ -30,10 +29,29 @@ const props = withDefaults(defineProps<{
 
 const emit = defineEmits<{ close: [] }>()
 const appShell = inject(AppShellContextKey, null)
-const history = useAiHistory()
-const ledgerSettings = useLedgerStore().settings
+const ordinaryHistory = useAiHistory()
+const ledgerHistory = useLedgerAiHistory(ordinaryHistory)
+const isLedger = computed(() => props.workspaceKind === 'ledger')
+const history = computed(() => isLedger.value ? ledgerHistory : ordinaryHistory)
+const title = computed(() => t(isLedger.value ? 'ai.finance' : 'ai.assistant'))
 const { t } = useI18n()
-const draft = ref('')
+const ordinaryDraft = ref('')
+const ledgerDraft = ref('')
+const draft = computed({
+  get: () => isLedger.value ? ledgerDraft.value : ordinaryDraft.value,
+  set: (value: string) => {
+    if (isLedger.value) ledgerDraft.value = value
+    else ordinaryDraft.value = value
+  },
+})
+const ledgerCommands = computed(() => [
+  { command: 'compact' as const, label: t('ai.ledger_compact') },
+  { command: 'clear' as const, label: t('ai.ledger_clear') },
+])
+const commandStatus = ref<LedgerAiCommandOutcome | 'compacting' | 'failed' | 'unknown' | null>(null)
+let commandController: AbortController | null = null
+const commandPending = ref(false)
+const ledgerLoadFailed = ref(false)
 const composer = ref<InstanceType<typeof AiComposer> | null>(null)
 const panelRef = ref<HTMLElement | null>(null)
 const showSessionPicker = ref(false)
@@ -216,7 +234,15 @@ function finishDrag(event: PointerEvent): void {
 
 async function onSend(): Promise<void> {
   const text = draft.value.trim()
-  if (!text || history.busy.value || history.isLoading.value || !history.configured.value) return
+  const active = history.value
+  if (!text || active.busy.value || active.isLoading.value) return
+  if (isLedger.value && text.startsWith('/')) {
+    if (text === '/compact' || text === '/clear') await onLedgerCommand(text === '/compact' ? 'compact' : 'clear')
+    else commandStatus.value = 'unknown'
+    return
+  }
+  if (!active.configured.value || (isLedger.value && (commandPending.value || !active.activeSession.value))) return
+  if (isLedger.value) commandStatus.value = null
 
   // Snapshot both the Note context and its file-change bus synchronously.
   // A later route change cannot replace this request's security boundary.
@@ -224,22 +250,56 @@ async function onSend(): Promise<void> {
   const capture = noteBridge?.capture() ?? { status: 'none' as const }
   const snapshot = capture.status === 'ready' ? capture.context : undefined
   const publishFileChange = noteBridge?.publishFileChange
-  const ledgerAnalysis = props.workspaceKind === 'ledger'
-    ? proposeLedgerAiAnalysis(text, ledgerSettings.value?.timezone)
-    : undefined
   draft.value = ''
-  await history.sendAndStream(text, {
-    ...(ledgerAnalysis ? { ledgerAnalysis } : {}),
+  await active.sendAndStream(text, {
+    ...(props.workspaceKind === 'ledger' ? { ledgerAnalysis: true } : {}),
     ...(snapshot ? { liveContext: snapshot } : {}),
     ...(publishFileChange ? { publishFileChange } : {}),
   })
 }
 
+async function onLedgerCommand(command: LedgerAiCommand): Promise<void> {
+  if (!isLedger.value || !ledgerHistory.activeSession.value || ledgerHistory.busy.value || commandPending.value) return
+  const controller = new AbortController()
+  commandController = controller
+  commandPending.value = true
+  commandStatus.value = command === 'compact' ? 'compacting' : null
+  const initialDraft = ledgerDraft.value
+  try {
+    const { outcome } = await runLedgerAiCommand(command, controller.signal)
+    if (controller.signal.aborted) return
+    if (outcome === 'cleared') {
+      ledgerHistory.messages.value = []
+      ledgerHistory.errorState.value = null
+    }
+    if (ledgerDraft.value === initialDraft) ledgerDraft.value = ''
+    commandStatus.value = outcome
+  } catch {
+    if (!controller.signal.aborted) commandStatus.value = 'failed'
+  } finally {
+    commandController = null
+    commandPending.value = false
+  }
+}
+
+watch([isLedger, () => props.open], ([ledger, open]) => {
+  if (!ledger || !open || ledgerHistory.activeSession.value || ledgerHistory.isLoading.value) return
+  ledgerLoadFailed.value = false
+  void ledgerHistory.loadActive().catch(() => { ledgerLoadFailed.value = true })
+}, { immediate: true })
+
+watch(isLedger, (ledger) => {
+  if (ledger) {
+    showSessionPicker.value = false
+    historyTrigger = null
+  }
+})
+
 async function onNewConversation(): Promise<void> {
-  if (history.busy.value || history.isLoading.value) return
+  if (ordinaryHistory.busy.value || ordinaryHistory.isLoading.value) return
   draft.value = ''
-  await history.createSession()
-  await history.refreshSessions()
+  await ordinaryHistory.createSession()
+  await ordinaryHistory.refreshSessions()
 }
 
 async function useQuickPrompt(text: string): Promise<void> {
@@ -269,11 +329,6 @@ function onGlobalKeydown(event: KeyboardEvent): void {
     || showSessionPicker.value
     || blockingOverlay.value
   ) return
-  if (history.ledgerApproval.value) {
-    event.preventDefault()
-    void history.decideLedgerAnalysis(false)
-    return
-  }
   emit('close')
 }
 
@@ -338,8 +393,8 @@ watch(() => props.open, (open, _previous, onCleanup) => {
 }, { immediate: true, flush: 'post' })
 
 onMounted(() => {
-  void history.loadActive().catch(() => {})
-  void history.refreshModel().catch(() => {})
+  void ordinaryHistory.loadActive().catch(() => {})
+  void ordinaryHistory.refreshModel().catch(() => {})
   window.addEventListener('resize', syncViewport)
   window.visualViewport?.addEventListener('resize', syncViewport)
   document.addEventListener('keydown', onGlobalKeydown)
@@ -353,6 +408,8 @@ onMounted(() => {
 })
 
 onBeforeUnmount(() => {
+  ledgerHistory.stop()
+  commandController?.abort()
   window.removeEventListener('resize', syncViewport)
   window.visualViewport?.removeEventListener('resize', syncViewport)
   document.removeEventListener('keydown', onGlobalKeydown)
@@ -373,7 +430,7 @@ onBeforeUnmount(() => {
       class="ai-panel ai-floating-panel"
       :class="{ 'is-dragging': isDragging, 'is-mobile': isMobileViewport, 'is-obscured': panelObscured }"
       :style="panelStyle"
-      :aria-label="t('ai.assistant')"
+      :aria-label="title"
       :aria-hidden="panelObscured || undefined"
       :inert="panelObscured || undefined"
       data-testid="global-ai-panel"
@@ -389,10 +446,11 @@ onBeforeUnmount(() => {
           @lostpointercapture="finishDrag"
           @dblclick="!isInteractiveTarget($event.target) && !isMobileViewport && restoreDefaultPosition()"
         >
-          <span class="ai-floating-title">{{ t('ai.assistant') }}</span>
+          <span class="ai-floating-title">{{ title }}</span>
         </div>
         <div class="ai-header-actions">
           <NButton
+            v-if="!isLedger"
             class="ai-header-btn"
             attr-type="button"
             text
@@ -404,6 +462,7 @@ onBeforeUnmount(() => {
             @click="onNewConversation"
           ><NIcon aria-hidden="true"><MessagePlus /></NIcon></NButton>
           <NButton
+            v-if="!isLedger"
             class="ai-header-btn"
             attr-type="button"
             text
@@ -426,7 +485,7 @@ onBeforeUnmount(() => {
         </div>
       </header>
 
-      <div v-if="!history.configured.value" class="ai-no-key-banner" role="status">
+      <div v-if="!history.configured.value && !history.isLoading.value" class="ai-no-key-banner" role="status">
         {{ t('ai.not_configured') }}
       </div>
 
@@ -440,37 +499,29 @@ onBeforeUnmount(() => {
       />
 
       <NAlert
-        v-if="history.ledgerApproval.value"
-        :title="t('ai.ledger_approval_title')"
-        :show-icon="false"
-        class="ai-ledger-status"
-        data-testid="ai-ledger-approval"
-      >
-        <div>{{ history.ledgerApproval.value.scope.from }} – {{ history.ledgerApproval.value.scope.to }}</div>
-        <div>{{ t('ai.ledger_scope_' + history.ledgerApproval.value.scope.kind) }}</div>
-        <div>{{ t('ai.ledger_approval_privacy') }}</div>
-        <div class="ai-ledger-approval-actions">
-          <NButton size="small" @click="history.decideLedgerAnalysis(false)">{{ t('ai.ledger_decline') }}</NButton>
-          <NButton size="small" type="primary" @click="history.decideLedgerAnalysis(true)">{{ t('ai.ledger_allow') }}</NButton>
-        </div>
-      </NAlert>
-      <NAlert
-        v-else-if="history.errorState.value?.startsWith('ledger-analysis-')"
+        v-if="history.errorState.value?.startsWith('ledger-analysis-')"
         type="warning"
         :show-icon="false"
         class="ai-ledger-status"
       >{{ t(history.errorState.value === 'ledger-analysis-uninitialized' ? 'ai.ledger_uninitialized' : 'ai.ledger_unavailable') }}</NAlert>
       <p v-else-if="history.ledgerReading.value" class="ai-ledger-status" role="status">{{ t('ai.ledger_reading') }}</p>
 
+      <p v-if="isLedger && commandStatus" class="ai-ledger-status" role="status">
+        {{ t(`ai.ledger_command_${commandStatus}`) }}
+      </p>
+      <p v-if="isLedger && ledgerLoadFailed" class="ai-ledger-status" role="status">{{ t('ai.ledger_unavailable') }}</p>
+
       <AiComposer
         ref="composer"
         v-model="draft"
         :busy="history.busy.value"
         :configured="history.configured.value"
-        :can-send="!history.isLoading.value"
+        :can-send="!history.isLoading.value && (!isLedger || (!!history.activeSession.value && !commandPending))"
+        :commands="isLedger ? ledgerCommands : undefined"
         :model-name="history.model.value"
         :prompts="quickPrompts"
         @send="onSend"
+        @command="onLedgerCommand"
         @stop="history.stop"
       />
 
@@ -485,11 +536,4 @@ onBeforeUnmount(() => {
   margin: 4px 12px;
 }
 
-.ai-ledger-approval-actions {
-  display: flex;
-  justify-content: flex-end;
-  flex-wrap: wrap;
-  gap: 8px;
-  margin-top: 8px;
-}
 </style>

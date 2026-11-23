@@ -11,6 +11,7 @@ export type ChatErrorReason =
   | 'empty'
   | 'aborted'
   | 'llm-error'
+  | 'ledger-analysis-unavailable'
   | 'parse-failed'
   | 'unsupported-provider'
 

@@ -1,4 +1,3 @@
-import type { LedgerAiAnalysisApproval, LedgerAiAnalysisScope } from '../../../shared/ledgerAiAnalysis'
 // AI history state + actions. Each VaultContext owns the instance shared by
 // AiPanel, the session picker, and settings. Persistence is server-side; this
 // composable is just a
@@ -34,7 +33,7 @@ import type { VaultContext } from './context/types.js'
 // request's liveContext field — never re-read, mutated, persisted,
 // or added to message state here.
 export interface SendAndStreamOptions {
-  ledgerAnalysis?: LedgerAiAnalysisScope
+  ledgerAnalysis?: true
   liveContext?: AiLiveContextSnapshot
   threadScope?: AiThreadScope
   /** Captured from the Note workspace at send time; never follows a later workspace switch. */
@@ -52,9 +51,7 @@ export interface AiHistory {
   errorState: Ref<string | null>
   configured: Ref<boolean>
   model: Ref<string>
-  ledgerApproval: Ref<LedgerAiAnalysisApproval | null>
   ledgerReading: Ref<boolean>
-  decideLedgerAnalysis(allowed: boolean): Promise<void>
 
   // actions
   loadActive(): Promise<void>
@@ -110,7 +107,9 @@ export function resetLegacyAiHistory(): void {
   legacyState = null
 }
 
-function createAiHistory(publishChange: (event: FileChangeEvent) => void): AiHistory {
+type AiModelState = Pick<AiHistory, 'configured' | 'model'>
+
+function createAiHistory(publishChange: (event: FileChangeEvent) => void, ledgerSettings?: AiModelState): AiHistory {
   // The currently in-flight stream belongs only to this Vault instance.
   let activeController: AbortController | null = null
   let streamSettled: Promise<void> = Promise.resolve()
@@ -124,16 +123,20 @@ function createAiHistory(publishChange: (event: FileChangeEvent) => void): AiHis
   const isLoading = ref(false)
   const busy = ref(false)
   const errorState = ref<string | null>(null)
-  const ledgerApproval = ref<LedgerAiAnalysisApproval | null>(null)
   const ledgerReading = ref(false)
-  let ledgerRequestSessionId: number | null = null
-  const configured = ref(false)
-  const model = ref('')
+  const configured = ledgerSettings?.configured ?? ref(false)
+  const model = ledgerSettings?.model ?? ref('')
 
   async function loadActive() {
     isLoading.value = true
     try {
       threadScope.value = null
+      if (ledgerSettings) {
+        const thread = await api.openLedgerAiSession()
+        activeSession.value = thread.session
+        messages.value = thread.messages
+        return
+      }
       const out = await api.getActiveSession()
       configured.value = out.configured
       model.value = out.model ?? ''
@@ -228,10 +231,6 @@ function createAiHistory(publishChange: (event: FileChangeEvent) => void): AiHis
   }
 
   async function switchSession(id: number) {
-    if (ledgerRequestSessionId !== null) {
-      stop()
-      await streamSettled
-    }
     isLoading.value = true
     try {
       await api.setActiveSessionId(id)
@@ -250,10 +249,6 @@ function createAiHistory(publishChange: (event: FileChangeEvent) => void): AiHis
   }
 
   async function deleteSession(id: number) {
-    if (ledgerRequestSessionId === id) {
-      stop()
-      await streamSettled
-    }
     await api.deleteSession(id)
     sessions.value = sessions.value.filter((s) => s.id !== id)
     if (activeSession.value?.id === id) {
@@ -297,12 +292,11 @@ function createAiHistory(publishChange: (event: FileChangeEvent) => void): AiHis
         if (ac.signal.aborted) return
         activeSession.value = session
         threadScope.value = options.threadScope
-      } else if (!session) {
+      } else if (!session && !ledgerSettings) {
         session = await createSession()
       }
       if (!session) throw new Error('AI thread is unavailable')
       const sessionId = session.id
-      if (options?.ledgerAnalysis) ledgerRequestSessionId = sessionId
 
       // Optimistic insert: user message (id 0) + empty assistant (id 0).
       // Object identity is the in-flight discriminator (see spec §3.9).
@@ -342,7 +336,7 @@ function createAiHistory(publishChange: (event: FileChangeEvent) => void): AiHis
         applyEvent(event, userMessage, assistantMessage, options?.publishFileChange ?? publishChange)
         if (event.type === 'done' || event.type === 'error') break
       }
-      if (!options?.threadScope) await refreshSessions()
+      if (!options?.threadScope && !ledgerSettings) await refreshSessions()
     } catch (e) {
       // Abort is the expected path when the user clicks Stop; surface
       // it as a quiet "[aborted]" tag on the assistant bubble and
@@ -364,29 +358,11 @@ function createAiHistory(publishChange: (event: FileChangeEvent) => void): AiHis
         throw e
       }
     } finally {
-      ledgerApproval.value = null
       ledgerReading.value = false
-      ledgerRequestSessionId = null
       activeController = null
       busy.value = false
       settleStream?.()
       settleStream = null
-    }
-  }
-
-  async function decideLedgerAnalysis(allowed: boolean): Promise<void> {
-    const approval = ledgerApproval.value
-    const controller = activeController
-    if (!approval || !controller || ledgerRequestSessionId === null) return
-    ledgerApproval.value = null
-    try {
-      if (await api.decideLedgerAnalysis(approval.id, ledgerRequestSessionId, allowed, controller.signal)) return
-    } catch {
-      if (controller.signal.aborted) return
-    }
-    if (!controller.signal.aborted) {
-      errorState.value = 'ledger-analysis-approval-expired'
-      controller.abort()
     }
   }
 
@@ -403,12 +379,10 @@ function createAiHistory(publishChange: (event: FileChangeEvent) => void): AiHis
     optimisticAssistant: Message,
     publishFileChange: (event: FileChangeEvent) => void,
   ): void {
-    if (event.type === 'ledger_approval') {
-      ledgerApproval.value = { id: event.id, scope: event.scope }
-    } else if (event.type === 'ledger_reading') {
+    if (event.type === 'ledger_reading') {
       ledgerReading.value = true
     } else if (event.type === 'user') {
-      ledgerApproval.value = null
+      ledgerReading.value = false
       messages.value = messages.value.map((m) =>
         m === optimisticUser ? { ...m, id: event.id } : m
       )
@@ -488,9 +462,7 @@ function createAiHistory(publishChange: (event: FileChangeEvent) => void): AiHis
     errorState,
     configured,
     model,
-    ledgerApproval,
     ledgerReading,
-    decideLedgerAnalysis,
     loadActive,
     loadSettings,
     loadThread,
@@ -521,4 +493,9 @@ export function useAiHistory(): AiHistory {
     vaultContext.onDispose(state.stop)
   }
   return state
+}
+
+/** Owned by the authenticated panel instance, independent of the general history picker. */
+export function useLedgerAiHistory(settings: AiModelState): AiHistory {
+  return createAiHistory(() => {}, settings)
 }

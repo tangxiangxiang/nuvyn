@@ -1,4 +1,3 @@
-import type { LedgerAiAnalysisApproval, LedgerAiAnalysisScope } from '../../shared/ledgerAiAnalysis'
 import type { SpeechVoiceId } from '../../shared/aiProfiles'
 // Wire types + typed fetch wrappers for /api/ai/*. The shapes
 // (Session, Message) are the single source of truth — the server
@@ -192,7 +191,7 @@ export interface AiCredentialStatus {
 export interface ChatRequest {
   sessionId: number
   content: string
-  ledgerAnalysis?: LedgerAiAnalysisScope
+  ledgerAnalysis?: true
   /** Document/workspace identity for Nuvyn's one-thread-per-note model. */
   threadScope?: AiThreadScope
   // Edit-10.3: the ONE live-context authority on the new wire. When
@@ -218,7 +217,6 @@ export interface FileChangeEvent {
 }
 
 export type ChatEvent =
-  | ({ type: 'ledger_approval' } & LedgerAiAnalysisApproval)
   | { type: 'ledger_reading' }
   | { type: 'user'; id: number }
   | { type: 'token'; text: string }
@@ -282,6 +280,19 @@ export async function appendMessage(
 
 export async function getActiveSession(): Promise<ActiveSession> {
   return jsonOrThrow<ActiveSession>(await authFetch('/api/ai/active', { method: 'GET' }))
+}
+
+export type LedgerAiCommand = 'compact' | 'clear'
+export type LedgerAiCommandOutcome = 'compacted' | 'nothing-to-compact' | 'cleared'
+
+export async function openLedgerAiSession(signal?: AbortSignal): Promise<AiThreadState> {
+  return jsonOrThrow(await authFetch('/api/ai/ledger-session', { method: 'POST', signal }))
+}
+
+export async function runLedgerAiCommand(command: LedgerAiCommand, signal?: AbortSignal): Promise<{ outcome: LedgerAiCommandOutcome }> {
+  return jsonOrThrow(await authFetch('/api/ai/ledger-session/command', {
+    method: 'POST', ...jsonBody({ command }), signal,
+  }))
 }
 
 export async function getAiThread(scope: AiThreadScope): Promise<AiThreadState> {
@@ -438,15 +449,6 @@ export async function suggestSummary(input: {
     ...jsonBody(input),
     signal,
   }))
-}
-
-export async function decideLedgerAnalysis(
-  id: string, sessionId: number, allowed: boolean, signal: AbortSignal,
-): Promise<boolean> {
-  const response = await authFetch('/api/ai/chat/ledger-approval', {
-    method: 'POST', ...jsonBody({ id, sessionId, allowed }), signal,
-  })
-  return response.ok
 }
 
 /**

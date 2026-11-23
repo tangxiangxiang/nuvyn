@@ -226,6 +226,7 @@ defineExpose({ canLeave })
       <div>
         <h3 id="settings-ai-title">{{ t('settings.ai_profiles') }}</h3>
         <p>{{ t('settings.ai_subtitle') }}</p>
+        <p>{{ t('ai.ledger_provider_privacy') }}</p>
       </div>
       <NButton :disabled="blocked" @click="choose()">{{ t('settings.profile_add') }}</NButton>
     </header>

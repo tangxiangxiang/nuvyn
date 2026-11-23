@@ -64,13 +64,70 @@ const THREAD_COLUMNS = `
 `
 
 export function listSessions(db: DatabaseT): Session[] {
-  const rows = db.prepare('SELECT id, title, created_at, updated_at FROM sessions ORDER BY updated_at DESC').all()
+  const rows = db.prepare("SELECT id, title, created_at, updated_at FROM sessions WHERE thread_kind != 'ledger' ORDER BY updated_at DESC").all()
   return rows.map(rowToSession)
 }
 
 export function getSession(db: DatabaseT, id: number): Session | null {
   const row = db.prepare('SELECT id, title, created_at, updated_at FROM sessions WHERE id = ?').get(id)
   return row ? rowToSession(row) : null
+}
+
+export function isLedgerAiSession(db: DatabaseT, id: number): boolean {
+  return Boolean(db.prepare("SELECT 1 FROM sessions WHERE id = ? AND thread_kind = 'ledger'").get(id))
+}
+
+function ledgerThreadKey(ownerId: number): string {
+  return JSON.stringify(['ledger', ownerId])
+}
+
+export function getLedgerAiThread(db: DatabaseT, ownerId: number): AiThreadRecord | null {
+  const row = db.prepare(`SELECT ${THREAD_COLUMNS} FROM sessions WHERE thread_key = ? AND thread_kind = 'ledger'`)
+    .get(ledgerThreadKey(ownerId))
+  return row ? rowToAiThread(row) : null
+}
+
+export function ensureLedgerAiThread(db: DatabaseT, ownerId: number): AiThreadRecord {
+  return db.transaction(() => {
+    const now = Date.now()
+    // thread_key already has a unique index. The Ledger identity is never
+    // constructed from a client-provided scope or an existing session title.
+    db.prepare(`
+      INSERT INTO sessions (title, created_at, updated_at, thread_key, thread_kind)
+      VALUES ('AI Finance', ?, ?, ?, 'ledger') ON CONFLICT DO NOTHING
+    `).run(now, now, ledgerThreadKey(ownerId))
+    const thread = getLedgerAiThread(db, ownerId)
+    if (!thread) throw new Error('Ledger AI session could not be created')
+    return thread
+  })()
+}
+
+export function clearLedgerAiThread(db: DatabaseT, ownerId: number): void {
+  db.transaction(() => {
+    const thread = getLedgerAiThread(db, ownerId)
+    if (!thread) return
+    db.prepare('DELETE FROM messages WHERE session_id = ?').run(thread.session.id)
+    db.prepare(`
+      UPDATE sessions SET compact_summary = '', compacted_through_message_id = 0, updated_at = ?
+      WHERE id = ?
+    `).run(Date.now(), thread.session.id)
+  })()
+}
+
+// The application serves requests through one live SQLite connection.
+// Hold the same slot for the complete stream and either command, including
+// provider waits, so a clear cannot be followed by a stale assistant write.
+const ledgerOperations = new WeakMap<DatabaseT, Set<number>>()
+
+export function acquireLedgerAiOperation(db: DatabaseT, sessionId: number): (() => void) | null {
+  let active = ledgerOperations.get(db)
+  if (!active) {
+    active = new Set()
+    ledgerOperations.set(db, active)
+  }
+  if (active.has(sessionId)) return null
+  active.add(sessionId)
+  return () => { active.delete(sessionId) }
 }
 
 export function createSession(db: DatabaseT): Session {

@@ -4,11 +4,17 @@ import { enableAutoUnmount, mount, type VueWrapper } from '@vue/test-utils'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { AppShellContextKey, type NoteAiContextBridge } from '../../../composables/appShellContext'
 import type { AiLiveContextCapture, AiDocumentContext, AiLiveContextSnapshot } from '../../../composables/vault/aiLiveContext'
-import { useAiHistory } from '../../../composables/vault/useAiHistory'
+import { useAiHistory, useLedgerAiHistory } from '../../../composables/vault/useAiHistory'
 import { useI18n } from '../../../composables/useI18n'
 import AiPanel from '../AiPanel.vue'
 import AiChatMessages from '../AiChatMessages.vue'
 import AiComposer from '../AiComposer.vue'
+import { runLedgerAiCommand } from '../../../lib/ai-api'
+
+vi.mock('../../../lib/ai-api', async (original) => ({
+  ...await original<typeof import('../../../lib/ai-api')>(),
+  runLedgerAiCommand: vi.fn(),
+}))
 
 vi.mock('../../../composables/vault/useAiHistory', async () => {
   const { ref: vueRef } = await import('vue')
@@ -20,9 +26,7 @@ vi.mock('../../../composables/vault/useAiHistory', async () => {
     isLoading: vueRef(false),
     busy: vueRef(false),
     errorState: vueRef(null),
-    ledgerApproval: vueRef(null),
     ledgerReading: vueRef(false),
-    decideLedgerAnalysis: vi.fn(),
     configured: vueRef(true),
     model: vueRef('test-model'),
     loadActive: vi.fn(async () => {}),
@@ -39,7 +43,15 @@ vi.mock('../../../composables/vault/useAiHistory', async () => {
     sendAndStream: vi.fn(async (_text: string, _opts?: { liveContext?: AiLiveContextSnapshot; publishFileChange?: (event: unknown) => void }) => {}),
     stop: vi.fn(),
   }
-  return { useAiHistory: () => history }
+  const financeHistory = {
+    ...history,
+    activeSession: vueRef({ id: 27, title: 'AI Finance', createdAt: 0, updatedAt: 0 }),
+    messages: vueRef([]),
+    busy: vueRef(false),
+    loadActive: vi.fn(async () => {}),
+    sendAndStream: vi.fn(async () => {}),
+  }
+  return { useAiHistory: () => history, useLedgerAiHistory: () => financeHistory }
 })
 
 function documentCapture(path = 'notes/a.md'): AiLiveContextCapture {
@@ -90,6 +102,7 @@ async function typeAndSend(wrapper: VueWrapper, text: string): Promise<void> {
 }
 
 const history = useAiHistory()
+const financeHistory = useLedgerAiHistory(history)
 enableAutoUnmount(afterEach)
 
 describe('global AI panel', () => {
@@ -100,6 +113,8 @@ describe('global AI panel', () => {
     history.isLoading.value = false
     history.activeSession.value = null
     history.messages.value = []
+    financeHistory.messages.value = []
+    financeHistory.busy.value = false
     vi.clearAllMocks()
   })
   afterEach(() => {
@@ -141,13 +156,52 @@ describe('global AI panel', () => {
     expect(wrapper.findComponent(AiComposer).props('modelValue')).toBe('')
   })
 
-  it('sends ordinary AI messages without Note, Diary, Ledger, or Board context', async () => {
-    const sendSpy = vi.spyOn(history, 'sendAndStream').mockImplementation(async () => {})
+  it('requests Ledger context even without financial keywords and excludes Note context', async () => {
+    const sendSpy = vi.spyOn(financeHistory, 'sendAndStream').mockImplementation(async () => {})
     const capture = vi.fn(() => documentCapture())
     const { wrapper } = mountPanel(capture, { workspaceKind: 'ledger' })
     await typeAndSend(wrapper, 'hello from another workspace')
-    expect(sendSpy).toHaveBeenCalledWith('hello from another workspace', {})
+    expect(sendSpy).toHaveBeenCalledWith('hello from another workspace', { ledgerAnalysis: true })
     expect(capture).not.toHaveBeenCalled()
+    expect(wrapper.get('.ai-floating-title').text()).toBe('AI Finance')
+    expect(wrapper.find('[data-testid="global-ai-new-session"]').exists()).toBe(false)
+    expect(wrapper.find('[data-testid="global-ai-history"]').exists()).toBe(false)
+    expect(wrapper.find('[data-testid="global-ai-close"]').exists()).toBe(true)
+  })
+
+  it('executes only the local commands and keeps existing messages until clear succeeds', async () => {
+    const conversation = [{ id: 2, sessionId: 27, role: 'assistant' as const, content: 'Private answer', createdAt: 1 }]
+    financeHistory.messages.value = conversation
+    const command = vi.mocked(runLedgerAiCommand)
+    const { wrapper } = mountPanel(undefined, { workspaceKind: 'ledger' })
+    await typeAndSend(wrapper, '/missing')
+    expect(wrapper.text()).toContain('Unknown command')
+    expect(financeHistory.sendAndStream).not.toHaveBeenCalled()
+    expect(command).not.toHaveBeenCalled()
+
+    let finish!: (value: { outcome: 'compacted' }) => void
+    command.mockImplementationOnce(() => new Promise(resolve => { finish = resolve }))
+    await typeAndSend(wrapper, '  /compact  ')
+    expect(wrapper.text()).toContain('Compacting conversation')
+    await typeAndSend(wrapper, '/compact')
+    expect(command).toHaveBeenCalledOnce()
+    finish({ outcome: 'compacted' })
+    await nextTick()
+    await nextTick()
+    expect(wrapper.text()).toContain('Conversation compacted')
+    expect(financeHistory.messages.value).toEqual(conversation)
+
+    command.mockRejectedValueOnce(new Error('could not clear'))
+    await typeAndSend(wrapper, '/clear')
+    await nextTick()
+    expect(wrapper.text()).toContain('Command failed')
+    expect(financeHistory.messages.value).toEqual(conversation)
+    command.mockResolvedValueOnce({ outcome: 'cleared' })
+    await typeAndSend(wrapper, '/clear')
+    await nextTick()
+    expect(wrapper.text()).toContain('Conversation cleared')
+    expect(financeHistory.messages.value).toEqual([])
+    expect(wrapper.findComponent(AiComposer).props('modelValue')).toBe('')
   })
 
   it('uses only the send-time Note snapshot when the workspace changes during a stream', async () => {
@@ -249,8 +303,11 @@ describe('global AI panel', () => {
       'Plan an important date', 'Plan a birthday or anniversary', 'Plan an activity',
     ])
     expect(wrapper.findComponent(AiChatMessages).props('messages')).toEqual(conversation)
-    expect(wrapper.findComponent(AiComposer).props('modelValue')).toBe(expectedDraft)
+    expect(wrapper.findComponent(AiComposer).props('modelValue')).toBe('')
     expect(wrapper.findComponent(AiChatMessages).props('emptyHint')).toBe('I can help you plan important dates and activities.')
+    await wrapper.setProps({ workspaceKind: 'ledger' })
+    expect(wrapper.findComponent(AiComposer).props('modelValue')).toBe(expectedDraft)
+    expect(wrapper.findComponent(AiChatMessages).props('messages')).toEqual([])
   })
 
   it('ignores ordinary DOM changes and scans for external overlays only while open', async () => {

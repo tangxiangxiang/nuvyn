@@ -126,6 +126,30 @@ describe('AiComposer', () => {
     expect(wrapper.emitted('update:modelValue')).toBeUndefined()
   })
 
+  it('handles Ledger commands through Enter and menu click without changing the ordinary prompt behavior', async () => {
+    const wrapper = mountComposer({ modelValue: ' /compact ', commands: [
+      { command: 'compact', label: 'Compact conversation' },
+      { command: 'clear', label: 'Clear conversation' },
+    ] })
+    const input = wrapper.get('textarea')
+    await input.trigger('focus')
+    expect(wrapper.get('[role="option"]').text()).toContain('/compact')
+    await input.trigger('keydown', { key: 'Enter', isComposing: true })
+    await input.trigger('keydown', { key: 'Enter', shiftKey: true })
+    expect(wrapper.emitted('send')).toBeUndefined()
+    await input.trigger('keydown', { key: 'Enter' })
+    expect(wrapper.emitted('send')).toHaveLength(1)
+
+    await wrapper.setProps({ modelValue: '/' })
+    const clear = wrapper.findAll('[role="option"]')[1]
+    await clear.trigger('click')
+    expect(wrapper.emitted('command')).toEqual([['clear']])
+    await wrapper.setProps({ busy: true, modelValue: '/clear' })
+    await input.trigger('keydown', { key: 'Enter' })
+    expect(wrapper.get('[role="option"]').attributes('disabled')).toBeDefined()
+    expect(wrapper.emitted('send')).toHaveLength(1)
+  })
+
   it('does not send when Enter confirms an IME composition', async () => {
     const wrapper = mountComposer({ modelValue: '你好' })
     await wrapper.get('textarea').trigger('keydown', { key: 'Enter', isComposing: true })

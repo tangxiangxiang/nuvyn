@@ -182,6 +182,7 @@ describe('Ledger 0013 foundation migration', () => {
       'ledger_transactions',
       'ledger_idempotency',
       'ledger_transaction_statistics_exclusions',
+      'ledger_ai_changes',
     ]))
     expect(db.prepare('SELECT COUNT(*) AS count FROM ledger_settings').get()).toEqual({ count: 0 })
     expect(db.prepare('SELECT COUNT(*) AS count FROM ledger_categories').get()).toEqual({ count: 0 })

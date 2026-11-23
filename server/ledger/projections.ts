@@ -126,7 +126,7 @@ function projectionInvariant(message: string): never {
   throw new Error(`Ledger projection invariant violated: ${message}`)
 }
 
-function transactionDto(
+export function transactionDto(
   transaction: LedgerTransaction,
   excludedFromStatistics: boolean,
 ): LedgerTransactionDto {
@@ -748,107 +748,10 @@ export function createLedgerProjections(
     }
 
     const excludedIds = new Set(repository.listStatisticsExcludedTransactionIds({ from: startMs, to: endMs }))
-    const transactions = statisticsTransactions(rows, excludedIds)
     const categories = new Map(
       repository.listCategories({ includeArchived: true }).map((category) => [category.id, category]),
     )
-    const cashflow = cashflowForTransactions(transactions)
-    const expense = categorySlicesForTransactions(transactions, categories).expense
-    const { repaymentInterestNetMinor, withdrawalFeeMinor } = transferChargesMinor(transactions, categories)
-    const snapshot: LedgerAiAnalysisSnapshot = {
-      version: 1,
-      generatedAt: new Date(nowMs).toISOString(),
-      currency: settings.baseCurrency,
-      currencyExponent: currencyExponentFor(settings.baseCurrency),
-      timezone: settings.timezone,
-      scope,
-      activeTransactionCount: rows.length,
-      excludedFromStatisticsCount: rows.length - transactions.length,
-      summary: {
-        ...cashflow,
-        balanceAfterRepaymentMinor: checkedSubMinor(cashflow.balanceMinor, cashflow.repaymentMinor),
-        repaymentInterestNetMinor,
-        repaymentOutflowMinor: checkedAddMinor(cashflow.repaymentMinor, repaymentInterestNetMinor),
-        withdrawalFeeMinor,
-      },
-    }
-    if (scope.kind === 'trend') {
-      const first = Temporal.PlainYearMonth.from(scope.from.slice(0, 7))
-      const last = Temporal.PlainYearMonth.from(scope.to.slice(0, 7))
-      const months = first.until(last, { largestUnit: 'months' }).months + 1
-      const ranges = calendarMonthRangesForLocalDate(months, scope.to, settings.timezone).map((range) => ({
-        ...range,
-        startMs: Math.max(startMs, range.startMs),
-        endMs: Math.min(endMs, range.endMs),
-      }))
-      return {
-        ...snapshot,
-        trend: trendForRanges(ranges, transactions).map((point) => ({
-          ...point,
-          balanceAfterRepaymentMinor: checkedSubMinor(point.balanceMinor, point.repaymentMinor),
-        })),
-      }
-    }
-    if (scope.kind === 'repayment') {
-      const actualCashflow = cashflowForTransactions(rows)
-      const { repaymentInterestNetMinor: actualInterest } = transferChargesMinor(rows, categories)
-      return {
-        ...snapshot,
-        summary: {
-          ...snapshot.summary,
-          actualRepaymentOutflowMinor: checkedAddMinor(actualCashflow.repaymentMinor, actualInterest),
-        },
-      }
-    }
-
-    const categoryNames = new Map([...categories].map(([id, { name }]) => [id, name]))
-    const accountNames = new Map<string, string>()
-    const ordinaryExpenses = transactions.filter((row) => row.type === 'expense').filter((row) => row.groupId === undefined)
-    const largestExpenses = [...ordinaryExpenses]
-      .sort((left, right) => right.amountMinor - left.amountMinor)
-      .slice(0, scope.kind === 'spending' ? 12 : 5)
-      .map((row) => toLedgerAnalysisTransaction(transactionDto(row, false), accountNames, categoryNames))
-      .flatMap((row) => row.type === 'expense' ? [{
-        occurredAt: row.occurredAt,
-        category: row.categoryName?.slice(0, 80) ?? null,
-        amountMinor: row.amountMinor,
-        ...(scope.kind === 'spending' && row.payee ? { payee: row.payee.slice(0, 80) } : {}),
-      }] : [])
-
-    const repeated = new Map<string, { payee: string; category: string; count: number; totalMinor: number }>()
-    if (scope.kind === 'spending') {
-      for (const { payee, categoryId, amountMinor } of ordinaryExpenses) {
-        if (!payee.trim()) continue
-        const key = JSON.stringify([payee.trim().toLowerCase(), categoryId])
-        const existing = repeated.get(key)
-        repeated.set(key, {
-          payee: payee.slice(0, 80),
-          category: (categoryNames.get(categoryId) ?? '').slice(0, 80),
-          count: (existing?.count ?? 0) + 1,
-          totalMinor: checkedAddMinor(existing?.totalMinor ?? 0, amountMinor),
-        })
-      }
-    }
-
-    return {
-      ...snapshot,
-      expenseCategories: expense.slice(0, 30).map(({ name, amountMinor }) => {
-        const share = cashflow.expenseMinor > 0
-          ? BigInt(amountMinor) * 10_000n / BigInt(cashflow.expenseMinor)
-          : null
-        return {
-          name: name.slice(0, 80),
-          amountMinor,
-          shareBasisPoints: share !== null && Number.isSafeInteger(Number(share)) ? Number(share) : null,
-        }
-      }),
-      omittedExpenseCategoryCount: Math.max(0, expense.length - 30),
-      largestExpenses,
-      ...(scope.kind === 'spending' ? {
-        recurringExpenseExamples: [...repeated.values()].filter(({ count }) => count > 1)
-          .sort((left, right) => right.totalMinor - left.totalMinor).slice(0, 8),
-      } : {}),
-    }
+    return projectLedgerAnalysis(settings, scope, rows, excludedIds, categories, nowMs)
   }
 
   function getTrend(months: number, anchorDate?: string): readonly LedgerTrendPoint[] {
@@ -875,5 +778,116 @@ export function createLedgerProjections(
     getOverview,
     getAnalysisSnapshot,
     getTrend,
+  }
+}
+
+/** Shared finance projection for database queries and the revisioned AI context. */
+export function projectLedgerAnalysis(
+  settings: LedgerSettings,
+  scope: LedgerAiAnalysisScope,
+  rows: readonly LedgerTransaction[],
+  excludedIds: ReadonlySet<string>,
+  categories: ReadonlyMap<string, LedgerCategory>,
+  nowMs: number,
+): LedgerAiAnalysisSnapshot {
+  const startMs = localDateRange(scope.from, settings.timezone).startMs
+  const endMs = localDateRange(scope.to, settings.timezone).endMs
+  const transactions = statisticsTransactions(rows, excludedIds)
+  const cashflow = cashflowForTransactions(transactions)
+  const expense = categorySlicesForTransactions(transactions, categories).expense
+  const { repaymentInterestNetMinor, withdrawalFeeMinor } = transferChargesMinor(transactions, categories)
+  const snapshot: LedgerAiAnalysisSnapshot = {
+    version: 1,
+    generatedAt: new Date(nowMs).toISOString(),
+    currency: settings.baseCurrency,
+    currencyExponent: currencyExponentFor(settings.baseCurrency),
+    timezone: settings.timezone,
+    scope,
+    activeTransactionCount: rows.length,
+    excludedFromStatisticsCount: rows.length - transactions.length,
+    summary: {
+      ...cashflow,
+      balanceAfterRepaymentMinor: checkedSubMinor(cashflow.balanceMinor, cashflow.repaymentMinor),
+      repaymentInterestNetMinor,
+      repaymentOutflowMinor: checkedAddMinor(cashflow.repaymentMinor, repaymentInterestNetMinor),
+      withdrawalFeeMinor,
+    },
+  }
+  if (scope.kind === 'trend') {
+    const first = Temporal.PlainYearMonth.from(scope.from.slice(0, 7))
+    const last = Temporal.PlainYearMonth.from(scope.to.slice(0, 7))
+    const months = first.until(last, { largestUnit: 'months' }).months + 1
+    const ranges = calendarMonthRangesForLocalDate(months, scope.to, settings.timezone).map((range) => ({
+      ...range,
+      startMs: Math.max(startMs, range.startMs),
+      endMs: Math.min(endMs, range.endMs),
+    }))
+    return {
+      ...snapshot,
+      trend: trendForRanges(ranges, transactions).map((point) => ({
+        ...point,
+        balanceAfterRepaymentMinor: checkedSubMinor(point.balanceMinor, point.repaymentMinor),
+      })),
+    }
+  }
+  if (scope.kind === 'repayment') {
+    const actualCashflow = cashflowForTransactions(rows)
+    const { repaymentInterestNetMinor: actualInterest } = transferChargesMinor(rows, categories)
+    return {
+      ...snapshot,
+      summary: {
+        ...snapshot.summary,
+        actualRepaymentOutflowMinor: checkedAddMinor(actualCashflow.repaymentMinor, actualInterest),
+      },
+    }
+  }
+
+  const categoryNames = new Map([...categories].map(([id, { name }]) => [id, name]))
+  const accountNames = new Map<string, string>()
+  const ordinaryExpenses = transactions.filter((row) => row.type === 'expense').filter((row) => row.groupId === undefined)
+  const largestExpenses = [...ordinaryExpenses]
+    .sort((left, right) => right.amountMinor - left.amountMinor)
+    .slice(0, scope.kind === 'spending' ? 12 : 5)
+    .map((row) => toLedgerAnalysisTransaction(transactionDto(row, false), accountNames, categoryNames))
+    .flatMap((row) => row.type === 'expense' ? [{
+      occurredAt: row.occurredAt,
+      category: row.categoryName?.slice(0, 80) ?? null,
+      amountMinor: row.amountMinor,
+      ...(scope.kind === 'spending' && row.payee ? { payee: row.payee.slice(0, 80) } : {}),
+    }] : [])
+
+  const repeated = new Map<string, { payee: string; category: string; count: number; totalMinor: number }>()
+  if (scope.kind === 'spending') {
+    for (const { payee, categoryId, amountMinor } of ordinaryExpenses) {
+      if (!payee.trim()) continue
+      const key = JSON.stringify([payee.trim().toLowerCase(), categoryId])
+      const existing = repeated.get(key)
+      repeated.set(key, {
+        payee: payee.slice(0, 80),
+        category: (categoryNames.get(categoryId) ?? '').slice(0, 80),
+        count: (existing?.count ?? 0) + 1,
+        totalMinor: checkedAddMinor(existing?.totalMinor ?? 0, amountMinor),
+      })
+    }
+  }
+
+  return {
+    ...snapshot,
+    expenseCategories: expense.slice(0, 30).map(({ name, amountMinor }) => {
+      const share = cashflow.expenseMinor > 0
+        ? BigInt(amountMinor) * 10_000n / BigInt(cashflow.expenseMinor)
+        : null
+      return {
+        name: name.slice(0, 80),
+        amountMinor,
+        shareBasisPoints: share !== null && Number.isSafeInteger(Number(share)) ? Number(share) : null,
+      }
+    }),
+    omittedExpenseCategoryCount: Math.max(0, expense.length - 30),
+    largestExpenses,
+    ...(scope.kind === 'spending' ? {
+      recurringExpenseExamples: [...repeated.values()].filter(({ count }) => count > 1)
+        .sort((left, right) => right.totalMinor - left.totalMinor).slice(0, 8),
+    } : {}),
   }
 }

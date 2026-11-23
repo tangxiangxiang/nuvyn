@@ -169,6 +169,9 @@ test('an in-flight Note response survives a workspace switch and later requests 
       sse('token', { text: 'stream finished after switching workspaces' }),
       sse('done', { userId: 1, assistantId: 2 }),
     ].join(''))
+    await page.route('**/api/ai/ledger-session', route => route.fulfill(jsonResponse({
+      session: { id: 2, title: 'AI Finance', createdAt: 1, updatedAt: 1 }, messages: [],
+    })))
     await gotoVaultReady(page)
     await ensureVaultLeftDrawerOpen(page)
     const row = page.locator(`[data-tree-key="file:${slug}"]`)
@@ -200,12 +203,15 @@ test('an in-flight Note response survives a workspace switch and later requests 
     await expect(page).toHaveURL(/\/ledger(?:\/|$)/)
     await expect(panel).toBeVisible()
     releaseStream()
-    await expect(panel.getByText('stream finished after switching workspaces')).toBeVisible()
+    await expect(panel.getByText('stream finished after switching workspaces')).toHaveCount(0)
 
     await sendAi(page, 'ordinary Ledger workspace question')
     await expect.poll(() => chatBodies.length).toBe(2)
+    expect(chatBodies[1]).toMatchObject({ sessionId: 2, ledgerAnalysis: true })
     expect(chatBodies[1]).not.toHaveProperty('liveContext')
     expect(JSON.stringify(chatBodies[1])).not.toContain(slug)
+    await selectWorkspace(page, 'note')
+    await expect(panel.getByText('stream finished after switching workspaces')).toBeVisible()
 
     await selectWorkspace(page, 'board')
     await expect(page).toHaveURL(/\/board(?:\/|$)/)
@@ -269,8 +275,9 @@ test('quick prompts follow the active workspace and Diary view without replacing
   await selectWorkspace(page, 'ledger')
   await expect(panel).toBeVisible()
   await expect(prompts).toHaveText(['分析本月收支', '分析消费结构', '查看财务趋势'])
-  await expect(panel.locator('.ai-empty-hint')).toHaveText('经你授权后，可以分析指定日期的账本收支。')
-  await expect(composer).toHaveValue('草稿在切换工作区后仍要保留')
+  await expect(panel.locator('.ai-empty-hint')).toHaveText('可以分析最新账本的收支、还款和账户余额。')
+  await expect(composer).toHaveValue('')
+  await composer.fill('财务草稿')
   expect(chatRequests).toBe(0)
 
   await selectWorkspace(page, 'board')
@@ -292,70 +299,113 @@ test('quick prompts follow the active workspace and Diary view without replacing
   await expect(prompts).toHaveText(['拆解复杂任务', '梳理任务优先级', '制定执行计划'])
   await expect(panel.locator('.ai-empty-hint')).toHaveText('可以帮你拆解任务、梳理优先级。')
   await expect(composer).toHaveValue('草稿在切换工作区后仍要保留')
+  await selectWorkspace(page, 'ledger')
+  await expect(composer).toHaveValue('财务草稿')
   expect(chatRequests).toBe(0)
 })
 
-test('Ledger analysis asks for each approval and keeps the conversation across workspaces', async ({ page }) => {
-  await interceptAiChat(page, [])
-  await page.addInitScript(() => {
-    const originalFetch = window.fetch.bind(window)
-    let pending: { scope: { kind: string; from: string; to: string }; stream: ReadableStreamDefaultController<Uint8Array> } | null = null
-    let turn = 0
-    const encoder = new TextEncoder()
-    const event = (name: string, data: unknown) => encoder.encode(
-      'event: ' + name + '\ndata: ' + JSON.stringify(data) + '\n\n',
-    )
-    window.fetch = async (input, init) => {
-      const path = new URL(input instanceof Request ? input.url : String(input), location.href).pathname
-      if (path !== '/api/ai/chat' && path !== '/api/ai/chat/ledger-approval') return originalFetch(input, init)
-      const body = JSON.parse(String(init?.body ?? '{}'))
-      if (path.endsWith('/ledger-approval')) {
-        if (!pending || body.id !== 'test-approval-' + turn || body.sessionId !== 1) return new Response(null, { status: 409 })
-        const { stream } = pending
-        if (body.allowed) stream.enqueue(event('ledger_reading', {}))
-        stream.enqueue(event('user', { id: turn * 2 - 1 }))
-        stream.enqueue(event('token', { text: body.allowed ? 'Confirmed Ledger analysis' : 'No Ledger data was read' }))
-        stream.enqueue(event('done', { userId: turn * 2 - 1, assistantId: turn * 2 }))
-        stream.close()
-        pending = null
-        return Response.json({ ok: true })
+test('AI Finance isolates its transcript and executes local commands without sending chat', async ({ page }) => {
+  const ordinary = { id: 30, title: 'Note chat', createdAt: 1, updatedAt: 1 }
+  const finance = { id: 31, title: 'AI Finance', createdAt: 1, updatedAt: 1 }
+  const chatRequests: AnyRecord[] = []
+  const commands: string[] = []
+  const financeMessages: AnyRecord[] = []
+  await page.route('**/api/ai/**', async (route) => {
+    const request = route.request()
+    switch (new URL(request.url()).pathname) {
+      case '/api/ai/active':
+        return route.fulfill(jsonResponse({ activeId: ordinary.id, activeSession: ordinary, configured: true }))
+      case '/api/ai/settings':
+        return route.fulfill(jsonResponse({ provider: 'openai', model: 'fixture' }))
+      case '/api/ai/sessions':
+        return route.fulfill(jsonResponse([ordinary]))
+      case '/api/ai/sessions/30/messages':
+        return route.fulfill(jsonResponse([
+          { id: 1, sessionId: ordinary.id, role: 'assistant', content: 'Previous Note conversation', createdAt: 1 },
+        ]))
+      case '/api/ai/ledger-session':
+        return route.fulfill(jsonResponse({ session: finance, messages: financeMessages }))
+      case '/api/ai/ledger-session/command': {
+        const { command } = request.postDataJSON()
+        commands.push(command)
+        if (command === 'clear') financeMessages.length = 0
+        return route.fulfill(jsonResponse({ outcome: command === 'clear' ? 'cleared' : 'nothing-to-compact' }))
       }
-      turn++
-      const stream = new ReadableStream<Uint8Array>({
-        start(controller) {
-          if (!body.ledgerAnalysis || body.liveContext) {
-            controller.enqueue(event('error', { reason: 'expected-ledger-scope' }))
-            controller.close()
-            return
-          }
-          pending = { scope: body.ledgerAnalysis, stream: controller }
-          controller.enqueue(event('ledger_approval', { id: 'test-approval-' + turn, scope: pending.scope }))
-        },
-      })
-      return new Response(stream, { headers: { 'Content-Type': 'text/event-stream' } })
+      case '/api/ai/chat': {
+        const body = request.postDataJSON()
+        chatRequests.push(body)
+        const number = chatRequests.length
+        const userId = number * 2
+        const assistantId = userId + 1
+        const reply = body.ledgerAnalysis ? `Ledger analysis ${number}` : 'Board conversation'
+        if (body.ledgerAnalysis) {
+          financeMessages.push(
+            { id: userId, sessionId: finance.id, role: 'user', content: body.content, createdAt: userId },
+            { id: assistantId, sessionId: finance.id, role: 'assistant', content: reply, createdAt: assistantId },
+          )
+        }
+        return route.fulfill({
+          status: 200,
+          contentType: 'text/event-stream',
+          body: sse('user', { id: userId }) + sse('token', { text: reply }) + sse('done', { userId, assistantId }),
+        })
+      }
+      default: return route.fallback()
     }
   })
+  await page.addInitScript(() => {
+    Object.defineProperty(navigator, 'language', { configurable: true, get: () => 'zh-CN' })
+  })
   await gotoVaultReady(page)
-  await selectWorkspace(page, 'ledger')
   await page.getByTestId('global-ai-trigger').click()
   const panel = page.getByTestId('global-ai-panel')
-  const approval = page.getByTestId('ai-ledger-approval')
-  await sendAi(page, '分析 2026-11-01 到 2026-11-30 的收入和支出')
-  await expect(approval).toContainText('2026-11-01 – 2026-11-30')
-  await expect(panel.getByText('Confirmed Ledger analysis')).toHaveCount(0)
-  await approval.getByRole('button', { name: /取消|Cancel/ }).click()
-  await expect(panel.getByText('No Ledger data was read')).toBeVisible()
-  await expect(approval).toBeHidden()
+  await expect(panel.getByText('Previous Note conversation')).toBeVisible()
+  await selectWorkspace(page, 'ledger')
+  await expect(panel.locator('.ai-floating-title')).toHaveText('AI财务')
+  await expect(panel.getByTestId('global-ai-new-session')).toHaveCount(0)
+  await expect(panel.getByTestId('global-ai-history')).toHaveCount(0)
+  await expect(panel.getByText('Previous Note conversation')).toHaveCount(0)
+  await sendAi(page, '分析本月的收入和支出')
+  await expect(panel.getByText('Ledger analysis 1')).toBeVisible()
+  await sendAi(page, '那上个月呢？')
+  await expect(panel.getByText('Ledger analysis 2')).toBeVisible()
+  await expect(panel.getByTestId('ai-ledger-approval')).toHaveCount(0)
 
-  await sendAi(page, '分析 2026-10-01 到 2026-10-31 的收入和支出')
-  await expect(approval).toContainText('2026-10-01 – 2026-10-31')
   await selectWorkspace(page, 'board')
-  await expect(approval).toBeVisible()
-  await approval.getByRole('button', { name: /允许分析|Allow analysis/ }).click()
-  await expect(panel.getByText('Confirmed Ledger analysis')).toBeVisible()
+  await expect(panel.getByText('Ledger analysis 2')).toHaveCount(0)
+  await expect(panel.getByText('Previous Note conversation')).toBeVisible()
+  await sendAi(page, '帮我整理思路')
+  await expect(panel.getByText('Board conversation')).toBeVisible()
+  expect(chatRequests.map(({ sessionId, ledgerAnalysis, liveContext }) => [sessionId, ledgerAnalysis, liveContext])).toEqual([
+    [finance.id, true, undefined], [finance.id, true, undefined], [ordinary.id, undefined, undefined],
+  ])
+
+  await selectWorkspace(page, 'ledger')
+  await expect(panel.getByText('Ledger analysis 2')).toBeVisible()
   await panel.getByTestId('global-ai-close').click()
   await page.getByTestId('global-ai-trigger').click()
-  await expect(panel.getByText('Confirmed Ledger analysis')).toBeVisible()
+  await expect(panel.getByText('Ledger analysis 2')).toBeVisible()
+
+  await sendAi(page, '  /compact  ')
+  await expect(panel.getByText('当前无需压缩')).toBeVisible()
+  await sendAi(page, '/unknown')
+  await expect(panel.getByText('未知命令。可用命令为 /compact 和 /clear。')).toBeVisible()
+  const input = panel.locator('textarea')
+  await input.fill('/')
+  await panel.getByRole('option', { name: '/clear · 清空对话', exact: true }).click()
+  await expect(panel.getByText('对话已清空')).toBeVisible()
+  await expect(panel.getByText('Ledger analysis 2')).toHaveCount(0)
+  await expect(input).toHaveValue('')
+  expect(commands).toEqual(['compact', 'clear'])
+  expect(chatRequests).toHaveLength(3)
+
+  await page.reload()
+  await page.getByTestId('global-ai-trigger').click()
+  await expect(panel.locator('.ai-floating-title')).toHaveText('AI财务')
+  await expect(panel.locator('.ai-empty-hint')).toBeVisible()
+  await expect(panel.getByText('Ledger analysis 2')).toHaveCount(0)
+  await selectWorkspace(page, 'note')
+  await expect(panel.getByText('Previous Note conversation')).toBeVisible()
 })
 
 test.describe('tablet global AI panel', () => {
