@@ -1,5 +1,5 @@
 import { expect, test } from './fixtures/auth'
-import { cleanupCreatedPaths, createDoc, openDoc, waitForVaultReady } from './helpers/edit-program'
+import { AI_E2E_PROFILES, cleanupCreatedPaths, createDoc, jsonResponse, openDoc, waitForVaultReady } from './helpers/edit-program'
 
 test('quick prompt previews and fills the composer without sending', async ({ page, request }) => {
   const slug = `inbox/e2e-quick-prompt-${Date.now()}`
@@ -10,6 +10,7 @@ test('quick prompt previews and fills the composer without sending', async ({ pa
   })
   try {
     await createDoc(request, slug, '# Example\n\nA note about component design.', created)
+    await page.route('**/api/ai/profiles', route => route.fulfill(jsonResponse(AI_E2E_PROFILES)))
     await page.goto('/vault')
     await waitForVaultReady(page)
     await openDoc(page, slug)

@@ -353,8 +353,8 @@ describe('streamChat', () => {
   }
 
   it('serializes liveContext verbatim and never sends currentNotePath', async () => {
-    const body = await collectRequestBody({ sessionId: 3, content: 'hello', liveContext })
-    expect(body).toEqual({ sessionId: 3, content: 'hello', liveContext })
+    const body = await collectRequestBody({ sessionId: 3, content: 'hello', profileId: 'profile-a', liveContext })
+    expect(body).toEqual({ sessionId: 3, content: 'hello', profileId: 'profile-a', liveContext })
     expect('currentNotePath' in body).toBe(false)
     // No truncation, no rewriting of the Markdown body.
     expect((body.liveContext as { raw: string }).raw).toBe('WIRE_BODY_SENTINEL')

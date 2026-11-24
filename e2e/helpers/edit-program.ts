@@ -43,6 +43,14 @@ export const MINIMAL_SSE = [
   sse('done', { userId: 1, assistantId: 2 }),
 ].join('')
 
+export const AI_E2E_PROFILES = {
+  profiles: [{
+    id: 'e2e-anthropic-profile', name: 'Fixture Anthropic', provider: 'anthropic', baseURL: '',
+    model: 'fixture-model', configured: true, maskedKey: '••••••••', createdAt: 1, updatedAt: 1,
+  }],
+  activeProfileId: 'e2e-anthropic-profile',
+}
+
 // The AI turn's SSE stream for a same-path write_file round: the
 // STANDARD file_changed descriptor (the exact shape server/ai/routes.ts
 // emits, pinned by the server closure suite) carrying the REAL
@@ -74,9 +82,13 @@ export async function interceptAiChat(page: Page, chatBodies: AnyRecord[]) {
       }
       return route.fulfill(jsonResponse([]))
     }
+    if (url.pathname === '/api/ai/ledger-session') {
+      return route.fulfill(jsonResponse({ session: { id: 2, title: 'AI Finance', createdAt: 1, updatedAt: 1 }, messages: [] }))
+    }
     if (url.pathname === '/api/ai/settings') {
       return route.fulfill(jsonResponse({ hasKey: true, baseURL: '', model: '' }))
     }
+    if (url.pathname === '/api/ai/profiles') return route.fulfill(jsonResponse(AI_E2E_PROFILES))
     if (url.pathname === '/api/ai/chat') {
       chatBodies.push(JSON.parse(route.request().postData() ?? '{}'))
       return route.fulfill({ status: 200, contentType: 'text/event-stream', body: MINIMAL_SSE })
@@ -107,9 +119,13 @@ export async function interceptAiChatGated(
       }
       return route.fulfill(jsonResponse([]))
     }
+    if (url.pathname === '/api/ai/ledger-session') {
+      return route.fulfill(jsonResponse({ session: { id: 2, title: 'AI Finance', createdAt: 1, updatedAt: 1 }, messages: [] }))
+    }
     if (url.pathname === '/api/ai/settings') {
       return route.fulfill(jsonResponse({ hasKey: true, baseURL: '', model: '' }))
     }
+    if (url.pathname === '/api/ai/profiles') return route.fulfill(jsonResponse(AI_E2E_PROFILES))
     if (url.pathname === '/api/ai/chat') {
       chatBodies.push(JSON.parse(route.request().postData() ?? '{}'))
       if (chatBodies.length === 1) {

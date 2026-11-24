@@ -271,6 +271,10 @@ const globalAiPositionStorageKey = computed(() => {
   const owner = auth.user.value
   return owner ? ownerScopedStorageKey(NUVYN_BROWSER_STORAGE_KEYS.aiPanelPosition, owner) : null
 })
+const globalAiModelPreferenceStorageKey = computed(() => {
+  const owner = auth.user.value
+  return owner ? ownerScopedStorageKey(NUVYN_BROWSER_STORAGE_KEYS.aiModelProfile, owner) : null
+})
 const showImmersiveBoardAiTrigger = computed(() => (
   showRoutedContent.value
   && auth.state.value === 'authenticated'
@@ -578,6 +582,7 @@ provide(VaultViewModeKey, { mode: viewMode, set: setViewMode, toggle: toggleView
     :workspace-kind="workspaceKind"
     :diary-view-mode="diaryViewMode"
     :position-storage-key="globalAiPositionStorageKey"
+    :model-preference-storage-key="globalAiModelPreferenceStorageKey"
     @close="closeGlobalAi"
   />
   <SettingsModal

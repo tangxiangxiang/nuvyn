@@ -1,8 +1,9 @@
 <script setup lang="ts">
-import { computed, nextTick, ref, useId, watch } from 'vue'
+import { computed, nextTick, onBeforeUnmount, ref, useId, watch } from 'vue'
 import { NButton, NIcon, NInput, type InputInst } from 'naive-ui'
-import { ArrowUp, PlayerStop, Send } from '@vicons/tabler'
+import { ArrowUp, Check, ChevronDown, PlayerStop, Send } from '@vicons/tabler'
 import type { LedgerAiCommand } from '../../lib/ai-api'
+import type { AiModelOption } from '../../lib/ai-api'
 import { useI18n } from '../../composables/useI18n'
 
 const props = withDefaults(defineProps<{
@@ -11,12 +12,18 @@ const props = withDefaults(defineProps<{
   configured: boolean
   canSend?: boolean
   modelName?: string
+  modelOptions?: AiModelOption[]
+  selectedModelProfileId?: string | null
+  modelSelectorDisabled?: boolean
   prompts?: Array<{ label: string; text: string }>
   commands?: Array<{ label: string; command: LedgerAiCommand; description?: string }>
   placeholder?: string
 }>(), {
   canSend: true,
   modelName: '',
+  modelOptions: () => [],
+  selectedModelProfileId: null,
+  modelSelectorDisabled: false,
   prompts: () => [],
 })
 
@@ -25,6 +32,8 @@ const emit = defineEmits<{
   send: []
   stop: []
   command: [command: LedgerAiCommand]
+  'select-model': [profileId: string]
+  'model-menu-open': []
 }>()
 const { t } = useI18n()
 
@@ -35,6 +44,10 @@ const focused = ref(false)
 const dismissed = ref(false)
 const selectedPrompt = ref(0)
 const composing = ref(false)
+const modelMenuOpen = ref(false)
+const composerEl = ref<HTMLElement | null>(null)
+const modelTrigger = ref<HTMLButtonElement | null>(null)
+const modelMenuId = useId()
 const slashText = computed(() => props.commands ? props.modelValue.trim() : props.modelValue)
 const slashQuery = computed(() => /^\/([^\s/]*)$/.exec(slashText.value)?.[1] ?? null)
 const matchingOptions = computed<Array<{ label: string; text: string; command?: LedgerAiCommand; description?: string }>>(() => {
@@ -54,6 +67,22 @@ watch(() => props.modelValue, () => {
 watch(() => props.prompts, () => { selectedPrompt.value = 0 })
 const sendEnabled = computed(() => !props.busy && !composing.value
   && !!props.modelValue.trim() && (props.configured || commandInput.value) && props.canSend)
+const modelGroups = computed(() => {
+  const providers = [...new Set(props.modelOptions.map(option => option.provider))]
+  const showProvider = providers.length > 1
+  return providers.map(provider => ({
+    provider,
+    label: provider === 'anthropic' ? t('ai.provider_anthropic') : t('ai.provider_openai'),
+    showHeading: showProvider,
+    options: props.modelOptions.filter(option => option.provider === provider),
+  }))
+})
+const duplicateModelIds = computed(() => {
+  const counts = new Map<string, number>()
+  for (const option of props.modelOptions) counts.set(option.model, (counts.get(option.model) ?? 0) + 1)
+  return new Set([...counts].filter(([, count]) => count > 1).map(([model]) => model))
+})
+const modelSwitchDisabled = computed(() => props.modelSelectorDisabled || props.busy)
 
 function chooseOption(index: number, executeCommand = false) {
   const option = matchingOptions.value[index]
@@ -112,6 +141,59 @@ function onPrimaryAction() {
   else send()
 }
 
+async function openModelMenu(): Promise<void> {
+  if (modelSwitchDisabled.value || !props.modelOptions.length) return
+  modelMenuOpen.value = true
+  emit('model-menu-open')
+  await nextTick()
+  const selected = composerEl.value?.querySelector<HTMLButtonElement>('[role="option"][aria-selected="true"]')
+  const first = composerEl.value?.querySelector<HTMLButtonElement>('[role="option"]')
+  const target = selected ?? first
+  target?.focus()
+}
+
+async function closeModelMenu(restoreFocus = true): Promise<void> {
+  if (!modelMenuOpen.value) return
+  modelMenuOpen.value = false
+  if (restoreFocus) {
+    await nextTick()
+    modelTrigger.value?.focus()
+  }
+}
+
+function chooseModel(profileId: string): void {
+  if (modelSwitchDisabled.value) return
+  emit('select-model', profileId)
+  void closeModelMenu()
+}
+
+function onModelMenuKeydown(event: KeyboardEvent): void {
+  if (event.key === 'Escape') {
+    event.preventDefault()
+    event.stopPropagation()
+    void closeModelMenu()
+    return
+  }
+  if (event.key !== 'ArrowDown' && event.key !== 'ArrowUp') return
+  const options = [...(composerEl.value?.querySelectorAll<HTMLButtonElement>('[role="option"]') ?? [])]
+  if (!options.length) return
+  event.preventDefault()
+  const current = options.indexOf(document.activeElement as HTMLButtonElement)
+  const delta = event.key === 'ArrowDown' ? 1 : -1
+  const next = (current + delta + options.length) % options.length
+  options[next]?.focus()
+}
+
+function onDocumentPointerdown(event: PointerEvent): void {
+  if (event.target instanceof Node && !composerEl.value?.contains(event.target)) void closeModelMenu(false)
+}
+
+watch(modelMenuOpen, (open) => {
+  if (open) document.addEventListener('pointerdown', onDocumentPointerdown)
+  else document.removeEventListener('pointerdown', onDocumentPointerdown)
+})
+onBeforeUnmount(() => document.removeEventListener('pointerdown', onDocumentPointerdown))
+
 async function focus() {
   await nextTick()
   inputEl.value?.focus()
@@ -121,7 +203,29 @@ defineExpose({ focus })
 </script>
 
 <template>
-  <form class="ai-composer" @submit.prevent="send">
+  <form ref="composerEl" class="ai-composer" @submit.prevent="send" @keydown="modelMenuOpen && onModelMenuKeydown($event)">
+    <div v-if="modelMenuOpen" :id="modelMenuId" class="ai-model-menu" role="listbox" :aria-label="t('ai.choose_model')">
+      <template v-for="group in modelGroups" :key="group.provider">
+        <div v-if="group.showHeading" class="ai-model-menu-heading">{{ group.label }}</div>
+        <button
+          v-for="option in group.options"
+          :key="option.profileId"
+          type="button"
+          role="option"
+          :aria-selected="selectedModelProfileId === option.profileId"
+          :disabled="modelSwitchDisabled"
+          :data-testid="`ai-model-option-${option.profileId}`"
+          @click="chooseModel(option.profileId)"
+        >
+          <span class="ai-model-option-text">
+            <span>{{ option.model }}</span>
+            <small v-if="duplicateModelIds.has(option.model)">{{ option.name }}</small>
+          </span>
+          <NIcon v-if="selectedModelProfileId === option.profileId" aria-hidden="true"><Check /></NIcon>
+        </button>
+      </template>
+      <div v-if="!modelOptions.length" class="ai-model-menu-heading">{{ t('ai.models_unavailable') }}</div>
+    </div>
     <div v-if="showPrompts" :id="menuId" class="ai-prompt-menu" role="listbox" :aria-label="t(commands ? 'ai.finance_commands' : 'ai.prompt_templates')">
       <div v-if="!commands" class="ai-prompt-menu-heading">{{ t('ai.prompt_templates') }}</div>
       <button
@@ -173,9 +277,22 @@ defineExpose({ focus })
       />
       <div class="ai-toolbar">
         <div class="ai-toolbar-left">
-          <span class="ai-mode-badge" :title="modelName">
+          <button
+            ref="modelTrigger"
+            class="ai-mode-badge"
+            type="button"
+            :title="modelName"
+            :aria-label="`${t('ai.choose_model')}: ${modelName}`"
+            :aria-haspopup="'listbox'"
+            :aria-expanded="modelMenuOpen"
+            :aria-controls="modelMenuOpen ? modelMenuId : undefined"
+            :disabled="modelSwitchDisabled"
+            data-testid="ai-model-selector"
+            @click="modelMenuOpen ? closeModelMenu(false) : openModelMenu()"
+          >
             <span class="ai-model-name">{{ modelName || '…' }}</span>
-          </span>
+            <NIcon class="ai-model-chevron" aria-hidden="true"><ChevronDown /></NIcon>
+          </button>
         </div>
         <div class="ai-toolbar-right">
           <NButton

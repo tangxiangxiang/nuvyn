@@ -61,12 +61,45 @@ describe('AiComposer', () => {
     expect(wrapper.get('.ai-send').attributes('disabled')).toBeDefined()
   })
 
-  it('shows only the model on the left and the send action on the right', () => {
+  it('shows the model selector on the left and the send action on the right', () => {
     const wrapper = mountComposer()
     expect(wrapper.find('.ai-toolbar-left > .ai-mode-badge').exists()).toBe(true)
-    expect(wrapper.find('.ai-toolbar-left button').exists()).toBe(false)
+    expect(wrapper.find('.ai-toolbar-left button').attributes('aria-haspopup')).toBe('listbox')
     expect(wrapper.find('.ai-toolbar-right .ai-send').exists()).toBe(true)
     expect(wrapper.find('.ai-tool-button, .ai-context-chip, .ai-context-picker').exists()).toBe(false)
+  })
+
+  it('groups configured models and emits a selection without changing the draft', async () => {
+    const models = [
+      { profileId: 'anthropic-profile', name: 'Claude profile', provider: 'anthropic' as const, model: 'claude-sonnet' },
+      { profileId: 'openai-profile', name: 'MiniMax profile', provider: 'openai' as const, model: 'MiniMax-M3.1-Flash' },
+    ]
+    const wrapper = mountComposer({
+      modelValue: 'keep this draft',
+      modelName: 'claude-sonnet',
+      modelOptions: models,
+      selectedModelProfileId: 'anthropic-profile',
+    })
+    await wrapper.get('[data-testid="ai-model-selector"]').trigger('click')
+    expect(wrapper.findAll('.ai-model-menu-heading').map(item => item.text())).toEqual(['Anthropic', 'OpenAI compatible'])
+    expect(wrapper.get('[role="option"][aria-selected="true"]').text()).toContain('claude-sonnet')
+
+    await wrapper.get('[data-testid="ai-model-option-openai-profile"]').trigger('click')
+    expect(wrapper.emitted('select-model')).toEqual([['openai-profile']])
+    expect(wrapper.emitted('update:modelValue')).toBeUndefined()
+    expect(wrapper.find('.ai-model-menu').exists()).toBe(false)
+    expect(wrapper.find('textarea').element.value).toBe('keep this draft')
+  })
+
+  it('keeps model switching disabled for an active agent run', async () => {
+    const wrapper = mountComposer({
+      busy: true,
+      modelOptions: [{ profileId: 'profile', name: 'Profile', provider: 'anthropic', model: 'model-x' }],
+    })
+    const selector = wrapper.get('[data-testid="ai-model-selector"]')
+    expect(selector.attributes('disabled')).toBeDefined()
+    await selector.trigger('click')
+    expect(wrapper.find('.ai-model-menu').exists()).toBe(false)
   })
 
   it('disables send when the current Note has no sendable live context', () => {

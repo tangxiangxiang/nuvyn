@@ -195,6 +195,8 @@ export interface AiCredentialStatus {
 export interface ChatRequest {
   sessionId: number
   content: string
+  /** Explicit configured profile selected for this workspace's request. */
+  profileId?: string
   ledgerAnalysis?: true
   /** Document/workspace identity for Nuvyn's one-thread-per-note model. */
   threadScope?: AiThreadScope
@@ -207,6 +209,14 @@ export interface ChatRequest {
   // (never null). Type-only import: the wire types stay free of any
   // runtime dependency on the capture module.
   liveContext?: AiLiveContextSnapshot
+}
+
+/** Safe, display-only projection of a configured profile for the Composer. */
+export interface AiModelOption {
+  profileId: string
+  name: string
+  provider: AiProvider
+  model: string
 }
 
 export type FileChangeKind = 'write' | 'delete' | 'rename'

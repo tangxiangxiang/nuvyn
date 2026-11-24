@@ -35,6 +35,7 @@ import type { VaultContext } from './context/types.js'
 // or added to message state here.
 export interface SendAndStreamOptions {
   ledgerAnalysis?: true
+  profileId?: string
   liveContext?: AiLiveContextSnapshot
   threadScope?: AiThreadScope
   /** Captured from the Note workspace at send time; never follows a later workspace switch. */
@@ -323,6 +324,7 @@ function createAiHistory(publishChange: (event: FileChangeEvent) => void, ledger
         {
           sessionId,
           content: trimmed,
+          ...(options?.profileId ? { profileId: options.profileId } : {}),
           ...(options?.ledgerAnalysis ? { ledgerAnalysis: options.ledgerAnalysis } : {}),
           ...(options?.threadScope ? { threadScope: options.threadScope } : {}),
           // Edit-10.3: the send-time snapshot is the ONE live-context
@@ -484,7 +486,9 @@ function createAiHistory(publishChange: (event: FileChangeEvent) => void, ledger
       optimisticAssistant.id = -1
       errorState.value = ledgerSettings && !event.reason.startsWith('ledger-analysis-')
         ? 'ledger-analysis-unavailable'
-        : event.reason
+        : event.reason === 'selected-profile-unavailable' || event.code === 'openai-tools-unsupported'
+          ? 'ai-model-unavailable'
+          : event.reason
     }
   }
 

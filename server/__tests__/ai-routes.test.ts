@@ -10,6 +10,7 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import Database from 'better-sqlite3'
 import { applyMigrations } from '../db'
 import * as aiSessions from '../ai/sessions'
+import { createAiProfile } from '../ai/profiles'
 
 // vi.hoisted runs synchronously before imports are resolved, so the
 // factory must be sync. Only `testDbRef` lives in the hoisted scope
@@ -628,6 +629,55 @@ describe('POST /api/ai/chat', () => {
     expect(JSON.parse(events[1].data)).toEqual({ text: 'hello ' })
     expect(JSON.parse(events[2].data)).toEqual({ text: 'world' })
     expect(JSON.parse(events[3].data)).toEqual({ userId: 101, assistantId: 202 })
+  })
+
+  it('uses the explicitly selected configured profile for the whole request', async () => {
+    const profile = createAiProfile(testDbRef.value!, {
+      name: 'Alternate model',
+      provider: 'openai',
+      apiKey: 'sk-alternate-profile',
+      baseURL: 'https://alternate.example.test/v1',
+      model: 'model-alternate',
+    })
+    const session = (await (await call('POST', '/sessions')).json()) as { id: number }
+    vi.mocked(chatModule.runChat).mockClear()
+
+    const response = await call('POST', '/chat', {
+      sessionId: session.id,
+      content: 'use this model',
+      profileId: profile.id,
+    })
+    expect(response.status).toBe(200)
+    await response.text()
+    expect(chatModule.runChat).toHaveBeenCalledOnce()
+    expect(chatModule.runChat.mock.calls[0][0]).toMatchObject({
+      model: 'model-alternate',
+      runtimeConfig: {
+        provider: 'openai',
+        model: 'model-alternate',
+        apiKey: 'sk-alternate-profile',
+        baseURL: 'https://alternate.example.test/v1',
+      },
+    })
+  })
+
+  it('rejects an unavailable selected profile without falling back to the default', async () => {
+    const profile = createAiProfile(testDbRef.value!, {
+      name: 'Unconfigured model',
+      provider: 'anthropic',
+      model: 'model-unconfigured',
+    })
+    const session = (await (await call('POST', '/sessions')).json()) as { id: number }
+    vi.mocked(chatModule.runChat).mockClear()
+
+    const response = await call('POST', '/chat', {
+      sessionId: session.id,
+      content: 'do not fall back',
+      profileId: profile.id,
+    })
+    expect(response.status).toBe(409)
+    expect(await response.json()).toEqual({ ok: false, reason: 'selected-profile-unavailable' })
+    expect(chatModule.runChat).not.toHaveBeenCalled()
   })
 
   it('emits an error event when runChat throws not-found', async () => {

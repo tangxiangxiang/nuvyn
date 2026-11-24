@@ -12,7 +12,7 @@ import { parseAccountCreateRequest, parseSettingsCreateRequest, parseTransaction
 import { syncLedgerAiContext } from '../ledger/aiContext.js'
 import { createLedgerAnalysis } from '../ai/ledger-analysis.js'
 import { createFinanceAgent, financeCoverageNotice } from '../ai/finance-agent.js'
-import { verifyFinanceAnswer } from '../ai/finance-verification.js'
+import { requiresLedgerEvidence, verifyFinanceAnswer } from '../ai/finance-verification.js'
 import { createLedgerProjections } from '../ledger/projections.js'
 import type { StreamRoundOpts } from '../ai/llm.js'
 import { authenticatedRequest, closeAuthTestContext, createAuthenticatedTestContext, type AuthenticatedTestContext } from './helpers/auth.js'
@@ -131,11 +131,58 @@ function toolObservations({ messages }: StreamRoundOpts) {
 
 describe('Finance Agent execution', () => {
   it('can answer a conceptual question without using a Ledger tool', async () => {
+    streamRound.mockResolvedValueOnce(financeReply({
+      type: 'knowledge', text: 'A budget allocates income among spending, saving, and planned goals.',
+    }))
     const events = await send('What is a budget?')
-    expect(events).toContain('A budget is a spending plan')
+    expect(events).toContain('A budget allocates income')
     expect(events).not.toContain('"phase":"reading"')
-    expect(streamRound).not.toHaveBeenCalled()
+    expect(streamRound).toHaveBeenCalledTimes(1)
+    expect(streamRound.mock.calls[0]?.[0].tools).toEqual([])
     expect(generateText).not.toHaveBeenCalled()
+  })
+
+  it.each([
+    ['什么是通货膨胀？', '通货膨胀是整体物价水平持续上升，并导致货币购买力下降的现象。'],
+    ['什么是复利？', '复利是把已产生的利息计入后续计息基数，使利息继续产生利息的计算方式。'],
+    ['等额本金和等额本息有什么区别？', '两种还款方式的区别主要在本金分摊方式和每期还款变化。'],
+    ['提前还房贷有哪些利弊？', '提前还贷可以减少未来利息支出，但也会降低可用于应急或投资的资金。'],
+    ['什么是资产负债率？', '资产负债率用负债总额与资产总额的比例观察整体杠杆水平。'],
+    ['信用卡免息期是怎么运作的？', '免息期是在符合还款条件时，消费金额暂不产生利息的一段时间。'],
+    ['为什么利率下降后，贷款总利息会减少？', '利率下降会降低未偿本金在后续期间产生的利息。'],
+  ] as const)('answers general finance knowledge without Ledger access: %s', async (question, answer) => {
+    streamRound.mockResolvedValueOnce(financeReply({ type: 'knowledge', text: answer }))
+    const events = await send(question)
+    expect(events.normalize('NFKC')).toContain(answer.normalize('NFKC'))
+    expect(streamRound).toHaveBeenCalledTimes(1)
+    expect(streamRound.mock.calls[0]?.[0].tools).toEqual([])
+    expect(events).not.toContain('"phase":"reading"')
+  })
+
+  it.each([
+    '什么是通货膨胀？',
+    '什么是复利？',
+    '等额本金和等额本息有什么区别？',
+    '提前还房贷有哪些利弊？',
+    '什么是资产负债率？',
+    '信用卡免息期是怎么运作的？',
+    '为什么利率下降后，贷款总利息会减少？',
+    '我想了解什么是通货膨胀。',
+    'How can someone create a simple budget?',
+  ])('does not classify a standalone concept as a personal Ledger request: %s', (question) => {
+    expect(requiresLedgerEvidence(question)).toBe(false)
+  })
+
+  it.each([
+    '我的月供是多少？',
+    '我上个月花了多少钱？',
+    '最近半年为什么存不下钱？',
+    '解释等额本金，然后分析我的房贷。',
+    'What is my current balance?',
+    'What did I spend last month?',
+    'Please explain what this means.',
+  ])('requires Ledger evidence for personal or ambiguous finance requests: %s', (question) => {
+    expect(requiresLedgerEvidence(question)).toBe(true)
   })
 
   it('requests fresh evidence when a model answers a personal amount before querying Ledger', async () => {
@@ -153,6 +200,33 @@ describe('Finance Agent execution', () => {
     expect(generateText).not.toHaveBeenCalled()
   })
 
+  it('does not accept a knowledge record as a substitute for a personal balance query', async () => {
+    streamRound.mockResolvedValueOnce(financeReply({
+      type: 'knowledge', text: 'A bank account balance is the amount currently held in that account.',
+    })).mockResolvedValueOnce(queryRound({ kind: 'accounts' })).mockResolvedValueOnce(financeReply(
+      { observation: 1, metric: 'currentBalanceMinor', row: 0 },
+    ))
+    const events = await send('What is my current balance?')
+    expect(events).toContain('Private account · Current balance：-CN¥8,144.88')
+    expect(events).not.toContain('A bank account balance is the amount currently held')
+    expect(streamRound).toHaveBeenCalledTimes(3)
+    expect(streamRound.mock.calls[0]?.[0].tools.map((tool) => tool.name)).toContain('read_ledger')
+  })
+
+  it('combines general financial education with only verified Ledger facts', async () => {
+    streamRound.mockResolvedValueOnce(queryRound(scope)).mockResolvedValueOnce(financeReply(
+      { id: 'f1', observation: 1, metric: 'expenseMinor' },
+      { type: 'knowledge', text: '通货膨胀是整体物价水平持续上升，并导致货币购买力下降的现象。' },
+      { type: 'inference', evidence: ['f1'], text: '了解收支变化有助于判断储蓄空间。' },
+    ))
+    const events = await send('解释通货膨胀，然后分析我的收支。')
+    expect(events).toContain('通货膨胀是整体物价水平持续上升')
+    expect(events).toContain('支出 · 2026-01-01 → 2026-01-10：¥825.01')
+    expect(events).toContain('了解收支变化有助于判断储蓄空间。')
+    expect(streamRound).toHaveBeenCalledTimes(2)
+    expect(streamRound.mock.calls[0]?.[0].tools.map((tool) => tool.name)).toContain('read_ledger')
+  })
+
   it('withholds a fabricated balance after the bounded correction', async () => {
     const guess = { text: 'Your balance is CNY 453,321.', toolCalls: [], finishReason: 'stop' as const }
     streamRound.mockResolvedValueOnce(guess).mockResolvedValueOnce(guess)
@@ -167,11 +241,20 @@ describe('Finance Agent execution', () => {
     ['Assume I earn ¥100 and spend ¥30. How much is left?', 'Using the assumptions you provided', '70.00'],
     ['假设月收入 8000 元，支出 3000 元，能剩多少钱？', '按你提供的假设', '5,000.00'],
     ['假设月收入 3.19 元，支出 3.28 元，能剩多少钱？', '按你提供的假设', '-¥0.09'],
+    ['假设每月收入 8000 元，每月支出 3000 元，一年能存多少钱？', '按你提供的假设', '60,000.00'],
   ])('calculates standalone hypothetical amounts on the server: %s', async (question, label, amount) => {
     const events = await send(question)
     expect(events.normalize('NFKC')).toContain(label)
     expect(events.normalize('NFKC')).toContain(amount)
     expect(events).not.toContain('"phase":"reading"')
+    expect(streamRound).not.toHaveBeenCalled()
+    expect(generateText).not.toHaveBeenCalled()
+  })
+
+  it('compares separate explicit savings assumptions without reading Ledger', async () => {
+    const events = await send('假设每月收入 8000 元、每月支出 3000 元；如果每月收入 9000 元、每月支出 3500 元，分别计算一年结余。')
+    expect(events).toContain('情景一每年结余为 ¥60,000.00')
+    expect(events).toContain('情景二每年结余为 ¥66,000.00')
     expect(streamRound).not.toHaveBeenCalled()
     expect(generateText).not.toHaveBeenCalled()
   })
@@ -247,6 +330,26 @@ describe('Finance Agent execution', () => {
     expect(events).toContain('Possible cause to investigate')
     expect(events).toContain('Claims that could not be verified were omitted')
     expect(events).not.toMatch(/observation|\{\{f|UNSUPPORTED REFERENCE|900,000|nine grand|Fake scope|every transaction|Unauthorized placeholder/)
+  })
+
+  it('keeps safe knowledge prose while rejecting personal facts hidden in a knowledge record', () => {
+    const analysis = createLedgerAnalysis(syncLedgerAiContext(db, auth.userId), Date.UTC(2026, 0, 20))
+    const query = analysis.normalize(scope)
+    const result = analysis.readQuery(query)
+    if ('error' in result) throw new Error('Expected a valid Ledger observation')
+    const observation = { query, result }
+    const draft = financeReply(
+      { id: 'f1', observation: 1, metric: 'expenseMinor' },
+      { type: 'knowledge', text: '通货膨胀是整体物价水平持续上升的现象。' },
+      { type: 'knowledge', text: '你的账户余额说明你可以提前还贷。' },
+      { type: 'knowledge', text: '通货膨胀为 3 percent。' },
+    ).text
+    const checked = verifyFinanceAnswer(draft, (id) => id === 1 ? observation : undefined, true, { allowGeneral: true })
+    expect(checked.text).toContain('通货膨胀是整体物价水平持续上升的现象。')
+    expect(checked.text).toContain('¥825.01')
+    expect(checked.text).not.toContain('你的账户余额')
+    expect(checked.text).not.toContain('3 percent')
+    expect(checked.rejected).toBe(true)
   })
 
   it('compares only delivered, equally scoped periods in the same currency', () => {

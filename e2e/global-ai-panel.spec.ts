@@ -155,6 +155,43 @@ test('global AI drag position persists, stays in view, and resets on title doubl
   expect(reset.top).toBeLessThan(moved.top)
 })
 
+test('model selection uses configured Profiles, preserves drafts, and persists by workspace', async ({ page }) => {
+  await page.setViewportSize({ width: 1024, height: 768 })
+  const chatBodies: AnyRecord[] = []
+  await interceptAiChat(page, chatBodies)
+  await page.route('**/api/ai/profiles', route => route.fulfill(jsonResponse({
+    profiles: [
+      { id: 'fixture-claude', name: 'Claude profile', provider: 'anthropic', baseURL: '', model: 'claude-fixture', configured: true, maskedKey: '••••••••', createdAt: 1, updatedAt: 1 },
+      { id: 'fixture-minimax', name: 'MiniMax profile', provider: 'openai', baseURL: '', model: 'MiniMax-M3.1-Flash', configured: true, maskedKey: '••••••••', createdAt: 2, updatedAt: 2 },
+    ],
+    activeProfileId: 'fixture-claude',
+  })))
+  await gotoVaultReady(page)
+  await page.getByTestId('global-ai-trigger').click()
+  const panel = page.getByTestId('global-ai-panel')
+  const selector = panel.getByTestId('ai-model-selector')
+  const input = panel.locator('textarea.ai-input')
+  await expect(selector).toContainText('claude-fixture')
+  await input.fill('Keep this draft while I change models')
+  await selector.click()
+  await panel.getByTestId('ai-model-option-fixture-minimax').click()
+  await expect(selector).toContainText('MiniMax-M3.1-Flash')
+  await expect(input).toHaveValue('Keep this draft while I change models')
+
+  await sendAi(page, 'Use the selected model')
+  await expect.poll(() => chatBodies.length).toBe(1)
+  expect(chatBodies[0]).toMatchObject({ profileId: 'fixture-minimax' })
+
+  await selectWorkspace(page, 'ledger')
+  await expect(selector).toContainText('claude-fixture')
+  await selectWorkspace(page, 'note')
+  await expect(selector).toContainText('MiniMax-M3.1-Flash')
+  await page.reload()
+  await gotoVaultReady(page)
+  await page.getByTestId('global-ai-trigger').click()
+  await expect(page.getByTestId('global-ai-panel').getByTestId('ai-model-selector')).toContainText('MiniMax-M3.1-Flash')
+})
+
 test('an in-flight Note response survives a workspace switch and later requests get no Ledger context', async ({ page, request }) => {
   await page.setViewportSize({ width: 1024, height: 768 })
   const slug = `inbox/e2e-global-ai-${Date.now()}`
@@ -313,6 +350,11 @@ test('AI Finance isolates its transcript and executes local commands without sen
   await page.route('**/api/ai/**', async (route) => {
     const request = route.request()
     switch (new URL(request.url()).pathname) {
+      case '/api/ai/profiles':
+        return route.fulfill(jsonResponse({ profiles: [{
+          id: 'finance-model', name: 'Finance fixture', provider: 'openai', baseURL: '', model: 'MiniMax-M3.1-Flash',
+          configured: true, maskedKey: '••••••••', createdAt: 1, updatedAt: 1,
+        }], activeProfileId: 'finance-model' }))
       case '/api/ai/active':
         return route.fulfill(jsonResponse({ activeId: ordinary.id, activeSession: ordinary, configured: true }))
       case '/api/ai/settings':
@@ -459,17 +501,17 @@ test('AI Finance isolates its transcript and executes local commands without sen
   const input = panel.locator('textarea')
   await input.fill('/')
   await panel.getByRole('option', { name: '/clear · 清空对话', exact: true }).click()
-  await expect(page.getByText('清空财务对话？')).toBeVisible()
-  await page.keyboard.press('Escape')
-  await expect(panel.getByText('Ledger analysis 2')).toBeVisible()
-  expect(commands).toEqual(['compact'])
-  await input.fill('/clear')
-  await input.press('Enter')
-  await page.getByRole('button', { name: '清空对话', exact: true }).click()
+  await expect(page.getByText('清空财务对话？')).toHaveCount(0)
   await expect(panel.getByText('对话已清空')).toBeVisible()
   await expect(panel.getByText('Ledger analysis 2')).toHaveCount(0)
-  await expect(input).toHaveValue('')
   expect(commands).toEqual(['compact', 'clear'])
+  await input.fill('/clear')
+  await input.press('Enter')
+  await expect.poll(() => commands.length).toBe(3)
+  await expect(page.getByText('清空财务对话？')).toHaveCount(0)
+  await expect(panel.getByText('Ledger analysis 2')).toHaveCount(0)
+  await expect(input).toHaveValue('')
+  expect(commands).toEqual(['compact', 'clear', 'clear'])
   expect(chatRequests).toHaveLength(3)
 
   await page.reload()

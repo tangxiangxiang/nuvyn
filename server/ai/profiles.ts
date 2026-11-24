@@ -119,7 +119,8 @@ function view(value: ProfileRow): AiProfile {
   }
   return {
     id: value.id, name: value.name, provider: value.provider, baseURL: value.base_url,
-    model: value.model, configured: Boolean(value.encrypted_api_key),
+    model: value.model || (value.provider === 'openai' ? DEFAULT_OPENAI_MODEL : DEFAULT_ANTHROPIC_MODEL),
+    configured: Boolean(value.encrypted_api_key),
     // A fixed mask also works when the master key is unavailable.
     maskedKey: value.encrypted_api_key ? '••••••••' : '',
     createdAt: value.created_at, updatedAt: value.updated_at,

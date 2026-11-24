@@ -5,11 +5,10 @@ import { History, MessagePlus, X } from '@vicons/tabler'
 import { useAiHistory, useLedgerAiHistory } from '../../composables/vault/useAiHistory'
 import type { AiLiveContextCapture } from '../../composables/vault/aiLiveContext'
 import { AppShellContextKey } from '../../composables/appShellContext'
-import { useConfirm } from '../../composables/useConfirm'
 import { useI18n } from '../../composables/useI18n'
 import type { DiaryCalendarMode } from '../../composables/appShellContext'
 import type { WorkspaceKind } from '../../lib/workspace'
-import { runLedgerAiCommand, type LedgerAiCommand, type LedgerAiCommandOutcome } from '../../lib/ai-api'
+import { getAiProfiles, runLedgerAiCommand, type AiModelOption, type LedgerAiCommand, type LedgerAiCommandOutcome } from '../../lib/ai-api'
 import { displayContextForCapture } from './aiContextPaths'
 import { resolveAiQuickPrompts } from './aiQuickPrompts'
 import AiChatMessages from './AiChatMessages.vue'
@@ -22,10 +21,12 @@ const props = withDefaults(defineProps<{
   workspaceKind?: WorkspaceKind
   diaryViewMode?: DiaryCalendarMode
   positionStorageKey?: string | null
+  modelPreferenceStorageKey?: string | null
 }>(), {
   workspaceKind: null,
   diaryViewMode: 'diary',
   positionStorageKey: null,
+  modelPreferenceStorageKey: null,
 })
 
 const emit = defineEmits<{ close: [] }>()
@@ -36,8 +37,6 @@ const isLedger = computed(() => props.workspaceKind === 'ledger')
 const history = computed(() => isLedger.value ? ledgerHistory : ordinaryHistory)
 const title = computed(() => t(isLedger.value ? 'ai.finance' : 'ai.assistant'))
 const { t } = useI18n()
-const { confirmCancellable } = useConfirm()
-let cancelClearConfirmation: (() => void) | null = null
 const ordinaryDraft = ref('')
 const ledgerDraft = ref('')
 const draft = computed({
@@ -65,6 +64,71 @@ const panelObscured = computed(() => blockingOverlay.value || showSessionPicker.
 const visualViewport = ref<{ top: number; height: number } | null>(null)
 const panelWidth = computed(() => isLedger.value ? 720 : 460)
 const position = ref<{ left: number; top: number } | null>(null)
+const aiProfiles = ref<AiModelOption[]>([])
+const profilesLoaded = ref(false)
+const profilesLoading = ref(false)
+const profileListFailed = ref(false)
+const defaultProfileId = ref<string | null>(null)
+const selectedProfileId = ref<string | null>(null)
+const hasSavedProfileSelection = ref(false)
+const workspaceModelPreferenceKey = computed(() => props.modelPreferenceStorageKey
+  ? `${props.modelPreferenceStorageKey}:${props.workspaceKind ?? 'vault'}`
+  : null)
+const availableModelOptions = computed(() => aiProfiles.value)
+const selectedModel = computed(() => aiProfiles.value.find(option => option.profileId === selectedProfileId.value) ?? null)
+const modelUnavailable = computed(() => profilesLoaded.value && !selectedModel.value)
+const modelName = computed(() => selectedModel.value?.model
+  ?? t(selectedProfileId.value ? 'ai.model_unavailable' : 'ai.model_choose'))
+const agentBusy = computed(() => ordinaryHistory.busy.value || ledgerHistory.busy.value || commandPending.value)
+
+function restoreWorkspaceModelSelection(): void {
+  const key = workspaceModelPreferenceKey.value
+  const stored = key ? readStorageKey(key) : null
+  hasSavedProfileSelection.value = stored !== null && stored.length > 0
+  selectedProfileId.value = hasSavedProfileSelection.value ? stored : defaultProfileId.value
+}
+
+watch(workspaceModelPreferenceKey, restoreWorkspaceModelSelection, { immediate: true })
+
+async function loadAiModelOptions(): Promise<void> {
+  if (profilesLoading.value) return
+  profilesLoading.value = true
+  profileListFailed.value = false
+  try {
+    const result = await getAiProfiles()
+    aiProfiles.value = result.profiles
+      .filter(profile => profile.configured && !profile.credentialError)
+      .filter(profile => profile.provider === 'anthropic' || profile.provider === 'openai')
+      .map(profile => ({
+        profileId: profile.id,
+        name: profile.name,
+        provider: profile.provider,
+        model: profile.model,
+      }))
+    defaultProfileId.value = result.activeProfileId
+    profilesLoaded.value = true
+    if (!hasSavedProfileSelection.value) selectedProfileId.value = result.activeProfileId
+  } catch {
+    profileListFailed.value = true
+  } finally {
+    profilesLoading.value = false
+  }
+}
+
+function selectModelProfile(profileId: string): void {
+  if (agentBusy.value || !availableModelOptions.value.some(option => option.profileId === profileId)) return
+  selectedProfileId.value = profileId
+  history.value.errorState.value = null
+  hasSavedProfileSelection.value = true
+  const key = workspaceModelPreferenceKey.value
+  if (key) writeStorageKey(key, profileId)
+}
+
+function onModelMenuOpen(): void {
+  if (profileListFailed.value || history.value.errorState.value === 'ai-model-unavailable') {
+    void loadAiModelOptions()
+  }
+}
 
 let drag: {
   pointerId: number
@@ -260,7 +324,7 @@ async function onSend(prompt?: string): Promise<void> {
     else commandStatus.value = 'unknown'
     return
   }
-  if (!active.configured.value || (isLedger.value && (commandPending.value || !active.activeSession.value))) return
+  if (!selectedModel.value || (isLedger.value && (commandPending.value || !active.activeSession.value))) return
   if (isLedger.value) commandStatus.value = null
 
   // Snapshot both the Note context and its file-change bus synchronously.
@@ -271,6 +335,7 @@ async function onSend(prompt?: string): Promise<void> {
   const publishFileChange = noteBridge?.publishFileChange
   if (prompt === undefined) draft.value = ''
   await active.sendAndStream(text, {
+    profileId: selectedModel.value.profileId,
     ...(props.workspaceKind === 'ledger' ? { ledgerAnalysis: true } : {}),
     ...(snapshot ? { liveContext: snapshot } : {}),
     ...(publishFileChange ? { publishFileChange } : {}),
@@ -279,17 +344,6 @@ async function onSend(prompt?: string): Promise<void> {
 
 async function onLedgerCommand(command: LedgerAiCommand): Promise<void> {
   if (!isLedger.value || !ledgerHistory.activeSession.value || ledgerHistory.busy.value || commandPending.value) return
-  if (command === 'clear') {
-    commandPending.value = true
-    const confirmation = confirmCancellable(t('ai.finance_clear_confirm'), t('ai.finance_clear_confirm_detail'), {
-      confirmLabel: t('ai.ledger_clear'), destructive: true,
-    })
-    cancelClearConfirmation = confirmation.cancel
-    const accepted = await confirmation.promise
-    cancelClearConfirmation = null
-    commandPending.value = false
-    if (!accepted || !props.open || !isLedger.value) return
-  }
   const controller = new AbortController()
   commandController = controller
   commandPending.value = true
@@ -319,7 +373,6 @@ watch([isLedger, () => props.open], ([ledger, open]) => {
 }, { immediate: true })
 
 watch(isLedger, (ledger) => {
-  if (!ledger) cancelClearConfirmation?.()
   if (props.open) {
     const previousWidth = Math.min(ledger ? 460 : 720, window.innerWidth - (ledger ? 24 : 32))
     if (!position.value || position.value.left === Math.max(12, window.innerWidth - previousWidth - 16)) {
@@ -370,7 +423,6 @@ function onGlobalKeydown(event: KeyboardEvent): void {
     || event.isComposing
     || event.keyCode === 229
     || !props.open
-    || cancelClearConfirmation !== null
     || showSessionPicker.value
     || blockingOverlay.value
   ) return
@@ -385,7 +437,6 @@ watch(() => props.positionStorageKey, async () => {
 watch(() => props.open, (open) => {
   if (open) void normalizePosition()
   else {
-    cancelClearConfirmation?.()
     showSessionPicker.value = false
     historyTrigger = null
   }
@@ -441,6 +492,7 @@ watch(() => props.open, (open, _previous, onCleanup) => {
 onMounted(() => {
   void ordinaryHistory.loadActive().catch(() => {})
   void ordinaryHistory.refreshModel().catch(() => {})
+  void loadAiModelOptions()
   window.addEventListener('resize', syncViewport)
   window.visualViewport?.addEventListener('resize', syncViewport)
   window.visualViewport?.addEventListener('scroll', syncVisualViewport)
@@ -455,7 +507,6 @@ onMounted(() => {
 })
 
 onBeforeUnmount(() => {
-  cancelClearConfirmation?.()
   ledgerHistory.stop()
   commandController?.abort()
   window.removeEventListener('resize', syncViewport)
@@ -534,8 +585,17 @@ onBeforeUnmount(() => {
         </div>
       </header>
 
-      <div v-if="!history.configured.value && !history.isLoading.value" class="ai-no-key-banner" role="status">
-        {{ t('ai.not_configured') }}
+      <div v-if="profilesLoaded && !availableModelOptions.length" class="ai-no-key-banner" role="status">
+        {{ t('ai.models_unavailable') }}
+      </div>
+      <div v-else-if="profileListFailed" class="ai-no-key-banner" role="status">
+        {{ t('ai.models_load_failed') }}
+      </div>
+      <div v-else-if="modelUnavailable" class="ai-no-key-banner" role="status">
+        {{ t(selectedProfileId ? 'ai.model_unavailable' : 'ai.model_choose') }}
+      </div>
+      <div v-else-if="history.errorState.value === 'ai-model-unavailable'" class="ai-no-key-banner" role="status">
+        {{ t('ai.model_unavailable') }}
       </div>
 
       <KeepAlive>
@@ -559,7 +619,7 @@ onBeforeUnmount(() => {
           :quick-prompts="quickPrompts"
           :empty-hint="emptyHint"
           :show-welcome="!!ledgerHistory.activeSession.value && !ledgerHistory.isLoading.value && !ledgerHistory.busy.value"
-          :prompts-disabled="!ledgerHistory.configured.value || commandPending"
+          :prompts-disabled="!selectedModel || commandPending"
           :finance-phase="ledgerHistory.financePhase.value"
           @prompt="useQuickPrompt"
         />
@@ -580,14 +640,19 @@ onBeforeUnmount(() => {
         ref="composer"
         v-model="draft"
         :busy="history.busy.value"
-        :configured="history.configured.value"
+        :configured="!!selectedModel"
         :can-send="!history.isLoading.value && (!isLedger || (!!history.activeSession.value && !commandPending))"
         :commands="isLedger ? ledgerCommands : undefined"
         :placeholder="isLedger ? t('ai.finance_placeholder') : undefined"
-        :model-name="history.model.value"
+        :model-name="modelName"
+        :model-options="availableModelOptions"
+        :selected-model-profile-id="selectedProfileId"
+        :model-selector-disabled="agentBusy || profilesLoading"
         :prompts="quickPrompts"
         @send="onSend"
         @command="onLedgerCommand"
+        @select-model="selectModelProfile"
+        @model-menu-open="onModelMenuOpen"
         @stop="history.stop"
       />
 

@@ -5,15 +5,15 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { AppShellContextKey, type NoteAiContextBridge } from '../../../composables/appShellContext'
 import type { AiLiveContextCapture, AiDocumentContext, AiLiveContextSnapshot } from '../../../composables/vault/aiLiveContext'
 import { useAiHistory, useLedgerAiHistory } from '../../../composables/vault/useAiHistory'
-import { useConfirm } from '../../../composables/useConfirm'
 import { useI18n } from '../../../composables/useI18n'
 import AiPanel from '../AiPanel.vue'
 import AiChatMessages from '../AiChatMessages.vue'
 import AiComposer from '../AiComposer.vue'
-import { runLedgerAiCommand } from '../../../lib/ai-api'
+import { getAiProfiles, runLedgerAiCommand } from '../../../lib/ai-api'
 
 vi.mock('../../../lib/ai-api', async (original) => ({
   ...await original<typeof import('../../../lib/ai-api')>(),
+  getAiProfiles: vi.fn(),
   runLedgerAiCommand: vi.fn(),
 }))
 
@@ -117,6 +117,13 @@ describe('global AI panel', () => {
     financeHistory.messages.value = []
     financeHistory.busy.value = false
     vi.clearAllMocks()
+    vi.mocked(getAiProfiles).mockResolvedValue({
+      profiles: [
+        { id: 'profile-default', name: 'Default', provider: 'anthropic', baseURL: '', model: 'claude-test', configured: true, maskedKey: '••••••••', createdAt: 1, updatedAt: 1 },
+        { id: 'profile-openai', name: 'OpenAI profile', provider: 'openai', baseURL: '', model: 'MiniMax-M3.1-Flash', configured: true, maskedKey: '••••••••', createdAt: 2, updatedAt: 2 },
+      ],
+      activeProfileId: 'profile-default',
+    })
   })
   afterEach(() => {
     vi.restoreAllMocks()
@@ -150,6 +157,7 @@ describe('global AI panel', () => {
 
     expect(events).toEqual(['capture', 'send'])
     expect(sendSpy).toHaveBeenCalledWith('hello', {
+      profileId: 'profile-default',
       liveContext: (capture as { status: 'ready'; context: AiLiveContextSnapshot }).context,
       publishFileChange: expect.any(Function),
     })
@@ -162,7 +170,7 @@ describe('global AI panel', () => {
     const capture = vi.fn(() => documentCapture())
     const { wrapper } = mountPanel(capture, { workspaceKind: 'ledger' })
     await typeAndSend(wrapper, 'hello from another workspace')
-    expect(sendSpy).toHaveBeenCalledWith('hello from another workspace', { ledgerAnalysis: true })
+    expect(sendSpy).toHaveBeenCalledWith('hello from another workspace', { profileId: 'profile-default', ledgerAnalysis: true })
     expect(capture).not.toHaveBeenCalled()
     expect(wrapper.get('.ai-floating-title').text()).toBe('AI Finance')
     expect(wrapper.find('[data-testid="global-ai-new-session"]').exists()).toBe(false)
@@ -192,23 +200,17 @@ describe('global AI panel', () => {
     expect(wrapper.text()).toContain('Conversation compacted')
     expect(financeHistory.messages.value).toEqual(conversation)
 
-    const confirmation = useConfirm()
-    await typeAndSend(wrapper, '/clear')
-    expect(command).toHaveBeenCalledTimes(1)
-    confirmation.answer(confirmation.queue.value[0].id, false)
-    await nextTick()
-    expect(financeHistory.messages.value).toEqual(conversation)
-
     command.mockRejectedValueOnce(new Error('could not clear'))
     await typeAndSend(wrapper, '/clear')
-    confirmation.answer(confirmation.queue.value[0].id, true)
     await flushPromises()
+    expect(command).toHaveBeenCalledTimes(2)
     expect(wrapper.text()).toContain('Command failed')
     expect(financeHistory.messages.value).toEqual(conversation)
+
     command.mockResolvedValueOnce({ outcome: 'cleared' })
     await typeAndSend(wrapper, '/clear')
-    confirmation.answer(confirmation.queue.value[0].id, true)
     await flushPromises()
+    expect(command).toHaveBeenCalledTimes(3)
     expect(wrapper.text()).toContain('Conversation cleared')
     expect(financeHistory.messages.value).toEqual([])
     expect(wrapper.get('h2').text()).toBe('What would you like to explore today?')
@@ -239,6 +241,36 @@ describe('global AI panel', () => {
 
     expect(capture).toHaveBeenCalledOnce()
     expect(sendSpy.mock.calls[0]?.[1]?.liveContext).toBe(sentSnapshot)
+  })
+
+  it('persists model selection independently per workspace and sends the selected profile', async () => {
+    const storageKey = 'nuvyn.ai.model-profile:test-owner'
+    localStorage.removeItem(`${storageKey}:vault`)
+    localStorage.removeItem(`${storageKey}:diary`)
+    const sendSpy = vi.spyOn(history, 'sendAndStream').mockImplementation(async () => {})
+    const { wrapper } = mountPanel(undefined, {
+      workspaceKind: 'vault',
+      modelPreferenceStorageKey: storageKey,
+    })
+    await flushPromises()
+
+    await wrapper.get('[data-testid="ai-model-selector"]').trigger('click')
+    await wrapper.get('[data-testid="ai-model-option-profile-openai"]').trigger('click')
+    expect(localStorage.getItem(`${storageKey}:vault`)).toBe('profile-openai')
+
+    await wrapper.setProps({ workspaceKind: 'diary' })
+    await nextTick()
+    expect(wrapper.findComponent(AiComposer).props('selectedModelProfileId')).toBe('profile-default')
+
+    await wrapper.setProps({ workspaceKind: 'vault' })
+    await nextTick()
+    expect(wrapper.findComponent(AiComposer).props('selectedModelProfileId')).toBe('profile-openai')
+    await typeAndSend(wrapper, 'use my selected model')
+    expect(sendSpy).toHaveBeenCalledWith('use my selected model', {
+      profileId: 'profile-openai',
+      publishFileChange: expect.any(Function),
+    })
+    expect(localStorage.getItem(`${storageKey}:diary`)).toBeNull()
   })
 
   it('keeps the conversation mounted while hidden and restores the active history controls', async () => {
@@ -292,6 +324,7 @@ describe('global AI panel', () => {
       }) } } },
     })
 
+    await flushPromises()
     expect(capture).toHaveBeenCalled()
     capture.mockClear()
     await wrapper.setProps({ workspaceKind: 'ledger' })
@@ -304,7 +337,7 @@ describe('global AI panel', () => {
     const prompt = wrapper.findAll('.ai-quick-prompt')[0]
     await prompt.trigger('click')
     expect(financeHistory.sendAndStream).toHaveBeenCalledExactlyOnceWith(
-      useI18n().t('quick_prompts.ledger.review.text'), { ledgerAnalysis: true },
+      useI18n().t('quick_prompts.ledger.review.text'), { profileId: 'profile-default', ledgerAnalysis: true },
     )
     expect(history.sendAndStream).not.toHaveBeenCalled()
     const expectedDraft = 'Finance draft'

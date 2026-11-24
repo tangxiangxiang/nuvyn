@@ -1,6 +1,6 @@
 import { financeOperation, type FinanceActivity, type FinanceActivityEvent, type FinanceAgentProgress } from '../../shared/ledgerAiAnalysis.js'
 import { createFinanceAgent, financeCoverageNotice } from './finance-agent.js'
-import { answerStandaloneFinanceQuestion, financeAnswerProtocol, verifyFinanceAnswer } from './finance-verification.js'
+import { answerStandaloneFinanceCalculation, financeAnswerProtocol, requiresLedgerEvidence, verifyFinanceAnswer } from './finance-verification.js'
 import { ledgerReadTool, type createLedgerAnalysis } from './ledger-analysis.js'
 import { getAiRuntimeConfig, type AiRuntimeConfig } from './settings.js'
 // AI chat orchestrator. Pure functions of (db, ...args) — no
@@ -286,6 +286,7 @@ export async function runChat(opts: RunChatOpts): Promise<{
   const userId = userResult.message.id
   await emit(opts.onEvent, { type: 'user', id: userId })
 
+  const financeNeedsLedger = opts.ledgerAnalysis ? requiresLedgerEvidence(opts.userContent) : false
   const system = opts.ledgerAnalysis
     ? opts.ledgerAnalysis.system + conversationMemorySection(compactSummary)
       + (compactSummary ? '\nUse fresh Ledger data for financial facts. Prior memory is for goals and open questions only.' : '')
@@ -301,7 +302,9 @@ export async function runChat(opts: RunChatOpts): Promise<{
   const toolSafety = deriveToolSafetyPolicy(opts.ctx)
 
   const convo: NormalizedMessage[] = opts.ledgerAnalysis
-    ? [...ledgerConversationHistory(history), { role: 'user', content: opts.userContent }]
+    ? financeNeedsLedger
+      ? [...ledgerConversationHistory(history), { role: 'user', content: opts.userContent }]
+      : [{ role: 'user', content: opts.userContent }]
     : buildConvoFromHistory(history, opts.userContent)
   // Backend may be cached from a previous run with a different
   // provider. Clear so getChatBackend() re-evaluates against the
@@ -329,8 +332,8 @@ export async function runChat(opts: RunChatOpts): Promise<{
   let ledgerDraft = ''
   const chinese = /\p{Script=Han}/u.test(opts.userContent)
   const unavailable = chinese
-    ? '目前无法根据账本核对这次问题。可以缩小日期范围后再试。'
-    : 'I could not verify this question against Ledger. Try again with a narrower date range.'
+    ? financeNeedsLedger ? '目前无法根据账本核对这次问题。可以缩小日期范围后再试。' : '这次回答未通过安全核验，请换个问法再试。'
+    : financeNeedsLedger ? 'I could not verify this question against Ledger. Try again with a narrower date range.' : 'I could not safely verify this response. Please rephrase the question.'
   const finance = opts.ledgerAnalysis && createFinanceAgent(opts.ledgerAnalysis)
   const requireFinanceAccess = () => {
     if (opts.signal?.aborted || !opts.canUseLedgerAnalysis?.()) throw new ChatError('aborted')
@@ -345,7 +348,7 @@ export async function runChat(opts: RunChatOpts): Promise<{
   try {
     if (finance) {
       requireFinanceAccess()
-      fullText = answerStandaloneFinanceQuestion(opts.userContent, chinese)
+      fullText = answerStandaloneFinanceCalculation(opts.userContent, chinese)
       if (fullText) {
         await emit(opts.onEvent, { type: 'token', text: fullText })
         requireFinanceAccess()
@@ -358,7 +361,7 @@ export async function runChat(opts: RunChatOpts): Promise<{
       if (finance) requireFinanceAccess()
       else if (opts.signal?.aborted) throw new ChatError('aborted')
 
-      const canRead = finance?.canQuery()
+      const canRead = Boolean(financeNeedsLedger && finance?.canQuery())
       ledgerDraft = ''
       const result = await backend.streamRound({
         db: opts.db,
@@ -383,13 +386,17 @@ export async function runChat(opts: RunChatOpts): Promise<{
           await emit(opts.onEvent, { type: 'finance_progress', phase: 'verifying' })
           requireFinanceAccess()
           const coverage = finance.limitations()
-          const checked = verifyFinanceAnswer(result.text, finance.observation, chinese)
+          const checked = verifyFinanceAnswer(result.text, finance.observation, chinese, {
+            allowGeneral: !financeNeedsLedger || finance.hasObservations(),
+          })
           const answer = checked.text
-          if ((!answer || checked.rejected) && (canRead || !coverage.noEvidence) &&
+          if ((!answer || checked.rejected) && ((!financeNeedsLedger) || canRead || !coverage.noEvidence) &&
               !ledgerReplyInterrupted && !financeCorrectionUsed) {
             financeCorrectionUsed = true
             earlierVerifiedDraft = checked.text
-            convo.push({ role: 'user', content: 'The previous draft did not pass verification. Read any missing Ledger evidence if tools are still available. Return valid fact records then evidence-linked analysis. Leave unverifiable claims out.' })
+            convo.push({ role: 'user', content: financeNeedsLedger
+              ? 'The previous draft did not pass verification. Read any missing Ledger evidence if tools are still available. Return valid fact records then evidence-linked analysis. Leave unverifiable claims out. If the question also asks for a general explanation, you may add a separate knowledge record without personal facts or figures.'
+              : 'The previous draft did not pass the general-knowledge safety check. Return one concise JSON knowledge record only. Do not refer to the user or their finances, and do not include figures, dates, rates, currencies or quantities.' })
             await emit(opts.onEvent, { type: 'finance_progress', phase: 'analyzing' })
             continue
           }
@@ -536,7 +543,9 @@ export async function runChat(opts: RunChatOpts): Promise<{
       if (activity.status === 'running') activity.status = financeAborted ? 'cancelled' : 'failed'
     }
     if (finance && !financeAborted && !fullText && (ledgerDraft || earlierVerifiedDraft)) {
-      const checked = verifyFinanceAnswer(ledgerDraft, finance.observation, chinese)
+      const checked = verifyFinanceAnswer(ledgerDraft, finance.observation, chinese, {
+        allowGeneral: !financeNeedsLedger || finance.hasObservations(),
+      })
       const verified = checked.text || earlierVerifiedDraft
       if (verified) {
         fullText = verified + financeCoverageNotice(finance.limitations(), chinese) + '\n\n' + interruptionNotice(false)

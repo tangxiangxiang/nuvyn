@@ -72,6 +72,7 @@ import {
   aiSpeechSettings,
   initializeAiProfiles,
   legacyProfileId,
+  profileRuntime,
   profileProbeConfig,
   saveAiSpeechSettings,
 } from './profiles.js'
@@ -984,12 +985,14 @@ ai.post('/chat', async (c) => {
         currentNotePath?: unknown
         threadScope?: unknown
         ledgerAnalysis?: unknown
+        profileId?: unknown
       }
     | null
   if (
     !body ||
     typeof body.sessionId !== 'number' ||
-    typeof body.content !== 'string'
+    typeof body.content !== 'string' ||
+    (body.profileId !== undefined && (typeof body.profileId !== 'string' || !body.profileId || body.profileId.length > 100))
   ) {
     return c.json({ ok: false, reason: 'invalid' }, 400)
   }
@@ -1081,7 +1084,26 @@ ai.post('/chat', async (c) => {
   // is not configured; no provider/client setup may observe its bytes.
   let runtimeConfig: ReturnType<typeof resolveAiRuntimeConfig>
   try {
-    runtimeConfig = resolveAiRuntimeConfig(db)
+    if (typeof body.profileId === 'string') {
+      try {
+        runtimeConfig = profileRuntime(db, body.profileId)
+      } catch (error) {
+        if (error instanceof AiProfileError) {
+          return c.json({ ok: false, reason: 'selected-profile-unavailable' }, error.status as 400 | 404 | 409 | 503)
+        }
+        if (error instanceof AiKeyConfigurationError) {
+          return c.json({ ok: false, reason: 'selected-profile-unavailable', code: error.code }, 503)
+        }
+        const response = aiKeyErrorResponse(c, error)
+        if (response) return response
+        throw error
+      }
+      if (!runtimeConfig.apiKey) {
+        return c.json({ ok: false, reason: 'selected-profile-unavailable' }, 409)
+      }
+    } else {
+      runtimeConfig = resolveAiRuntimeConfig(db)
+    }
   } catch (error) {
     const response = aiKeyErrorResponse(c, error)
     if (response) return response

@@ -153,7 +153,14 @@ export function createFinanceAgent(analysis: ReturnType<typeof createLedgerAnaly
     }
   }
 
-  return { canQuery, beginBatch, execute, limitations, observation: (id: number) => delivered.get(id) }
+  return {
+    canQuery,
+    beginBatch,
+    execute,
+    limitations,
+    hasObservations: () => delivered.size > 0,
+    observation: (id: number) => delivered.get(id),
+  }
 }
 
 export function financeCoverageNotice(limits: ReturnType<ReturnType<typeof createFinanceAgent>['limitations']>, chinese: boolean) {
