@@ -50,7 +50,7 @@ export interface LedgerAiAnalysisSnapshot {
 }
 
 /** Live execution phases. The chat stream's done/error events end the run. */
-export const FINANCE_AGENT_PHASES = ['preparing', 'reading', 'analyzing', 'verifying'] as const
+export const FINANCE_AGENT_PHASES = ['preparing', 'reading', 'analyzing'] as const
 export type FinanceAgentPhase = typeof FINANCE_AGENT_PHASES[number]
 export type FinanceAgentProgress = { type: 'finance_progress'; phase: FinanceAgentPhase }
 

@@ -340,7 +340,7 @@ describe('sendAndStream', () => {
         if (signal?.aborted) resolve()
         else signal?.addEventListener('abort', () => resolve(), { once: true })
       })
-      yield { type: 'finance_progress', phase: 'verifying' }
+      yield { type: 'finance_progress', phase: 'analyzing' }
     })
     const request = finance.sendAndStream('Read cashflow', { ledgerAnalysis: true })
     await vi.waitFor(() => expect(finance.financePhase.value).toBe('reading'))

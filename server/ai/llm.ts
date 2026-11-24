@@ -302,6 +302,8 @@ export interface StreamRoundOpts {
   messages: NormalizedMessage[]
   tools: NormalizedTool[]
   onToken: (text: string) => void
+  /** Optional per-request output cap. Omitted requests keep the shared default. */
+  maxOutputTokens?: number
   signal?: AbortSignal
 }
 
@@ -363,7 +365,7 @@ class AnthropicBackend implements ChatBackend {
 
     const stream = client.messages.stream({
       model: opts.model,
-      max_tokens: MAX_TOKENS,
+      max_tokens: opts.maxOutputTokens ?? MAX_TOKENS,
       system: opts.system,
       messages: anthropicMessages,
       ...(tools.length > 0 ? { tools, tool_choice: { type: 'auto' as const } } : {}),
@@ -475,7 +477,7 @@ class OpenAIBackend implements ChatBackend {
         messages: openaiMessages,
         ...(tools.length > 0 ? { tools, tool_choice: 'auto' as const } : {}),
         stream: true,
-      }, MAX_TOKENS, opts.signal) as AsyncIterable<OpenAI.ChatCompletionChunk>
+      }, opts.maxOutputTokens ?? MAX_TOKENS, opts.signal) as AsyncIterable<OpenAI.ChatCompletionChunk>
     } catch (err) {
       if (opts.signal?.aborted) throw new ChatError('aborted')
       if (tools.length > 0 && isOpenAiToolsUnsupported(err)) {

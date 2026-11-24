@@ -12,7 +12,6 @@ import { parseAccountCreateRequest, parseSettingsCreateRequest, parseTransaction
 import { syncLedgerAiContext } from '../ledger/aiContext.js'
 import { createLedgerAnalysis } from '../ai/ledger-analysis.js'
 import { createFinanceAgent, financeCoverageNotice } from '../ai/finance-agent.js'
-import { requiresLedgerEvidence, verifyFinanceAnswer } from '../ai/finance-verification.js'
 import { createLedgerProjections } from '../ledger/projections.js'
 import type { StreamRoundOpts } from '../ai/llm.js'
 import { authenticatedRequest, closeAuthTestContext, createAuthenticatedTestContext, type AuthenticatedTestContext } from './helpers/auth.js'
@@ -34,7 +33,12 @@ const streamRound = vi.hoisted(() => vi.fn(async ({ messages, onToken, tools }: 
       finishReason: 'tool_calls' as const,
     }
   }
-  const text = ledger ? JSON.stringify({ observation: 1, metric: 'expenseMinor' }) : 'Ordinary answer'
+  const aggregate = ledger ? messages.filter(({ role }) => role === 'tool').map(({ content }) => {
+    try { return JSON.parse(String(content)) as { summary?: { expenseMinor?: number } } } catch { return undefined }
+  }).find((value) => value?.summary) : undefined
+  const amountMinor = aggregate?.summary?.expenseMinor
+  const amount = typeof amountMinor === 'number' ? (amountMinor / 100).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : null
+  const text = ledger && amount ? `Ledger spending was ¥${amount}.` : ledger ? 'I checked the Ledger data.' : 'Ordinary answer'
   await onToken(text)
   return { text, toolCalls: [], finishReason: 'stop' as const }
 }))
@@ -121,8 +125,8 @@ function queryRound(...queries: Record<string, unknown>[]) {
   }
 }
 
-function financeReply(...records: object[]) {
-  return { text: records.map((record) => JSON.stringify(record)).join('\n'), toolCalls: [], finishReason: 'stop' as const }
+function financeReply(text: string, finishReason: 'stop' | 'length' | 'other' = 'stop') {
+  return { text, toolCalls: [], finishReason }
 }
 
 function toolObservations({ messages }: StreamRoundOpts) {
@@ -130,324 +134,112 @@ function toolObservations({ messages }: StreamRoundOpts) {
 }
 
 describe('Finance Agent execution', () => {
-  it('can answer a conceptual question without using a Ledger tool', async () => {
-    streamRound.mockResolvedValueOnce(financeReply({
-      type: 'knowledge', text: 'A budget allocates income among spending, saving, and planned goals.',
-    }))
+  it('answers general questions directly while allowing the model to decide whether Ledger data is needed', async () => {
+    streamRound.mockResolvedValueOnce(financeReply('A budget allocates income among spending, saving, and planned goals.'))
     const events = await send('What is a budget?')
     expect(events).toContain('A budget allocates income')
     expect(events).not.toContain('"phase":"reading"')
-    expect(streamRound).toHaveBeenCalledTimes(1)
-    expect(streamRound.mock.calls[0]?.[0].tools).toEqual([])
+    expect(events).not.toContain('"phase":"verifying"')
+    expect(streamRound).toHaveBeenCalledOnce()
+    expect(streamRound.mock.calls[0]?.[0].tools.map(({ name }) => name)).toEqual(['read_ledger'])
+    expect(streamRound.mock.calls[0]?.[0].maxOutputTokens).toBe(8192)
     expect(generateText).not.toHaveBeenCalled()
   })
 
-  it.each([
-    ['什么是通货膨胀？', '通货膨胀是整体物价水平持续上升，并导致货币购买力下降的现象。'],
-    ['什么是复利？', '复利是把已产生的利息计入后续计息基数，使利息继续产生利息的计算方式。'],
-    ['等额本金和等额本息有什么区别？', '两种还款方式的区别主要在本金分摊方式和每期还款变化。'],
-    ['提前还房贷有哪些利弊？', '提前还贷可以减少未来利息支出，但也会降低可用于应急或投资的资金。'],
-    ['什么是资产负债率？', '资产负债率用负债总额与资产总额的比例观察整体杠杆水平。'],
-    ['信用卡免息期是怎么运作的？', '免息期是在符合还款条件时，消费金额暂不产生利息的一段时间。'],
-    ['为什么利率下降后，贷款总利息会减少？', '利率下降会降低未偿本金在后续期间产生的利息。'],
-  ] as const)('answers general finance knowledge without Ledger access: %s', async (question, answer) => {
-    streamRound.mockResolvedValueOnce(financeReply({ type: 'knowledge', text: answer }))
-    const events = await send(question)
-    expect(events.normalize('NFKC')).toContain(answer.normalize('NFKC'))
-    expect(streamRound).toHaveBeenCalledTimes(1)
-    expect(streamRound.mock.calls[0]?.[0].tools).toEqual([])
-    expect(events).not.toContain('"phase":"reading"')
-  })
-
-  it.each([
-    '什么是通货膨胀？',
-    '什么是复利？',
-    '等额本金和等额本息有什么区别？',
-    '提前还房贷有哪些利弊？',
-    '什么是资产负债率？',
-    '信用卡免息期是怎么运作的？',
-    '为什么利率下降后，贷款总利息会减少？',
-    '我想了解什么是通货膨胀。',
-    'How can someone create a simple budget?',
-  ])('does not classify a standalone concept as a personal Ledger request: %s', (question) => {
-    expect(requiresLedgerEvidence(question)).toBe(false)
-  })
-
-  it.each([
-    '我的月供是多少？',
-    '我上个月花了多少钱？',
-    '最近半年为什么存不下钱？',
-    '解释等额本金，然后分析我的房贷。',
-    'What is my current balance?',
-    'What did I spend last month?',
-    'Please explain what this means.',
-  ])('requires Ledger evidence for personal or ambiguous finance requests: %s', (question) => {
-    expect(requiresLedgerEvidence(question)).toBe(true)
-  })
-
-  it('requests fresh evidence when a model answers a personal amount before querying Ledger', async () => {
-    const unsupported = { text: 'Your spending was ¥5,000.', toolCalls: [], finishReason: 'stop' as const }
-    streamRound.mockResolvedValueOnce(unsupported)
-      .mockImplementationOnce(async ({ messages, tools }) => {
-        expect(tools[0]?.name).toBe('read_ledger')
-        expect(messages.at(-1)?.content).toContain('did not pass verification')
-        return queryRound(scope)
+  it('uses one aggregate read and returns the model response as natural Markdown', async () => {
+    streamRound.mockResolvedValueOnce(queryRound({ kind: 'cashflow', from: '2026-01-01', to: '2026-01-31' }))
+      .mockImplementationOnce(async (round) => {
+        const [observation] = toolObservations(round)
+        expect(observation.summary.expenseMinor).toBe(inScopeAmount)
+        expect(observation.expenseCategories).toHaveLength(1)
+        expect(observation.largestExpenses).toHaveLength(1)
+        expect(observation.summary.repaymentMinor).toBe(0)
+        return financeReply('## 2026 年 1 月收支\n\n- 收入：¥0.00\n- 支出：¥8,144.88\n- 还款本金：¥0.00\n\n主要支出来自常规消费分类。')
       })
-      .mockResolvedValueOnce(financeReply({ observation: 1, metric: 'expenseMinor' }))
-    const events = await send('What did I spend between January 1 and January 10?')
-    expect(events).toContain('825.01')
-    expect(events).not.toContain('5,000')
+    const events = await send('分析我 1 月的收入、支出、还款和主要支出来源。')
+    expect(events).toContain('## 2026 年 1 月收支')
+    expect(events).toContain('主要支出来自常规消费分类')
+    expect(events).not.toMatch(/Private intermediate|event: tool_|observation|"summary"/)
+    expect(events).not.toContain('verifying')
+    expect(streamRound).toHaveBeenCalledTimes(2)
+    expect(streamRound.mock.calls[0]?.[0].tools.map(({ name }) => name)).toEqual(['read_ledger'])
+    expect(streamRound.mock.calls[1]?.[0].maxOutputTokens).toBe(8192)
     expect(generateText).not.toHaveBeenCalled()
   })
 
-  it('does not accept a knowledge record as a substitute for a personal balance query', async () => {
-    streamRound.mockResolvedValueOnce(financeReply({
-      type: 'knowledge', text: 'A bank account balance is the amount currently held in that account.',
-    })).mockResolvedValueOnce(queryRound({ kind: 'accounts' })).mockResolvedValueOnce(financeReply(
-      { observation: 1, metric: 'currentBalanceMinor', row: 0 },
-    ))
+  it('lets the model choose a current-balance query and keeps the answer without a verifier retry', async () => {
+    streamRound.mockResolvedValueOnce(queryRound({ kind: 'accounts' }))
+      .mockResolvedValueOnce(financeReply('你的「Private account」当前余额是 **-¥8,144.88**。'))
     const events = await send('What is my current balance?')
-    expect(events).toContain('Private account · Current balance：-CN¥8,144.88')
-    expect(events).not.toContain('A bank account balance is the amount currently held')
-    expect(streamRound).toHaveBeenCalledTimes(3)
-    expect(streamRound.mock.calls[0]?.[0].tools.map((tool) => tool.name)).toContain('read_ledger')
+    expect(events).toContain('**-¥8,144.88**')
+    expect(events).not.toContain('could not verify')
+    expect(streamRound).toHaveBeenCalledTimes(2)
+    expect(streamRound.mock.calls[0]?.[0].tools.map(({ name }) => name)).toEqual(['read_ledger'])
+    expect(generateText).not.toHaveBeenCalled()
   })
 
-  it('combines general financial education with only verified Ledger facts', async () => {
-    streamRound.mockResolvedValueOnce(queryRound(scope)).mockResolvedValueOnce(financeReply(
-      { id: 'f1', observation: 1, metric: 'expenseMinor' },
-      { type: 'knowledge', text: '通货膨胀是整体物价水平持续上升，并导致货币购买力下降的现象。' },
-      { type: 'inference', evidence: ['f1'], text: '了解收支变化有助于判断储蓄空间。' },
-    ))
+  it('answers hypothetical calculations through the configured model instead of a local regex shortcut', async () => {
+    streamRound.mockResolvedValueOnce(financeReply('按你提供的假设，¥100 - ¥30 = **¥70.00**。'))
+    const events = await send('Assume I earn ¥100 and spend ¥30. How much is left?')
+    expect(events).toContain('**¥70.00**')
+    expect(streamRound).toHaveBeenCalledOnce()
+    expect(streamRound.mock.calls[0]?.[0].tools.map(({ name }) => name)).toEqual(['read_ledger'])
+    expect(generateText).not.toHaveBeenCalled()
+  })
+
+  it('combines general financial education and fresh Ledger evidence in one Markdown answer', async () => {
+    streamRound.mockResolvedValueOnce(queryRound(scope))
+      .mockResolvedValueOnce(financeReply('通货膨胀是整体物价水平持续上升，并导致货币购买力下降的现象。\n\n本期支出为 **¥825.01**。'))
     const events = await send('解释通货膨胀，然后分析我的收支。')
     expect(events).toContain('通货膨胀是整体物价水平持续上升')
-    expect(events).toContain('支出 · 2026-01-01 → 2026-01-10：¥825.01')
-    expect(events).toContain('了解收支变化有助于判断储蓄空间。')
-    expect(streamRound).toHaveBeenCalledTimes(2)
-    expect(streamRound.mock.calls[0]?.[0].tools.map((tool) => tool.name)).toContain('read_ledger')
-  })
-
-  it('withholds a fabricated balance after the bounded correction', async () => {
-    const guess = { text: 'Your balance is CNY 453,321.', toolCalls: [], finishReason: 'stop' as const }
-    streamRound.mockResolvedValueOnce(guess).mockResolvedValueOnce(guess)
-    const events = await send('How much is in my bank account?')
-    expect(events).toContain('could not verify this question against Ledger')
-    expect(events).not.toContain('453,321')
+    expect(events).toContain('**¥825.01**')
     expect(streamRound).toHaveBeenCalledTimes(2)
     expect(generateText).not.toHaveBeenCalled()
   })
 
-  it.each([
-    ['Assume I earn ¥100 and spend ¥30. How much is left?', 'Using the assumptions you provided', '70.00'],
-    ['假设月收入 8000 元，支出 3000 元，能剩多少钱？', '按你提供的假设', '5,000.00'],
-    ['假设月收入 3.19 元，支出 3.28 元，能剩多少钱？', '按你提供的假设', '-¥0.09'],
-    ['假设每月收入 8000 元，每月支出 3000 元，一年能存多少钱？', '按你提供的假设', '60,000.00'],
-  ])('calculates standalone hypothetical amounts on the server: %s', async (question, label, amount) => {
-    const events = await send(question)
-    expect(events.normalize('NFKC')).toContain(label)
-    expect(events.normalize('NFKC')).toContain(amount)
-    expect(events).not.toContain('"phase":"reading"')
-    expect(streamRound).not.toHaveBeenCalled()
-    expect(generateText).not.toHaveBeenCalled()
-  })
-
-  it('compares separate explicit savings assumptions without reading Ledger', async () => {
-    const events = await send('假设每月收入 8000 元、每月支出 3000 元；如果每月收入 9000 元、每月支出 3500 元，分别计算一年结余。')
-    expect(events).toContain('情景一每年结余为 ¥60,000.00')
-    expect(events).toContain('情景二每年结余为 ¥66,000.00')
-    expect(streamRound).not.toHaveBeenCalled()
-    expect(generateText).not.toHaveBeenCalled()
-  })
-
-  it.each([
-    'What is the debt-to-assets ratio? Also calculate mine.',
-    '什么是资产负债率？顺便帮我算一下我的。',
-    'Assume I earn ¥100 and spend ¥30. How much is left? Include my current balance.',
-    'What did I spend last month?',
-    'Please explain what this means.',
-  ])('requires delivered evidence for ambiguous or personal requests: %s', async (question) => {
-    const draft = { text: 'Hypothetically, your actual bank balance is ¥84,539.', toolCalls: [], finishReason: 'stop' as const }
-    streamRound.mockResolvedValueOnce(draft).mockResolvedValueOnce(draft)
-    const events = await send(question)
-    expect(events).toMatch(/could not verify|无法根据账本核对/)
-    expect(events).not.toContain('84,539')
-    expect(streamRound).toHaveBeenCalledTimes(2)
-    expect(generateText).not.toHaveBeenCalled()
-  })
-
-  it('does not trust a prose draft, a reviewer label, or an evidence-free JSON paragraph', async () => {
-    streamRound.mockResolvedValueOnce({ text: 'CONCEPT', toolCalls: [], finishReason: 'stop' })
-      .mockResolvedValueOnce(financeReply({
-        type: 'recommendation', evidence: [], text: 'Your actual account balance gives you ample room to spend.',
-      }))
-    const events = await send('How much do I have available?')
-    expect(events).toContain('could not verify')
-    expect(events).not.toMatch(/ample room|CONCEPT/)
-    expect(generateText).not.toHaveBeenCalled()
-  })
-
-  it('rejects wrong amounts, mismatched metrics, partial months and undelivered observation IDs', async () => {
-    const january = { observation: 1, metric: 'expenseMinor', month: '2026-01' }
-    const february = { ...january, month: '2026-02' }
-    const unsupported = financeReply(
-      february,
-      { ...february, amountMinor: 99_999_999 },
-      { compare: [january, february] },
-      { compare: [february, { ...january, metric: 'incomeMinor' }] },
-      { observation: 2, metric: 'currentBalanceMinor' },
-      { observation: 99, metric: 'repaymentMinor' },
-    )
-    streamRound.mockResolvedValueOnce(queryRound(
-      { kind: 'trend', from: '2026-01-02', to: '2026-02-28' }, { kind: 'accounts' },
-    )).mockResolvedValueOnce(unsupported)
-      .mockResolvedValueOnce(financeReply({ observation: 99, metric: 'expenseMinor' }))
-    const events = await send('Compare my expense totals and balance')
-    expect(events).toContain('7,319.87')
-    expect(events).toContain('Claims that could not be verified were omitted')
-    expect(events).toContain('part of the calendar month')
-    expect(events).not.toMatch(/99999999|825\.01|Second period minus first|Current balance/)
-  })
-
-  it('renders an inline figure with its actual metric and dates, rejecting unverified prose', async () => {
-    streamRound.mockResolvedValueOnce(queryRound(scope, { kind: 'accounts' }))
-      .mockResolvedValueOnce(financeReply(
-        { id: 'f1', observation: 1, metric: 'expenseMinor' },
-        { id: 'f2', observation: 2, metric: 'currentBalanceMinor', row: 0 },
-        { type: 'inference', evidence: ['f1'], text: 'Start with {{f1}}. This spending may leave less room for savings.' },
-        { type: 'hypothesis', evidence: ['f2'], text: 'A mismatch could come from pending payments.' },
-        { type: 'inference', evidence: ['f3'], text: 'UNSUPPORTED REFERENCE' },
-        { type: 'inference', evidence: ['f1'], text: 'Your actual balance is ¥900,000.' },
-        { type: 'inference', evidence: ['f1'], text: 'Your actual balance is nine grand.' },
-        { type: 'inference', evidence: ['f1'], text: 'Fake scope December 2025' },
-        { type: 'inference', evidence: ['f1'], text: 'I looked through every transaction.' },
-        { type: 'inference', evidence: ['f1'], text: 'Unauthorized placeholder {{f2}}' },
-      )).mockResolvedValueOnce(financeReply({ observation: 99, metric: 'expenseMinor' }))
-
-    const events = await send('What can I learn from my spending and balances?')
-    expect(events).toContain('Start with **Spending · 2026-01-01 → 2026-01-10：CN¥825.01**')
-    expect(events).toContain('This spending may leave less room for savings.')
-    expect(events).toContain('Private account · Current balance：-CN¥8,144.88')
-    expect(events).toContain('Possible cause to investigate')
-    expect(events).toContain('Claims that could not be verified were omitted')
-    expect(events).not.toMatch(/observation|\{\{f|UNSUPPORTED REFERENCE|900,000|nine grand|Fake scope|every transaction|Unauthorized placeholder/)
-  })
-
-  it('keeps safe knowledge prose while rejecting personal facts hidden in a knowledge record', () => {
-    const analysis = createLedgerAnalysis(syncLedgerAiContext(db, auth.userId), Date.UTC(2026, 0, 20))
-    const query = analysis.normalize(scope)
-    const result = analysis.readQuery(query)
-    if ('error' in result) throw new Error('Expected a valid Ledger observation')
-    const observation = { query, result }
-    const draft = financeReply(
-      { id: 'f1', observation: 1, metric: 'expenseMinor' },
-      { type: 'knowledge', text: '通货膨胀是整体物价水平持续上升的现象。' },
-      { type: 'knowledge', text: '你的账户余额说明你可以提前还贷。' },
-      { type: 'knowledge', text: '通货膨胀为 3 percent。' },
-    ).text
-    const checked = verifyFinanceAnswer(draft, (id) => id === 1 ? observation : undefined, true, { allowGeneral: true })
-    expect(checked.text).toContain('通货膨胀是整体物价水平持续上升的现象。')
-    expect(checked.text).toContain('¥825.01')
-    expect(checked.text).not.toContain('你的账户余额')
-    expect(checked.text).not.toContain('3 percent')
-    expect(checked.rejected).toBe(true)
-  })
-
-  it('compares only delivered, equally scoped periods in the same currency', () => {
-    const analysis = createLedgerAnalysis(syncLedgerAiContext(db, auth.userId), Date.UTC(2026, 2, 5))
-    const january = analysis.normalize({ kind: 'cashflow', from: '2026-01-01', to: '2026-01-31' })
-    const february = analysis.normalize({ kind: 'cashflow', from: '2026-02-01', to: '2026-02-28' })
-    const first = { query: january, result: analysis.readQuery(january) }
-    const second = { query: february, result: analysis.readQuery(february) }
-    const draft = financeReply({ compare: [
-      { observation: 1, metric: 'expenseMinor' },
-      { observation: 2, metric: 'expenseMinor' },
-    ] }).text
-    expect(verifyFinanceAnswer(draft, (id) => id === 1 ? first : second, false).text).toContain('6,494.86')
-    expect(verifyFinanceAnswer(draft, (id) => id === 1 ? first : {
-      ...second, result: { ...second.result, currency: 'USD' },
-    }, false)).toEqual({ text: '', rejected: true })
-  })
-
-  it.each(['length', 'other'] as const)('preserves only verified content on %s termination and reload', async (finishReason) => {
-    streamRound.mockResolvedValueOnce(queryRound(scope)).mockResolvedValueOnce({
-      ...financeReply({ observation: 1, metric: 'expenseMinor' }),
-      text: financeReply({ observation: 1, metric: 'expenseMinor' }).text + '\n{"observation":9,',
-      finishReason,
-    })
+  it.each(['length', 'other'] as const)('keeps a natural Markdown answer and marks it interrupted on %s termination', async (finishReason) => {
+    const partialAnswer = '## 本期支出\n\n账本统计为 **¥825.01**。'
+    streamRound.mockResolvedValueOnce(queryRound(scope)).mockResolvedValueOnce(financeReply(partialAnswer, finishReason))
     const warning = finishReason === 'length' ? 'reached the length limit' : 'ended before it was complete'
     const events = await send('Report my spending')
-    expect(events).toContain('825.01')
+    expect(events).toContain('## 本期支出')
+    expect(events).toContain('¥825.01')
     expect(events).toContain(warning)
     expect(events).toContain('"interrupted":true')
-    expect(events).not.toContain('observation')
+    expect(events).not.toContain('"observation"')
+    expect(events).not.toContain('verifying')
+    expect(streamRound).toHaveBeenCalledTimes(2)
     expect(await (await aiRequest('/ledger-session', 'POST')).json()).toMatchObject({
       messages: [{ role: 'user' }, { content: expect.stringContaining(warning), blocks: { interrupted: true } }],
     })
   })
 
-  it('keeps delivered facts on a provider failure but does not expose the remaining draft', async () => {
+  it('does not expose an uncompleted draft when the provider fails mid-round', async () => {
     streamRound.mockResolvedValueOnce(queryRound(scope)).mockImplementationOnce(async ({ onToken }) => {
-      await onToken(financeReply({ observation: 1, metric: 'expenseMinor' }).text + '\nPrivate draft: ¥999,999')
+      await onToken('Private draft: ¥999,999')
       throw new Error('provider failed')
     })
     const events = await send('Report my spending')
-    expect(events).toContain('825.01')
-    expect(events).toContain('ended before it was complete')
     expect(events).toContain('event: error')
-    expect(events).not.toMatch(/event: done|Private draft|999,999/)
+    expect(events).not.toMatch(/event: done|Private draft|999,999|event: token/)
   })
 
-  it('follows an unusual month into spending, then details, and only emits the final answer', async () => {
-    streamRound.mockImplementationOnce(async ({ onToken }) => {
-      onToken('Private intermediate text')
-      return queryRound({ kind: 'trend', from: '2025-09-01', to: '2026-02-28' })
-    }).mockImplementationOnce(async (round) => {
-      const [{ trend }] = toolObservations(round)
-      expect(trend).toHaveLength(6)
-      expect(trend.at(-1).expenseMinor).toBeGreaterThan(trend.at(-2).expenseMinor)
-      return queryRound({ kind: 'spending', from: '2026-02-01', to: '2026-02-28' }, { kind: 'repayment' })
-    }).mockImplementationOnce(async (round) => {
-      const [, spending, repayment] = toolObservations(round)
-      expect(spending.expenseCategories[0].amountMinor).toBe(outOfScopeAmount)
-      expect(repayment.summary.repaymentMinor).toBe(0)
-      return queryRound({ kind: 'details', from: spending.scope.from, to: spending.scope.to })
-    }).mockImplementationOnce(async (round) => {
-      const detail = toolObservations(round).at(-1)
-      expect(detail.coverage).toEqual({ offset: 0, returned: 1, total: 1, firstUnreadOffset: null, exhaustive: true })
-      expect(detail.transactions[0].amountMinor).toBe(outOfScopeAmount)
-      expect(JSON.stringify(detail)).not.toContain('PRIVATE NOTE')
-      return financeReply(
-        { id: 'f1', compare: [{ observation: 1, metric: 'expenseMinor', month: '2026-01' }, { observation: 1, metric: 'expenseMinor', month: '2026-02' }], percent: true },
-        { id: 'f2', observation: 2, metric: 'categoryExpenseMinor', row: 0 },
-        { id: 'f3', observation: 3, metric: 'repaymentMinor' },
-        { observation: 4, metric: 'transactionAmountMinor', row: 0 },
-        { type: 'inference', evidence: ['f1', 'f3'], text: 'With other items held equal, higher spending reduces the cashflow balance. Repayment principal uses cash separately from ordinary spending.' },
-        { type: 'hypothesis', evidence: ['f1', 'f2'], text: 'Irregular purchases could explain some of the change.' },
-        { type: 'recommendation', evidence: [], text: 'Separate essential and adjustable spending before setting a budget.' },
-      )
-    })
-    const events = await send('What changed in the past six months?')
-    expect(events).toMatch(/"phase":"preparing"[\s\S]*"phase":"reading"[\s\S]*"phase":"analyzing"[\s\S]*"phase":"verifying"[\s\S]*7,319\.87[\s\S]*event: done/)
-    expect(events).toContain('6,494.86')
-    expect(events).toContain('787.25%')
-    expect(events).toContain('Irregular purchases could explain some of the change.')
-    expect(events).toContain('Separate essential and adjustable spending before setting a budget.')
-    expect(events).toContain('With other items held equal, higher spending reduces the cashflow balance.')
-    expect(events).toContain('Individual transaction example')
-    expect(events.match(/"phase":"reading"/g)).toHaveLength(3)
-    expect(events).not.toMatch(/Private intermediate|event: tool_|PRIVATE NOTE|Ledger coverage/)
-    const expectedOperations = ['trend', 'spending', 'repayment', 'details']
-    const activity = [...events.matchAll(/event: finance_activity\ndata: (.+)/g)].map(([, json]) => JSON.parse(json).activity)
-    expect(activity).toEqual(expectedOperations.flatMap((operation, index) => [
-      { id: index + 1, operation, status: 'running' }, { id: index + 1, operation, status: 'success' },
-    ]))
-    const stored = db.prepare('SELECT content FROM messages WHERE session_id = ? ORDER BY id').all(sessionId) as { content: string }[]
-    expect(JSON.stringify(stored)).not.toMatch(/finance_progress|Private intermediate|PRIVATE NOTE|observation|f1/)
-    const completed = activity.filter(item => item.status === 'success')
-    expect(JSON.parse(stored.at(-1)!.content).financeActivity).toEqual(completed)
-    expect(await (await aiRequest('/ledger-session', 'POST')).json()).toMatchObject({
-      messages: [{ role: 'user' }, { blocks: { financeActivity: completed, toolCalls: [] } }],
-    })
+  it('uses the aggregate before asking for narrower evidence and emits only the final answer', async () => {
+    streamRound.mockResolvedValueOnce(queryRound({ kind: 'cashflow', from: '2026-02-01', to: '2026-02-28' }))
+      .mockImplementationOnce(async (round) => {
+        const [observation] = toolObservations(round)
+        expect(observation.scope).toEqual({ kind: 'cashflow', from: '2026-02-01', to: '2026-02-28' })
+        expect(observation.expenseCategories[0].amountMinor).toBe(outOfScopeAmount)
+        expect(observation.largestExpenses).toHaveLength(1)
+        return financeReply('## 2026 年 2 月收支\n\n| 项目 | 金额 |\n| --- | ---: |\n| 支出 | ¥7,319.87 |\n| 收入 | ¥0.00 |\n| 还款本金 | ¥0.00 |\n\n主要支出来自常规消费分类。')
+      })
+    const events = await send('Summarize February income, spending, repayment and major expenses.')
+    expect(events).toContain('## 2026 年 2 月收支')
+    expect(events).toContain('| 支出 | ¥7,319.87 |')
+    expect(events).toContain('主要支出来自常规消费分类')
+    expect(events).not.toMatch(/Private intermediate|event: tool_|PRIVATE NOTE|observation|"summary"/)
+    expect(events).toContain('"operation":"cashflow"')
+    expect(streamRound).toHaveBeenCalledTimes(2)
   })
 
   it('recovers from invalid queries and reuses canonical observations for duplicate ranges', async () => {
@@ -465,21 +257,21 @@ describe('Finance Agent execution', () => {
       return queryRound({ kind: 'cashflow', to: full.scope.to, from: full.scope.from, offset: 0 })
     }).mockImplementationOnce(async (round) => {
       expect(toolObservations(round).at(-1)).toMatchObject({ duplicateOfObservation: 4 })
-      return financeReply({ observation: 4, metric: 'expenseMinor' })
+      return financeReply('Recorded expenses total ¥8,144.88.')
     })
     const events = await send('Compare all recorded expenses')
     expect(events).toContain('8,144.88')
     expect(events).toContain('some queries could not be completed (trend (2023-01-01 → 2026-02-28))')
   })
 
-  it('withholds an unsupported answer when every Ledger read failed', async () => {
+  it('reports a failed read with the model’s direct natural-language response', async () => {
     streamRound
-      .mockResolvedValueOnce(queryRound({ kind: 'cashflow', from: '2026-01-01' }))
-      .mockResolvedValueOnce({ text: 'I verified you spent ¥500.', toolCalls: [], finishReason: 'stop' })
-      .mockResolvedValueOnce(financeReply({ observation: 1, metric: 'expenseMinor' }))
+      .mockResolvedValueOnce(queryRound({ kind: 'trend', from: 'not-a-date', to: 'also-not-a-date' }))
+      .mockResolvedValueOnce(financeReply('本次读取没有成功，我无法提供可靠的具体金额。'))
     const events = await send('How much did I spend?')
-    expect(events).toContain('could not verify this question against Ledger')
-    expect(events).not.toContain('¥500')
+    expect(events).toContain('本次读取没有成功，我无法提供可靠的具体金额。')
+    expect(events).toContain('some queries could not be completed')
+    expect(streamRound).toHaveBeenCalledTimes(2)
   })
 
   it('labels clipped calendar months and keeps the observation in Ledger time', () => {
@@ -505,7 +297,7 @@ describe('Finance Agent execution', () => {
         const observations = toolObservations(round)
         expect(observations).toHaveLength(rounds * batchSize)
         expect(observations.filter(({ accounts }) => accounts)).toHaveLength(1)
-        return financeReply({ observation: 1, metric: 'currentBalanceMinor', row: 0 })
+        return financeReply('The returned account balance is available for this analysis.')
       })
       expect(await send('Continue investigating')).toContain('query budget for this turn was reached')
       expect(streamRound).toHaveBeenCalledTimes(rounds + 1)
@@ -530,12 +322,12 @@ describe('Finance Agent execution', () => {
         const [{ nextOffset, coverage }] = toolObservations(round)
         expect(nextOffset).toBeNull()
         expect(coverage).toEqual({ offset: 16, returned: 2, total: 18, firstUnreadOffset: 0, exhaustive: false })
-        return exhaustive ? queryRound({ kind: 'details' }) : financeReply({ observation: 1, metric: 'transactionAmountMinor', row: 0 })
+        return exhaustive ? queryRound({ kind: 'details' }) : financeReply('The last page did not include the beginning of the list.')
       })
       if (exhaustive) {
         streamRound.mockImplementationOnce(async (round) => {
           expect(toolObservations(round).at(-1).coverage).toMatchObject({ total: 18, firstUnreadOffset: null, exhaustive: true })
-          return financeReply({ observation: 2, metric: 'transactionAmountMinor', row: 0 })
+          return financeReply('I reviewed the complete transaction list.')
         })
       }
       const events = await send('Review my transaction history')
@@ -660,7 +452,7 @@ describe('Ledger analysis request boundary', () => {
       .toContain('"expenseMinor":731987')
     expect(repository.listActiveTransactions()).toHaveLength(2)
     const stored = db.prepare('SELECT content FROM messages WHERE session_id = ? ORDER BY id').all(sessionId)
-    expect(JSON.stringify(stored)).toContain('Spending · 2026-01-01 → 2026-01-10')
+    expect(JSON.stringify(stored)).toContain('Ledger spending was ¥825.01.')
     expect(db.prepare('SELECT title FROM sessions WHERE id = ?').get(sessionId)).toEqual({ title: 'AI Finance' })
     expect(JSON.stringify(stored)).not.toMatch(/82501|largestExpenses|PRIVATE NOTE|issue a Ledger mutation/)
 
@@ -733,9 +525,9 @@ describe('fixed Ledger AI session and commands', () => {
     await send('Compare January spending')
     streamRound.mockRejectedValueOnce(new Error('interrupted'))
     await send('Incomplete private turn')
-    streamRound.mockResolvedValueOnce(queryRound(scope)).mockResolvedValueOnce({
-      ...financeReply({ observation: 1, metric: 'expenseMinor' }), finishReason: 'length',
-    })
+    streamRound.mockResolvedValueOnce(queryRound(scope)).mockResolvedValueOnce(
+      financeReply('The recorded spending total is ¥825.01.', 'length'),
+    )
     await send('Truncated private turn')
     await send('Keep this recent context')
     await send('Keep the latest topic')
@@ -758,7 +550,7 @@ describe('fixed Ledger AI session and commands', () => {
     expect(reopened.messages).toHaveLength(10)
     await send('Fresh figures please')
     expect(streamRound.mock.calls.at(-1)![0].system).toContain(checkpoint.compactSummary)
-    expect(streamRound.mock.calls.at(-1)![0].system).toContain('Use fresh Ledger data')
+    expect(streamRound.mock.calls.at(-1)![0].system).toContain('use fresh read_ledger data')
     expect(streamRound.mock.calls.at(-1)![0].messages).not.toContainEqual(expect.objectContaining({ content: 'Compare January spending' }))
 
     expect(await (await command('clear', { sessionId: ordinaryId })).json()).toEqual({ outcome: 'cleared' })

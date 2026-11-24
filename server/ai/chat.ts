@@ -1,6 +1,5 @@
 import { financeOperation, type FinanceActivity, type FinanceActivityEvent, type FinanceAgentProgress } from '../../shared/ledgerAiAnalysis.js'
 import { createFinanceAgent, financeCoverageNotice } from './finance-agent.js'
-import { answerStandaloneFinanceCalculation, financeAnswerProtocol, requiresLedgerEvidence, verifyFinanceAnswer } from './finance-verification.js'
 import { ledgerReadTool, type createLedgerAnalysis } from './ledger-analysis.js'
 import { getAiRuntimeConfig, type AiRuntimeConfig } from './settings.js'
 // AI chat orchestrator. Pure functions of (db, ...args) — no
@@ -51,6 +50,8 @@ import {
 } from './messages.js'
 import * as messages from './messages.js'
 import * as sessions from './sessions.js'
+
+const FINANCE_MAX_OUTPUT_TOKENS = 8192
 
 // The Nuvyn context prompt (file layout, frontmatter schema, writing
 // conventions) lives in ./prompt.md so it's easy to edit as a
@@ -286,11 +287,9 @@ export async function runChat(opts: RunChatOpts): Promise<{
   const userId = userResult.message.id
   await emit(opts.onEvent, { type: 'user', id: userId })
 
-  const financeNeedsLedger = opts.ledgerAnalysis ? requiresLedgerEvidence(opts.userContent) : false
   const system = opts.ledgerAnalysis
     ? opts.ledgerAnalysis.system + conversationMemorySection(compactSummary)
-      + (compactSummary ? '\nUse fresh Ledger data for financial facts. Prior memory is for goals and open questions only.' : '')
-      + '\n\n' + financeAnswerProtocol
+      + '\nHistorical conversation and memory can explain the user’s goals, but never treat old figures as current. Query fresh Ledger data for personal financial facts; if no relevant read succeeds, say what remains unknown.'
     : buildSystemPrompt(opts.ctx, compactSummary)
   // Edit-10.4: ONE safety policy per run, derived from the normalized
   // ChatContext and applied to every tool call inside executeToolCall
@@ -302,9 +301,7 @@ export async function runChat(opts: RunChatOpts): Promise<{
   const toolSafety = deriveToolSafetyPolicy(opts.ctx)
 
   const convo: NormalizedMessage[] = opts.ledgerAnalysis
-    ? financeNeedsLedger
-      ? [...ledgerConversationHistory(history), { role: 'user', content: opts.userContent }]
-      : [{ role: 'user', content: opts.userContent }]
+    ? [...ledgerConversationHistory(history), { role: 'user', content: opts.userContent }]
     : buildConvoFromHistory(history, opts.userContent)
   // Backend may be cached from a previous run with a different
   // provider. Clear so getChatBackend() re-evaluates against the
@@ -327,20 +324,14 @@ export async function runChat(opts: RunChatOpts): Promise<{
   const toolCtxSignal = opts.signal ?? new AbortController().signal
 
   let ledgerReplyInterrupted = false
-  let financeCorrectionUsed = false
-  let earlierVerifiedDraft = ''
-  let ledgerDraft = ''
   const chinese = /\p{Script=Han}/u.test(opts.userContent)
-  const unavailable = chinese
-    ? financeNeedsLedger ? '目前无法根据账本核对这次问题。可以缩小日期范围后再试。' : '这次回答未通过安全核验，请换个问法再试。'
-    : financeNeedsLedger ? 'I could not verify this question against Ledger. Try again with a narrower date range.' : 'I could not safely verify this response. Please rephrase the question.'
   const finance = opts.ledgerAnalysis && createFinanceAgent(opts.ledgerAnalysis)
   const requireFinanceAccess = () => {
     if (opts.signal?.aborted || !opts.canUseLedgerAnalysis?.()) throw new ChatError('aborted')
   }
   const finalFinanceInstruction = {
     role: 'user' as const,
-    content: 'The Ledger tool budget for this turn is closed. Answer from the observations already returned. Identify any scope that could not be verified.',
+    content: 'The Ledger tool budget for this turn is closed. Give the best natural-language answer supported by the observations already returned. State any relevant coverage gap and do not guess missing figures.',
   }
   const interruptionNotice = (length: boolean) => length
     ? (chinese ? '回答因长度限制未完成，部分分析内容可能缺失。' : 'The response reached the length limit. Part of the analysis may be missing.')
@@ -348,99 +339,83 @@ export async function runChat(opts: RunChatOpts): Promise<{
   try {
     if (finance) {
       requireFinanceAccess()
-      fullText = answerStandaloneFinanceCalculation(opts.userContent, chinese)
-      if (fullText) {
-        await emit(opts.onEvent, { type: 'token', text: fullText })
-        requireFinanceAccess()
-      } else {
-        await emit(opts.onEvent, { type: 'finance_progress', phase: 'analyzing' })
-      }
+      await emit(opts.onEvent, { type: 'finance_progress', phase: 'analyzing' })
     }
     while (true) {
-      if (finance && fullText) break
       if (finance) requireFinanceAccess()
       else if (opts.signal?.aborted) throw new ChatError('aborted')
 
-      const canRead = Boolean(financeNeedsLedger && finance?.canQuery())
-      ledgerDraft = ''
+      const canRead = Boolean(finance?.canQuery())
+      const financeTokens: string[] = []
       const result = await backend.streamRound({
         db: opts.db,
         model: opts.model, runtimeConfig,
         system,
         messages: convo,
         tools: finance ? (canRead ? [ledgerReadTool] : []) : TOOL_DEFINITIONS,
+        ...(finance ? { maxOutputTokens: FINANCE_MAX_OUTPUT_TOKENS } : {}),
         signal: opts.signal,
-        onToken: finance ? (text) => {
-          if (ledgerDraft.length < 24_000) ledgerDraft += text.slice(0, 24_000 - ledgerDraft.length)
-        } : async (text) => {
+        // A round can include both draft text and tool calls. Hold Finance
+        // chunks until the provider identifies a final answer, then forward
+        // only the final round's original chunks to the client.
+        onToken: finance ? (text) => { financeTokens.push(text) } : async (text) => {
           fullText += text
           await emit(opts.onEvent, { type: 'token', text })
         },
       })
 
       if (finance) {
-        ledgerDraft = ''
         requireFinanceAccess()
-        if (result.finishReason !== 'tool_calls' || !canRead) {
-          ledgerReplyInterrupted = result.finishReason !== 'stop'
-          await emit(opts.onEvent, { type: 'finance_progress', phase: 'verifying' })
-          requireFinanceAccess()
-          const coverage = finance.limitations()
-          const checked = verifyFinanceAnswer(result.text, finance.observation, chinese, {
-            allowGeneral: !financeNeedsLedger || finance.hasObservations(),
-          })
-          const answer = checked.text
-          if ((!answer || checked.rejected) && ((!financeNeedsLedger) || canRead || !coverage.noEvidence) &&
-              !ledgerReplyInterrupted && !financeCorrectionUsed) {
-            financeCorrectionUsed = true
-            earlierVerifiedDraft = checked.text
-            convo.push({ role: 'user', content: financeNeedsLedger
-              ? 'The previous draft did not pass verification. Read any missing Ledger evidence if tools are still available. Return valid fact records then evidence-linked analysis. Leave unverifiable claims out. If the question also asks for a general explanation, you may add a separate knowledge record without personal facts or figures.'
-              : 'The previous draft did not pass the general-knowledge safety check. Return one concise JSON knowledge record only. Do not refer to the user or their finances, and do not include figures, dates, rates, currencies or quantities.' })
+        if (result.finishReason === 'tool_calls' && result.toolCalls.length > 0) {
+          if (canRead && finance.beginBatch(result.toolCalls.length)) {
+            convo.push({ role: 'assistant', content: result.toolCalls.map((tc) => ({
+              type: 'tool_use', id: tc.id, name: tc.name, input: tc.input,
+            })) })
+            let reading = false
+            for (const [ordinal, tc] of result.toolCalls.entries()) {
+              requireFinanceAccess()
+              const activity: FinanceActivity = {
+                id: financeActivity.length + 1,
+                operation: financeOperation(tc.name === ledgerReadTool.name ? tc.input?.kind : undefined),
+                status: 'running',
+              }
+              financeActivity.push(activity)
+              await emit(opts.onEvent, { type: 'finance_activity', activity: { ...activity } })
+              requireFinanceAccess()
+              const { content, status } = await finance.execute(tc, result.toolCalls.length, ordinal, async () => {
+                if (!reading) {
+                  await emit(opts.onEvent, { type: 'finance_progress', phase: 'reading' })
+                  reading = true
+                }
+                requireFinanceAccess()
+              })
+              activity.status = status
+              await emit(opts.onEvent, { type: 'finance_activity', activity: { ...activity } })
+              convo.push({ role: 'tool', tool_call_id: tc.id, content })
+            }
+            if (!finance.canQuery()) convo.push(finalFinanceInstruction)
             await emit(opts.onEvent, { type: 'finance_progress', phase: 'analyzing' })
             continue
           }
-          fullText = (answer || earlierVerifiedDraft || unavailable) + financeCoverageNotice(coverage, chinese)
-          if ((checked.rejected && checked.text) || (!answer && earlierVerifiedDraft)) {
-            fullText += chinese ? '\n\n已省略未通过核对的结论。' : '\n\nClaims that could not be verified were omitted.'
+          if (convo.at(-1)?.content !== finalFinanceInstruction.content) {
+            convo.push(finalFinanceInstruction)
+            continue
           }
-          if (ledgerReplyInterrupted) fullText += '\n\n' + interruptionNotice(result.finishReason === 'length')
-          await emit(opts.onEvent, { type: 'token', text: fullText })
-          requireFinanceAccess()
-          break
         }
-        if (!finance.beginBatch(result.toolCalls.length)) {
-          convo.push(finalFinanceInstruction)
-          continue
+
+        const coverage = finance.limitations()
+        ledgerReplyInterrupted = result.finishReason !== 'stop'
+        const answer = result.text || financeTokens.join('')
+        fullText = answer.trim() || (chinese ? '这次没有生成可显示的回答。' : 'No answer was generated.')
+        const suffix = financeCoverageNotice(coverage, chinese)
+          + (ledgerReplyInterrupted ? '\n\n' + interruptionNotice(result.finishReason === 'length') : '')
+        const chunks = answer === financeTokens.join('') && financeTokens.length ? financeTokens : [fullText]
+        for (const [index, chunk] of chunks.entries()) {
+          await emit(opts.onEvent, { type: 'token', text: chunk + (index === chunks.length - 1 ? suffix : '') })
         }
-        convo.push({ role: 'assistant', content: result.toolCalls.map((tc) => ({
-          type: 'tool_use', id: tc.id, name: tc.name, input: tc.input,
-        })) })
-        let reading = false
-        for (const [ordinal, tc] of result.toolCalls.entries()) {
-          requireFinanceAccess()
-          const activity: FinanceActivity = {
-            id: financeActivity.length + 1,
-            operation: financeOperation(tc.name === ledgerReadTool.name ? tc.input?.kind : undefined),
-            status: 'running',
-          }
-          financeActivity.push(activity)
-          await emit(opts.onEvent, { type: 'finance_activity', activity: { ...activity } })
-          requireFinanceAccess()
-          const { content, status } = await finance.execute(tc, result.toolCalls.length, ordinal, async () => {
-            if (!reading) {
-              await emit(opts.onEvent, { type: 'finance_progress', phase: 'reading' })
-              reading = true
-            }
-            requireFinanceAccess()
-          })
-          activity.status = status
-          await emit(opts.onEvent, { type: 'finance_activity', activity: { ...activity } })
-          convo.push({ role: 'tool', tool_call_id: tc.id, content })
-        }
-        if (!finance.canQuery()) convo.push(finalFinanceInstruction)
-        await emit(opts.onEvent, { type: 'finance_progress', phase: 'analyzing' })
-        continue
+        fullText += suffix
+        requireFinanceAccess()
+        break
       }
       const roundText = result.text
       const roundToolCalls = result.toolCalls.map((tc) => ({
@@ -536,21 +511,11 @@ export async function runChat(opts: RunChatOpts): Promise<{
       }
     }
   } catch (err) {
-    // Persist whatever streamed so far (typically '' or a few tokens)
-    // and re-throw a tagged error so the route can emit SSE error.
+    // Finance round text is held until a provider round is known to be final.
+    // Other workspaces persist whatever streamed so far.
     const financeAborted = finance && (opts.signal?.aborted || !opts.canUseLedgerAnalysis?.())
     for (const activity of financeActivity) {
       if (activity.status === 'running') activity.status = financeAborted ? 'cancelled' : 'failed'
-    }
-    if (finance && !financeAborted && !fullText && (ledgerDraft || earlierVerifiedDraft)) {
-      const checked = verifyFinanceAnswer(ledgerDraft, finance.observation, chinese, {
-        allowGeneral: !financeNeedsLedger || finance.hasObservations(),
-      })
-      const verified = checked.text || earlierVerifiedDraft
-      if (verified) {
-        fullText = verified + financeCoverageNotice(finance.limitations(), chinese) + '\n\n' + interruptionNotice(false)
-        await emit(opts.onEvent, { type: 'token', text: fullText })
-      }
     }
     const cancelled = Boolean(finance && opts.signal?.aborted)
     const partial = cancelled ? '' : (financeAborted ? '' : fullText) || (finance ? interruptionNotice(false) : '[stream interrupted]')

@@ -64,6 +64,20 @@ describe('OpenAI Chat Completions backend', () => {
     expect(tokens).toEqual(['hello ', 'world'])
     expect(result.text).toBe('hello world')
     expect(result.finishReason).toBe('stop')
+    expect(createRef.value.mock.calls[0][0]).toMatchObject({ max_tokens: 4096 })
+  })
+
+  it('accepts a request-specific output cap without changing the ordinary default', async () => {
+    await getChatBackend(db, 'openai').streamRound({
+      db,
+      model: 'test-model',
+      system: 'system',
+      messages: [{ role: 'user', content: 'Analyze my Ledger' }],
+      tools: [],
+      maxOutputTokens: 8192,
+      onToken: () => {},
+    })
+    expect(createRef.value.mock.calls[0][0]).toMatchObject({ max_tokens: 8192 })
   })
 
   it.each([

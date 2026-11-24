@@ -331,7 +331,6 @@ const STRINGS: Strings = {
   'ai.finance_phase_preparing': { zh: '正在同步账本…', en: 'Syncing Ledger…' },
   'ai.finance_phase_reading': { zh: '正在查询账本…', en: 'Reading Ledger…' },
   'ai.finance_phase_analyzing': { zh: '正在分析问题…', en: 'Analyzing your question…' },
-  'ai.finance_phase_verifying': { zh: '正在核对查询范围…', en: 'Checking query coverage…' },
   'ai.ledger_uninitialized': { zh: '账本尚未初始化，无法分析。', en: 'Set up Ledger before running an analysis.' },
   'ai.ledger_unavailable': { zh: '本次账本分析未能完成。请重试或缩短日期范围。', en: 'Ledger analysis could not be completed. Try again or use a shorter date range.' },
   'ai.empty_hint_board': { zh: '可以帮助你头脑风暴和整理思路。', en: 'I can help you brainstorm and organize ideas.' },
