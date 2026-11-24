@@ -14,6 +14,9 @@ const operations: Record<FinanceActivity['operation'], string> = {
   spending: 'ai.finance_spending',
   trend: 'ai.finance_trend',
   repayment: 'ai.finance_repayment',
+  memory_add: 'ai.finance_activity_memory_add',
+  memory_update: 'ai.finance_activity_memory_update',
+  memory_delete: 'ai.finance_activity_memory_delete',
   query: 'ai.finance_query',
 }
 const icons = { success: Check, failed: X, cancelled: Circle, running: Clock, reused: Rotate }

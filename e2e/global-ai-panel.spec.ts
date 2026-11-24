@@ -347,6 +347,22 @@ test('AI Finance isolates its transcript and executes local commands without sen
   const chatRequests: AnyRecord[] = []
   const commands: string[] = []
   const financeMessages: AnyRecord[] = []
+  const financeMemories: AnyRecord[] = [
+    { id: 101, kind: 'user', content: '优先保留应急资金。', createdAt: 1, updatedAt: 1 },
+    { id: 102, kind: 'agent', content: '把还款本金计入现金流分析。', createdAt: 2, updatedAt: 2 },
+  ]
+  const memoryState = () => {
+    const user = financeMemories.filter(item => item.kind === 'user').reduce((sum, item) => sum + [...String(item.content)].length, 0)
+    const agent = financeMemories.filter(item => item.kind === 'agent').reduce((sum, item) => sum + [...String(item.content)].length, 0)
+    return {
+      items: financeMemories,
+      usage: {
+        user: { used: user, limit: 2_000 },
+        agent: { used: agent, limit: 3_000 },
+        total: { used: user + agent, limit: 5_000 },
+      },
+    }
+  }
   await page.route('**/api/ai/**', async (route) => {
     const request = route.request()
     switch (new URL(request.url()).pathname) {
@@ -367,6 +383,30 @@ test('AI Finance isolates its transcript and executes local commands without sen
         ]))
       case '/api/ai/ledger-session':
         return route.fulfill(jsonResponse({ session: finance, messages: financeMessages }))
+      case '/api/ai/finance-memory':
+        if (request.method() === 'DELETE') {
+          financeMemories.length = 0
+          return route.fulfill(jsonResponse({ cleared: true, usage: memoryState().usage }))
+        }
+        return route.fulfill(jsonResponse(memoryState()))
+      case '/api/ai/finance-memory/101':
+        if (request.method() === 'PATCH') {
+          financeMemories[0] = { ...financeMemories[0], content: request.postDataJSON().content, updatedAt: 3 }
+          return route.fulfill(jsonResponse({ memory: financeMemories[0], usage: memoryState().usage }))
+        }
+        if (request.method() === 'DELETE') {
+          const index = financeMemories.findIndex(item => item.id === 101)
+          if (index >= 0) financeMemories.splice(index, 1)
+          return route.fulfill(jsonResponse({ deleted: true, usage: memoryState().usage }))
+        }
+        return route.fallback()
+      case '/api/ai/finance-memory/102':
+        if (request.method() === 'DELETE') {
+          const index = financeMemories.findIndex(item => item.id === 102)
+          if (index >= 0) financeMemories.splice(index, 1)
+          return route.fulfill(jsonResponse({ deleted: true, usage: memoryState().usage }))
+        }
+        return route.fallback()
       case '/api/ai/ledger-session/command': {
         const { command } = request.postDataJSON()
         commands.push(command)
@@ -497,9 +537,10 @@ test('AI Finance isolates its transcript and executes local commands without sen
   await sendAi(page, '  /compact  ')
   await expect(panel.getByText('当前无需压缩')).toBeVisible()
   await sendAi(page, '/unknown')
-  await expect(panel.getByText('未知命令。可用命令为 /compact 和 /clear。')).toBeVisible()
+  await expect(panel.getByText('未知命令。可用命令为 /compact、/clear 和 /memory。')).toBeVisible()
   const input = panel.locator('textarea')
   await input.fill('/')
+  await expect(panel.getByRole('option')).toHaveCount(3)
   await panel.getByRole('option', { name: '/clear · 清空对话', exact: true }).click()
   await expect(page.getByText('清空财务对话？')).toHaveCount(0)
   await expect(panel.getByText('对话已清空')).toBeVisible()
@@ -513,6 +554,32 @@ test('AI Finance isolates its transcript and executes local commands without sen
   await expect(input).toHaveValue('')
   expect(commands).toEqual(['compact', 'clear', 'clear'])
   expect(chatRequests).toHaveLength(3)
+
+  const messagesBeforeMemory = structuredClone(financeMessages)
+  await input.fill('/')
+  await panel.getByRole('option', { name: '/memory · 管理财务记忆', exact: true }).click()
+  const memoryDialog = page.locator('.ai-finance-memory-dialog')
+  await expect(memoryDialog).toBeVisible()
+  await expect(memoryDialog.getByRole('heading', { name: '用户记忆' })).toBeVisible()
+  await expect(memoryDialog.getByRole('heading', { name: '分析经验' })).toBeVisible()
+  await expect(memoryDialog.getByText('优先保留应急资金。')).toBeVisible()
+  expect(chatRequests).toHaveLength(3)
+  expect(financeMessages).toEqual(messagesBeforeMemory)
+  expect(commands).toEqual(['compact', 'clear', 'clear'])
+
+  await memoryDialog.getByRole('button', { name: '编辑记忆: 优先保留应急资金。' }).click()
+  await memoryDialog.getByRole('textbox', { name: '编辑记忆' }).fill('先留足家庭应急资金。')
+  await memoryDialog.getByRole('button', { name: '保存' }).click()
+  await expect(memoryDialog.getByText('先留足家庭应急资金。')).toBeVisible()
+  await memoryDialog.getByRole('button', { name: '删除记忆: 把还款本金计入现金流分析。' }).click()
+  await expect(memoryDialog.getByText('把还款本金计入现金流分析。')).toHaveCount(0)
+  await memoryDialog.getByRole('button', { name: '清空全部记忆' }).click()
+  await expect(memoryDialog.getByText('这不会删除原始聊天中的相关内容。')).toBeVisible()
+  await memoryDialog.getByRole('button', { name: '清空全部记忆' }).click()
+  await expect(memoryDialog.getByText('还没有长期记忆。')).toBeVisible()
+  expect(chatRequests).toHaveLength(3)
+  expect(financeMessages).toEqual(messagesBeforeMemory)
+  await memoryDialog.getByRole('button', { name: '关闭' }).click()
 
   await page.reload()
   await page.getByTestId('global-ai-trigger').click()
@@ -651,7 +718,7 @@ test.describe('AI Finance responsive layout', () => {
     await expect.poll(async () => (await input.boundingBox())!.height).toBe(compactHeight)
 
     await input.fill('/')
-    await expect(panel.getByRole('option')).toHaveCount(2)
+    await expect(panel.getByRole('option')).toHaveCount(3)
     await input.press('ArrowDown')
     await expect(panel.getByRole('option', { name: /\/clear/ })).toHaveAttribute('aria-selected', 'true')
     await input.press('Escape')

@@ -45,7 +45,7 @@ export function getDataDir(): string {
 export const SQLITE_BUSY_TIMEOUT_MS = 5_000
 
 /** Latest fully applied SQLite schema version. */
-export const LATEST_SCHEMA_VERSION = 53
+export const LATEST_SCHEMA_VERSION = 54
 
 function ensureDataDir() {
   if (!existsSync(DATA_DIR)) mkdirSync(DATA_DIR, { recursive: true })

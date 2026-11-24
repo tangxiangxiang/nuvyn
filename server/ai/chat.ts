@@ -1,6 +1,7 @@
 import { financeOperation, type FinanceActivity, type FinanceActivityEvent, type FinanceAgentProgress } from '../../shared/ledgerAiAnalysis.js'
-import { createFinanceAgent, financeCoverageNotice } from './finance-agent.js'
-import { ledgerReadTool, type createLedgerAnalysis } from './ledger-analysis.js'
+import { createFinanceAgent, financeCoverageNotice, manageMemoryTool } from './finance-agent.js'
+import { type createLedgerAnalysis } from './ledger-analysis.js'
+import { createFinanceMemoryRepository, formatFinanceMemoryContext } from './finance-memory.js'
 import { getAiRuntimeConfig, type AiRuntimeConfig } from './settings.js'
 // AI chat orchestrator. Pure functions of (db, ...args) — no
 // closures over module state, no classes (ChatError is the one
@@ -227,6 +228,7 @@ export type RunChatOpts = {
   ctx: ChatContext
   diaryBodyAccess?: (path: string) => boolean
   ledgerAnalysis?: ReturnType<typeof createLedgerAnalysis>
+  ledgerOwnerId?: number
   canUseLedgerAnalysis?: () => boolean
   onEvent: (e: ChatEvent) => void | Promise<void>
 } & RunChatDeps
@@ -287,10 +289,7 @@ export async function runChat(opts: RunChatOpts): Promise<{
   const userId = userResult.message.id
   await emit(opts.onEvent, { type: 'user', id: userId })
 
-  const system = opts.ledgerAnalysis
-    ? opts.ledgerAnalysis.system + conversationMemorySection(compactSummary)
-      + '\nHistorical conversation and memory can explain the user’s goals, but never treat old figures as current. Query fresh Ledger data for personal financial facts; if no relevant read succeeds, say what remains unknown.'
-    : buildSystemPrompt(opts.ctx, compactSummary)
+  const ordinarySystem = opts.ledgerAnalysis ? '' : buildSystemPrompt(opts.ctx, compactSummary)
   // Edit-10.4: ONE safety policy per run, derived from the normalized
   // ChatContext and applied to every tool call inside executeToolCall
   // (immediately before each side effect). The policy is this run's
@@ -325,7 +324,13 @@ export async function runChat(opts: RunChatOpts): Promise<{
 
   let ledgerReplyInterrupted = false
   const chinese = /\p{Script=Han}/u.test(opts.userContent)
-  const finance = opts.ledgerAnalysis && createFinanceAgent(opts.ledgerAnalysis)
+  const financeMemory = opts.ledgerAnalysis && opts.ledgerOwnerId
+    ? createFinanceMemoryRepository(opts.db)
+    : null
+  const finance = opts.ledgerAnalysis && createFinanceAgent(
+    opts.ledgerAnalysis,
+    financeMemory && opts.ledgerOwnerId ? { db: opts.db, ownerId: opts.ledgerOwnerId } : undefined,
+  )
   const requireFinanceAccess = () => {
     if (opts.signal?.aborted || !opts.canUseLedgerAnalysis?.()) throw new ChatError('aborted')
   }
@@ -346,13 +351,24 @@ export async function runChat(opts: RunChatOpts): Promise<{
       else if (opts.signal?.aborted) throw new ChatError('aborted')
 
       const canRead = Boolean(finance?.canQuery())
+      const persistentFinanceMemory = finance && financeMemory && opts.ledgerOwnerId
+        ? formatFinanceMemoryContext(financeMemory.list(opts.ledgerOwnerId))
+        : ''
+      const system = finance && financeMemory && opts.ledgerOwnerId
+        ? opts.ledgerAnalysis!.system + conversationMemorySection(compactSummary)
+          + (persistentFinanceMemory ? `\n\n${persistentFinanceMemory}` : '')
+          + '\nHistorical conversation and memory can explain the user’s goals, but never treat old figures as current. Query fresh Ledger data for personal financial facts; if no relevant read succeeds, say what remains unknown.'
+        : opts.ledgerAnalysis
+          ? opts.ledgerAnalysis.system + conversationMemorySection(compactSummary)
+            + '\nHistorical conversation and memory can explain the user’s goals, but never treat old figures as current. Query fresh Ledger data for personal financial facts; if no relevant read succeeds, say what remains unknown.'
+          : ordinarySystem
       const financeTokens: string[] = []
       const result = await backend.streamRound({
         db: opts.db,
         model: opts.model, runtimeConfig,
         system,
         messages: convo,
-        tools: finance ? (canRead ? [ledgerReadTool] : []) : TOOL_DEFINITIONS,
+        tools: finance ? finance.availableTools(canRead) : TOOL_DEFINITIONS,
         ...(finance ? { maxOutputTokens: FINANCE_MAX_OUTPUT_TOKENS } : {}),
         signal: opts.signal,
         // A round can include both draft text and tool calls. Hold Finance
@@ -367,7 +383,7 @@ export async function runChat(opts: RunChatOpts): Promise<{
       if (finance) {
         requireFinanceAccess()
         if (result.finishReason === 'tool_calls' && result.toolCalls.length > 0) {
-          if (canRead && finance.beginBatch(result.toolCalls.length)) {
+          if (finance.canUseTools() && finance.beginBatch(result.toolCalls.length)) {
             convo.push({ role: 'assistant', content: result.toolCalls.map((tc) => ({
               type: 'tool_use', id: tc.id, name: tc.name, input: tc.input,
             })) })
@@ -376,24 +392,26 @@ export async function runChat(opts: RunChatOpts): Promise<{
               requireFinanceAccess()
               const activity: FinanceActivity = {
                 id: financeActivity.length + 1,
-                operation: financeOperation(tc.name === ledgerReadTool.name ? tc.input?.kind : undefined),
+                operation: financeOperation(tc.name === manageMemoryTool.name
+                  ? `memory_${String(tc.input?.action ?? '')}`
+                  : tc.input?.kind),
                 status: 'running',
               }
               financeActivity.push(activity)
               await emit(opts.onEvent, { type: 'finance_activity', activity: { ...activity } })
               requireFinanceAccess()
               const { content, status } = await finance.execute(tc, result.toolCalls.length, ordinal, async () => {
-                if (!reading) {
+                requireFinanceAccess()
+                if (tc.name !== manageMemoryTool.name && !reading) {
                   await emit(opts.onEvent, { type: 'finance_progress', phase: 'reading' })
                   reading = true
                 }
-                requireFinanceAccess()
               })
               activity.status = status
               await emit(opts.onEvent, { type: 'finance_activity', activity: { ...activity } })
               convo.push({ role: 'tool', tool_call_id: tc.id, content })
             }
-            if (!finance.canQuery()) convo.push(finalFinanceInstruction)
+            if (!finance.canUseTools()) convo.push(finalFinanceInstruction)
             await emit(opts.onEvent, { type: 'finance_progress', phase: 'analyzing' })
             continue
           }

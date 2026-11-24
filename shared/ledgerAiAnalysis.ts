@@ -55,7 +55,7 @@ export type FinanceAgentPhase = typeof FINANCE_AGENT_PHASES[number]
 export type FinanceAgentProgress = { type: 'finance_progress'; phase: FinanceAgentPhase }
 
 /** Display metadata only. Never includes a tool's arguments or result. */
-const financeOperations = ['accounts', 'details', ...LEDGER_AI_ANALYSIS_KINDS, 'query'] as const
+const financeOperations = ['accounts', 'details', ...LEDGER_AI_ANALYSIS_KINDS, 'memory_add', 'memory_update', 'memory_delete', 'query'] as const
 const financeStatuses = ['running', 'success', 'failed', 'cancelled', 'reused'] as const
 export type FinanceActivity = {
   id: number

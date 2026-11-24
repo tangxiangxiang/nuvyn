@@ -297,17 +297,43 @@ export async function getActiveSession(): Promise<ActiveSession> {
   return jsonOrThrow<ActiveSession>(await authFetch('/api/ai/active', { method: 'GET' }))
 }
 
-export type LedgerAiCommand = 'compact' | 'clear'
+export type LedgerAiCommand = 'compact' | 'clear' | 'memory'
+export type LedgerAiServerCommand = Exclude<LedgerAiCommand, 'memory'>
 export type LedgerAiCommandOutcome = 'compacted' | 'nothing-to-compact' | 'cleared'
+
+export type FinanceMemoryKind = 'user' | 'agent'
+export type FinanceMemoryItem = { id: number; kind: FinanceMemoryKind; content: string; createdAt: number; updatedAt: number }
+export type FinanceMemoryUsage = {
+  user: { used: number; limit: number }
+  agent: { used: number; limit: number }
+  total: { used: number; limit: number }
+}
+export type FinanceMemoryState = { items: FinanceMemoryItem[]; usage: FinanceMemoryUsage }
 
 export async function openLedgerAiSession(signal?: AbortSignal): Promise<AiThreadState> {
   return jsonOrThrow(await authFetch('/api/ai/ledger-session', { method: 'POST', signal }))
 }
 
-export async function runLedgerAiCommand(command: LedgerAiCommand, signal?: AbortSignal): Promise<{ outcome: LedgerAiCommandOutcome }> {
+export async function runLedgerAiCommand(command: LedgerAiServerCommand, signal?: AbortSignal, profileId?: string): Promise<{ outcome: LedgerAiCommandOutcome }> {
   return jsonOrThrow(await authFetch('/api/ai/ledger-session/command', {
-    method: 'POST', ...jsonBody({ command }), signal,
+    method: 'POST', ...jsonBody({ command, ...(profileId && command === 'compact' ? { profileId } : {}) }), signal,
   }))
+}
+
+export async function getFinanceMemory(signal?: AbortSignal): Promise<FinanceMemoryState> {
+  return jsonOrThrow(await authFetch('/api/ai/finance-memory', { signal }))
+}
+
+export async function updateFinanceMemory(id: number, content: string): Promise<{ memory: FinanceMemoryItem; usage: FinanceMemoryUsage }> {
+  return jsonOrThrow(await authFetch(`/api/ai/finance-memory/${id}`, { method: 'PATCH', ...jsonBody({ content }) }))
+}
+
+export async function deleteFinanceMemory(id: number): Promise<{ deleted: true; usage: FinanceMemoryUsage }> {
+  return jsonOrThrow(await authFetch(`/api/ai/finance-memory/${id}`, { method: 'DELETE' }))
+}
+
+export async function clearFinanceMemory(): Promise<{ cleared: true; usage: FinanceMemoryUsage }> {
+  return jsonOrThrow(await authFetch('/api/ai/finance-memory', { method: 'DELETE' }))
 }
 
 export async function getAiThread(scope: AiThreadScope): Promise<AiThreadState> {

@@ -43,6 +43,7 @@ import { generateTags } from './tags.js'
 import { generateTitle } from './title.js'
 import { ChatError } from './errors.js'
 import { compactLedgerAiThread } from './compaction.js'
+import { createFinanceMemoryRepository } from './finance-memory.js'
 import { hasDiaryBodyAccess, requireDiaryBodyAccess } from '../diaryAccess/guard.js'
 import { readDiaryAccessCapability } from '../diaryAccess/service.js'
 import { classifyDiaryPath } from '../../shared/diaryProtocol.js'
@@ -497,6 +498,97 @@ function ledgerAuthIsCurrent(db: ReturnType<typeof getDb>, ownerId: number, auth
   return lookup.status === 'valid' && lookup.user?.id === ownerId
 }
 
+function currentFinanceMemoryOwner(c: any, db: ReturnType<typeof getDb>): { id: number } | null {
+  const user = c.get('authUser') as { id?: unknown } | undefined
+  const authSessionId = c.get('authSessionId') as unknown
+  if (!user || typeof user.id !== 'number' || typeof authSessionId !== 'number'
+    || !ledgerAuthIsCurrent(db, user.id, authSessionId)) return null
+  return { id: user.id }
+}
+
+function lockFinanceMemoryManagement(db: ReturnType<typeof getDb>, ownerId: number): (() => void) | null {
+  const thread = sessions.getLedgerAiThread(db, ownerId)
+  return thread ? sessions.acquireLedgerAiOperation(db, thread.session.id) : () => {}
+}
+
+function parseFinanceMemoryId(raw: string): number | null {
+  if (!/^[1-9]\d{0,14}$/.test(raw)) return null
+  const id = Number(raw)
+  return Number.isSafeInteger(id) ? id : null
+}
+
+ai.get('/finance-memory', (c) => {
+  c.header('Cache-Control', 'no-store')
+  const db = getDb()
+  const owner = currentFinanceMemoryOwner(c, db)
+  if (!owner) return bad(c, 'Finance memory requires authentication', 403)
+  const repository = createFinanceMemoryRepository(db)
+  return c.json({ items: repository.list(owner.id), usage: repository.usage(owner.id) })
+})
+
+ai.patch('/finance-memory/:id', async (c) => {
+  c.header('Cache-Control', 'no-store')
+  const db = getDb()
+  const owner = currentFinanceMemoryOwner(c, db)
+  if (!owner) return bad(c, 'Finance memory requires authentication', 403)
+  const id = parseFinanceMemoryId(c.req.param('id'))
+  if (!id) return bad(c, 'Invalid memory id')
+  const body = await c.req.json().catch(() => null) as Record<string, unknown> | null
+  if (!body || Object.keys(body).length !== 1 || typeof body.content !== 'string') return bad(c, 'Invalid memory update')
+  const release = lockFinanceMemoryManagement(db, owner.id)
+  if (!release) return bad(c, 'Finance Agent is busy', 409)
+  try {
+    const repository = createFinanceMemoryRepository(db)
+    const existing = repository.list(owner.id).find(item => item.id === id)
+    if (!existing) return bad(c, 'Memory not found', 404)
+    const result = repository.update(owner.id, existing.kind, id, body.content)
+    if (!result.ok) {
+      const status = result.error === 'not-found' ? 404 : result.error === 'capacity-exceeded' ? 409 : 400
+      return bad(c, 'Memory update failed: ' + result.error, status)
+    }
+    return c.json({ memory: result.memory, usage: result.usage })
+  } finally {
+    release()
+  }
+})
+
+ai.delete('/finance-memory/:id', (c) => {
+  c.header('Cache-Control', 'no-store')
+  const db = getDb()
+  const owner = currentFinanceMemoryOwner(c, db)
+  if (!owner) return bad(c, 'Finance memory requires authentication', 403)
+  const id = parseFinanceMemoryId(c.req.param('id'))
+  if (!id) return bad(c, 'Invalid memory id')
+  const release = lockFinanceMemoryManagement(db, owner.id)
+  if (!release) return bad(c, 'Finance Agent is busy', 409)
+  try {
+    const repository = createFinanceMemoryRepository(db)
+    const existing = repository.list(owner.id).find(item => item.id === id)
+    if (!existing) return bad(c, 'Memory not found', 404)
+    const result = repository.remove(owner.id, existing.kind, id)
+    if (!result.ok) return bad(c, 'Memory delete failed', result.error === 'not-found' ? 404 : 400)
+    return c.json({ deleted: true as const, usage: result.usage })
+  } finally {
+    release()
+  }
+})
+
+ai.delete('/finance-memory', (c) => {
+  c.header('Cache-Control', 'no-store')
+  const db = getDb()
+  const owner = currentFinanceMemoryOwner(c, db)
+  if (!owner) return bad(c, 'Finance memory requires authentication', 403)
+  const release = lockFinanceMemoryManagement(db, owner.id)
+  if (!release) return bad(c, 'Finance Agent is busy', 409)
+  try {
+    const result = createFinanceMemoryRepository(db).clear(owner.id)
+    if (!result.ok) return bad(c, 'Finance memory clear failed', 400)
+    return c.json({ cleared: true as const, usage: result.usage })
+  } finally {
+    release()
+  }
+})
+
 ai.post('/ledger-session', (c) => {
   c.header('Cache-Control', 'no-store')
   const user = c.get('authUser')
@@ -512,8 +604,11 @@ ai.post('/ledger-session', (c) => {
 
 ai.post('/ledger-session/command', async (c) => {
   c.header('Cache-Control', 'no-store')
-  const body = await c.req.json().catch(() => null) as { command?: unknown } | null
+  const body = await c.req.json().catch(() => null) as { command?: unknown; profileId?: unknown } | null
   if (body?.command !== 'compact' && body?.command !== 'clear') return bad(c, 'Unknown Ledger AI command')
+  if (body.profileId !== undefined && (body.command !== 'compact' || typeof body.profileId !== 'string' || !body.profileId || body.profileId.length > 100)) {
+    return bad(c, 'Invalid Ledger AI profile')
+  }
   const user = c.get('authUser')
   const authSessionId = c.get('authSessionId')
   const db = getDb()
@@ -530,7 +625,15 @@ ai.post('/ledger-session/command', async (c) => {
       sessions.clearLedgerAiThread(db, user.id)
       return c.json({ outcome: 'cleared' })
     }
-    const runtimeConfig = resolveAiRuntimeConfig(db)
+    let runtimeConfig: ReturnType<typeof resolveAiRuntimeConfig>
+    try {
+      runtimeConfig = typeof body.profileId === 'string'
+        ? profileRuntime(db, body.profileId)
+        : resolveAiRuntimeConfig(db)
+    } catch (error) {
+      if (error instanceof AiProfileError) return bad(c, error.message, error.status, error.code)
+      return bad(c, 'Ledger AI profile is unavailable', 503)
+    }
     const compacted = await compactLedgerAiThread({
       db,
       sessionId: thread.session.id,
@@ -1229,6 +1332,7 @@ ai.post('/chat', async (c) => {
           return Boolean(authRuntime && hasDiaryBodyAccess(authSessionId, presentedDiaryCapability))
         },
         ledgerAnalysis,
+        ledgerOwnerId: ledgerRequested ? ledgerUser.id : undefined,
         canUseLedgerAnalysis: ledgerRequested ? ledgerSessionIsCurrent : undefined,
         signal,
         onEvent: writeEvent,

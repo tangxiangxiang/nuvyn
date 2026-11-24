@@ -9,11 +9,15 @@ import { useI18n } from '../../../composables/useI18n'
 import AiPanel from '../AiPanel.vue'
 import AiChatMessages from '../AiChatMessages.vue'
 import AiComposer from '../AiComposer.vue'
-import { getAiProfiles, runLedgerAiCommand } from '../../../lib/ai-api'
+import { getAiProfiles, getFinanceMemory, runLedgerAiCommand } from '../../../lib/ai-api'
 
 vi.mock('../../../lib/ai-api', async (original) => ({
   ...await original<typeof import('../../../lib/ai-api')>(),
   getAiProfiles: vi.fn(),
+  getFinanceMemory: vi.fn(),
+  updateFinanceMemory: vi.fn(),
+  deleteFinanceMemory: vi.fn(),
+  clearFinanceMemory: vi.fn(),
   runLedgerAiCommand: vi.fn(),
 }))
 
@@ -124,6 +128,14 @@ describe('global AI panel', () => {
       ],
       activeProfileId: 'profile-default',
     })
+    vi.mocked(getFinanceMemory).mockResolvedValue({
+      items: [],
+      usage: {
+        user: { used: 0, limit: 2_000 },
+        agent: { used: 0, limit: 3_000 },
+        total: { used: 0, limit: 5_000 },
+      },
+    })
   })
   afterEach(() => {
     vi.restoreAllMocks()
@@ -194,6 +206,8 @@ describe('global AI panel', () => {
     expect(wrapper.text()).toContain('Compacting conversation')
     await typeAndSend(wrapper, '/compact')
     expect(command).toHaveBeenCalledOnce()
+    expect(command.mock.calls[0]?.[0]).toBe('compact')
+    expect(command.mock.calls[0]?.[2]).toBe('profile-default')
     finish({ outcome: 'compacted' })
     await nextTick()
     await nextTick()
@@ -214,6 +228,19 @@ describe('global AI panel', () => {
     expect(wrapper.text()).toContain('Conversation cleared')
     expect(financeHistory.messages.value).toEqual([])
     expect(wrapper.get('h2').text()).toBe('What would you like to explore today?')
+    expect(wrapper.findComponent(AiComposer).props('modelValue')).toBe('')
+  })
+
+  it('opens finance memory locally without sending a chat request or modifying history', async () => {
+    const conversation = [{ id: 2, sessionId: 27, role: 'assistant' as const, content: 'Existing finance answer', createdAt: 1 }]
+    financeHistory.messages.value = conversation
+    const { wrapper } = mountPanel(undefined, { workspaceKind: 'ledger' })
+    await typeAndSend(wrapper, '/memory')
+    await flushPromises()
+    expect(getFinanceMemory).toHaveBeenCalledOnce()
+    expect(runLedgerAiCommand).not.toHaveBeenCalled()
+    expect(financeHistory.sendAndStream).not.toHaveBeenCalled()
+    expect(financeHistory.messages.value).toEqual(conversation)
     expect(wrapper.findComponent(AiComposer).props('modelValue')).toBe('')
   })
 

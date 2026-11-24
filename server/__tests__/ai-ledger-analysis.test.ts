@@ -12,6 +12,7 @@ import { parseAccountCreateRequest, parseSettingsCreateRequest, parseTransaction
 import { syncLedgerAiContext } from '../ledger/aiContext.js'
 import { createLedgerAnalysis } from '../ai/ledger-analysis.js'
 import { createFinanceAgent, financeCoverageNotice } from '../ai/finance-agent.js'
+import { createFinanceMemoryRepository } from '../ai/finance-memory.js'
 import { createLedgerProjections } from '../ledger/projections.js'
 import type { StreamRoundOpts } from '../ai/llm.js'
 import { authenticatedRequest, closeAuthTestContext, createAuthenticatedTestContext, type AuthenticatedTestContext } from './helpers/auth.js'
@@ -141,7 +142,7 @@ describe('Finance Agent execution', () => {
     expect(events).not.toContain('"phase":"reading"')
     expect(events).not.toContain('"phase":"verifying"')
     expect(streamRound).toHaveBeenCalledOnce()
-    expect(streamRound.mock.calls[0]?.[0].tools.map(({ name }) => name)).toEqual(['read_ledger'])
+    expect(streamRound.mock.calls[0]?.[0].tools.map(({ name }) => name)).toEqual(['read_ledger', 'manage_memory'])
     expect(streamRound.mock.calls[0]?.[0].maxOutputTokens).toBe(8192)
     expect(generateText).not.toHaveBeenCalled()
   })
@@ -162,7 +163,7 @@ describe('Finance Agent execution', () => {
     expect(events).not.toMatch(/Private intermediate|event: tool_|observation|"summary"/)
     expect(events).not.toContain('verifying')
     expect(streamRound).toHaveBeenCalledTimes(2)
-    expect(streamRound.mock.calls[0]?.[0].tools.map(({ name }) => name)).toEqual(['read_ledger'])
+    expect(streamRound.mock.calls[0]?.[0].tools.map(({ name }) => name)).toEqual(['read_ledger', 'manage_memory'])
     expect(streamRound.mock.calls[1]?.[0].maxOutputTokens).toBe(8192)
     expect(generateText).not.toHaveBeenCalled()
   })
@@ -174,7 +175,7 @@ describe('Finance Agent execution', () => {
     expect(events).toContain('**-¥8,144.88**')
     expect(events).not.toContain('could not verify')
     expect(streamRound).toHaveBeenCalledTimes(2)
-    expect(streamRound.mock.calls[0]?.[0].tools.map(({ name }) => name)).toEqual(['read_ledger'])
+    expect(streamRound.mock.calls[0]?.[0].tools.map(({ name }) => name)).toEqual(['read_ledger', 'manage_memory'])
     expect(generateText).not.toHaveBeenCalled()
   })
 
@@ -183,8 +184,34 @@ describe('Finance Agent execution', () => {
     const events = await send('Assume I earn ¥100 and spend ¥30. How much is left?')
     expect(events).toContain('**¥70.00**')
     expect(streamRound).toHaveBeenCalledOnce()
-    expect(streamRound.mock.calls[0]?.[0].tools.map(({ name }) => name)).toEqual(['read_ledger'])
+    expect(streamRound.mock.calls[0]?.[0].tools.map(({ name }) => name)).toEqual(['read_ledger', 'manage_memory'])
     expect(generateText).not.toHaveBeenCalled()
+  })
+
+  it('autonomously stores a durable preference, injects the fresh memory next round, and isolates it from ordinary AI', async () => {
+    const repository = createFinanceMemoryRepository(db)
+    const preference = '重点关注扣除还款本金后实际能留下多少钱。'
+    streamRound.mockResolvedValueOnce({
+      text: '',
+      toolCalls: [{ id: 'remember-1', name: 'manage_memory', input: { action: 'add', target: 'user', content: preference } }],
+      finishReason: 'tool_calls',
+    }).mockResolvedValueOnce(financeReply('我会在后续财务分析中关注还款后的实际结余。'))
+    const events = await send('以后分析财务时，重点关注扣除还款本金后实际能留下多少钱。')
+    expect(repository.list(auth.userId)).toMatchObject([{ kind: 'user', content: preference }])
+    expect(events).toContain('operation":"memory_add')
+    expect(events).not.toMatch(/event: tool_use|event: tool_result|\{"ok":true,"action":"add"/)
+    expect(streamRound.mock.calls[0]![0].tools.map(({ name }) => name)).toContain('manage_memory')
+    const nextFinanceRound = streamRound.mock.calls[1]![0]
+    expect(nextFinanceRound.system).toContain('## Persistent Finance Memory')
+    expect(nextFinanceRound.system).toContain(JSON.stringify(preference))
+    expect(nextFinanceRound.system).toContain(`"id":${repository.list(auth.userId)[0]!.id}`)
+    expect(nextFinanceRound.messages.filter(message => message.role === 'tool')).toContainEqual(expect.objectContaining({
+      content: expect.stringContaining('"ok":true'),
+    }))
+
+    streamRound.mockResolvedValueOnce(financeReply('Ordinary answer'))
+    await send('Ordinary Note conversation', false)
+    expect(streamRound.mock.calls.at(-1)![0].system).not.toContain('## Persistent Finance Memory')
   })
 
   it('combines general financial education and fresh Ledger evidence in one Markdown answer', async () => {
@@ -432,11 +459,11 @@ describe('Ledger analysis request boundary', () => {
   it('reads on send, refreshes aggregates after a sidecar change, supports follow-ups and isolates other workspaces', async () => {
     expect(await send('Let’s look at January')).toMatch(/event: finance_progress[\s\S]*event: done/)
     const round = streamRound.mock.calls[1]![0]
-    expect(round.tools.map(({ name }) => name)).toEqual(['read_ledger'])
+    expect(round.tools.map(({ name }) => name)).toEqual(['read_ledger', 'manage_memory'])
     const results = round.messages.filter(({ role }) => role === 'tool').map(({ content }) => String(content))
     expect(results[0]).toContain('"expenseMinor":82501')
     expect(results[0]).not.toMatch(/731987|PRIVATE NOTE/)
-    expect(results[1]).toContain('Only read_ledger is available')
+    expect(results[1]).toContain('Only read_ledger and manage_memory are available')
 
     const repository = createLedgerRepository(db)
     const transaction = repository.listActiveTransactions().find(({ amountMinor }) => amountMinor === inScopeAmount)!
@@ -531,6 +558,8 @@ describe('fixed Ledger AI session and commands', () => {
     await send('Truncated private turn')
     await send('Keep this recent context')
     await send('Keep the latest topic')
+    const memory = createFinanceMemoryRepository(db).add(auth.userId, 'user', 'Keep an emergency reserve first.')
+    expect(memory.ok).toBe(true)
     const baseline = syncLedgerAiContext(db, auth.userId)
     const checkpointBefore = getAiThreadCompactionState(db, sessionId)
 
@@ -551,11 +580,13 @@ describe('fixed Ledger AI session and commands', () => {
     await send('Fresh figures please')
     expect(streamRound.mock.calls.at(-1)![0].system).toContain(checkpoint.compactSummary)
     expect(streamRound.mock.calls.at(-1)![0].system).toContain('use fresh read_ledger data')
+    expect(streamRound.mock.calls.at(-1)![0].system).toContain('Keep an emergency reserve first.')
     expect(streamRound.mock.calls.at(-1)![0].messages).not.toContainEqual(expect.objectContaining({ content: 'Compare January spending' }))
 
     expect(await (await command('clear', { sessionId: ordinaryId })).json()).toEqual({ outcome: 'cleared' })
     expect(getAiThreadCompactionState(db, sessionId)).toEqual({ compactSummary: '', compactedThroughMessageId: 0 })
     expect(await (await aiRequest('/ledger-session', 'POST')).json()).toMatchObject({ session: { id: sessionId }, messages: [] })
+    expect(createFinanceMemoryRepository(db).list(auth.userId)).toMatchObject([{ content: 'Keep an emergency reserve first.' }])
     expect(await (await aiRequest(`/sessions/${ordinaryId}/messages`)).json()).toEqual([
       expect.objectContaining({ content: 'Ordinary history' }), expect.objectContaining({ content: 'Ordinary answer' }),
     ])

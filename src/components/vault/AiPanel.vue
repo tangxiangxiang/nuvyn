@@ -14,6 +14,7 @@ import { resolveAiQuickPrompts } from './aiQuickPrompts'
 import AiChatMessages from './AiChatMessages.vue'
 import AiComposer from './AiComposer.vue'
 import AiSessionPicker from './AiSessionPicker.vue'
+import AiFinanceMemoryDialog from './AiFinanceMemoryDialog.vue'
 import { readStorageKey, writeStorageKey } from '../../technicalNamespace'
 
 const props = withDefaults(defineProps<{
@@ -49,6 +50,7 @@ const draft = computed({
 const ledgerCommands = computed(() => [
   { command: 'compact' as const, label: t('ai.ledger_compact'), description: t('ai.finance_compact_detail') },
   { command: 'clear' as const, label: t('ai.ledger_clear'), description: t('ai.finance_clear_detail') },
+  { command: 'memory' as const, label: t('ai.ledger_memory'), description: t('ai.finance_memory_title') },
 ])
 const commandStatus = ref<LedgerAiCommandOutcome | 'compacting' | 'failed' | 'unknown' | null>(null)
 let commandController: AbortController | null = null
@@ -57,10 +59,11 @@ const ledgerLoadFailed = ref(false)
 const composer = ref<InstanceType<typeof AiComposer> | null>(null)
 const panelRef = ref<HTMLElement | null>(null)
 const showSessionPicker = ref(false)
+const showFinanceMemory = ref(false)
 const isDragging = ref(false)
 const isMobileViewport = ref(typeof window !== 'undefined' && window.innerWidth <= 640)
 const blockingOverlay = ref(false)
-const panelObscured = computed(() => blockingOverlay.value || showSessionPicker.value)
+const panelObscured = computed(() => blockingOverlay.value || showSessionPicker.value || showFinanceMemory.value)
 const visualViewport = ref<{ top: number; height: number } | null>(null)
 const panelWidth = computed(() => isLedger.value ? 720 : 460)
 const position = ref<{ left: number; top: number } | null>(null)
@@ -320,7 +323,9 @@ async function onSend(prompt?: string): Promise<void> {
   const active = history.value
   if (!text || active.busy.value || active.isLoading.value) return
   if (isLedger.value && text.startsWith('/')) {
-    if (text === '/compact' || text === '/clear') await onLedgerCommand(text === '/compact' ? 'compact' : 'clear')
+    if (text === '/compact' || text === '/clear' || text === '/memory') {
+      await onLedgerCommand(text.slice(1) as LedgerAiCommand)
+    }
     else commandStatus.value = 'unknown'
     return
   }
@@ -343,6 +348,13 @@ async function onSend(prompt?: string): Promise<void> {
 }
 
 async function onLedgerCommand(command: LedgerAiCommand): Promise<void> {
+  if (command === 'memory') {
+    if (!isLedger.value || ledgerHistory.busy.value || commandPending.value) return
+    ledgerDraft.value = ''
+    commandStatus.value = null
+    showFinanceMemory.value = true
+    return
+  }
   if (!isLedger.value || !ledgerHistory.activeSession.value || ledgerHistory.busy.value || commandPending.value) return
   const controller = new AbortController()
   commandController = controller
@@ -350,7 +362,7 @@ async function onLedgerCommand(command: LedgerAiCommand): Promise<void> {
   commandStatus.value = command === 'compact' ? 'compacting' : null
   const initialDraft = ledgerDraft.value
   try {
-    const { outcome } = await runLedgerAiCommand(command, controller.signal)
+    const { outcome } = await runLedgerAiCommand(command, controller.signal, command === 'compact' ? selectedModel.value?.profileId : undefined)
     if (controller.signal.aborted) return
     if (outcome === 'cleared') {
       ledgerHistory.messages.value = []
@@ -657,6 +669,7 @@ onBeforeUnmount(() => {
       />
 
       <AiSessionPicker v-if="showSessionPicker" @close="closeSessionPicker" />
+      <AiFinanceMemoryDialog :open="showFinanceMemory" :busy="agentBusy" @close="showFinanceMemory = false" />
     </aside>
   </Transition>
 </template>

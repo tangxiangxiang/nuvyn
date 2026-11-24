@@ -78,9 +78,9 @@ describe('Phase 5 central authentication boundary', () => {
       expect(identity.headers.get('cache-control')).toBe('no-store')
       expect(await identity.json()).toEqual({ vaultId: getVaultId() })
 
-      const tree = await app.fetch(authenticatedRequest(context, '/api/tree'))
-      expect(tree.status).toBe(200)
-      expect(tree.headers.get('cache-control')).toBe('no-store')
+      const protectedIdentity = await app.fetch(authenticatedRequest(context, '/api/vault/identity'))
+      expect(protectedIdentity.status).toBe(200)
+      expect(protectedIdentity.headers.get('cache-control')).toBe('no-store')
 
       const unknown = await app.fetch(authenticatedRequest(context, '/api/future-example'))
       expect(unknown.status).toBe(404)
@@ -272,7 +272,7 @@ describe('Phase 5 central authentication boundary', () => {
   it('normalizes missing, unknown, revoked, expired, and disabled sessions to one 401 contract', async () => {
     const now = 1_700_000_000_000
     const context = createAuthenticatedTestContext({ now: () => now })
-    const path = 'http://localhost/api/tree'
+    const path = 'http://localhost/api/vault/identity'
     const requestWithToken = (token: string) => new Request(path, {
       headers: { Cookie: `${context.runtime.config.cookie.name}=${token}` },
     })
@@ -317,14 +317,14 @@ describe('Phase 5 central authentication boundary', () => {
       ).get(context.session.id) as { last_seen_at: number; expires_at: number }
 
       now = initialNow + SESSION_LAST_SEEN_UPDATE_INTERVAL_MS - 1
-      expect((await app.fetch(authenticatedRequest(context, '/api/tree'))).status).toBe(200)
+      expect((await app.fetch(authenticatedRequest(context, '/api/vault/identity'))).status).toBe(200)
       const withinInterval = context.db.prepare(
         'SELECT last_seen_at, expires_at FROM auth_sessions WHERE id = ?',
       ).get(context.session.id) as { last_seen_at: number; expires_at: number }
       expect(withinInterval).toEqual(before)
 
       now = initialNow + SESSION_LAST_SEEN_UPDATE_INTERVAL_MS
-      expect((await app.fetch(authenticatedRequest(context, '/api/tree'))).status).toBe(200)
+      expect((await app.fetch(authenticatedRequest(context, '/api/vault/identity'))).status).toBe(200)
       const touched = context.db.prepare(
         'SELECT last_seen_at, expires_at FROM auth_sessions WHERE id = ?',
       ).get(context.session.id) as { last_seen_at: number; expires_at: number }
@@ -332,7 +332,7 @@ describe('Phase 5 central authentication boundary', () => {
       expect(touched.expires_at).toBe(before.expires_at)
 
       now += SESSION_LAST_SEEN_UPDATE_INTERVAL_MS - 1
-      expect((await app.fetch(authenticatedRequest(context, '/api/tree'))).status).toBe(200)
+      expect((await app.fetch(authenticatedRequest(context, '/api/vault/identity'))).status).toBe(200)
       const secondWithinInterval = context.db.prepare(
         'SELECT last_seen_at, expires_at FROM auth_sessions WHERE id = ?',
       ).get(context.session.id) as { last_seen_at: number; expires_at: number }
@@ -349,7 +349,7 @@ describe('Phase 5 central authentication boundary', () => {
     try {
       now += SESSION_LAST_SEEN_UPDATE_INTERVAL_MS
       context.db.pragma('query_only = ON')
-      const response = await app.fetch(authenticatedRequest(context, '/api/tree'))
+      const response = await app.fetch(authenticatedRequest(context, '/api/vault/identity'))
       expect(response.status).toBe(503)
       expect(response.headers.get('cache-control')).toBe('no-store')
       expect(await response.json()).toEqual({
@@ -369,7 +369,7 @@ describe('Phase 5 central authentication boundary', () => {
       const firstExpired = createSession(context.db, context.userId, {
         now: initialNow - SESSION_LIFETIME_MS - 1,
       })
-      expect((await app.fetch(authenticatedRequest(context, '/api/tree'))).status).toBe(200)
+      expect((await app.fetch(authenticatedRequest(context, '/api/vault/identity'))).status).toBe(200)
       await Promise.resolve()
       expect(context.db.prepare('SELECT 1 FROM auth_sessions WHERE id = ?').get(firstExpired.session.id)).toBeUndefined()
 
@@ -377,15 +377,15 @@ describe('Phase 5 central authentication boundary', () => {
         now: initialNow - SESSION_LIFETIME_MS - 2,
       })
       // The same maintenance timestamp suppresses another DELETE attempt.
-      expect((await app.fetch(authenticatedRequest(context, '/api/tree'))).status).toBe(200)
+      expect((await app.fetch(authenticatedRequest(context, '/api/vault/identity'))).status).toBe(200)
       await Promise.resolve()
       expect(context.db.prepare('SELECT 1 FROM auth_sessions WHERE id = ?').get(secondExpired.session.id)).toEqual({ 1: 1 })
 
       now += context.runtime.service.sessionPruneIntervalMs
-      expect((await app.fetch(authenticatedRequest(context, '/api/tree'))).status).toBe(200)
+      expect((await app.fetch(authenticatedRequest(context, '/api/vault/identity'))).status).toBe(200)
       await Promise.resolve()
       expect(context.db.prepare('SELECT 1 FROM auth_sessions WHERE id = ?').get(secondExpired.session.id)).toBeUndefined()
-      expect((await app.fetch(authenticatedRequest(context, '/api/tree'))).status).toBe(200)
+      expect((await app.fetch(authenticatedRequest(context, '/api/vault/identity'))).status).toBe(200)
     } finally {
       closeAuthTestContext(context)
     }
@@ -395,7 +395,7 @@ describe('Phase 5 central authentication boundary', () => {
     const context = createAuthenticatedTestContext()
     try {
       context.db.close()
-      const response = await app.fetch(authenticatedRequest(context, '/api/tree'))
+      const response = await app.fetch(authenticatedRequest(context, '/api/vault/identity'))
       expect(response.status).toBe(503)
       expect(response.headers.get('cache-control')).toBe('no-store')
       expect(await response.json()).toEqual({
