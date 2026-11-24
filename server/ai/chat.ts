@@ -1,6 +1,6 @@
 import type { FinanceAgentProgress } from '../../shared/ledgerAiAnalysis.js'
 import { createFinanceAgent, financeCoverageNotice } from './finance-agent.js'
-import { financeAnswerProtocol, nonLedgerReviewPrompt, verifyFinanceAnswer } from './finance-verification.js'
+import { answerStandaloneFinanceQuestion, financeAnswerProtocol, verifyFinanceAnswer } from './finance-verification.js'
 import { ledgerReadTool, type createLedgerAnalysis } from './ledger-analysis.js'
 import { getAiRuntimeConfig, type AiRuntimeConfig } from './settings.js'
 // AI chat orchestrator. Pure functions of (db, ...args) — no
@@ -38,7 +38,6 @@ import type { AiErrorCode } from './settings.js'
 import {
   clearChatBackendCache,
   getChatBackend,
-  generateText,
   type NormalizedBlock,
   type NormalizedMessage,
 } from './llm.js'
@@ -336,32 +335,22 @@ export async function runChat(opts: RunChatOpts): Promise<{
     role: 'user' as const,
     content: 'The Ledger tool budget for this turn is closed. Answer from the observations already returned. Identify any scope that could not be verified.',
   }
-  async function allowNonLedgerAnswer(draft: string) {
-    if (!draft.trim() || draft.length + opts.userContent.length > 12_000) return ''
-    const deadline = AbortSignal.timeout(10_000)
-    const signal = opts.signal ? AbortSignal.any([opts.signal, deadline]) : deadline
-    try {
-      const decision = await generateText({
-        db: opts.db, model: opts.model, runtimeConfig, signal,
-        system: nonLedgerReviewPrompt, maxTokens: 128,
-        user: JSON.stringify({ question: opts.userContent, candidate: draft }),
-      })
-      if (decision.finishReason !== 'stop') return ''
-      if (decision.text.trim() === 'CONCEPT') return draft
-      if (decision.text.trim() === 'HYPOTHETICAL') {
-        return (chinese ? '以下计算基于你提供的假设数据。' : 'This calculation uses the assumptions you provided.') + '\n\n' + draft
-      }
-    } catch {
-      // An unavailable reviewer never authorizes releasing a draft.
-    }
-    return ''
-  }
   const interruptionNotice = (length: boolean) => length
     ? (chinese ? '回答因长度限制未完成，部分分析内容可能缺失。' : 'The response reached the length limit. Part of the analysis may be missing.')
     : (chinese ? '回答未完整结束，部分分析内容可能缺失。' : 'The response ended before it was complete. Part of the analysis may be missing.')
   try {
-    if (finance) await emit(opts.onEvent, { type: 'finance_progress', phase: 'analyzing' })
+    if (finance) {
+      requireFinanceAccess()
+      fullText = answerStandaloneFinanceQuestion(opts.userContent, chinese)
+      if (fullText) {
+        await emit(opts.onEvent, { type: 'token', text: fullText })
+        requireFinanceAccess()
+      } else {
+        await emit(opts.onEvent, { type: 'finance_progress', phase: 'analyzing' })
+      }
+    }
     while (true) {
+      if (finance && fullText) break
       if (finance) requireFinanceAccess()
       else if (opts.signal?.aborted) throw new ChatError('aborted')
 
@@ -391,16 +380,12 @@ export async function runChat(opts: RunChatOpts): Promise<{
           requireFinanceAccess()
           const coverage = finance.limitations()
           const checked = verifyFinanceAnswer(result.text, finance.observation, chinese)
-          let answer = checked.text
-          if (!answer && coverage.noEvidence && !coverage.queried && !financeCorrectionUsed) {
-            answer = await allowNonLedgerAnswer(result.text)
-            requireFinanceAccess()
-          }
-          if ((!answer || (checked.rejected && !coverage.noEvidence)) && canRead &&
+          const answer = checked.text
+          if ((!answer || checked.rejected) && (canRead || !coverage.noEvidence) &&
               !ledgerReplyInterrupted && !financeCorrectionUsed) {
             financeCorrectionUsed = true
             earlierVerifiedDraft = checked.text
-            convo.push({ role: 'user', content: 'The previous draft did not pass verification. Use read_ledger for missing data, then return only valid observation references for the question. If you cannot verify the requested facts, leave them out.' })
+            convo.push({ role: 'user', content: 'The previous draft did not pass verification. Read any missing Ledger evidence if tools are still available. Return valid fact records then evidence-linked analysis. Leave unverifiable claims out.' })
             await emit(opts.onEvent, { type: 'finance_progress', phase: 'analyzing' })
             continue
           }

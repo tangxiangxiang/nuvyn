@@ -338,7 +338,9 @@ test('AI Finance isolates its transcript and executes local commands without sen
         const userId = number * 2
         const assistantId = userId + 1
         const interrupted = body.ledgerAnalysis === true && number === 2
-        const reply = body.ledgerAnalysis ? `Ledger analysis ${number}` : 'Board conversation'
+        const reply = body.ledgerAnalysis
+          ? `### Ledger analysis ${number}\n\n**推断** · 支出和还款会共同影响可支配资金。\n\n- 日常支出：¥825.01`
+          : 'Board conversation'
         const text = interrupted ? reply + '\n\n回答因长度限制未完成，部分分析内容可能缺失。' : reply
         if (body.ledgerAnalysis) {
           financeMessages.push(
@@ -398,7 +400,9 @@ test('AI Finance isolates its transcript and executes local commands without sen
   await selectWorkspace(page, 'ledger')
   await expect(progress).toHaveText('正在查询账本…')
   await page.evaluate(() => window.dispatchEvent(new Event('finance-fixture-answer')))
-  await expect(panel.getByText('Ledger analysis 1')).toBeVisible()
+  await expect(panel.getByRole('heading', { name: 'Ledger analysis 1' })).toBeVisible()
+  await expect(panel.getByText('支出和还款会共同影响可支配资金。', { exact: false })).toBeVisible()
+  await expect(panel.getByText('日常支出：¥825.01', { exact: true })).toBeVisible()
   await expect(progress).toHaveCount(0)
   await sendAi(page, '那上个月呢？')
   await expect(panel.getByText('Ledger analysis 2')).toBeVisible()
