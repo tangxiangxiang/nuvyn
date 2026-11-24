@@ -1,4 +1,4 @@
-import type { FinanceAgentPhase } from '../../../shared/ledgerAiAnalysis.js'
+import { parseFinanceActivity, type FinanceAgentPhase } from '../../../shared/ledgerAiAnalysis.js'
 // AI history state + actions. Each VaultContext owns the instance shared by
 // AiPanel, the session picker, and settings. Persistence is server-side; this
 // composable is just a
@@ -338,16 +338,21 @@ function createAiHistory(publishChange: (event: FileChangeEvent) => void, ledger
         applyEvent(event, userMessage, assistantMessage, options?.publishFileChange ?? publishChange)
         if (event.type === 'done' || event.type === 'error') break
       }
-      if (ledgerSettings) ac.signal.throwIfAborted()
+      if (ledgerSettings) {
+        ac.signal.throwIfAborted()
+        if (optimisticAssistant.id === 0) throw new Error('Ledger chat stream ended before completion')
+      }
       if (!options?.threadScope && !ledgerSettings) await refreshSessions()
     } catch (e) {
-      // Abort is the expected path when the user clicks Stop; surface
-      // it as a quiet "[aborted]" tag on the assistant bubble and
-      // move on. Other errors are rethrown so the existing
-      // finally (which clears busy) still runs, but the catch
-      // block doesn't swallow them silently.
+      // Mark unfinished Finance operations before displaying the stopped
+      // or unavailable state. Ordinary chats retain their existing error behavior.
+      if (optimisticAssistant && ledgerSettings) {
+        finishFinanceActivity(optimisticAssistant, ac.signal.aborted ? 'cancelled' : 'failed')
+        if (!ac.signal.aborted) errorState.value = 'ledger-analysis-unavailable'
+      }
       if (ac.signal.aborted && optimisticAssistant) {
-        optimisticAssistant.content += '\n\n[aborted]'
+        if (ledgerSettings && optimisticAssistant.blocks) optimisticAssistant.blocks.cancelled = true
+        else optimisticAssistant.content += '\n\n[aborted]'
         if (optimisticAssistant.blocks) {
           optimisticAssistant.blocks.text = optimisticAssistant.content
         }
@@ -357,6 +362,9 @@ function createAiHistory(publishChange: (event: FileChangeEvent) => void, ledger
             : m,
         )
         optimisticAssistant.id = -1
+      } else if (ledgerSettings && optimisticAssistant) {
+        optimisticAssistant.id = -1
+        messages.value = [...messages.value]
       } else {
         throw e
       }
@@ -377,6 +385,16 @@ function createAiHistory(publishChange: (event: FileChangeEvent) => void, ledger
     activeController?.abort()
   }
 
+  function finishFinanceActivity(message: Message, status: 'cancelled' | 'failed') {
+    const blocks = message.blocks
+    const activity = blocks?.financeActivity
+    if (!blocks || !activity) return
+    message.blocks = {
+      ...blocks,
+      financeActivity: activity.map(item => item.status === 'running' ? { ...item, status } : item),
+    }
+  }
+
   function applyEvent(
     event: ChatEvent,
     optimisticUser: Message,
@@ -385,6 +403,16 @@ function createAiHistory(publishChange: (event: FileChangeEvent) => void, ledger
   ): void {
     if (event.type === 'finance_progress') {
       if (ledgerSettings) financePhase.value = event.phase
+    } else if (event.type === 'finance_activity') {
+      if (!ledgerSettings || !optimisticAssistant.blocks) return
+      const item = parseFinanceActivity(event.activity)
+      if (!item) return
+      const activity = [...(optimisticAssistant.blocks.financeActivity ?? [])]
+      const index = activity.findIndex(current => current.id === item.id)
+      if (index < 0) activity.push(item)
+      else if (activity[index].status === 'running') activity[index] = item
+      optimisticAssistant.blocks = { ...optimisticAssistant.blocks, financeActivity: activity }
+      messages.value = [...messages.value]
     } else if (event.type === 'user') {
       messages.value = messages.value.map((m) =>
         m === optimisticUser ? { ...m, id: event.id } : m
@@ -436,13 +464,15 @@ function createAiHistory(publishChange: (event: FileChangeEvent) => void, ledger
         oldPath: event.oldPath,
       })
     } else if (event.type === 'done') {
+      if (ledgerSettings) finishFinanceActivity(optimisticAssistant, 'failed')
       if (event.interrupted && optimisticAssistant.blocks) optimisticAssistant.blocks.interrupted = true
       messages.value = messages.value.map((m) =>
         m === optimisticAssistant ? { ...m, id: event.assistantId } : m,
       )
       optimisticAssistant.id = event.assistantId
     } else if (event.type === 'error') {
-      optimisticAssistant.content += `\n\n[error: ${event.reason}]${event.message ? ` ${event.message}` : ''}`
+      if (ledgerSettings) finishFinanceActivity(optimisticAssistant, 'failed')
+      else optimisticAssistant.content += `\n\n[error: ${event.reason}]${event.message ? ` ${event.message}` : ''}`
       if (optimisticAssistant.blocks) {
         optimisticAssistant.blocks.text = optimisticAssistant.content
       }
@@ -452,7 +482,9 @@ function createAiHistory(publishChange: (event: FileChangeEvent) => void, ledger
           : m,
       )
       optimisticAssistant.id = -1
-      errorState.value = event.reason
+      errorState.value = ledgerSettings && !event.reason.startsWith('ledger-analysis-')
+        ? 'ledger-analysis-unavailable'
+        : event.reason
     }
   }
 

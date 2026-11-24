@@ -333,8 +333,18 @@ describe('Finance Agent execution', () => {
     expect(events).toContain('Individual transaction example')
     expect(events.match(/"phase":"reading"/g)).toHaveLength(3)
     expect(events).not.toMatch(/Private intermediate|event: tool_|PRIVATE NOTE|Ledger coverage/)
-    const stored = db.prepare('SELECT content FROM messages WHERE session_id = ?').all(sessionId)
+    const expectedOperations = ['trend', 'spending', 'repayment', 'details']
+    const activity = [...events.matchAll(/event: finance_activity\ndata: (.+)/g)].map(([, json]) => JSON.parse(json).activity)
+    expect(activity).toEqual(expectedOperations.flatMap((operation, index) => [
+      { id: index + 1, operation, status: 'running' }, { id: index + 1, operation, status: 'success' },
+    ]))
+    const stored = db.prepare('SELECT content FROM messages WHERE session_id = ? ORDER BY id').all(sessionId) as { content: string }[]
     expect(JSON.stringify(stored)).not.toMatch(/finance_progress|Private intermediate|PRIVATE NOTE|observation|f1/)
+    const completed = activity.filter(item => item.status === 'success')
+    expect(JSON.parse(stored.at(-1)!.content).financeActivity).toEqual(completed)
+    expect(await (await aiRequest('/ledger-session', 'POST')).json()).toMatchObject({
+      messages: [{ role: 'user' }, { blocks: { financeActivity: completed, toolCalls: [] } }],
+    })
   })
 
   it('recovers from invalid queries and reuses canonical observations for duplicate ranges', async () => {
@@ -443,7 +453,7 @@ describe('Finance Agent execution', () => {
     expect(agent.beginBatch(6)).toBe(true)
     const oversized = { ...result, fixture: '账'.repeat(4_100) }
     read.mockReturnValueOnce(oversized)
-    const rejected = await agent.execute(call(0), 6, 0, beforeRead)
+    const { content: rejected } = await agent.execute(call(0), 6, 0, beforeRead)
     expect(JSON.parse(rejected).error).toContain('result is too large')
     expect(agent.limitations().omittedCategories).toBe(false)
 
@@ -451,7 +461,7 @@ describe('Finance Agent execution', () => {
     read.mockReturnValue(accepted)
     const responses = [rejected]
     for (let index = 1; index < 6; index++) {
-      responses.push(await agent.execute(call(index), 6, index, beforeRead))
+      responses.push((await agent.execute(call(index), 6, index, beforeRead)).content)
     }
     expect(responses.slice(1, 5).every((content) => JSON.parse(content).omittedExpenseCategoryCount === 1)).toBe(true)
     expect(JSON.parse(responses[5]).error).toContain('tool budget exhausted')
@@ -466,7 +476,7 @@ describe('Finance Agent execution', () => {
     const agent = createFinanceAgent(analysis)
     const call = { id: 'same', name: 'read_ledger', input: scope }
     expect(agent.beginBatch(3)).toBe(true)
-    const execute = (ordinal: number) => agent.execute(call, 3, ordinal, async () => {})
+    const execute = (ordinal: number) => agent.execute(call, 3, ordinal, async () => {}).then(result => result.content)
     expect(JSON.parse(await execute(0)).error).toContain('Retry once')
     expect(agent.limitations()).toMatchObject({ noEvidence: true, failedQueries: true })
     expect(JSON.parse(await execute(1))).toMatchObject({ observation: 2, summary: { expenseMinor: inScopeAmount } })
@@ -498,7 +508,7 @@ describe('Finance Agent execution', () => {
       const errors = expected[index]!
       expect(agent.beginBatch(errors.length)).toBe(true)
       for (const [ordinal, error] of errors.entries()) {
-        const result = await agent.execute({ id: 'test', name: 'read_ledger', input }, errors.length, ordinal, async () => {})
+        const { content: result } = await agent.execute({ id: 'test', name: 'read_ledger', input }, errors.length, ordinal, async () => {})
         expect(JSON.parse(result).error).toContain(error)
       }
     }

@@ -5,6 +5,7 @@ import { History, MessagePlus, X } from '@vicons/tabler'
 import { useAiHistory, useLedgerAiHistory } from '../../composables/vault/useAiHistory'
 import type { AiLiveContextCapture } from '../../composables/vault/aiLiveContext'
 import { AppShellContextKey } from '../../composables/appShellContext'
+import { useConfirm } from '../../composables/useConfirm'
 import { useI18n } from '../../composables/useI18n'
 import type { DiaryCalendarMode } from '../../composables/appShellContext'
 import type { WorkspaceKind } from '../../lib/workspace'
@@ -35,6 +36,8 @@ const isLedger = computed(() => props.workspaceKind === 'ledger')
 const history = computed(() => isLedger.value ? ledgerHistory : ordinaryHistory)
 const title = computed(() => t(isLedger.value ? 'ai.finance' : 'ai.assistant'))
 const { t } = useI18n()
+const { confirmCancellable } = useConfirm()
+let cancelClearConfirmation: (() => void) | null = null
 const ordinaryDraft = ref('')
 const ledgerDraft = ref('')
 const draft = computed({
@@ -45,8 +48,8 @@ const draft = computed({
   },
 })
 const ledgerCommands = computed(() => [
-  { command: 'compact' as const, label: t('ai.ledger_compact') },
-  { command: 'clear' as const, label: t('ai.ledger_clear') },
+  { command: 'compact' as const, label: t('ai.ledger_compact'), description: t('ai.finance_compact_detail') },
+  { command: 'clear' as const, label: t('ai.ledger_clear'), description: t('ai.finance_clear_detail') },
 ])
 const commandStatus = ref<LedgerAiCommandOutcome | 'compacting' | 'failed' | 'unknown' | null>(null)
 let commandController: AbortController | null = null
@@ -59,6 +62,8 @@ const isDragging = ref(false)
 const isMobileViewport = ref(typeof window !== 'undefined' && window.innerWidth <= 640)
 const blockingOverlay = ref(false)
 const panelObscured = computed(() => blockingOverlay.value || showSessionPicker.value)
+const visualViewport = ref<{ top: number; height: number } | null>(null)
+const panelWidth = computed(() => isLedger.value ? 720 : 460)
 const position = ref<{ left: number; top: number } | null>(null)
 
 let drag: {
@@ -98,7 +103,12 @@ const quickPrompts = computed(() => quickPromptState.value.prompts)
 const emptyHint = computed(() => quickPromptState.value.emptyHint)
 
 const panelStyle = computed(() => {
-  if (isMobileViewport.value || !position.value) return undefined
+  if (isMobileViewport.value) {
+    return isLedger.value && visualViewport.value
+      ? { '--ai-viewport-top': `${visualViewport.value.top}px`, '--ai-viewport-height': `${visualViewport.value.height}px` }
+      : undefined
+  }
+  if (!position.value) return undefined
   return {
     left: `${position.value.left}px`,
     top: `${position.value.top}px`,
@@ -134,7 +144,7 @@ function workspaceChromeBottom(): number {
 }
 
 function defaultPosition(): { left: number; top: number } {
-  const width = Math.min(460, Math.max(280, window.innerWidth - 24))
+  const width = Math.min(panelWidth.value, window.innerWidth - (isLedger.value ? 32 : 24))
   return {
     left: Math.max(12, window.innerWidth - width - 16),
     top: Math.max(12, workspaceChromeBottom() + 12),
@@ -145,10 +155,10 @@ function clampPosition(next: { left: number; top: number }): { left: number; top
   const rect = panelRef.value?.getBoundingClientRect()
   const width = rect && rect.width > 0
     ? rect.width
-    : Math.min(460, Math.max(280, window.innerWidth - 24))
+    : Math.min(panelWidth.value, window.innerWidth - (isLedger.value ? 32 : 24))
   const height = rect && rect.height > 0
     ? rect.height
-    : Math.min(window.innerHeight * 0.8, 720)
+    : Math.min(window.innerHeight * 0.8, isLedger.value ? 860 : 720)
   const minTop = Math.max(8, workspaceChromeBottom() + 8)
   const maxLeft = Math.max(8, window.innerWidth - width - 8)
   const maxTop = Math.max(minTop, window.innerHeight - height - 8)
@@ -172,7 +182,16 @@ function restoreDefaultPosition(): void {
   persistPosition()
 }
 
+function syncVisualViewport(): void {
+  if (window.innerWidth > 640) return
+  const viewport = window.visualViewport
+  visualViewport.value = viewport?.scale === 1
+    ? { top: viewport.offsetTop, height: viewport.height }
+    : null
+}
+
 function syncViewport(): void {
+  syncVisualViewport()
   isMobileViewport.value = window.innerWidth <= 640
   if (isMobileViewport.value) return
   position.value = clampPosition(position.value ?? defaultPosition())
@@ -232,8 +251,8 @@ function finishDrag(event: PointerEvent): void {
   persistPosition()
 }
 
-async function onSend(): Promise<void> {
-  const text = draft.value.trim()
+async function onSend(prompt?: string): Promise<void> {
+  const text = (prompt ?? draft.value).trim()
   const active = history.value
   if (!text || active.busy.value || active.isLoading.value) return
   if (isLedger.value && text.startsWith('/')) {
@@ -250,7 +269,7 @@ async function onSend(): Promise<void> {
   const capture = noteBridge?.capture() ?? { status: 'none' as const }
   const snapshot = capture.status === 'ready' ? capture.context : undefined
   const publishFileChange = noteBridge?.publishFileChange
-  draft.value = ''
+  if (prompt === undefined) draft.value = ''
   await active.sendAndStream(text, {
     ...(props.workspaceKind === 'ledger' ? { ledgerAnalysis: true } : {}),
     ...(snapshot ? { liveContext: snapshot } : {}),
@@ -260,6 +279,17 @@ async function onSend(): Promise<void> {
 
 async function onLedgerCommand(command: LedgerAiCommand): Promise<void> {
   if (!isLedger.value || !ledgerHistory.activeSession.value || ledgerHistory.busy.value || commandPending.value) return
+  if (command === 'clear') {
+    commandPending.value = true
+    const confirmation = confirmCancellable(t('ai.finance_clear_confirm'), t('ai.finance_clear_confirm_detail'), {
+      confirmLabel: t('ai.ledger_clear'), destructive: true,
+    })
+    cancelClearConfirmation = confirmation.cancel
+    const accepted = await confirmation.promise
+    cancelClearConfirmation = null
+    commandPending.value = false
+    if (!accepted || !props.open || !isLedger.value) return
+  }
   const controller = new AbortController()
   commandController = controller
   commandPending.value = true
@@ -289,6 +319,14 @@ watch([isLedger, () => props.open], ([ledger, open]) => {
 }, { immediate: true })
 
 watch(isLedger, (ledger) => {
+  if (!ledger) cancelClearConfirmation?.()
+  if (props.open) {
+    const previousWidth = Math.min(ledger ? 460 : 720, window.innerWidth - (ledger ? 24 : 32))
+    if (!position.value || position.value.left === Math.max(12, window.innerWidth - previousWidth - 16)) {
+      position.value = defaultPosition()
+    }
+    void normalizePosition()
+  }
   if (ledger) {
     showSessionPicker.value = false
     historyTrigger = null
@@ -303,6 +341,10 @@ async function onNewConversation(): Promise<void> {
 }
 
 async function useQuickPrompt(text: string): Promise<void> {
+  if (isLedger.value) {
+    await onSend(text)
+    return
+  }
   draft.value = text
   await nextTick()
   await composer.value?.focus()
@@ -325,7 +367,10 @@ function onGlobalKeydown(event: KeyboardEvent): void {
   if (
     event.key !== 'Escape'
     || event.defaultPrevented
+    || event.isComposing
+    || event.keyCode === 229
     || !props.open
+    || cancelClearConfirmation !== null
     || showSessionPicker.value
     || blockingOverlay.value
   ) return
@@ -340,6 +385,7 @@ watch(() => props.positionStorageKey, async () => {
 watch(() => props.open, (open) => {
   if (open) void normalizePosition()
   else {
+    cancelClearConfirmation?.()
     showSessionPicker.value = false
     historyTrigger = null
   }
@@ -397,6 +443,7 @@ onMounted(() => {
   void ordinaryHistory.refreshModel().catch(() => {})
   window.addEventListener('resize', syncViewport)
   window.visualViewport?.addEventListener('resize', syncViewport)
+  window.visualViewport?.addEventListener('scroll', syncVisualViewport)
   document.addEventListener('keydown', onGlobalKeydown)
   if (typeof ResizeObserver !== 'undefined' && panelRef.value) {
     resizeObserver = new ResizeObserver(() => {
@@ -408,10 +455,12 @@ onMounted(() => {
 })
 
 onBeforeUnmount(() => {
+  cancelClearConfirmation?.()
   ledgerHistory.stop()
   commandController?.abort()
   window.removeEventListener('resize', syncViewport)
   window.visualViewport?.removeEventListener('resize', syncViewport)
+  window.visualViewport?.removeEventListener('scroll', syncVisualViewport)
   document.removeEventListener('keydown', onGlobalKeydown)
   resizeObserver?.disconnect()
   if (drag) {
@@ -428,7 +477,7 @@ onBeforeUnmount(() => {
       ref="panelRef"
       v-show="props.open"
       class="ai-panel ai-floating-panel"
-      :class="{ 'is-dragging': isDragging, 'is-mobile': isMobileViewport, 'is-obscured': panelObscured }"
+      :class="{ 'is-dragging': isDragging, 'is-mobile': isMobileViewport, 'is-obscured': panelObscured, 'is-finance': isLedger }"
       :style="panelStyle"
       :aria-label="title"
       :aria-hidden="panelObscured || undefined"
@@ -489,14 +538,32 @@ onBeforeUnmount(() => {
         {{ t('ai.not_configured') }}
       </div>
 
-      <AiChatMessages
-        :messages="history.messages.value"
-        :current-path="displayPath"
-        :note-link-context="noteLinkContext"
-        :quick-prompts="quickPrompts"
-        :empty-hint="emptyHint"
-        @prompt="useQuickPrompt"
-      />
+      <KeepAlive>
+        <AiChatMessages
+          v-if="!isLedger"
+          key="ordinary"
+          :messages="ordinaryHistory.messages.value"
+          :current-path="displayPath"
+          :note-link-context="noteLinkContext"
+          :quick-prompts="quickPrompts"
+          :empty-hint="emptyHint"
+          @prompt="useQuickPrompt"
+        />
+
+        <AiChatMessages
+          v-else
+          key="finance"
+          finance
+          :messages="ledgerHistory.messages.value"
+          :current-path="null"
+          :quick-prompts="quickPrompts"
+          :empty-hint="emptyHint"
+          :show-welcome="!!ledgerHistory.activeSession.value && !ledgerHistory.isLoading.value && !ledgerHistory.busy.value"
+          :prompts-disabled="!ledgerHistory.configured.value || commandPending"
+          :finance-phase="ledgerHistory.financePhase.value"
+          @prompt="useQuickPrompt"
+        />
+      </KeepAlive>
 
       <NAlert
         v-if="history.errorState.value?.startsWith('ledger-analysis-')"
@@ -504,10 +571,6 @@ onBeforeUnmount(() => {
         :show-icon="false"
         class="ai-ledger-status"
       >{{ t(history.errorState.value === 'ledger-analysis-uninitialized' ? 'ai.ledger_uninitialized' : 'ai.ledger_unavailable') }}</NAlert>
-      <p v-else-if="isLedger && ledgerHistory.financePhase.value" class="ai-ledger-status" role="status" data-testid="finance-agent-progress">
-        {{ t(`ai.finance_phase_${ledgerHistory.financePhase.value}`) }}
-      </p>
-
       <p v-if="isLedger && commandStatus" class="ai-ledger-status" role="status">
         {{ t(`ai.ledger_command_${commandStatus}`) }}
       </p>
@@ -520,6 +583,7 @@ onBeforeUnmount(() => {
         :configured="history.configured.value"
         :can-send="!history.isLoading.value && (!isLedger || (!!history.activeSession.value && !commandPending))"
         :commands="isLedger ? ledgerCommands : undefined"
+        :placeholder="isLedger ? t('ai.finance_placeholder') : undefined"
         :model-name="history.model.value"
         :prompts="quickPrompts"
         @send="onSend"

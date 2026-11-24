@@ -330,6 +330,11 @@ describe('sendAndStream', () => {
     vi.mocked(streamChat).mockImplementationOnce(async function* (_request, signal) {
       yield { type: 'finance_progress', phase: 'preparing' }
       yield { type: 'user', id: 7 }
+      const item = { id: 1, operation: 'cashflow', status: 'running' } as const
+      yield { type: 'finance_activity', activity: item }
+      yield { type: 'finance_activity', activity: { ...item, status: 'success' } }
+      yield { type: 'finance_activity', activity: item }
+      yield { type: 'finance_activity', activity: { ...item, id: 2 } }
       yield { type: 'finance_progress', phase: 'reading' }
       await new Promise<void>((resolve) => {
         if (signal?.aborted) resolve()
@@ -346,7 +351,13 @@ describe('sendAndStream', () => {
     await request
     expect(finance.financePhase.value).toBeNull()
     expect(finance.busy.value).toBe(false)
-    expect(finance.messages.value[1]?.content).toContain('[aborted]')
+    expect(finance.messages.value[1]?.blocks).toMatchObject({
+      cancelled: true,
+      financeActivity: [
+        { id: 1, operation: 'cashflow', status: 'success' },
+        { id: 2, operation: 'cashflow', status: 'cancelled' },
+      ],
+    })
   })
 
   it('stop() is a no-op when nothing is in flight', async () => {

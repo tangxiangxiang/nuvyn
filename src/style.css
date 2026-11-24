@@ -7021,3 +7021,48 @@ body:has(.ledger-detail-sheet-card) .n-modal-mask {
 @keyframes ai-cursor-blink {
   to { opacity: 0; }
 }
+
+/* Finance needs more room for long analyses while sharing the same floating shell. */
+.ai-panel.ai-floating-panel.is-finance:not(.is-mobile) {
+  width: min(720px, calc(100vw - 32px));
+  height: min(80dvh, 860px);
+}
+.ai-panel.is-finance .ai-messages {
+  padding: 16px clamp(14px, 3vw, 24px);
+  overflow-x: hidden;
+  scrollbar-width: none;
+  overscroll-behavior: contain;
+}
+.ai-panel.is-finance .ai-bubble { overflow-wrap: anywhere; }
+.ai-panel.is-finance .ai-message.assistant .ai-bubble {
+  width: 100%;
+  max-width: 100%;
+}
+.ai-panel.is-finance .ai-message.user .ai-bubble {
+  max-width: 85%;
+  border-radius: 12px 12px 4px 12px;
+  padding: 7px 12px;
+}
+.ai-panel.is-finance .ai-composer { padding-inline: clamp(12px, 3vw, 22px); }
+.ai-panel.is-finance .ai-input { padding: 10px 12px 5px; scrollbar-width: none; }
+.ai-panel.is-finance .ai-input::-webkit-scrollbar,
+.ai-panel.is-finance .ai-messages::-webkit-scrollbar { display: none; }
+.ai-panel.is-finance .ai-toolbar { min-height: 38px; padding: 2px 8px 6px 12px; }
+.ai-panel.is-finance .ai-prompt-menu {
+  bottom: calc(100% + 2px);
+  inset-inline: clamp(12px, 3vw, 22px);
+}
+.ai-command-name { display: block; font-weight: 600; }
+.ai-command-description { display: block; margin-top: 3px; color: var(--vs-text-2); font-size: .75rem; }
+@media (max-width: 640px) {
+  .ai-panel.ai-floating-panel.is-finance {
+    inset: var(--ai-viewport-top, 0px) 0 auto;
+    height: var(--ai-viewport-height, 100dvh);
+    padding: env(safe-area-inset-top, 0px) env(safe-area-inset-right, 0px)
+      env(safe-area-inset-bottom, 0px) env(safe-area-inset-left, 0px);
+  }
+  .ai-panel.is-finance .ai-input { font-size: 1rem; }
+  .ai-panel.is-finance .ai-header-btn,
+  .ai-panel.is-finance .ai-send { width: 40px; height: 40px; }
+  .ai-panel.is-finance .ai-prompt-menu button { min-height: 44px; }
+}

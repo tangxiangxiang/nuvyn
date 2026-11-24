@@ -274,8 +274,8 @@ test('quick prompts follow the active workspace and Diary view without replacing
 
   await selectWorkspace(page, 'ledger')
   await expect(panel).toBeVisible()
-  await expect(prompts).toHaveText(['分析本月收支', '分析消费结构', '查看财务趋势'])
-  await expect(panel.locator('.ai-empty-hint')).toHaveText('可以分析最新账本的收支、还款和账户余额。')
+  await expect(prompts).toHaveText(['分析本月收支', '分析我的消费结构', '查看近期财务趋势'])
+  await expect(panel.locator('.ai-empty-hint')).toHaveText('了解你的财务状况，合理规划每一笔钱。')
   await expect(composer).toHaveValue('')
   await composer.fill('财务草稿')
   expect(chatRequests).toBe(0)
@@ -342,10 +342,15 @@ test('AI Finance isolates its transcript and executes local commands without sen
           ? `### Ledger analysis ${number}\n\n**推断** · 支出和还款会共同影响可支配资金。\n\n- 日常支出：¥825.01`
           : 'Board conversation'
         const text = interrupted ? reply + '\n\n回答因长度限制未完成，部分分析内容可能缺失。' : reply
+        const activity = [
+          { id: 1, operation: 'accounts', status: 'success' },
+          { id: 2, operation: 'cashflow', status: 'failed' },
+        ]
         if (body.ledgerAnalysis) {
           financeMessages.push(
             { id: userId, sessionId: finance.id, role: 'user', content: body.content, createdAt: userId },
-            { id: assistantId, sessionId: finance.id, role: 'assistant', content: text, createdAt: assistantId },
+            { id: assistantId, sessionId: finance.id, role: 'assistant', content: text, createdAt: assistantId,
+              ...(number === 1 ? { blocks: { v: 1, text, toolCalls: [], financeActivity: activity } } : {}) },
           )
         }
         return route.fulfill({
@@ -353,8 +358,13 @@ test('AI Finance isolates its transcript and executes local commands without sen
           contentType: 'text/event-stream',
           ...(number === 1 ? { headers: { 'x-finance-progress-fixture': '1' } } : {}),
           body: sse('user', { id: userId })
-            + (number === 1 ? sse('finance_progress', { phase: 'reading' }) : '')
-            + sse('token', { text }) + sse('done', { userId, assistantId, ...(interrupted ? { interrupted } : {}) }),
+            + (number === 1 ? sse('finance_progress', { phase: 'reading' })
+              + sse('finance_activity', { activity: { ...activity[0], status: 'running' } })
+              + sse('finance_activity', { activity: activity[0] })
+              + sse('finance_activity', { activity: { ...activity[1], status: 'running' } }) : '')
+            + sse('token', { text })
+            + (number === 1 ? sse('finance_activity', { activity: activity[1] }) : '')
+            + sse('done', { userId, assistantId, ...(interrupted ? { interrupted } : {}) }),
         })
       }
       default: return route.fallback()
@@ -391,10 +401,15 @@ test('AI Finance isolates its transcript and executes local commands without sen
   await expect(panel.getByTestId('global-ai-new-session')).toHaveCount(0)
   await expect(panel.getByTestId('global-ai-history')).toHaveCount(0)
   await expect(panel.getByText('Previous Note conversation')).toHaveCount(0)
-  await sendAi(page, '分析本月的收入和支出')
+  await expect(panel.getByRole('heading', { name: '今天想了解什么？' })).toBeVisible()
+  await expect(panel.getByPlaceholder('询问你的财务状况…')).toBeVisible()
+  await panel.getByRole('button', { name: '分析本月收支' }).click()
   const progress = panel.getByTestId('finance-agent-progress')
   await expect(progress).toHaveText('正在查询账本…')
   await expect(panel.getByText('Ledger analysis 1')).toHaveCount(0)
+  const execution = panel.getByTestId('finance-activity')
+  await expect(execution.locator('[data-status="success"]')).toContainText('读取账户数据')
+  await expect(execution.locator('[data-status="running"]')).toContainText('计算收支情况')
   await selectWorkspace(page, 'board')
   await expect(progress).toHaveCount(0)
   await selectWorkspace(page, 'ledger')
@@ -404,6 +419,12 @@ test('AI Finance isolates its transcript and executes local commands without sen
   await expect(panel.getByText('支出和还款会共同影响可支配资金。', { exact: false })).toBeVisible()
   await expect(panel.getByText('日常支出：¥825.01', { exact: true })).toBeVisible()
   await expect(progress).toHaveCount(0)
+  const operationSummary = execution.locator('summary')
+  await expect(operationSummary).toHaveText('已完成 1 项操作 · 1 项失败')
+  await expect(execution.locator('[data-status="failed"]')).toBeHidden()
+  await operationSummary.click()
+  await expect(execution.locator('[data-status="failed"]')).toBeVisible()
+  await operationSummary.click()
   await sendAi(page, '那上个月呢？')
   await expect(panel.getByText('Ledger analysis 2')).toBeVisible()
   await expect(panel.getByText('回答因长度限制未完成，部分分析内容可能缺失。', { exact: true })).toBeVisible()
@@ -429,6 +450,8 @@ test('AI Finance isolates its transcript and executes local commands without sen
   await page.getByTestId('global-ai-trigger').click()
   await expect(panel.getByText('回答因长度限制未完成，部分分析内容可能缺失。', { exact: true })).toBeVisible()
 
+  await expect(operationSummary).toBeVisible()
+  await expect(execution.locator('[data-status="failed"]')).toBeHidden()
   await sendAi(page, '  /compact  ')
   await expect(panel.getByText('当前无需压缩')).toBeVisible()
   await sendAi(page, '/unknown')
@@ -436,6 +459,13 @@ test('AI Finance isolates its transcript and executes local commands without sen
   const input = panel.locator('textarea')
   await input.fill('/')
   await panel.getByRole('option', { name: '/clear · 清空对话', exact: true }).click()
+  await expect(page.getByText('清空财务对话？')).toBeVisible()
+  await page.keyboard.press('Escape')
+  await expect(panel.getByText('Ledger analysis 2')).toBeVisible()
+  expect(commands).toEqual(['compact'])
+  await input.fill('/clear')
+  await input.press('Enter')
+  await page.getByRole('button', { name: '清空对话', exact: true }).click()
   await expect(panel.getByText('对话已清空')).toBeVisible()
   await expect(panel.getByText('Ledger analysis 2')).toHaveCount(0)
   await expect(input).toHaveValue('')
@@ -505,5 +535,102 @@ test.describe('mobile global AI panel', () => {
     await panel.getByTestId('global-ai-close').tap()
     await expect(panel).toBeHidden()
     await expect(page.locator('.ai-floating-backdrop')).toHaveCount(0)
+  })
+})
+
+test.describe('AI Finance responsive layout', () => {
+  test.use({ hasTouch: true })
+
+  test('keeps the composer accessible and preserves the reading position around wide reports', async ({ page }) => {
+    const session = { id: 31, title: 'AI Finance', createdAt: 1, updatedAt: 1 }
+    const headings = Array.from({ length: 10 }, (_, index) => `Reporting period ${index + 1}`)
+    const table = [
+      `| ${headings.join(' | ')} |`,
+      `| ${headings.map(() => '---').join(' | ')} |`,
+      `| ${headings.map(() => '¥1,234.56').join(' | ')} |`,
+    ].join('\n')
+    const report = `## Quarterly report\n\n${table}\n\n${Array.from({ length: 35 }, (_, index) =>
+      `Review period ${index + 1} and its relationship to the household budget.`).join('\n\n')}`
+    await page.route('**/api/ai/active', route => route.fulfill(jsonResponse({ activeId: null, configured: true })))
+    await page.route('**/api/ai/ledger-session', route => route.fulfill(jsonResponse({
+      session,
+      messages: [{ id: 1, sessionId: session.id, role: 'assistant', content: report, createdAt: 1 }],
+    })))
+    await page.route('**/api/ai/ledger-session/command', async route => {
+      expect(route.request().postDataJSON()).toMatchObject({ command: 'compact' })
+      await route.fulfill(jsonResponse({ outcome: 'nothing-to-compact' }))
+    })
+    await gotoVaultReady(page)
+    await selectWorkspace(page, 'ledger')
+    const trigger = page.getByTestId('global-ai-trigger')
+    await trigger.click()
+    const panel = page.getByTestId('global-ai-panel')
+    const messages = panel.getByRole('log')
+    const input = panel.locator('textarea')
+    const tableScroll = panel.locator('.ai-table-scroll')
+
+    await expect(tableScroll).toHaveCount(1)
+    await expect(tableScroll.getByRole('cell').first()).toHaveCSS('text-align', 'right')
+    await expect(page.locator('html')).toHaveAttribute('data-theme', 'light')
+    const lightBackground = await panel.evaluate(el => getComputedStyle(el).backgroundColor)
+    await page.locator('.navbar .theme-toggle').click()
+    await expect(page.locator('html')).toHaveAttribute('data-theme', 'dark')
+    await expect.poll(() => panel.evaluate(el => getComputedStyle(el).backgroundColor)).not.toBe(lightBackground)
+    for (const width of [1440, 1024, 768, 430, 390]) {
+      await page.setViewportSize({ width, height: 840 })
+      await expect(panel).toHaveCSS('width', width > 640 ? '720px' : `${width}px`)
+      await expect(messages).toHaveCSS('scrollbar-width', 'none')
+      await expect(tableScroll).toHaveCSS('scrollbar-width', 'none')
+      const bounds = await panel.evaluate((element) => {
+        const rect = element.getBoundingClientRect()
+        const composer = element.querySelector('.ai-composer')!.getBoundingClientRect()
+        return { left: rect.left, right: rect.right, bottom: rect.bottom, composerBottom: composer.bottom }
+      })
+      expect(bounds.left).toBeGreaterThanOrEqual(0)
+      expect(bounds.right).toBeLessThanOrEqual(width)
+      expect(bounds.bottom).toBeLessThanOrEqual(840)
+      expect(bounds.composerBottom).toBeLessThanOrEqual(bounds.bottom)
+      expect(await tableScroll.evaluate(el => el.scrollWidth > el.clientWidth)).toBe(true)
+    }
+    await expect(panel.getByRole('heading', { name: 'Quarterly report' })).toHaveCount(1)
+    await expect(panel.getByRole('heading', { name: 'What would you like to explore today?' })).toHaveCount(0)
+    await expect(panel.getByTestId('finance-activity')).toHaveCount(0)
+
+    await messages.evaluate(el => { el.scrollTop = 48 })
+    await expect(panel.locator('.ai-scroll-latest')).toBeVisible()
+    await panel.getByTestId('global-ai-close').click()
+    await trigger.click()
+    await expect.poll(() => messages.evaluate(el => el.scrollTop)).toBe(48)
+
+    const compactHeight = (await input.boundingBox())!.height
+    await input.fill('first line\nsecond line\nthird line\nfourth line')
+    await expect.poll(async () => (await input.boundingBox())!.height).toBeGreaterThan(compactHeight)
+    await input.fill('')
+    await expect.poll(async () => (await input.boundingBox())!.height).toBe(compactHeight)
+
+    await input.fill('/')
+    await expect(panel.getByRole('option')).toHaveCount(2)
+    await input.press('ArrowDown')
+    await expect(panel.getByRole('option', { name: /\/clear/ })).toHaveAttribute('aria-selected', 'true')
+    await input.press('Escape')
+    await expect(panel.getByRole('listbox')).toHaveCount(0)
+    await expect(panel).toBeVisible()
+    await input.fill('/comp')
+    await expect(panel.getByRole('option')).toHaveCount(1)
+    await panel.getByRole('option', { name: /\/compact/ }).tap()
+    await expect(input).toHaveValue('')
+    await expect(panel.getByText(/Nothing to compact yet|当前无需压缩/)).toBeVisible()
+    await input.fill('Keyboard test')
+    await input.focus()
+
+    // A keyboard reduces the visual viewport without changing the layout viewport.
+    await page.evaluate(() => {
+      const viewport = window.visualViewport!
+      Object.defineProperty(viewport, 'height', { configurable: true, value: 410 })
+      viewport.dispatchEvent(new Event('resize'))
+    })
+    await expect(panel).toHaveCSS('height', '410px')
+    expect((await input.boundingBox())!.y).toBeLessThan(410)
+    await expect(panel.locator('.ai-send')).toBeInViewport()
   })
 })

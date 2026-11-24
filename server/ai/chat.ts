@@ -1,4 +1,4 @@
-import type { FinanceAgentProgress } from '../../shared/ledgerAiAnalysis.js'
+import { financeOperation, type FinanceActivity, type FinanceActivityEvent, type FinanceAgentProgress } from '../../shared/ledgerAiAnalysis.js'
 import { createFinanceAgent, financeCoverageNotice } from './finance-agent.js'
 import { answerStandaloneFinanceQuestion, financeAnswerProtocol, verifyFinanceAnswer } from './finance-verification.js'
 import { ledgerReadTool, type createLedgerAnalysis } from './ledger-analysis.js'
@@ -195,6 +195,7 @@ const LIVE_CONTEXT_KIND_NOTES: Record<AiLiveContextSnapshot['kind'], string> = {
 // (subset) as `ChatEvent` on the client side in src/lib/ai-api.ts.
 export type ChatEvent =
   | FinanceAgentProgress
+  | FinanceActivityEvent
   | { type: 'user'; id: number }
   | { type: 'token'; text: string }
   | { type: 'tool_use'; id: string; name: string; input: Record<string, unknown> }
@@ -265,8 +266,11 @@ export async function runChat(opts: RunChatOpts): Promise<{
   // Persist the user message FIRST so a crash mid-stream only loses
   // the in-flight assistant text. See spec §3.5.
   const privateLedgerAnalysis = opts.ledgerAnalysis !== undefined
-  const persistLedgerText = (text: string, interrupted = false) => JSON.stringify({
+  const financeActivity: FinanceActivity[] = []
+  const persistLedgerText = (text: string, interrupted = false, cancelled = false) => JSON.stringify({
     v: 2, text, rounds: [], toolCalls: [], privateLedgerAnalysis: true,
+    ...(financeActivity.length ? { financeActivity } : {}),
+    ...(cancelled ? { cancelled: true } : {}),
     ...(interrupted ? { interrupted: true } : {}),
   })
   const userResult = messages.appendMessage(
@@ -408,13 +412,23 @@ export async function runChat(opts: RunChatOpts): Promise<{
         let reading = false
         for (const [ordinal, tc] of result.toolCalls.entries()) {
           requireFinanceAccess()
-          const content = await finance.execute(tc, result.toolCalls.length, ordinal, async () => {
+          const activity: FinanceActivity = {
+            id: financeActivity.length + 1,
+            operation: financeOperation(tc.name === ledgerReadTool.name ? tc.input?.kind : undefined),
+            status: 'running',
+          }
+          financeActivity.push(activity)
+          await emit(opts.onEvent, { type: 'finance_activity', activity: { ...activity } })
+          requireFinanceAccess()
+          const { content, status } = await finance.execute(tc, result.toolCalls.length, ordinal, async () => {
             if (!reading) {
               await emit(opts.onEvent, { type: 'finance_progress', phase: 'reading' })
               reading = true
             }
             requireFinanceAccess()
           })
+          activity.status = status
+          await emit(opts.onEvent, { type: 'finance_activity', activity: { ...activity } })
           convo.push({ role: 'tool', tool_call_id: tc.id, content })
         }
         if (!finance.canQuery()) convo.push(finalFinanceInstruction)
@@ -518,6 +532,9 @@ export async function runChat(opts: RunChatOpts): Promise<{
     // Persist whatever streamed so far (typically '' or a few tokens)
     // and re-throw a tagged error so the route can emit SSE error.
     const financeAborted = finance && (opts.signal?.aborted || !opts.canUseLedgerAnalysis?.())
+    for (const activity of financeActivity) {
+      if (activity.status === 'running') activity.status = financeAborted ? 'cancelled' : 'failed'
+    }
     if (finance && !financeAborted && !fullText && (ledgerDraft || earlierVerifiedDraft)) {
       const checked = verifyFinanceAnswer(ledgerDraft, finance.observation, chinese)
       const verified = checked.text || earlierVerifiedDraft
@@ -526,12 +543,13 @@ export async function runChat(opts: RunChatOpts): Promise<{
         await emit(opts.onEvent, { type: 'token', text: fullText })
       }
     }
-    const partial = (financeAborted ? '' : fullText) || (finance ? interruptionNotice(false) : '[stream interrupted]')
+    const cancelled = Boolean(finance && opts.signal?.aborted)
+    const partial = cancelled ? '' : (financeAborted ? '' : fullText) || (finance ? interruptionNotice(false) : '[stream interrupted]')
     const assistantResult = messages.appendMessage(
       opts.db,
       opts.sessionId,
       'assistant',
-      privateLedgerAnalysis ? persistLedgerText(partial, true) : partial,
+      privateLedgerAnalysis ? persistLedgerText(partial, true, cancelled) : partial,
     )
     const assistantId = assistantResult.ok ? assistantResult.message.id : -1
     if (financeAborted) throw new ChatError('aborted', undefined, assistantId)

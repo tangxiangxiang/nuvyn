@@ -39,8 +39,8 @@ describe('AI quick prompts by workspace', () => {
     const ledger = resolveAiQuickPrompts({ workspace: 'ledger', diaryViewMode: 'diary', hasActiveNote: false, t })
     const board = resolveAiQuickPrompts({ workspace: 'board', diaryViewMode: 'diary', hasActiveNote: false, t })
 
-    expect(ledger.prompts.map(({ label }) => label)).toEqual(['分析本月收支', '分析消费结构', '查看财务趋势'])
-    expect(ledger.emptyHint).toBe('可以分析最新账本的收支、还款和账户余额。')
+    expect(ledger.prompts.map(({ label }) => label)).toEqual(['分析本月收支', '分析我的消费结构', '查看近期财务趋势'])
+    expect(ledger.emptyHint).toBe('了解你的财务状况，合理规划每一笔钱。')
     expect(board.prompts.map(({ label }) => label)).toEqual(['头脑风暴', '整理思路', '设计信息结构'])
     expect(board.emptyHint).toBe('可以帮助你头脑风暴和整理思路。')
   })

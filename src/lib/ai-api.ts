@@ -1,4 +1,4 @@
-import type { FinanceAgentProgress } from '../../shared/ledgerAiAnalysis'
+import type { FinanceActivity, FinanceActivityEvent, FinanceAgentProgress } from '../../shared/ledgerAiAnalysis'
 import type { SpeechVoiceId } from '../../shared/aiProfiles'
 // Wire types + typed fetch wrappers for /api/ai/*. The shapes
 // (Session, Message) are the single source of truth — the server
@@ -110,6 +110,8 @@ export interface AssistantBlocks {
   v: 1
   text: string
   toolCalls: ToolCallRecord[]
+  financeActivity?: FinanceActivity[]
+  cancelled?: true
   interrupted?: true
 }
 
@@ -220,6 +222,7 @@ export interface FileChangeEvent {
 
 export type ChatEvent =
   | FinanceAgentProgress
+  | FinanceActivityEvent
   | { type: 'user'; id: number }
   | { type: 'token'; text: string }
   | { type: 'tool_use'; id: string; name: string; input: Record<string, unknown> }

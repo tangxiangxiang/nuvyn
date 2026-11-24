@@ -155,7 +155,7 @@ describe('AiChatMessages empty presentation', () => {
     expect(wrapper.find('.ai-empty-hint').exists()).toBe(false)
     expect(wrapper.find('.ai-context-block').exists()).toBe(false)
     expect(wrapper.get('.ai-message').text()).toBe('hello')
-    expect(wrapper.classes()).toContain('has-messages')
+    expect(wrapper.get('[role=log]').classes()).toContain('has-messages')
   })
 
   it('emits the selected quick prompt without sending it', async () => {
@@ -165,5 +165,20 @@ describe('AiChatMessages empty presentation', () => {
     await wrapper.get('.ai-quick-prompt').trigger('click')
 
     expect(wrapper.emitted('prompt')).toEqual([['总结当前笔记']])
+  })
+})
+
+describe('AI Finance messages', () => {
+  it('waits for history before showing the welcome and removes it when streaming begins', async () => {
+    const wrapper = mount(AiChatMessages, {
+      props: { finance: true, currentPath: null, quickPrompts: [], messages: [], showWelcome: false },
+    })
+    expect(wrapper.find('.ai-empty-chat').exists()).toBe(false)
+    await wrapper.setProps({ showWelcome: true })
+    expect(wrapper.find('.ai-empty-chat h2').exists()).toBe(true)
+    expect(wrapper.find('.ai-suggestion-heading').exists()).toBe(false)
+    await wrapper.setProps({ messages: [{ id: 0, sessionId: 1, role: 'user', content: 'Analyze cash flow', createdAt: 1 }] })
+    expect(wrapper.find('.ai-empty-chat').exists()).toBe(false)
+    expect(wrapper.find('[data-testid="finance-activity"]').exists()).toBe(false)
   })
 })

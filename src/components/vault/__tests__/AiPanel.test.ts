@@ -1,10 +1,11 @@
 // @vitest-environment jsdom
 import { defineComponent, h, nextTick, provide, ref, type Ref } from 'vue'
-import { enableAutoUnmount, mount, type VueWrapper } from '@vue/test-utils'
+import { enableAutoUnmount, flushPromises, mount, type VueWrapper } from '@vue/test-utils'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { AppShellContextKey, type NoteAiContextBridge } from '../../../composables/appShellContext'
 import type { AiLiveContextCapture, AiDocumentContext, AiLiveContextSnapshot } from '../../../composables/vault/aiLiveContext'
 import { useAiHistory, useLedgerAiHistory } from '../../../composables/vault/useAiHistory'
+import { useConfirm } from '../../../composables/useConfirm'
 import { useI18n } from '../../../composables/useI18n'
 import AiPanel from '../AiPanel.vue'
 import AiChatMessages from '../AiChatMessages.vue'
@@ -191,16 +192,26 @@ describe('global AI panel', () => {
     expect(wrapper.text()).toContain('Conversation compacted')
     expect(financeHistory.messages.value).toEqual(conversation)
 
+    const confirmation = useConfirm()
+    await typeAndSend(wrapper, '/clear')
+    expect(command).toHaveBeenCalledTimes(1)
+    confirmation.answer(confirmation.queue.value[0].id, false)
+    await nextTick()
+    expect(financeHistory.messages.value).toEqual(conversation)
+
     command.mockRejectedValueOnce(new Error('could not clear'))
     await typeAndSend(wrapper, '/clear')
-    await nextTick()
+    confirmation.answer(confirmation.queue.value[0].id, true)
+    await flushPromises()
     expect(wrapper.text()).toContain('Command failed')
     expect(financeHistory.messages.value).toEqual(conversation)
     command.mockResolvedValueOnce({ outcome: 'cleared' })
     await typeAndSend(wrapper, '/clear')
-    await nextTick()
+    confirmation.answer(confirmation.queue.value[0].id, true)
+    await flushPromises()
     expect(wrapper.text()).toContain('Conversation cleared')
     expect(financeHistory.messages.value).toEqual([])
+    expect(wrapper.get('h2').text()).toBe('What would you like to explore today?')
     expect(wrapper.findComponent(AiComposer).props('modelValue')).toBe('')
   })
 
@@ -292,9 +303,12 @@ describe('global AI panel', () => {
 
     const prompt = wrapper.findAll('.ai-quick-prompt')[0]
     await prompt.trigger('click')
-    const expectedDraft = useI18n().t('quick_prompts.ledger.review.text')
-    expect(wrapper.findComponent(AiComposer).props('modelValue')).toBe(expectedDraft)
+    expect(financeHistory.sendAndStream).toHaveBeenCalledExactlyOnceWith(
+      useI18n().t('quick_prompts.ledger.review.text'), { ledgerAnalysis: true },
+    )
     expect(history.sendAndStream).not.toHaveBeenCalled()
+    const expectedDraft = 'Finance draft'
+    await wrapper.get('textarea').setValue(expectedDraft)
 
     const conversation = [{ id: 1, sessionId: 1, role: 'assistant' as const, content: 'kept', createdAt: 1 }]
     history.messages.value = conversation

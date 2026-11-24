@@ -1,3 +1,4 @@
+import { parseFinanceActivity, type FinanceActivity } from '../../shared/ledgerAiAnalysis.js'
 // Messages service. The two functions are listMessages (read) and
 // appendMessage (write). appendMessage does several things in one
 // transaction: validate input, ensure the session exists, insert the
@@ -63,6 +64,8 @@ export type NormalizedRound = {
 export type AssistantEnvelopeV2 = {
   v: 2
   privateLedgerAnalysis?: true
+  financeActivity?: FinanceActivity[]
+  cancelled?: true
   interrupted?: true
   text: string
   rounds: NormalizedRound[]
@@ -145,9 +148,14 @@ export function parseStoredContent(raw: string): StoredContent {
             rounds.push(r as NormalizedRound)
           }
         }
+        const financeActivity = j.privateLedgerAnalysis === true && Array.isArray(j.financeActivity)
+          ? (j.financeActivity as unknown[]).map(parseFinanceActivity).filter((activity): activity is FinanceActivity => !!activity)
+          : []
         return { kind: 'envelope', envelope: {
           v: 2, text: j.text, rounds, toolCalls: j.toolCalls,
           ...(j.privateLedgerAnalysis === true ? { privateLedgerAnalysis: true } : {}),
+          ...(j.privateLedgerAnalysis === true && j.cancelled === true ? { cancelled: true } : {}),
+          ...(financeActivity.length ? { financeActivity } : {}),
           ...(j.interrupted === true ? { interrupted: true } : {}),
         } }
       }

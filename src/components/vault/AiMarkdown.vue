@@ -8,6 +8,7 @@ import { resolveWikiTarget } from '../../../shared/linkResolve'
 const props = defineProps<{
   content: string
   sourcePath?: string | null
+  finance?: boolean
   noteLinkContext?: { paths: string[]; openLink: (path: string, anchor?: string) => Promise<void> } | null
 }>()
 
@@ -15,6 +16,7 @@ const vaultContext = useOptionalVaultContext()
 const linkIndex = getLinkIndex(vaultContext?.fileChanges)
 const html = computed(() => renderAiMarkdown(props.content, {
   sourcePath: props.sourcePath ?? undefined,
+  finance: props.finance,
   resolver: (ref, _anchor, context) => ({
     target: resolveWikiTarget(
       ref,
@@ -36,7 +38,7 @@ function onLinkClick(event: MouseEvent) {
 </script>
 
 <template>
-  <div class="ai-markdown article" v-html="html" @click="onLinkClick" />
+  <div class="ai-markdown article" :class="{ 'ai-finance-markdown': finance }" v-html="html" @click="onLinkClick" />
 </template>
 
 <style scoped>
@@ -172,4 +174,20 @@ function onLinkClick(event: MouseEvent) {
   text-decoration: none;
 }
 .ai-markdown :deep(a:hover) { text-decoration: underline; }
+.ai-finance-markdown :deep(:is(p, ul, ol, blockquote)) { font-size: 0.875rem; line-height: 1.65; }
+.ai-finance-markdown :deep(h1) { font-size: 1.08rem; }
+.ai-finance-markdown :deep(h2) { font-size: 1rem; }
+.ai-finance-markdown :deep(h3) { font-size: 0.92rem; }
+.ai-finance-markdown :deep(.ai-table-scroll),
+.ai-finance-markdown :deep(pre) {
+  max-width: 100%;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+.ai-finance-markdown :deep(.ai-table-scroll::-webkit-scrollbar),
+.ai-finance-markdown :deep(pre::-webkit-scrollbar) { display: none; }
+.ai-finance-markdown :deep(.ai-table-scroll:focus-visible) { outline: 1px solid var(--vs-accent); }
+.ai-finance-markdown :deep(.ai-table-scroll table) { width: max-content; min-width: 100%; }
+.ai-finance-markdown :deep(.ai-table-scroll :is(th, td)) { max-width: 18rem; }
+.ai-finance-markdown :deep(.ai-table-scroll .ai-finance-number) { text-align: right; }
 </style>

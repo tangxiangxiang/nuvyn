@@ -53,3 +53,25 @@ export interface LedgerAiAnalysisSnapshot {
 export const FINANCE_AGENT_PHASES = ['preparing', 'reading', 'analyzing', 'verifying'] as const
 export type FinanceAgentPhase = typeof FINANCE_AGENT_PHASES[number]
 export type FinanceAgentProgress = { type: 'finance_progress'; phase: FinanceAgentPhase }
+
+/** Display metadata only. Never includes a tool's arguments or result. */
+const financeOperations = ['accounts', 'details', ...LEDGER_AI_ANALYSIS_KINDS, 'query'] as const
+const financeStatuses = ['running', 'success', 'failed', 'cancelled', 'reused'] as const
+export type FinanceActivity = {
+  id: number
+  operation: typeof financeOperations[number]
+  status: typeof financeStatuses[number]
+}
+export type FinanceActivityEvent = { type: 'finance_activity'; activity: FinanceActivity }
+
+export function financeOperation(kind: unknown): FinanceActivity['operation'] {
+  return financeOperations.find(operation => operation === kind) ?? 'query'
+}
+
+export function parseFinanceActivity(value: unknown): FinanceActivity | undefined {
+  if (!value || typeof value !== 'object' || !('id' in value) || !('status' in value) || !('operation' in value)) return
+  const { id, status, operation } = value
+  const recognizedStatus = financeStatuses.find(item => item === status)
+  if (typeof id !== 'number' || !Number.isSafeInteger(id) || id < 1 || !recognizedStatus) return
+  return { id, operation: financeOperation(operation), status: recognizedStatus }
+}

@@ -259,6 +259,8 @@ function rehydrateForClient(m: Message): Message {
     v: 1,
     text: parsed.envelope.text,
     toolCalls: parsed.envelope.toolCalls,
+    ...(parsed.envelope.cancelled ? { cancelled: true } : {}),
+    ...(parsed.envelope.financeActivity ? { financeActivity: parsed.envelope.financeActivity } : {}),
     ...(parsed.envelope.interrupted ? { interrupted: true } : {}),
   }
   return { ...m, content: parsed.envelope.text, blocks }
@@ -1101,6 +1103,9 @@ ai.post('/chat', async (c) => {
     try {
       const writeEvent = async (e: ChatEvent) => {
         switch (e.type) {
+          case 'finance_activity':
+            await stream.writeSSE({ event: e.type, data: JSON.stringify({ activity: e.activity }) })
+            break
           case 'finance_progress':
             await stream.writeSSE({ event: e.type, data: JSON.stringify({ phase: e.phase }) })
             break

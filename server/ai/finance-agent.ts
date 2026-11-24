@@ -74,6 +74,7 @@ export function createFinanceAgent(analysis: ReturnType<typeof createLedgerAnaly
     const observation = calls - batchSize + ordinal + 1
     let delivery: { key: string; query: Query; result: DeliveredResult; page: ReturnType<typeof pageCoverage> } | undefined
     let content: string
+    let reused = false
     if (exhausted) {
       content = encodeError(budgetError, observation)
     } else if (call.name !== ledgerReadTool.name) {
@@ -89,6 +90,7 @@ export function createFinanceAgent(analysis: ReturnType<typeof createLedgerAnaly
         const key = JSON.stringify(query)
         const previous = observations.get(key)
         if (previous !== undefined) {
+          reused = true
           content = JSON.stringify({ duplicateOfObservation: previous, instruction: 'Use the earlier observation or query a different scope.' })
         } else if (failures.get(key)?.kind === 'oversized') {
           content = encodeError('Ledger result is too large. Try a shorter period or a more focused kind of query.', observation)
@@ -123,6 +125,7 @@ export function createFinanceAgent(analysis: ReturnType<typeof createLedgerAnaly
     }
     if (Buffer.byteLength(content) + (batchSize - ordinal - 1) * errorBytes > remaining) {
       exhausted = true
+      reused = false
       content = encodeError(budgetError, observation)
       if (delivery) failures.set(delivery.key, { kind: 'budget', query: delivery.query })
       delivery = undefined
@@ -136,7 +139,7 @@ export function createFinanceAgent(analysis: ReturnType<typeof createLedgerAnaly
       if (page) pages.set(page.key, page.page)
       if ('omittedExpenseCategoryCount' in result && (result.omittedExpenseCategoryCount ?? 0) > 0) omittedCategories = true
     }
-    return content
+    return { content, status: delivery ? 'success' : reused ? 'reused' : 'failed' } as const
   }
 
   function limitations() {
