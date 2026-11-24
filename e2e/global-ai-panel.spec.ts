@@ -337,11 +337,13 @@ test('AI Finance isolates its transcript and executes local commands without sen
         const number = chatRequests.length
         const userId = number * 2
         const assistantId = userId + 1
+        const interrupted = body.ledgerAnalysis === true && number === 2
         const reply = body.ledgerAnalysis ? `Ledger analysis ${number}` : 'Board conversation'
+        const text = interrupted ? reply + '\n\n回答因长度限制未完成，部分分析内容可能缺失。' : reply
         if (body.ledgerAnalysis) {
           financeMessages.push(
             { id: userId, sessionId: finance.id, role: 'user', content: body.content, createdAt: userId },
-            { id: assistantId, sessionId: finance.id, role: 'assistant', content: reply, createdAt: assistantId },
+            { id: assistantId, sessionId: finance.id, role: 'assistant', content: text, createdAt: assistantId },
           )
         }
         return route.fulfill({
@@ -350,7 +352,7 @@ test('AI Finance isolates its transcript and executes local commands without sen
           ...(number === 1 ? { headers: { 'x-finance-progress-fixture': '1' } } : {}),
           body: sse('user', { id: userId })
             + (number === 1 ? sse('finance_progress', { phase: 'reading' }) : '')
-            + sse('token', { text: reply }) + sse('done', { userId, assistantId }),
+            + sse('token', { text }) + sse('done', { userId, assistantId, ...(interrupted ? { interrupted } : {}) }),
         })
       }
       default: return route.fallback()
@@ -400,6 +402,8 @@ test('AI Finance isolates its transcript and executes local commands without sen
   await expect(progress).toHaveCount(0)
   await sendAi(page, '那上个月呢？')
   await expect(panel.getByText('Ledger analysis 2')).toBeVisible()
+  await expect(panel.getByText('回答因长度限制未完成，部分分析内容可能缺失。', { exact: true })).toBeVisible()
+  await expect(progress).toHaveCount(0)
   await expect(panel.getByTestId('ai-ledger-approval')).toHaveCount(0)
 
   await selectWorkspace(page, 'board')
@@ -416,6 +420,10 @@ test('AI Finance isolates its transcript and executes local commands without sen
   await panel.getByTestId('global-ai-close').click()
   await page.getByTestId('global-ai-trigger').click()
   await expect(panel.getByText('Ledger analysis 2')).toBeVisible()
+
+  await page.reload()
+  await page.getByTestId('global-ai-trigger').click()
+  await expect(panel.getByText('回答因长度限制未完成，部分分析内容可能缺失。', { exact: true })).toBeVisible()
 
   await sendAi(page, '  /compact  ')
   await expect(panel.getByText('当前无需压缩')).toBeVisible()

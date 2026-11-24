@@ -110,6 +110,7 @@ export interface AssistantBlocks {
   v: 1
   text: string
   toolCalls: ToolCallRecord[]
+  interrupted?: true
 }
 
 export interface ToolCallRecord {
@@ -224,7 +225,7 @@ export type ChatEvent =
   | { type: 'tool_use'; id: string; name: string; input: Record<string, unknown> }
   | { type: 'tool_result'; tool_use_id: string; content: string; is_error: boolean }
   | { type: 'file_changed' } & FileChangeEvent
-  | { type: 'done'; userId: number; assistantId: number }
+  | { type: 'done'; userId: number; assistantId: number; interrupted?: true }
   | { type: 'error'; reason: string; code?: AiKeyErrorCode; message?: string }
 
 async function jsonOrThrow<T>(r: Response): Promise<T> {

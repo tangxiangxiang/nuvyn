@@ -436,6 +436,7 @@ function createAiHistory(publishChange: (event: FileChangeEvent) => void, ledger
         oldPath: event.oldPath,
       })
     } else if (event.type === 'done') {
+      if (event.interrupted && optimisticAssistant.blocks) optimisticAssistant.blocks.interrupted = true
       messages.value = messages.value.map((m) =>
         m === optimisticAssistant ? { ...m, id: event.assistantId } : m,
       )

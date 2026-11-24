@@ -259,6 +259,7 @@ function rehydrateForClient(m: Message): Message {
     v: 1,
     text: parsed.envelope.text,
     toolCalls: parsed.envelope.toolCalls,
+    ...(parsed.envelope.interrupted ? { interrupted: true } : {}),
   }
   return { ...m, content: parsed.envelope.text, blocks }
 }
@@ -1140,7 +1141,7 @@ ai.post('/chat', async (c) => {
           case 'done':
             await stream.writeSSE({
               event: 'done',
-              data: JSON.stringify({ userId: e.userId, assistantId: e.assistantId }),
+              data: JSON.stringify({ userId: e.userId, assistantId: e.assistantId, ...(e.interrupted ? { interrupted: true } : {}) }),
             })
             break
           case 'error':

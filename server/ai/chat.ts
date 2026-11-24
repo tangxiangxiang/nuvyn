@@ -1,5 +1,6 @@
 import type { FinanceAgentProgress } from '../../shared/ledgerAiAnalysis.js'
 import { createFinanceAgent, financeCoverageNotice } from './finance-agent.js'
+import { financeAnswerProtocol, nonLedgerReviewPrompt, verifyFinanceAnswer } from './finance-verification.js'
 import { ledgerReadTool, type createLedgerAnalysis } from './ledger-analysis.js'
 import { getAiRuntimeConfig, type AiRuntimeConfig } from './settings.js'
 // AI chat orchestrator. Pure functions of (db, ...args) — no
@@ -37,6 +38,7 @@ import type { AiErrorCode } from './settings.js'
 import {
   clearChatBackendCache,
   getChatBackend,
+  generateText,
   type NormalizedBlock,
   type NormalizedMessage,
 } from './llm.js'
@@ -206,7 +208,7 @@ export type ChatEvent =
       newRaw?: string
       oldPath?: string
     }
-  | { type: 'done'; userId: number; assistantId: number }
+  | { type: 'done'; userId: number; assistantId: number; interrupted?: true }
   | { type: 'error'; reason: string; message?: string; code?: AiErrorCode }
 
 export type RunChatDeps = {
@@ -284,6 +286,7 @@ export async function runChat(opts: RunChatOpts): Promise<{
   const system = opts.ledgerAnalysis
     ? opts.ledgerAnalysis.system + conversationMemorySection(compactSummary)
       + (compactSummary ? '\nUse fresh Ledger data for financial facts. Prior memory is for goals and open questions only.' : '')
+      + '\n\n' + financeAnswerProtocol
     : buildSystemPrompt(opts.ctx, compactSummary)
   // Edit-10.4: ONE safety policy per run, derived from the normalized
   // ChatContext and applied to every tool call inside executeToolCall
@@ -318,6 +321,13 @@ export async function runChat(opts: RunChatOpts): Promise<{
   const toolCtxSignal = opts.signal ?? new AbortController().signal
 
   let ledgerReplyInterrupted = false
+  let financeCorrectionUsed = false
+  let earlierVerifiedDraft = ''
+  let ledgerDraft = ''
+  const chinese = /\p{Script=Han}/u.test(opts.userContent)
+  const unavailable = chinese
+    ? '目前无法根据账本核对这次问题。可以缩小日期范围后再试。'
+    : 'I could not verify this question against Ledger. Try again with a narrower date range.'
   const finance = opts.ledgerAnalysis && createFinanceAgent(opts.ledgerAnalysis)
   const requireFinanceAccess = () => {
     if (opts.signal?.aborted || !opts.canUseLedgerAnalysis?.()) throw new ChatError('aborted')
@@ -326,6 +336,29 @@ export async function runChat(opts: RunChatOpts): Promise<{
     role: 'user' as const,
     content: 'The Ledger tool budget for this turn is closed. Answer from the observations already returned. Identify any scope that could not be verified.',
   }
+  async function allowNonLedgerAnswer(draft: string) {
+    if (!draft.trim() || draft.length + opts.userContent.length > 12_000) return ''
+    const deadline = AbortSignal.timeout(10_000)
+    const signal = opts.signal ? AbortSignal.any([opts.signal, deadline]) : deadline
+    try {
+      const decision = await generateText({
+        db: opts.db, model: opts.model, runtimeConfig, signal,
+        system: nonLedgerReviewPrompt, maxTokens: 128,
+        user: JSON.stringify({ question: opts.userContent, candidate: draft }),
+      })
+      if (decision.finishReason !== 'stop') return ''
+      if (decision.text.trim() === 'CONCEPT') return draft
+      if (decision.text.trim() === 'HYPOTHETICAL') {
+        return (chinese ? '以下计算基于你提供的假设数据。' : 'This calculation uses the assumptions you provided.') + '\n\n' + draft
+      }
+    } catch {
+      // An unavailable reviewer never authorizes releasing a draft.
+    }
+    return ''
+  }
+  const interruptionNotice = (length: boolean) => length
+    ? (chinese ? '回答因长度限制未完成，部分分析内容可能缺失。' : 'The response reached the length limit. Part of the analysis may be missing.')
+    : (chinese ? '回答未完整结束，部分分析内容可能缺失。' : 'The response ended before it was complete. Part of the analysis may be missing.')
   try {
     if (finance) await emit(opts.onEvent, { type: 'finance_progress', phase: 'analyzing' })
     while (true) {
@@ -333,6 +366,7 @@ export async function runChat(opts: RunChatOpts): Promise<{
       else if (opts.signal?.aborted) throw new ChatError('aborted')
 
       const canRead = finance?.canQuery()
+      ledgerDraft = ''
       const result = await backend.streamRound({
         db: opts.db,
         model: opts.model, runtimeConfig,
@@ -340,35 +374,45 @@ export async function runChat(opts: RunChatOpts): Promise<{
         messages: convo,
         tools: finance ? (canRead ? [ledgerReadTool] : []) : TOOL_DEFINITIONS,
         signal: opts.signal,
-        onToken: finance ? () => {} : async (text) => {
+        onToken: finance ? (text) => {
+          if (ledgerDraft.length < 24_000) ledgerDraft += text.slice(0, 24_000 - ledgerDraft.length)
+        } : async (text) => {
           fullText += text
           await emit(opts.onEvent, { type: 'token', text })
         },
       })
 
       if (finance) {
+        ledgerDraft = ''
         requireFinanceAccess()
-        if (result.finishReason !== 'tool_calls') {
-          ledgerReplyInterrupted = result.finishReason === 'length'
+        if (result.finishReason !== 'tool_calls' || !canRead) {
+          ledgerReplyInterrupted = result.finishReason !== 'stop'
           await emit(opts.onEvent, { type: 'finance_progress', phase: 'verifying' })
           requireFinanceAccess()
-          // Only the final answer can leave the server. Tool-round text and
-          // observations may contain private data or provisional conclusions.
-          const chinese = /\p{Script=Han}/u.test(result.text || opts.userContent)
           const coverage = finance.limitations()
-          let answer = result.text
-          if (coverage.noEvidence) {
-            answer = chinese
-              ? '目前无法根据账本核对这次问题。可以缩小日期范围后再试。'
-              : 'I could not verify this question against Ledger. Try again with a narrower date range.'
+          const checked = verifyFinanceAnswer(result.text, finance.observation, chinese)
+          let answer = checked.text
+          if (!answer && coverage.noEvidence && !coverage.queried && !financeCorrectionUsed) {
+            answer = await allowNonLedgerAnswer(result.text)
+            requireFinanceAccess()
           }
-          if (!answer.trim()) throw new ChatError('ledger-analysis-unavailable')
-          fullText = answer + financeCoverageNotice(coverage, chinese)
+          if ((!answer || (checked.rejected && !coverage.noEvidence)) && canRead &&
+              !ledgerReplyInterrupted && !financeCorrectionUsed) {
+            financeCorrectionUsed = true
+            earlierVerifiedDraft = checked.text
+            convo.push({ role: 'user', content: 'The previous draft did not pass verification. Use read_ledger for missing data, then return only valid observation references for the question. If you cannot verify the requested facts, leave them out.' })
+            await emit(opts.onEvent, { type: 'finance_progress', phase: 'analyzing' })
+            continue
+          }
+          fullText = (answer || earlierVerifiedDraft || unavailable) + financeCoverageNotice(coverage, chinese)
+          if ((checked.rejected && checked.text) || (!answer && earlierVerifiedDraft)) {
+            fullText += chinese ? '\n\n已省略未通过核对的结论。' : '\n\nClaims that could not be verified were omitted.'
+          }
+          if (ledgerReplyInterrupted) fullText += '\n\n' + interruptionNotice(result.finishReason === 'length')
           await emit(opts.onEvent, { type: 'token', text: fullText })
           requireFinanceAccess()
           break
         }
-        if (!canRead) throw new ChatError('ledger-analysis-unavailable')
         if (!finance.beginBatch(result.toolCalls.length)) {
           convo.push(finalFinanceInstruction)
           continue
@@ -489,7 +533,15 @@ export async function runChat(opts: RunChatOpts): Promise<{
     // Persist whatever streamed so far (typically '' or a few tokens)
     // and re-throw a tagged error so the route can emit SSE error.
     const financeAborted = finance && (opts.signal?.aborted || !opts.canUseLedgerAnalysis?.())
-    const partial = (financeAborted ? '' : fullText) || '[stream interrupted]'
+    if (finance && !financeAborted && !fullText && (ledgerDraft || earlierVerifiedDraft)) {
+      const checked = verifyFinanceAnswer(ledgerDraft, finance.observation, chinese)
+      const verified = checked.text || earlierVerifiedDraft
+      if (verified) {
+        fullText = verified + financeCoverageNotice(finance.limitations(), chinese) + '\n\n' + interruptionNotice(false)
+        await emit(opts.onEvent, { type: 'token', text: fullText })
+      }
+    }
+    const partial = (financeAborted ? '' : fullText) || (finance ? interruptionNotice(false) : '[stream interrupted]')
     const assistantResult = messages.appendMessage(
       opts.db,
       opts.sessionId,
@@ -526,7 +578,7 @@ export async function runChat(opts: RunChatOpts): Promise<{
     throw new ChatError('llm-error', 'failed to persist assistant')
   }
   const assistantId = assistantResult.message.id
-  await emit(opts.onEvent, { type: 'done', userId, assistantId })
+  await emit(opts.onEvent, { type: 'done', userId, assistantId, ...(ledgerReplyInterrupted ? { interrupted: true } : {}) })
 
   // Start the next compaction after the visible answer has completed. The
   // next turn awaits this same per-thread job if it has not finished yet.

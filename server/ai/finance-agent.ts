@@ -14,11 +14,18 @@ const errorBytes = Buffer.byteLength(encodeError(budgetError, MAX_CALLS))
 type Query = ReturnType<ReturnType<typeof createLedgerAnalysis>['normalize']>
 type Result = ReturnType<ReturnType<typeof createLedgerAnalysis>['readQuery']>
 
+type Failure = { kind: 'invalid' | 'retryable' | 'oversized' | 'budget'; query?: Query }
+type DeliveredResult = Exclude<Result, { error: string }>
+export type FinanceObservation = { query: Query; result: DeliveredResult }
+const MAX_READ_ATTEMPTS = 2
+
 export function createFinanceAgent(analysis: ReturnType<typeof createLedgerAnalysis>) {
+  const delivered = new Map<number, FinanceObservation>()
   const observations = new Map<string, number>()
+  const attempts = new Map<string, number>()
+  const failures = new Map<string, Failure>()
   const pages = new Map<string, { total: number; sizes: Map<number, number>; coveredPrefix: number }>()
   let omittedCategories = false
-  let successfulReads = 0
   let rounds = 0
   let calls = 0
   let remaining = MAX_CONTEXT_BYTES
@@ -65,71 +72,109 @@ export function createFinanceAgent(analysis: ReturnType<typeof createLedgerAnaly
 
   async function execute(call: NormalizedToolCall, batchSize: number, ordinal: number, beforeRead: () => Promise<void>) {
     const observation = calls - batchSize + ordinal + 1
-    let commit: (() => void) | undefined
+    let delivery: { key: string; query: Query; result: DeliveredResult; page: ReturnType<typeof pageCoverage> } | undefined
     let content: string
     if (exhausted) {
       content = encodeError(budgetError, observation)
     } else if (call.name !== ledgerReadTool.name) {
+      failures.set('unsupported-tool', { kind: 'invalid' })
       content = encodeError('Only read_ledger is available.', observation)
     } else {
       let query: Query | undefined
       try { query = analysis.normalize(call.input) } catch { /* invalid input */ }
       if (!query) {
+        failures.set('invalid-input', { kind: 'invalid' })
         content = encodeError('Invalid Ledger query. Check the requested kind, dates and page.', observation)
       } else {
         const key = JSON.stringify(query)
         const previous = observations.get(key)
         if (previous !== undefined) {
           content = JSON.stringify({ duplicateOfObservation: previous, instruction: 'Use the earlier observation or query a different scope.' })
+        } else if (failures.get(key)?.kind === 'oversized') {
+          content = encodeError('Ledger result is too large. Try a shorter period or a more focused kind of query.', observation)
+        } else if (failures.get(key)?.kind === 'invalid') {
+          content = encodeError('Ledger query parameters must change before retrying.', observation)
+        } else if ((attempts.get(key) ?? 0) >= MAX_READ_ATTEMPTS) {
+          content = encodeError('Ledger query retry limit reached. Report this scope as unavailable.', observation)
         } else {
-          // Keep access and cancellation errors out of the tool error handler.
           await beforeRead()
-          observations.set(key, observation)
+          attempts.set(key, (attempts.get(key) ?? 0) + 1)
           try {
             const result = analysis.readQuery(query)
-            const page = pageCoverage(query, result)
-            content = JSON.stringify({ ...result, observation, ...(page ? { coverage: page.coverage } : {}) })
-            commit = () => {
-              if (!('error' in result)) successfulReads++
-              if (page) pages.set(page.key, page.page)
-              if ('omittedExpenseCategoryCount' in result && (result.omittedExpenseCategoryCount ?? 0) > 0) omittedCategories = true
+            if ('error' in result && typeof result.error === 'string') {
+              failures.set(key, { kind: 'invalid', query })
+              content = encodeError(result.error, observation)
+            } else {
+              const page = pageCoverage(query, result)
+              content = JSON.stringify({ ...result, observation, ...(page ? { coverage: page.coverage } : {}) })
+              delivery = { key, query, result: result as DeliveredResult, page }
             }
           } catch {
-            content = encodeError('Ledger query failed. Try a narrower range or report the data as unavailable.', observation)
+            failures.set(key, { kind: 'retryable', query })
+            content = encodeError('Ledger query failed. Retry once or report the data as unavailable.', observation)
           }
         }
       }
     }
     if (Buffer.byteLength(content) > MAX_RESULT_BYTES) {
       content = encodeError('Ledger result is too large. Try a shorter period or a more focused kind of query.', observation)
-      commit = undefined
+      if (delivery) failures.set(delivery.key, { kind: 'oversized', query: delivery.query })
+      delivery = undefined
     }
     if (Buffer.byteLength(content) + (batchSize - ordinal - 1) * errorBytes > remaining) {
       exhausted = true
       content = encodeError(budgetError, observation)
-      commit = undefined
+      if (delivery) failures.set(delivery.key, { kind: 'budget', query: delivery.query })
+      delivery = undefined
     }
     remaining -= Buffer.byteLength(content)
-    commit?.()
+    if (delivery) {
+      const { key, query, result, page } = delivery
+      observations.set(key, observation)
+      delivered.set(observation, { query, result })
+      failures.delete(key)
+      if (page) pages.set(page.key, page.page)
+      if ('omittedExpenseCategoryCount' in result && (result.omittedExpenseCategoryCount ?? 0) > 0) omittedCategories = true
+    }
     return content
   }
 
   function limitations() {
     const partialPages = [...pages.values()].some(({ total, coveredPrefix }) => coveredPrefix < total)
-    return { partialPages, omittedCategories, noEvidence: rounds > 0 && successfulReads === 0, exhausted: !canQuery() }
+    const failedScopes = [...failures.values()].flatMap(({ query }) => query ? [query] : [])
+    return {
+      partialPages, omittedCategories, noEvidence: delivered.size === 0,
+      queried: rounds > 0, failedQueries: failures.size > 0, failedScopes,
+      partialMonths: [...delivered.values()].some(({ result }) => 'partialMonths' in result && Boolean(result.partialMonths?.length)),
+      exhausted: !canQuery(),
+    }
   }
 
-  return { canQuery, beginBatch, execute, limitations }
+  return { canQuery, beginBatch, execute, limitations, observation: (id: number) => delivered.get(id) }
 }
 
 export function financeCoverageNotice(limits: ReturnType<ReturnType<typeof createFinanceAgent>['limitations']>, chinese: boolean) {
+  const scopeLabels = {
+    accounts: ['账户余额', 'account balances'], details: ['交易明细', 'transaction details'],
+    cashflow: ['收支', 'cashflow'], spending: ['支出', 'spending'],
+    trend: ['趋势', 'trend'], repayment: ['还款', 'repayment'],
+  } as const
+  const failedScopes = [...new Set(limits.failedScopes.map((query) => {
+    const kind = scopeLabels[query.kind][chinese ? 0 : 1]
+    return 'from' in query ? `${kind} (${query.from} → ${query.to})` : kind
+  }))].slice(0, 3)
+  const scopes = failedScopes.length ? ' (' + failedScopes.join(', ') + ')' : ''
   const notes = chinese ? [
     limits.partialPages && '部分账户或交易明细未逐页查完',
     limits.omittedCategories && '分类汇总仅列出部分分类',
+    limits.partialMonths && '部分趋势月份只覆盖了月内部分日期',
+    limits.failedQueries && '有查询未能完成' + scopes,
     limits.exhausted && '本轮查询已达到执行预算',
   ] : [
     limits.partialPages && 'some account or transaction lists were only partially reviewed',
     limits.omittedCategories && 'the category breakdown includes only the leading categories',
+    limits.partialMonths && 'some trend months cover only part of the calendar month',
+    limits.failedQueries && 'some queries could not be completed' + scopes,
     limits.exhausted && 'the query budget for this turn was reached',
   ]
   const present = notes.filter(Boolean)

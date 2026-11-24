@@ -310,8 +310,8 @@ export interface StreamRoundResult {
   toolCalls: NormalizedToolCall[]
   /* Why the round stopped. 'stop' = model produced a final answer,
      'tool_calls' = model wants to call tools (loop again),
-     'length' = hit the output token limit. */
-  finishReason: 'stop' | 'tool_calls' | 'length'
+     'length' = hit the output token limit; 'other' = no normal terminal reason. */
+  finishReason: 'stop' | 'tool_calls' | 'length' | 'other'
 }
 
 export interface ChatBackend {
@@ -389,8 +389,7 @@ class AnthropicBackend implements ChatBackend {
     }
     const finishReason: StreamRoundResult['finishReason'] =
       result.finalMessage.stop_reason === 'tool_use' ? 'tool_calls'
-      : result.finalMessage.stop_reason === 'max_tokens' ? 'length'
-      : 'stop'
+      : normalizeAnthropicFinishReason(result.finalMessage.stop_reason)
     return { text, toolCalls, finishReason }
   }
 }
@@ -498,7 +497,7 @@ class OpenAIBackend implements ChatBackend {
        function name later, arguments in pieces). */
     let text = ''
     const toolCallAccum = new Map<number, { id?: string; name?: string; arguments: string }>()
-    let finishReason: 'stop' | 'tool_calls' | 'length' = 'stop'
+    let finishReason: StreamRoundResult['finishReason'] = 'other'
     for await (const chunk of response) {
       const choice = chunk.choices?.[0]
       if (!choice) continue
@@ -520,8 +519,7 @@ class OpenAIBackend implements ChatBackend {
         toolCallAccum.set(tcDelta.index, entry)
       }
       if (choice.finish_reason === 'tool_calls') finishReason = 'tool_calls'
-      else if (choice.finish_reason === 'length') finishReason = 'length'
-      else if (choice.finish_reason === 'stop') finishReason = 'stop'
+      else if (choice.finish_reason != null) finishReason = normalizeOpenAiFinishReason(choice.finish_reason)
     }
 
     const toolCalls: NormalizedToolCall[] = []

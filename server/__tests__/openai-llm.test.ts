@@ -66,6 +66,20 @@ describe('OpenAI Chat Completions backend', () => {
     expect(result.finishReason).toBe('stop')
   })
 
+  it.each([
+    ['length', 'length'],
+    ['content_filter', 'other'],
+    [null, 'other'],
+  ])('treats provider termination %s as %s', async (reason, expected) => {
+    createRef.value = vi.fn(async () => [
+      { choices: [{ delta: { content: 'partial text' }, finish_reason: reason }] },
+    ])
+    const result = await getChatBackend(db, 'openai').streamRound({
+      db, model: 'test-model', system: 'system', messages: [], tools: [], onToken: () => {},
+    })
+    expect(result).toMatchObject({ text: 'partial text', finishReason: expected })
+  })
+
   it('persists a plain OpenAI response through runChat', async () => {
     const session = sessions.createSession(db)
     const result = await runChat({
