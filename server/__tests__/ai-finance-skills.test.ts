@@ -103,7 +103,7 @@ describe('Finance Skills Registry', () => {
     )
     const message = 'Please remember that I prioritize an emergency fund over extra repayments.'
     const agent = createFinanceAgent(createLedgerAnalysis(context), { db, ownerId: auth.userId }, message, registry)
-    expect(agent.availableTools(true).map(tool => tool.name)).toEqual(['read_ledger', 'manage_memory'])
+    expect(agent.availableTools(true).map(tool => tool.name)).toEqual(['read_ledger', 'manage_memory', 'manage_skill'])
     expect(agent.systemPrompt).toContain('Optional Finance Skills are unavailable')
     expect(agent.systemPrompt).not.toContain('monthly-review:')
     expect(agent.systemPrompt).not.toContain('read_skill')

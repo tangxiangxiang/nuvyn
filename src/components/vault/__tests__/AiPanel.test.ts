@@ -139,14 +139,14 @@ describe('global AI panel', () => {
       },
     })
     vi.mocked(getFinanceSkills).mockResolvedValue([
-      { name: 'monthly-review', description: 'Review monthly finances.' },
-      { name: 'spending-analysis', description: 'Analyze spending.' },
-      { name: 'debt-analysis', description: 'Analyze debt.' },
-      { name: 'cashflow-analysis', description: 'Analyze cashflow.' },
-      { name: 'financial-planning', description: 'Plan finances.' },
+      { name: 'monthly-review', title: 'Monthly review', description: 'Review monthly finances.', source: 'builtin' },
+      { name: 'spending-analysis', title: 'Spending analysis', description: 'Analyze spending.', source: 'builtin' },
+      { name: 'debt-analysis', title: 'Debt analysis', description: 'Analyze debt.', source: 'builtin' },
+      { name: 'cashflow-analysis', title: 'Cashflow analysis', description: 'Analyze cashflow.', source: 'builtin' },
+      { name: 'financial-planning', title: 'Financial planning', description: 'Plan finances.', source: 'builtin' },
     ])
     vi.mocked(getFinanceSkill).mockResolvedValue({
-      name: 'monthly-review', description: 'Review monthly finances.', content: '# Monthly review',
+      name: 'monthly-review', title: 'Monthly review', description: 'Review monthly finances.', source: 'builtin', content: '# Monthly review',
     })
   })
   afterEach(() => {

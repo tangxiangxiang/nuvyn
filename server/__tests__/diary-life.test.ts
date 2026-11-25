@@ -314,7 +314,7 @@ describe('Diary database API', () => {
     expect(aborted).toEqual({ items: [], nextCursor: null })
   })
   it('repairs a version 43 database missing Diary deletion receipts', async () => {
-    db.exec('DROP TABLE diary_day_attachments; DROP TABLE diary_task_occurrences; DROP TABLE diary_task_series_deleted_records; DROP TABLE diary_task_series; DROP TABLE diary_task_list_cursor_key; DROP TABLE diary_task_list_revisions; DROP TABLE diary_task_deleted_records; DROP TABLE diary_tasks; DROP TABLE diary_deleted_records; DROP TABLE IF EXISTS ai_finance_memory_tombstones; DROP TABLE IF EXISTS ai_finance_memory; UPDATE schema_version SET version = 43')
+    db.exec('DROP TABLE diary_day_attachments; DROP TABLE diary_task_occurrences; DROP TABLE diary_task_series_deleted_records; DROP TABLE diary_task_series; DROP TABLE diary_task_list_cursor_key; DROP TABLE diary_task_list_revisions; DROP TABLE diary_task_deleted_records; DROP TABLE diary_tasks; DROP TABLE diary_deleted_records; DROP TABLE IF EXISTS ai_finance_skill_tombstones; DROP TABLE IF EXISTS ai_finance_skills; DROP TABLE IF EXISTS ai_finance_memory_tombstones; DROP TABLE IF EXISTS ai_finance_memory; UPDATE schema_version SET version = 43')
     const path = '/days/2026-11-15'
     const eventPath = `/events/${randomUUID()}`
     const day = { moodId: null, description: 'Diary upgrade test', expectedVersion: 0 }

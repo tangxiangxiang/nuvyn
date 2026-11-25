@@ -142,7 +142,7 @@ describe('Finance Agent execution', () => {
     expect(events).not.toContain('"phase":"reading"')
     expect(events).not.toContain('"phase":"verifying"')
     expect(streamRound).toHaveBeenCalledOnce()
-    expect(streamRound.mock.calls[0]?.[0].tools.map(({ name }) => name)).toEqual(['read_ledger', 'manage_memory', 'read_skill'])
+    expect(streamRound.mock.calls[0]?.[0].tools.map(({ name }) => name)).toEqual(['read_ledger', 'manage_memory', 'read_skill', 'manage_skill'])
     expect(streamRound.mock.calls[0]?.[0].maxOutputTokens).toBe(8192)
     expect(generateText).not.toHaveBeenCalled()
   })
@@ -163,7 +163,7 @@ describe('Finance Agent execution', () => {
     expect(events).not.toMatch(/Private intermediate|event: tool_|observation|"summary"/)
     expect(events).not.toContain('verifying')
     expect(streamRound).toHaveBeenCalledTimes(2)
-    expect(streamRound.mock.calls[0]?.[0].tools.map(({ name }) => name)).toEqual(['read_ledger', 'manage_memory', 'read_skill'])
+    expect(streamRound.mock.calls[0]?.[0].tools.map(({ name }) => name)).toEqual(['read_ledger', 'manage_memory', 'read_skill', 'manage_skill'])
     expect(streamRound.mock.calls[1]?.[0].maxOutputTokens).toBe(8192)
     expect(generateText).not.toHaveBeenCalled()
   })
@@ -175,7 +175,7 @@ describe('Finance Agent execution', () => {
     expect(events).toContain('**-¥8,144.88**')
     expect(events).not.toContain('could not verify')
     expect(streamRound).toHaveBeenCalledTimes(2)
-    expect(streamRound.mock.calls[0]?.[0].tools.map(({ name }) => name)).toEqual(['read_ledger', 'manage_memory', 'read_skill'])
+    expect(streamRound.mock.calls[0]?.[0].tools.map(({ name }) => name)).toEqual(['read_ledger', 'manage_memory', 'read_skill', 'manage_skill'])
     expect(generateText).not.toHaveBeenCalled()
   })
 
@@ -184,7 +184,7 @@ describe('Finance Agent execution', () => {
     const events = await send('Assume I earn ¥100 and spend ¥30. How much is left?')
     expect(events).toContain('**¥70.00**')
     expect(streamRound).toHaveBeenCalledOnce()
-    expect(streamRound.mock.calls[0]?.[0].tools.map(({ name }) => name)).toEqual(['read_ledger', 'manage_memory', 'read_skill'])
+    expect(streamRound.mock.calls[0]?.[0].tools.map(({ name }) => name)).toEqual(['read_ledger', 'manage_memory', 'read_skill', 'manage_skill'])
     expect(generateText).not.toHaveBeenCalled()
   })
 
@@ -550,11 +550,11 @@ describe('Ledger analysis request boundary', () => {
   it('reads on send, refreshes aggregates after a sidecar change, supports follow-ups and isolates other workspaces', async () => {
     expect(await send('Let’s look at January')).toMatch(/event: finance_progress[\s\S]*event: done/)
     const round = streamRound.mock.calls[1]![0]
-    expect(round.tools.map(({ name }) => name)).toEqual(['read_ledger', 'manage_memory', 'read_skill'])
+    expect(round.tools.map(({ name }) => name)).toEqual(['read_ledger', 'manage_memory', 'read_skill', 'manage_skill'])
     const results = round.messages.filter(({ role }) => role === 'tool').map(({ content }) => String(content))
     expect(results[0]).toContain('"expenseMinor":82501')
     expect(results[0]).not.toMatch(/731987|PRIVATE NOTE/)
-    expect(results[1]).toContain('Only read_ledger, manage_memory, and read_skill are available')
+    expect(results[1]).toContain('Only read_ledger, manage_memory, read_skill, and manage_skill are available')
 
     const repository = createLedgerRepository(db)
     const transaction = repository.listActiveTransactions().find(({ amountMinor }) => amountMinor === inScopeAmount)!

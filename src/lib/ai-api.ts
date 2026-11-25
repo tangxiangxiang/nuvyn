@@ -10,6 +10,8 @@ import type { AiProfile, AiProfileInput, AiProfileList, AiSpeechSettings } from 
 export type { AiProfile, AiProfileInput, AiProfileList } from '../../shared/aiProfiles'
 export type { AiSpeechSettings } from '../../shared/aiProfiles'
 import type { SpeechPronunciationEntry } from '../../shared/speechPronunciations'
+import type { FinanceSkill, FinanceSkillMetadata, FinanceSkillName } from '../../shared/financeSkills'
+export type { FinanceSkill, FinanceSkillMetadata, FinanceSkillName } from '../../shared/financeSkills'
 export type { SpeechPronunciationEntry } from '../../shared/speechPronunciations'
 
 export async function getSpeechPronunciations(signal?: AbortSignal): Promise<SpeechPronunciationEntry[]> {
@@ -340,9 +342,10 @@ export async function clearFinanceMemory(): Promise<{ cleared: true; usage: Fina
   return jsonOrThrow(await authFetch('/api/ai/finance-memory', { method: 'DELETE' }))
 }
 
-export type FinanceSkillName = 'monthly-review' | 'spending-analysis' | 'debt-analysis' | 'cashflow-analysis' | 'financial-planning'
-export type FinanceSkillMetadata = { name: FinanceSkillName; description: string }
-export type FinanceSkill = FinanceSkillMetadata & { content: string }
+export type FinanceSkillMutationResult = {
+  skill: FinanceSkill & { createdAt?: number; updatedAt?: number }
+  usage: { count: number; countLimit: number; contentCharacters: number; contentLimit: number }
+}
 
 export async function getFinanceSkills(signal?: AbortSignal): Promise<FinanceSkillMetadata[]> {
   const result = await jsonOrThrow<{ skills: FinanceSkillMetadata[] }>(await authFetch('/api/ai/finance-skills', { signal }))
@@ -351,6 +354,25 @@ export async function getFinanceSkills(signal?: AbortSignal): Promise<FinanceSki
 
 export async function getFinanceSkill(name: FinanceSkillName, signal?: AbortSignal): Promise<FinanceSkill> {
   return jsonOrThrow(await authFetch(`/api/ai/finance-skills/${encodeURIComponent(name)}`, { signal }))
+}
+
+export async function createFinanceSkill(title: string, description: string, content: string): Promise<FinanceSkillMutationResult> {
+  return jsonOrThrow(await authFetch('/api/ai/finance-skills', {
+    method: 'POST', ...jsonBody({ title, description, content }),
+  }))
+}
+
+export async function updateFinanceSkill(
+  name: string,
+  input: { title: string; description: string; content: string; expectedRevision: number },
+): Promise<FinanceSkillMutationResult> {
+  return jsonOrThrow(await authFetch(`/api/ai/finance-skills/${encodeURIComponent(name)}`, {
+    method: 'PATCH', ...jsonBody(input),
+  }))
+}
+
+export async function deleteFinanceSkill(name: string, expectedRevision: number): Promise<{ deleted: true }> {
+  return jsonOrThrow(await authFetch(`/api/ai/finance-skills/${encodeURIComponent(name)}?expectedRevision=${expectedRevision}`, { method: 'DELETE' }))
 }
 
 export async function getAiThread(scope: AiThreadScope): Promise<AiThreadState> {

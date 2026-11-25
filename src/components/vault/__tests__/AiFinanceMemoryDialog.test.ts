@@ -107,6 +107,20 @@ describe('AiFinanceMemoryDialog', () => {
     expect(wrapper.find('form').exists()).toBe(false)
   })
 
+  it('updates an existing duplicate response by id instead of rendering a duplicate memory key', async () => {
+    vi.mocked(addFinanceMemory).mockResolvedValueOnce({ memory: state.items[0]!, usage: state.usage })
+    const wrapper = mountDialog()
+    await flushPromises()
+    await wrapper.get('[aria-label="Add finance memory"]').trigger('click')
+    await wrapper.get('textarea[aria-label="Add finance memory"]').setValue(state.items[0]!.content)
+    await wrapper.get('form').trigger('submit')
+    await flushPromises()
+
+    expect(wrapper.findAll('.ai-finance-memory-entry')).toHaveLength(2)
+    expect(wrapper.findAll('.ai-finance-memory-entry').filter(entry => entry.text().includes(state.items[0]!.content))).toHaveLength(1)
+    expect(wrapper.text()).toContain('29/2000')
+  })
+
   it('shows a load error without presenting the failed request as an empty memory list', async () => {
     vi.mocked(getFinanceMemory).mockRejectedValueOnce(new Error('offline'))
     const wrapper = mountDialog()

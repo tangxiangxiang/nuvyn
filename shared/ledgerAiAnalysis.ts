@@ -59,6 +59,7 @@ const financeOperations = [
   'accounts', 'details', ...LEDGER_AI_ANALYSIS_KINDS,
   'memory_add', 'memory_update', 'memory_delete',
   'skill_monthly_review', 'skill_spending_analysis', 'skill_debt_analysis', 'skill_cashflow_analysis', 'skill_financial_planning',
+  'skill_read', 'skill_create', 'skill_update',
   'query',
 ] as const
 const financeStatuses = ['running', 'success', 'failed', 'cancelled', 'reused'] as const

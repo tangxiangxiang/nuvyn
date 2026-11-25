@@ -93,7 +93,9 @@ async function saveAdd(): Promise<void> {
   error.value = ''
   try {
     const result = await addFinanceMemory(newKind.value, newContent.value)
-    items.value = [...items.value, result.memory]
+    const existingIndex = items.value.findIndex(item => item.id === result.memory.id)
+    if (existingIndex < 0) items.value = [...items.value, result.memory]
+    else items.value = items.value.map(item => item.id === result.memory.id ? result.memory : item)
     usage.value = result.usage
     cancelAdd()
   } catch {

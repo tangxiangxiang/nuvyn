@@ -1254,7 +1254,7 @@ describe('Diary task API', () => {
       showCountdown: true, isPrimary: false, expectedVersion: 0,
     })).status).toBe(200)
 
-    db.exec('DROP TABLE diary_task_occurrences; DROP TABLE diary_task_series_deleted_records; DROP TABLE diary_task_series; DROP TABLE diary_task_list_cursor_key; DROP TABLE diary_task_list_revisions; DROP TABLE diary_task_deleted_records; DROP TABLE diary_tasks; DROP TABLE IF EXISTS ai_finance_memory_tombstones; DROP TABLE IF EXISTS ai_finance_memory; UPDATE schema_version SET version = 46')
+    db.exec('DROP TABLE diary_task_occurrences; DROP TABLE diary_task_series_deleted_records; DROP TABLE diary_task_series; DROP TABLE diary_task_list_cursor_key; DROP TABLE diary_task_list_revisions; DROP TABLE diary_task_deleted_records; DROP TABLE diary_tasks; DROP TABLE IF EXISTS ai_finance_skill_tombstones; DROP TABLE IF EXISTS ai_finance_skills; DROP TABLE IF EXISTS ai_finance_memory_tombstones; DROP TABLE IF EXISTS ai_finance_memory; UPDATE schema_version SET version = 46')
     database.applyMigrations(db)
 
     expect((await (await request('GET', `/days/${dayDate}`)).json()).day.entries).toEqual(['Existing diary entry'])
@@ -1279,7 +1279,7 @@ describe('Diary task API', () => {
     const before = db.prepare('SELECT owner_user_id, id, due_date, encrypted_fields, version FROM diary_tasks WHERE owner_user_id = ? AND id = ?')
       .get(auth.userId, id) as { owner_user_id: number; id: string; due_date: string; encrypted_fields: Buffer; version: number }
 
-    db.exec('DROP TABLE diary_task_occurrences; DROP TABLE diary_task_series_deleted_records; DROP TABLE diary_task_series; DROP TABLE diary_task_list_cursor_key; DROP TABLE diary_task_list_revisions; DROP TABLE IF EXISTS ai_finance_memory_tombstones; DROP TABLE IF EXISTS ai_finance_memory; UPDATE schema_version SET version = 47')
+    db.exec('DROP TABLE diary_task_occurrences; DROP TABLE diary_task_series_deleted_records; DROP TABLE diary_task_series; DROP TABLE diary_task_list_cursor_key; DROP TABLE diary_task_list_revisions; DROP TABLE IF EXISTS ai_finance_skill_tombstones; DROP TABLE IF EXISTS ai_finance_skills; DROP TABLE IF EXISTS ai_finance_memory_tombstones; DROP TABLE IF EXISTS ai_finance_memory; UPDATE schema_version SET version = 47')
     database.applyMigrations(db)
 
     const after = db.prepare('SELECT owner_user_id, id, due_date, encrypted_fields, version FROM diary_tasks WHERE owner_user_id = ? AND id = ?')

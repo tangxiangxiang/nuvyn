@@ -399,12 +399,13 @@ test('AI Finance isolates its transcript and executes local commands without sen
     })),
   ]
   const financeSkills = [
-    { name: 'monthly-review', description: 'Review monthly finances.' },
-    { name: 'spending-analysis', description: 'Analyze spending.' },
-    { name: 'debt-analysis', description: 'Analyze debt.' },
-    { name: 'cashflow-analysis', description: 'Analyze cashflow.' },
-    { name: 'financial-planning', description: 'Plan finances.' },
+    { name: 'monthly-review', title: 'Monthly review', description: 'Review monthly finances.', source: 'builtin' },
+    { name: 'spending-analysis', title: 'Spending analysis', description: 'Analyze spending.', source: 'builtin' },
+    { name: 'debt-analysis', title: 'Debt analysis', description: 'Analyze debt.', source: 'builtin' },
+    { name: 'cashflow-analysis', title: 'Cashflow analysis', description: 'Analyze cashflow.', source: 'builtin' },
+    { name: 'financial-planning', title: 'Financial planning', description: 'Plan finances.', source: 'builtin' },
   ]
+  const customFinanceSkills = new Map<string, AnyRecord>()
   const memoryState = () => {
     const user = financeMemories.filter(item => item.kind === 'user').reduce((sum, item) => sum + [...String(item.content)].length, 0)
     const agent = financeMemories.filter(item => item.kind === 'agent').reduce((sum, item) => sum + [...String(item.content)].length, 0)
@@ -438,9 +439,48 @@ test('AI Finance isolates its transcript and executes local commands without sen
       case '/api/ai/ledger-session':
         return route.fulfill(jsonResponse({ session: finance, messages: financeMessages }))
       case '/api/ai/finance-skills':
-        return route.fulfill(jsonResponse({ skills: financeSkills }))
+        if (request.method() === 'POST') {
+          const body = request.postDataJSON()
+          const skill = {
+            name: 'custom-personal-monthly-review',
+            ...body,
+            source: 'custom',
+            revision: 1,
+            createdAt: 3,
+            updatedAt: 3,
+          }
+          customFinanceSkills.set(skill.name, skill)
+          return route.fulfill(jsonResponse({ skill, usage: { count: customFinanceSkills.size, contentCharacters: String(skill.content).length } }, 201))
+        }
+        return route.fulfill(jsonResponse({
+          skills: [
+            ...financeSkills,
+            ...customFinanceSkills.values().map(skill => ({
+              name: skill.name, title: skill.title, description: skill.description,
+              source: 'custom', revision: skill.revision,
+            })),
+          ],
+        }))
       case '/api/ai/finance-skills/monthly-review':
         return route.fulfill(jsonResponse({ ...financeSkills[0], content: '# 月度财务回顾\n\n先核对收支汇总。' }))
+      case '/api/ai/finance-skills/custom-personal-monthly-review': {
+        const skill = customFinanceSkills.get('custom-personal-monthly-review')
+        if (request.method() === 'GET') return route.fulfill(skill ? jsonResponse(skill) : jsonResponse({ error: 'not found' }, 404))
+        if (request.method() === 'PATCH' && skill) {
+          const body = request.postDataJSON()
+          if (body.expectedRevision !== skill.revision) return route.fulfill(jsonResponse({ error: 'stale-revision' }, 409))
+          const updated = { ...skill, ...body, revision: Number(skill.revision) + 1, updatedAt: 4 }
+          delete updated.expectedRevision
+          customFinanceSkills.set(skill.name, updated)
+          return route.fulfill(jsonResponse({ skill: updated, usage: { count: customFinanceSkills.size } }))
+        }
+        if (request.method() === 'DELETE' && skill) {
+          if (new URL(request.url()).searchParams.get('expectedRevision') !== String(skill.revision)) return route.fulfill(jsonResponse({ error: 'stale-revision' }, 409))
+          customFinanceSkills.delete(skill.name)
+          return route.fulfill(jsonResponse({ deleted: true, usage: { count: customFinanceSkills.size } }))
+        }
+        return route.fallback()
+      }
       case '/api/ai/finance-memory':
         if (request.method() === 'POST') {
           const body = request.postDataJSON()
@@ -775,6 +815,30 @@ test('AI Finance isolates its transcript and executes local commands without sen
   expect(chatRequests).toHaveLength(chatCountBeforeSkills)
   await skillsDialog.getByRole('button', { name: '返回技能列表' }).click()
   await expect(skillsDialog.locator('li')).toHaveCount(5)
+  await skillsDialog.getByRole('button', { name: '新增技能' }).click()
+  await skillsDialog.getByRole('textbox', { name: '标题' }).fill('个人月度回顾')
+  await skillsDialog.getByRole('textbox', { name: '简短描述' }).fill('按我的偏好复盘收支')
+  await skillsDialog.getByRole('textbox', { name: 'Markdown 正文' }).fill('先列收入和支出，再比较上月同期。')
+  await skillsDialog.getByRole('button', { name: '保存' }).click()
+  await expect(skillsDialog.getByRole('heading', { name: '个人月度回顾' })).toBeVisible()
+  await expect(skillsDialog.locator('.ai-finance-skill-content')).toContainText('比较上月同期')
+  await skillsDialog.getByRole('button', { name: '返回技能列表' }).click()
+  const customSkillsGroup = skillsDialog.getByRole('region', { name: '自定义技能' })
+  await expect(customSkillsGroup.getByRole('button', { name: /个人月度回顾/ })).toBeVisible()
+  await customSkillsGroup.getByRole('button', { name: /个人月度回顾/ }).click()
+  await skillsDialog.locator('.ai-finance-skill-actions').getByRole('button', { name: '编辑技能' }).click()
+  await skillsDialog.getByRole('textbox', { name: 'Markdown 正文' }).fill('先列收入、支出和还款，再比较上月同期。')
+  await skillsDialog.getByRole('button', { name: '保存' }).click()
+  await expect(skillsDialog.locator('.ai-finance-skill-content')).toContainText('还款')
+  await skillsDialog.locator('.ai-finance-skill-actions').getByRole('button', { name: '删除技能' }).click()
+  await skillsDialog.locator('.ai-finance-skill-delete-confirm').getByRole('button', { name: '删除技能' }).click()
+  await expect(skillsDialog.getByText('还没有自定义技能。')).toBeVisible()
+  await skillsDialog.getByRole('button', { name: '新增技能' }).click()
+  await skillsDialog.getByRole('textbox', { name: '标题' }).fill('个人月度回顾')
+  await skillsDialog.getByRole('textbox', { name: '简短描述' }).fill('按我的偏好复盘收支')
+  await skillsDialog.getByRole('textbox', { name: 'Markdown 正文' }).fill('重新创建的复盘步骤。')
+  await skillsDialog.getByRole('button', { name: '保存' }).click()
+  await expect(skillsDialog.getByRole('heading', { name: '个人月度回顾' })).toBeVisible()
   await skillsDialog.getByRole('button', { name: '关闭' }).click()
 
   await page.reload()

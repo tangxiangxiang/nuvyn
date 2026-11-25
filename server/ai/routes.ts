@@ -44,6 +44,7 @@ import { generateTitle } from './title.js'
 import { ChatError } from './errors.js'
 import { compactLedgerAiThread } from './compaction.js'
 import { createFinanceMemoryRepository } from './finance-memory.js'
+import { createFinanceCustomSkillRepository } from './finance-custom-skills.js'
 import { getFinanceSkillRegistryState, readFinanceSkill } from './finance-skills.js'
 import { hasDiaryBodyAccess, requireDiaryBodyAccess } from '../diaryAccess/guard.js'
 import { readDiaryAccessCapability } from '../diaryAccess/service.js'
@@ -524,20 +525,98 @@ function parseFinanceMemoryRevision(raw: string | undefined): number | null {
   return Number.isSafeInteger(revision) ? revision : null
 }
 
+function parseFinanceSkillRevision(raw: string | undefined): number | null {
+  if (!raw || !/^[1-9]\d{0,14}$/.test(raw)) return null
+  const revision = Number(raw)
+  return Number.isSafeInteger(revision) ? revision : null
+}
+
+function financeSkillMutationStatus(error: string): number {
+  if (error === 'not-found') return 404
+  if (['duplicate', 'previously-deleted', 'count-exceeded', 'capacity-exceeded', 'stale-revision'].includes(error)) return 409
+  return 400
+}
+
 ai.get('/finance-skills', (c) => {
   c.header('Cache-Control', 'no-store')
   const db = getDb()
-  if (!currentFinanceMemoryOwner(c, db)) return bad(c, 'Finance skills require authentication', 403)
-  return c.json({ skills: getFinanceSkillRegistryState().available })
+  const owner = currentFinanceMemoryOwner(c, db)
+  if (!owner) return bad(c, 'Finance skills require authentication', 403)
+  return c.json({ skills: getFinanceSkillRegistryState(db, owner.id).available })
 })
 
 ai.get('/finance-skills/:name', (c) => {
   c.header('Cache-Control', 'no-store')
   const db = getDb()
-  if (!currentFinanceMemoryOwner(c, db)) return bad(c, 'Finance skills require authentication', 403)
-  const result = readFinanceSkill(c.req.param('name'))
+  const owner = currentFinanceMemoryOwner(c, db)
+  if (!owner) return bad(c, 'Finance skills require authentication', 403)
+  const result = readFinanceSkill(c.req.param('name'), db, owner.id)
   if (!result.ok) return bad(c, result.error === 'unknown' ? 'Unknown finance skill' : 'Finance skill is unavailable', result.error === 'unknown' ? 404 : 500)
   return c.json(result.skill)
+})
+
+ai.post('/finance-skills', async (c) => {
+  c.header('Cache-Control', 'no-store')
+  const db = getDb()
+  const owner = currentFinanceMemoryOwner(c, db)
+  if (!owner) return bad(c, 'Finance skills require authentication', 403)
+  const body = await c.req.json().catch(() => null) as Record<string, unknown> | null
+  if (!body || Object.keys(body).length !== 3 || typeof body.title !== 'string'
+    || typeof body.description !== 'string' || typeof body.content !== 'string') return bad(c, 'Invalid finance skill')
+  const release = lockFinanceMemoryManagement(db, owner.id)
+  if (!release) return bad(c, 'Finance Agent is busy', 409)
+  try {
+    const result = createFinanceCustomSkillRepository(db).createForUser(owner.id, {
+      title: body.title,
+      description: body.description,
+      content: body.content,
+    })
+    if (!result.ok) return bad(c, 'Finance skill create failed: ' + result.error, financeSkillMutationStatus(result.error))
+    return c.json({ skill: result.skill, usage: result.usage }, 201)
+  } finally {
+    release()
+  }
+})
+
+ai.patch('/finance-skills/:name', async (c) => {
+  c.header('Cache-Control', 'no-store')
+  const db = getDb()
+  const owner = currentFinanceMemoryOwner(c, db)
+  if (!owner) return bad(c, 'Finance skills require authentication', 403)
+  const name = c.req.param('name')
+  const body = await c.req.json().catch(() => null) as Record<string, unknown> | null
+  if (!body || !Number.isSafeInteger(body.expectedRevision) || typeof body.expectedRevision !== 'number'
+    || body.expectedRevision < 1 || !Object.keys(body).some(key => ['title', 'description', 'content'].includes(key))
+    || Object.keys(body).some(key => !['expectedRevision', 'title', 'description', 'content'].includes(key))) return bad(c, 'Invalid finance skill update')
+  const patch = { title: body.title, description: body.description, content: body.content }
+  if (Object.values(patch).some(value => value !== undefined && typeof value !== 'string')) return bad(c, 'Invalid finance skill update')
+  const release = lockFinanceMemoryManagement(db, owner.id)
+  if (!release) return bad(c, 'Finance Agent is busy', 409)
+  try {
+    const result = createFinanceCustomSkillRepository(db).update(owner.id, name, patch, body.expectedRevision)
+    if (!result.ok) return bad(c, 'Finance skill update failed: ' + result.error, financeSkillMutationStatus(result.error))
+    return c.json({ skill: result.skill, usage: result.usage })
+  } finally {
+    release()
+  }
+})
+
+ai.delete('/finance-skills/:name', (c) => {
+  c.header('Cache-Control', 'no-store')
+  const db = getDb()
+  const owner = currentFinanceMemoryOwner(c, db)
+  if (!owner) return bad(c, 'Finance skills require authentication', 403)
+  const expectedRevision = parseFinanceSkillRevision(c.req.query('expectedRevision'))
+  if (expectedRevision === null) return bad(c, 'A valid expected finance skill revision is required')
+  const release = lockFinanceMemoryManagement(db, owner.id)
+  if (!release) return bad(c, 'Finance Agent is busy', 409)
+  try {
+    const result = createFinanceCustomSkillRepository(db).remove(owner.id, c.req.param('name'), expectedRevision)
+    if (!result.ok) return bad(c, 'Finance skill delete failed: ' + result.error, financeSkillMutationStatus(result.error))
+    return c.json({ deleted: true as const, usage: result.usage })
+  } finally {
+    release()
+  }
 })
 
 ai.get('/finance-memory', (c) => {

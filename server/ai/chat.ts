@@ -1,5 +1,6 @@
 import { financeOperation, type FinanceActivity, type FinanceActivityEvent, type FinanceAgentProgress } from '../../shared/ledgerAiAnalysis.js'
-import { createFinanceAgent, financeCoverageNotice, manageMemoryTool, readSkillTool } from './finance-agent.js'
+import { createFinanceAgent, financeCoverageNotice, manageMemoryTool, manageSkillTool, readSkillTool } from './finance-agent.js'
+import { BUILTIN_FINANCE_SKILL_NAMES } from '../../shared/financeSkills.js'
 import { type createLedgerAnalysis } from './ledger-analysis.js'
 import { createFinanceMemoryRepository, formatFinanceMemoryContext } from './finance-memory.js'
 import { getAiRuntimeConfig, type AiRuntimeConfig } from './settings.js'
@@ -394,8 +395,12 @@ export async function runChat(opts: RunChatOpts): Promise<{
                 id: financeActivity.length + 1,
                 operation: financeOperation(tc.name === manageMemoryTool.name
                   ? `memory_${String(tc.input?.action ?? '')}`
-                  : tc.name === readSkillTool.name
-                    ? `skill_${String(tc.input?.name ?? '').replaceAll('-', '_')}`
+                  : tc.name === manageSkillTool.name
+                    ? `skill_${String(tc.input?.action ?? '')}`
+                    : tc.name === readSkillTool.name
+                      ? (BUILTIN_FINANCE_SKILL_NAMES.includes(tc.input?.name as typeof BUILTIN_FINANCE_SKILL_NAMES[number])
+                        ? `skill_${String(tc.input?.name ?? '').replaceAll('-', '_')}`
+                        : 'skill_read')
                     : tc.input?.kind),
                 status: 'running',
               }
