@@ -44,7 +44,7 @@ import { generateTitle } from './title.js'
 import { ChatError } from './errors.js'
 import { compactLedgerAiThread } from './compaction.js'
 import { createFinanceMemoryRepository } from './finance-memory.js'
-import { listFinanceSkills, readFinanceSkill } from './finance-skills.js'
+import { getFinanceSkillRegistryState, readFinanceSkill } from './finance-skills.js'
 import { hasDiaryBodyAccess, requireDiaryBodyAccess } from '../diaryAccess/guard.js'
 import { readDiaryAccessCapability } from '../diaryAccess/service.js'
 import { classifyDiaryPath } from '../../shared/diaryProtocol.js'
@@ -528,11 +528,7 @@ ai.get('/finance-skills', (c) => {
   c.header('Cache-Control', 'no-store')
   const db = getDb()
   if (!currentFinanceMemoryOwner(c, db)) return bad(c, 'Finance skills require authentication', 403)
-  try {
-    return c.json({ skills: listFinanceSkills() })
-  } catch {
-    return bad(c, 'Built-in finance skills are unavailable', 500)
-  }
+  return c.json({ skills: getFinanceSkillRegistryState().available })
 })
 
 ai.get('/finance-skills/:name', (c) => {
@@ -553,6 +549,29 @@ ai.get('/finance-memory', (c) => {
   return c.json({ items: repository.list(owner.id), usage: repository.usage(owner.id) })
 })
 
+ai.post('/finance-memory', async (c) => {
+  c.header('Cache-Control', 'no-store')
+  const db = getDb()
+  const owner = currentFinanceMemoryOwner(c, db)
+  if (!owner) return bad(c, 'Finance memory requires authentication', 403)
+  const body = await c.req.json().catch(() => null) as Record<string, unknown> | null
+  if (!body || Object.keys(body).length !== 2 || (body.kind !== 'user' && body.kind !== 'agent')
+    || typeof body.content !== 'string') return bad(c, 'Invalid finance memory')
+  const release = lockFinanceMemoryManagement(db, owner.id)
+  if (!release) return bad(c, 'Finance Agent is busy', 409)
+  try {
+    // This endpoint is only used by the signed-in user's explicit add action.
+    const result = createFinanceMemoryRepository(db).addExplicitly(owner.id, body.kind, body.content)
+    if (!result.ok) {
+      const status = result.error === 'capacity-exceeded' ? 409 : 400
+      return bad(c, 'Memory add failed: ' + result.error, status)
+    }
+    return c.json({ memory: result.memory, usage: result.usage }, 201)
+  } finally {
+    release()
+  }
+})
+
 ai.patch('/finance-memory/:id', async (c) => {
   c.header('Cache-Control', 'no-store')
   const db = getDb()
@@ -571,7 +590,7 @@ ai.patch('/finance-memory/:id', async (c) => {
     if (!existing) return bad(c, 'Memory not found', 404)
     // This endpoint is only the signed-in user's explicit edit action, so
     // restoring wording they previously removed is intentional here.
-    const result = repository.update(owner.id, existing.kind, id, body.content, true, Date.now(), body.expectedRevision)
+    const result = repository.updateExplicitly(owner.id, existing.kind, id, body.content, Date.now(), body.expectedRevision)
     if (!result.ok) {
       const status = result.error === 'not-found' ? 404 : result.error === 'capacity-exceeded' || result.error === 'stale-revision' ? 409 : 400
       return bad(c, 'Memory update failed: ' + result.error, status)

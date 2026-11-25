@@ -4,7 +4,7 @@ import app from '../index.js'
 import { createFinanceAgent, readSkillTool } from '../ai/finance-agent.js'
 import { createLedgerAnalysis } from '../ai/ledger-analysis.js'
 import { createFinanceMemoryRepository } from '../ai/finance-memory.js'
-import { FINANCE_SKILL_LIMITS, listFinanceSkills, parseFinanceSkillDocument, readFinanceSkill } from '../ai/finance-skills.js'
+import { buildFinanceSkillRegistryState, FINANCE_SKILL_LIMITS, financeSkillsDirectory, listFinanceSkills, parseFinanceSkillDocument, readFinanceSkill, type FinanceSkillName, type FinanceSkillRegistryEntry } from '../ai/finance-skills.js'
 import type { LedgerAiContext } from '../ledger/aiContext.js'
 import { authenticatedRequest, closeAuthTestContext, createAuthenticatedTestContext, type AuthenticatedTestContext } from './helpers/auth.js'
 
@@ -60,6 +60,93 @@ describe('Finance Skills Registry', () => {
     expect(parseFinanceSkillDocument('monthly-review', oversized)).toEqual({ ok: false, error: 'too-large' })
     expect(() => parseFinanceSkillDocument('monthly-review', '---\nname: monthly-review\nname: monthly-review\ndescription: Test\n---\n# Body')).not.toThrow()
     expect(parseFinanceSkillDocument('monthly-review', '---\nname: monthly-review\nname: monthly-review\ndescription: Test\n---\n# Body').ok).toBe(false)
+  })
+
+  it('isolates missing, invalid, oversized and thrown skill reads in the runtime registry', () => {
+    const names: FinanceSkillName[] = ['monthly-review', 'spending-analysis', 'debt-analysis', 'cashflow-analysis', 'financial-planning']
+    const entries: FinanceSkillRegistryEntry[] = names.map(name => ({ name, file: `${name}/SKILL.md` }))
+    const malformed = parseFinanceSkillDocument('spending-analysis', 'not valid frontmatter')
+    const oversized = parseFinanceSkillDocument('debt-analysis', `---\nname: debt-analysis\ndescription: Debt analysis\n---\n${'x'.repeat(FINANCE_SKILL_LIMITS.contentCharacters + 1)}`)
+    const state = buildFinanceSkillRegistryState(entries, name => {
+      if (name === 'monthly-review') return { ok: false, error: 'unavailable' }
+      if (name === 'spending-analysis') return malformed
+      if (name === 'debt-analysis') return oversized
+      if (name === 'cashflow-analysis') throw new Error('private filesystem details')
+      return readFinanceSkill(name)
+    })
+    expect(state.available.map(skill => skill.name)).toEqual(['financial-planning'])
+    expect(state.unavailable).toEqual([
+      { name: 'monthly-review', reason: 'unavailable' },
+      { name: 'spending-analysis', reason: 'invalid' },
+      { name: 'debt-analysis', reason: 'too-large' },
+      { name: 'cashflow-analysis', reason: 'unavailable' },
+    ])
+    expect(state.configurationError).toBeNull()
+  })
+
+  it('reports registry configuration errors separately from unavailable skills', () => {
+    const entries: FinanceSkillRegistryEntry[] = [
+      { name: 'monthly-review', file: 'monthly-review/SKILL.md' },
+      { name: 'monthly-review', file: 'duplicate/SKILL.md' },
+    ]
+    const state = buildFinanceSkillRegistryState(entries, () => ({ ok: false, error: 'unavailable' }))
+    expect(state.configurationError).toBe('duplicate-name')
+    expect(state.available).toEqual([])
+    expect(state.unavailable).toEqual([{ name: 'monthly-review', reason: 'unavailable' }])
+    expect(buildFinanceSkillRegistryState([], () => ({ ok: false, error: 'unknown' })).configurationError).toBe('empty')
+  })
+
+  it('provides a Phase 2A Finance Agent when every optional skill is unavailable', async () => {
+    const registry = buildFinanceSkillRegistryState(
+      [{ name: 'monthly-review', file: 'missing/SKILL.md' }],
+      () => ({ ok: false, error: 'unavailable' }),
+    )
+    const message = 'Please remember that I prioritize an emergency fund over extra repayments.'
+    const agent = createFinanceAgent(createLedgerAnalysis(context), { db, ownerId: auth.userId }, message, registry)
+    expect(agent.availableTools(true).map(tool => tool.name)).toEqual(['read_ledger', 'manage_memory'])
+    expect(agent.systemPrompt).toContain('Optional Finance Skills are unavailable')
+    expect(agent.systemPrompt).not.toContain('monthly-review:')
+    expect(agent.systemPrompt).not.toContain('read_skill')
+
+    expect(agent.beginBatch(1)).toBe(true)
+    const accounts = await agent.execute({ id: 'accounts', name: 'read_ledger', input: { kind: 'accounts' } }, 1, 0, async () => {})
+    expect(accounts.status).toBe('success')
+    expect(JSON.parse(accounts.content)).toHaveProperty('accounts')
+
+    expect(agent.beginBatch(1)).toBe(true)
+    const memory = await agent.execute({ id: 'remember', name: 'manage_memory', input: {
+      action: 'add', target: 'user', content: 'Prioritize an emergency fund over extra repayments.',
+      evidence: 'I prioritize an emergency fund over extra repayments.',
+    } }, 1, 0, async () => {})
+    expect(JSON.parse(memory.content)).toMatchObject({ ok: true, action: 'add' })
+    expect(createFinanceMemoryRepository(db).list(auth.userId)).toHaveLength(1)
+    expect(financeSkillsDirectory(registry)).toContain('No optional Finance Skills are currently available')
+  })
+
+  it('offers only usable skills and does not deduplicate a failed skill load as success', async () => {
+    const entries: FinanceSkillRegistryEntry[] = [
+      { name: 'monthly-review', file: 'monthly-review/SKILL.md' },
+      { name: 'spending-analysis', file: 'spending-analysis/SKILL.md' },
+    ]
+    const registry = buildFinanceSkillRegistryState(entries, name => name === 'monthly-review'
+      ? { ok: false, error: 'unavailable' }
+      : readFinanceSkill(name))
+    const agent = createFinanceAgent(createLedgerAnalysis(context), undefined, '', registry)
+    const tool = agent.availableTools(true).find(({ name }) => name === 'read_skill')
+    expect(tool?.parameters.properties.name.enum).toEqual(['spending-analysis'])
+
+    const invalid = { id: 'unavailable', name: readSkillTool.name, input: { name: 'monthly-review' } }
+    expect(agent.beginBatch(1)).toBe(true)
+    const failed = await agent.execute(invalid, 1, 0, async () => {})
+    expect(failed.status).toBe('failed')
+    expect(JSON.parse(failed.content)).toMatchObject({ ok: false, error: 'Finance skill could not be loaded.' })
+    expect(agent.beginBatch(1)).toBe(true)
+    const failedAgain = await agent.execute(invalid, 1, 0, async () => {})
+    expect(failedAgain.status).toBe('failed')
+    expect(JSON.parse(failedAgain.content)).not.toHaveProperty('reused')
+    expect(agent.beginBatch(1)).toBe(true)
+    const successful = await agent.execute({ id: 'available', name: readSkillTool.name, input: { name: 'spending-analysis' } }, 1, 0, async () => {})
+    expect(successful.status).toBe('success')
   })
 
   it('serves authenticated metadata and one requested body without calling an AI provider', async () => {
@@ -120,11 +207,11 @@ describe('Finance Agent read_skill tool', () => {
     const stale = await agent.execute({ id: 'old-context', name: 'manage_memory', input: {
       action: 'add', target: 'user', content: 'Keep an emergency fund.', evidence: 'I want to keep an emergency fund.',
     } }, 1, 0, async () => {})
-    expect(JSON.parse(stale.content)).toMatchObject({ ok: false, error: 'Memory writes require a relevant exact quote from the current user message.' })
+    expect(JSON.parse(stale.content)).toMatchObject({ ok: false, error: 'Memory writes require an exact quote from the current user message.' })
     expect(db.prepare('SELECT COUNT(*) AS count FROM ai_finance_memory WHERE owner_user_id = ?').get(ownerId)).toEqual({ count: 0 })
   })
 
-  it('restores a forgotten memory only when the current message re-expresses it', async () => {
+  it.each(['user', 'agent'] as const)('does not let the Finance Agent restore forgotten content as %s memory after a negation', async (target) => {
     const user = db.prepare(`INSERT INTO users (username, username_normalized, password_hash, created_at, updated_at) VALUES ('restore-user', 'restore-user', 'hash', 1, 1)`).run()
     const ownerId = Number(user.lastInsertRowid)
     const repository = createFinanceMemoryRepository(db)
@@ -132,13 +219,15 @@ describe('Finance Agent read_skill tool', () => {
     if (!old.ok) throw new Error('expected memory to be added')
     repository.remove(ownerId, 'user', old.memory.id)
 
-    const currentMessage = 'I want to prioritize early mortgage repayment again.'
+    const currentMessage = 'I do not want to prioritize early mortgage repayment anymore; keep emergency cash instead.'
     const agent = createFinanceAgent(createLedgerAnalysis(context), { db, ownerId }, currentMessage)
     expect(agent.beginBatch(1)).toBe(true)
-    const restored = await agent.execute({ id: 'restore', name: 'manage_memory', input: {
-      action: 'add', target: 'user', content: old.memory.content, evidence: 'prioritize early mortgage repayment',
+    const rejected = await agent.execute({ id: 'restore', name: 'manage_memory', input: {
+      action: 'add', target, content: old.memory.content, evidence: 'I do not want to prioritize early mortgage repayment anymore',
     } }, 1, 0, async () => {})
-    expect(JSON.parse(restored.content)).toMatchObject({ ok: true, action: 'add', memory: { content: old.memory.content } })
-    expect(repository.canRestore(ownerId, 'user', old.memory.content)).toBe(false)
+    expect(JSON.parse(rejected.content)).toMatchObject({ ok: false, error: expect.stringContaining('previously forgotten') })
+    expect(rejected.status).toBe('failed')
+    expect(repository.list(ownerId)).toEqual([])
+    expect(repository.canRestore(ownerId, 'user', old.memory.content)).toBe(true)
   })
 })

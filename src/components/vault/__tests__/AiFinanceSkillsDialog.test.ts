@@ -66,4 +66,29 @@ describe('AiFinanceSkillsDialog', () => {
     expect(wrapper.get('[role="alert"]').text()).toBe('Could not load finance skills. Please try again.')
     expect(wrapper.findAll('li')).toHaveLength(0)
   })
+
+  it('shows a settled empty state when the runtime registry has no usable skills', async () => {
+    vi.mocked(getFinanceSkills).mockResolvedValueOnce([])
+    const wrapper = mount(AiFinanceSkillsDialog, {
+      props: { open: true },
+      global: { stubs: { NModal: ModalStub, NIcon: true, teleport: true } },
+    })
+    await flushPromises()
+    expect(wrapper.get('[role="status"]').text()).toBe('No finance skills are currently available.')
+    expect(wrapper.findAll('li')).toHaveLength(0)
+  })
+
+  it('shows a bounded load error when one available skill body fails to load', async () => {
+    vi.mocked(getFinanceSkill).mockRejectedValueOnce(new Error('private filesystem path'))
+    const wrapper = mount(AiFinanceSkillsDialog, {
+      props: { open: true },
+      global: { stubs: { NModal: ModalStub, NIcon: true, teleport: true } },
+    })
+    await flushPromises()
+    await wrapper.get('li button').trigger('click')
+    await flushPromises()
+    expect(wrapper.get('[role="alert"]').text()).toBe('Could not load this skill. Please try again.')
+    expect(wrapper.text()).not.toContain('private filesystem path')
+    expect(wrapper.findAll('li')).toHaveLength(5)
+  })
 })

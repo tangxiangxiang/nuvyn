@@ -202,6 +202,7 @@ describe('Finance Agent execution', () => {
     const events = await send('以后分析财务时，重点关注扣除还款本金后实际能留下多少钱。')
     expect(repository.list(auth.userId)).toMatchObject([{ kind: 'user', content: preference }])
     expect(events).toContain('operation":"memory_add')
+    expect(events).not.toContain('"phase":"reading"')
     expect(events).not.toMatch(/event: tool_use|event: tool_result|\{"ok":true,"action":"add"/)
     expect(streamRound.mock.calls[0]![0].tools.map(({ name }) => name)).toContain('manage_memory')
     const nextFinanceRound = streamRound.mock.calls[1]![0]
@@ -215,6 +216,30 @@ describe('Finance Agent execution', () => {
     streamRound.mockResolvedValueOnce(financeReply('Ordinary answer'))
     await send('Ordinary Note conversation', false)
     expect(streamRound.mock.calls.at(-1)![0].system).not.toContain('## Persistent Finance Memory')
+  })
+
+  it('keeps answering after a negated goal hits the deleted-memory safeguard', async () => {
+    const repository = createFinanceMemoryRepository(db)
+    const old = repository.add(auth.userId, 'user', 'Prioritize early mortgage repayment.')
+    if (!old.ok) throw new Error('expected memory to be added')
+    repository.remove(auth.userId, 'user', old.memory.id)
+    const currentMessage = 'I do not want to prioritize early mortgage repayment anymore; keep emergency cash instead.'
+    streamRound.mockResolvedValueOnce({
+      text: '',
+      toolCalls: [{ id: 'memory', name: 'manage_memory', input: {
+        action: 'add', target: 'user', content: old.memory.content,
+        evidence: 'I do not want to prioritize early mortgage repayment anymore',
+      } }],
+      finishReason: 'tool_calls',
+    }).mockResolvedValueOnce(financeReply('Understood. Keeping emergency cash takes priority over early repayment now.'))
+
+    const events = await send(currentMessage)
+    expect(events).toContain('Understood. Keeping emergency cash takes priority over early repayment now.')
+    expect(events).toContain('operation":"memory_add')
+    expect(events).toContain('"status":"failed"')
+    expect(events).toContain('event: done')
+    expect(repository.list(auth.userId)).toEqual([])
+    expect(streamRound).toHaveBeenCalledTimes(2)
   })
 
   it('loads an optional Finance Skill on demand, then uses Ledger evidence without persisting skill text', async () => {
@@ -242,6 +267,42 @@ describe('Finance Agent execution', () => {
     const stored = db.prepare(`SELECT content FROM messages WHERE session_id = ? AND role = 'assistant' ORDER BY id DESC LIMIT 1`).get(sessionId) as { content: string }
     expect(stored.content).not.toContain('# 月度财务回顾')
     expect(stored.content).toContain('skill_monthly_review')
+  })
+
+  it('keeps progress in analyzing while loading a Finance Skill without reading the Ledger', async () => {
+    streamRound.mockResolvedValueOnce({
+      text: '',
+      toolCalls: [{ id: 'skill-education', name: 'read_skill', input: { name: 'financial-planning' } }],
+      finishReason: 'tool_calls',
+    }).mockResolvedValueOnce(financeReply('An emergency fund covers essential costs during unexpected disruption.'))
+
+    const events = await send('What is an emergency fund?')
+    expect(events).toContain('operation":"skill_financial_planning')
+    expect(events).not.toContain('"phase":"reading"')
+    expect(events.match(/"phase":"analyzing"/gu)).toHaveLength(2)
+    expect(streamRound).toHaveBeenCalledTimes(2)
+  })
+
+  it('emits Ledger reading progress only when a mixed batch reaches read_ledger', async () => {
+    const currentMessage = 'I want to keep an emergency fund; check my account balance.'
+    streamRound.mockResolvedValueOnce({
+      text: '',
+      toolCalls: [
+        { id: 'skill', name: 'read_skill', input: { name: 'financial-planning' } },
+        { id: 'memory', name: 'manage_memory', input: {
+          action: 'add', target: 'user', content: 'Keep an emergency fund.', evidence: 'I want to keep an emergency fund',
+        } },
+        { id: 'accounts', name: 'read_ledger', input: { kind: 'accounts' } },
+      ],
+      finishReason: 'tool_calls',
+    }).mockResolvedValueOnce(financeReply('Your account query is complete.'))
+
+    const events = await send(currentMessage)
+    expect(events.match(/"phase":"reading"/gu)).toHaveLength(1)
+    expect(events).toContain('operation":"skill_financial_planning')
+    expect(events).toContain('operation":"memory_add')
+    expect(events).toContain('operation":"accounts')
+    expect(events).toContain('Your account query is complete.')
   })
 
   it('combines general financial education and fresh Ledger evidence in one Markdown answer', async () => {

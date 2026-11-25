@@ -324,6 +324,10 @@ export async function getFinanceMemory(signal?: AbortSignal): Promise<FinanceMem
   return jsonOrThrow(await authFetch('/api/ai/finance-memory', { signal }))
 }
 
+export async function addFinanceMemory(kind: FinanceMemoryKind, content: string): Promise<{ memory: FinanceMemoryItem; usage: FinanceMemoryUsage }> {
+  return jsonOrThrow(await authFetch('/api/ai/finance-memory', { method: 'POST', ...jsonBody({ kind, content }) }))
+}
+
 export async function updateFinanceMemory(id: number, content: string, expectedRevision: number): Promise<{ memory: FinanceMemoryItem; usage: FinanceMemoryUsage }> {
   return jsonOrThrow(await authFetch(`/api/ai/finance-memory/${id}`, { method: 'PATCH', ...jsonBody({ content, expectedRevision }) }))
 }

@@ -1,4 +1,4 @@
-import { expect, test } from './fixtures/auth'
+import { expect, test, type Locator } from './fixtures/auth'
 import {
   cleanupCreatedPaths,
   createDoc,
@@ -12,6 +12,45 @@ import {
 import type { AnyRecord } from './helpers/edit-program'
 import { ensureVaultLeftDrawerOpen, selectWorkspace } from './helpers/workspace-navigation'
 import { unlockDiary } from './helpers/diary-life'
+
+async function computedColorForToken(
+  element: Locator,
+  property: 'backgroundColor' | 'color',
+  token: string,
+): Promise<{ actual: string; expected: string }> {
+  return computedColorForCssValue(element, property, `var(${token})`)
+}
+
+async function computedColorForCssValue(
+  element: Locator,
+  property: 'backgroundColor' | 'color',
+  value: string,
+): Promise<{ actual: string; expected: string }> {
+  return element.evaluate((node, args) => {
+    const probe = document.createElement('span')
+    if (args.property === 'backgroundColor') probe.style.backgroundColor = args.value
+    else probe.style.color = args.value
+    document.body.append(probe)
+    const expected = getComputedStyle(probe)[args.property]
+    probe.remove()
+    return { actual: getComputedStyle(node)[args.property], expected }
+  }, { property, value })
+}
+
+async function waitForStableRect(element: Locator): Promise<void> {
+  let previous = ''
+  let stableSamples = 0
+  await expect.poll(async () => {
+    const rect = await element.evaluate(node => {
+      const bounds = node.getBoundingClientRect()
+      return [bounds.x, bounds.y, bounds.width, bounds.height].map(value => Math.round(value * 10) / 10)
+    })
+    const current = rect.join(',')
+    stableSamples = current === previous ? stableSamples + 1 : 0
+    previous = current
+    return stableSamples >= 2
+  }).toBe(true)
+}
 
 test.describe('AI history keyboard interaction', () => {
   test.beforeEach(async ({ page }) => {
@@ -350,6 +389,14 @@ test('AI Finance isolates its transcript and executes local commands without sen
   const financeMemories: AnyRecord[] = [
     { id: 101, kind: 'user', content: '优先保留应急资金。', createdAt: 1, updatedAt: 1, revision: 1 },
     { id: 102, kind: 'agent', content: '把还款本金计入现金流分析。', createdAt: 2, updatedAt: 2, revision: 1 },
+    ...Array.from({ length: 24 }, (_, index) => ({
+      id: 200 + index,
+      kind: 'agent',
+      content: `分析经验 ${index + 1}：明确区分账本事实和推测。`,
+      createdAt: index + 3,
+      updatedAt: index + 3,
+      revision: 1,
+    })),
   ]
   const financeSkills = [
     { name: 'monthly-review', description: 'Review monthly finances.' },
@@ -395,6 +442,12 @@ test('AI Finance isolates its transcript and executes local commands without sen
       case '/api/ai/finance-skills/monthly-review':
         return route.fulfill(jsonResponse({ ...financeSkills[0], content: '# 月度财务回顾\n\n先核对收支汇总。' }))
       case '/api/ai/finance-memory':
+        if (request.method() === 'POST') {
+          const body = request.postDataJSON()
+          const memory = { id: 103, kind: body.kind, content: body.content, createdAt: 3, updatedAt: 3, revision: 1 }
+          financeMemories.push(memory)
+          return route.fulfill(jsonResponse({ memory, usage: memoryState().usage }, 201))
+        }
         if (request.method() === 'DELETE') {
           financeMemories.length = 0
           return route.fulfill(jsonResponse({ cleared: true, usage: memoryState().usage }))
@@ -575,6 +628,65 @@ test('AI Finance isolates its transcript and executes local commands without sen
   await panel.getByRole('option', { name: '/memory · 管理财务记忆', exact: true }).click()
   const memoryDialog = page.locator('.ai-finance-memory-dialog')
   await expect(memoryDialog).toBeVisible()
+  await waitForStableRect(memoryDialog)
+  const memorySurface = await computedColorForToken(memoryDialog, 'backgroundColor', '--nuvyn-surface-1')
+  expect(memorySurface.actual).toBe(memorySurface.expected)
+  expect(memorySurface.actual).not.toBe('rgba(0, 0, 0, 0)')
+  const memoryText = await computedColorForToken(memoryDialog, 'color', '--nuvyn-text-1')
+  expect(memoryText.actual).toBe(memoryText.expected)
+  const hoveredMemoryEntry = memoryDialog.locator('.ai-finance-memory-entry').first()
+  await hoveredMemoryEntry.hover()
+  const memoryHover = await computedColorForCssValue(
+    hoveredMemoryEntry,
+    'backgroundColor',
+    'color-mix(in srgb, var(--nuvyn-accent) 5%, var(--nuvyn-surface-1))',
+  )
+  expect(memoryHover.actual).toBe(memoryHover.expected)
+  await page.mouse.move(0, 0)
+  const memoryBody = memoryDialog.locator('.ai-finance-memory-body')
+  await expect(memoryBody).toHaveCSS('overflow-y', 'auto')
+  await expect(memoryBody).toHaveCSS('scrollbar-width', 'none')
+  await expect.poll(() => memoryBody.evaluate(element => element.scrollHeight > element.clientHeight)).toBe(true)
+  const header = memoryDialog.locator('.ai-finance-memory-header')
+  const footer = memoryDialog.locator('.ai-finance-memory-footer')
+  const fixedRegions = await Promise.all([
+    header.evaluate(element => {
+      const dialog = element.closest('.ai-finance-memory-dialog')!.getBoundingClientRect()
+      return element.getBoundingClientRect().top - dialog.top
+    }),
+    footer.evaluate(element => {
+      const dialog = element.closest('.ai-finance-memory-dialog')!.getBoundingClientRect()
+      return dialog.bottom - element.getBoundingClientRect().bottom
+    }),
+  ])
+  await memoryBody.evaluate(element => { element.scrollTop = element.scrollHeight })
+  expect(await header.evaluate(element => {
+    const dialog = element.closest('.ai-finance-memory-dialog')!.getBoundingClientRect()
+    return element.getBoundingClientRect().top - dialog.top
+  })).toBe(fixedRegions[0])
+  expect(await footer.evaluate(element => {
+    const dialog = element.closest('.ai-finance-memory-dialog')!.getBoundingClientRect()
+    return dialog.bottom - element.getBoundingClientRect().bottom
+  })).toBe(fixedRegions[1])
+  await memoryBody.evaluate(element => { element.scrollTop = 0 })
+  for (const [width, height] of [[320, 740], [390, 844], [768, 900], [1280, 900]]) {
+    await page.setViewportSize({ width, height })
+    await waitForStableRect(memoryDialog)
+    const bounds = await memoryDialog.boundingBox()
+    expect(bounds).not.toBeNull()
+    expect(bounds!.x).toBeGreaterThanOrEqual(0)
+    expect(bounds!.x + bounds!.width, `dialog should fit ${width}px viewport`).toBeLessThanOrEqual(width)
+  }
+  await page.setViewportSize({ width: 1280, height: 900 })
+  const lightBackground = memorySurface.actual
+  await page.locator('.navbar .theme-toggle').evaluate((element) => (element as HTMLButtonElement).click())
+  await expect(page.locator('html')).toHaveAttribute('data-theme', 'dark')
+  await expect.poll(async () => (await computedColorForToken(memoryDialog, 'backgroundColor', '--nuvyn-surface-1')).actual).not.toBe(lightBackground)
+  const darkSurface = await computedColorForToken(memoryDialog, 'backgroundColor', '--nuvyn-surface-1')
+  expect(darkSurface.actual).toBe(darkSurface.expected)
+  expect(darkSurface.actual).not.toBe('rgba(0, 0, 0, 0)')
+  await page.locator('.navbar .theme-toggle').evaluate((element) => (element as HTMLButtonElement).click())
+  await expect(page.locator('html')).toHaveAttribute('data-theme', 'light')
   await expect(memoryDialog.getByRole('heading', { name: '用户记忆' })).toBeVisible()
   await expect(memoryDialog.getByRole('heading', { name: '分析经验' })).toBeVisible()
   await expect(memoryDialog.getByText('优先保留应急资金。')).toBeVisible()
@@ -583,9 +695,23 @@ test('AI Finance isolates its transcript and executes local commands without sen
   expect(commands).toEqual(['compact', 'clear', 'clear'])
 
   await memoryDialog.getByRole('button', { name: '编辑记忆: 优先保留应急资金。' }).click()
-  await memoryDialog.getByRole('textbox', { name: '编辑记忆' }).fill('先留足家庭应急资金。')
+  const editMemoryInput = memoryDialog.getByRole('textbox', { name: '编辑记忆' })
+  const editInputBackground = await computedColorForToken(editMemoryInput, 'backgroundColor', '--nuvyn-surface-2')
+  expect(editInputBackground.actual).toBe(editInputBackground.expected)
+  await editMemoryInput.fill('先留足家庭应急资金。')
   await memoryDialog.getByRole('button', { name: '保存' }).click()
   await expect(memoryDialog.getByText('先留足家庭应急资金。')).toBeVisible()
+  await memoryDialog.getByRole('button', { name: '添加财务记忆' }).click()
+  const memoryTypeSelect = memoryDialog.getByRole('combobox', { name: '记忆类型' })
+  const memoryTypeBackground = await computedColorForToken(memoryTypeSelect, 'backgroundColor', '--nuvyn-surface-2')
+  expect(memoryTypeBackground.actual).toBe(memoryTypeBackground.expected)
+  const newMemoryInput = memoryDialog.getByRole('textbox', { name: '添加财务记忆' })
+  const newMemoryBackground = await computedColorForToken(newMemoryInput, 'backgroundColor', '--nuvyn-surface-2')
+  expect(newMemoryBackground.actual).toBe(newMemoryBackground.expected)
+  await memoryTypeSelect.selectOption('agent')
+  await newMemoryInput.fill('清晰区分事实与假设。')
+  await memoryDialog.getByRole('button', { name: '保存' }).click()
+  await expect(memoryDialog.getByText('清晰区分事实与假设。')).toBeVisible()
   await memoryDialog.getByRole('button', { name: '删除记忆: 把还款本金计入现金流分析。' }).click()
   await expect(memoryDialog.getByText('把还款本金计入现金流分析。')).toHaveCount(0)
   await memoryDialog.getByRole('button', { name: '清空全部记忆' }).click()
@@ -601,21 +727,51 @@ test('AI Finance isolates its transcript and executes local commands without sen
   await panel.getByRole('option', { name: '/skills · 查看财务技能', exact: true }).click()
   const skillsDialog = page.locator('.ai-finance-skills-dialog')
   await expect(skillsDialog).toBeVisible()
+  const skillsSurface = await computedColorForToken(skillsDialog, 'backgroundColor', '--nuvyn-surface-1')
+  expect(skillsSurface.actual).toBe(skillsSurface.expected)
+  expect(skillsSurface.actual).not.toBe('rgba(0, 0, 0, 0)')
+  const skillsText = await computedColorForToken(skillsDialog, 'color', '--nuvyn-text-1')
+  expect(skillsText.actual).toBe(skillsText.expected)
+  const skillsLightBackground = skillsSurface.actual
+  await page.locator('.navbar .theme-toggle').evaluate((element) => (element as HTMLButtonElement).click())
+  await expect(page.locator('html')).toHaveAttribute('data-theme', 'dark')
+  await expect.poll(async () => (await computedColorForToken(skillsDialog, 'backgroundColor', '--nuvyn-surface-1')).actual).not.toBe(skillsLightBackground)
+  const darkSkillsSurface = await computedColorForToken(skillsDialog, 'backgroundColor', '--nuvyn-surface-1')
+  expect(darkSkillsSurface.actual).toBe(darkSkillsSurface.expected)
+  expect(darkSkillsSurface.actual).not.toBe('rgba(0, 0, 0, 0)')
+  await page.locator('.navbar .theme-toggle').evaluate((element) => (element as HTMLButtonElement).click())
+  await expect(page.locator('html')).toHaveAttribute('data-theme', 'light')
+  const skillsBody = skillsDialog.locator('.ai-finance-skills-body')
+  await expect(skillsBody).toHaveCSS('overflow-y', 'auto')
+  await expect(skillsBody).toHaveCSS('scrollbar-width', 'none')
   await expect(skillsDialog).not.toHaveClass(/enter-active/)
+  await waitForStableRect(skillsDialog)
   const desktopSize = page.viewportSize()!
-  await page.setViewportSize({ width: 390, height: 844 })
-  await expect(skillsDialog).not.toHaveClass(/enter-active/)
-  const mobileBounds = await skillsDialog.boundingBox()
-  expect(mobileBounds).not.toBeNull()
-  expect(mobileBounds!.x).toBeGreaterThanOrEqual(0)
-  expect(mobileBounds!.x + mobileBounds!.width).toBeLessThanOrEqual(390)
+  for (const [width, height] of [[320, 740], [390, 844], [768, 900], [1280, 900]]) {
+    await page.setViewportSize({ width, height })
+    await waitForStableRect(skillsDialog)
+    const bounds = await skillsDialog.boundingBox()
+    expect(bounds).not.toBeNull()
+    expect(bounds!.x).toBeGreaterThanOrEqual(0)
+    expect(bounds!.x + bounds!.width, `dialog should fit ${width}px viewport`).toBeLessThanOrEqual(width)
+  }
   await page.setViewportSize(desktopSize)
   await expect(skillsDialog.getByText('月度财务回顾')).toBeVisible()
   await expect(skillsDialog.locator('li')).toHaveCount(5)
   expect(chatRequests).toHaveLength(chatCountBeforeSkills)
   expect(commands).toEqual(['compact', 'clear', 'clear'])
-  await skillsDialog.locator('li button').first().click()
+  const firstSkill = skillsDialog.locator('li button').first()
+  await firstSkill.hover()
+  const skillsHover = await computedColorForCssValue(
+    firstSkill,
+    'backgroundColor',
+    'color-mix(in srgb, var(--nuvyn-accent) 8%, var(--nuvyn-surface-1))',
+  )
+  expect(skillsHover.actual).toBe(skillsHover.expected)
+  await firstSkill.click()
   await expect(skillsDialog.locator('pre')).toContainText('# 月度财务回顾')
+  const skillTextColor = await computedColorForToken(skillsDialog.locator('pre'), 'color', '--nuvyn-text-1')
+  expect(skillTextColor.actual).toBe(skillTextColor.expected)
   expect(chatRequests).toHaveLength(chatCountBeforeSkills)
   await skillsDialog.getByRole('button', { name: '返回技能列表' }).click()
   await expect(skillsDialog.locator('li')).toHaveCount(5)
@@ -626,6 +782,12 @@ test('AI Finance isolates its transcript and executes local commands without sen
   await expect(panel.locator('.ai-floating-title')).toHaveText('AI财务')
   await expect(panel.locator('.ai-empty-hint')).toBeVisible()
   await expect(panel.getByText('Ledger analysis 2')).toHaveCount(0)
+  await panel.locator('textarea').fill('/')
+  await panel.getByRole('option', { name: '/memory · 管理财务记忆', exact: true }).click()
+  await expect(page.locator('.ai-finance-memory-dialog')).toBeVisible()
+  const refreshedMemorySurface = await computedColorForToken(page.locator('.ai-finance-memory-dialog'), 'backgroundColor', '--nuvyn-surface-1')
+  expect(refreshedMemorySurface.actual).toBe(refreshedMemorySurface.expected)
+  await page.locator('.ai-finance-memory-dialog').getByRole('button', { name: '关闭' }).click()
   await selectWorkspace(page, 'note')
   await expect(panel.getByText('Previous Note conversation')).toBeVisible()
 })

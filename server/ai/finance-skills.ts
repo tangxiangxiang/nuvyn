@@ -18,10 +18,16 @@ export type FinanceSkillMetadata = { name: FinanceSkillName; description: string
 export type FinanceSkill = FinanceSkillMetadata & { content: string }
 export type FinanceSkillError = 'unknown' | 'invalid' | 'too-large' | 'unavailable'
 export type FinanceSkillResult = { ok: true; skill: FinanceSkill } | { ok: false; error: FinanceSkillError }
+export type FinanceSkillRegistryEntry = { name: FinanceSkillName; file: string }
+export type FinanceSkillRegistryState = {
+  available: FinanceSkillMetadata[]
+  unavailable: Array<{ name: FinanceSkillName; reason: FinanceSkillError }>
+  configurationError: 'empty' | 'duplicate-name' | null
+}
 
 const SKILLS_ROOT = path.resolve(import.meta.dirname, 'skills/finance')
 
-const registry: readonly { name: FinanceSkillName; file: string }[] = [
+const registry: readonly FinanceSkillRegistryEntry[] = [
   { name: 'monthly-review', file: 'monthly-review/SKILL.md' },
   { name: 'spending-analysis', file: 'spending-analysis/SKILL.md' },
   { name: 'debt-analysis', file: 'debt-analysis/SKILL.md' },
@@ -67,27 +73,55 @@ function readRegisteredSkill(name: string): FinanceSkillResult {
   }
 }
 
-export function listFinanceSkills(): FinanceSkillMetadata[] {
-  const names = new Set<string>()
-  const skills = registry.map(({ name }) => {
-    if (names.has(name)) throw new Error('Duplicate built-in finance skill name.')
+export function buildFinanceSkillRegistryState(
+  entries: readonly FinanceSkillRegistryEntry[],
+  load: (name: string) => FinanceSkillResult,
+): FinanceSkillRegistryState {
+  const names = new Set<FinanceSkillName>()
+  const available: FinanceSkillMetadata[] = []
+  const unavailable: FinanceSkillRegistryState['unavailable'] = []
+  let configurationError: FinanceSkillRegistryState['configurationError'] = entries.length ? null : 'empty'
+
+  for (const { name } of entries) {
+    if (names.has(name)) {
+      configurationError = 'duplicate-name'
+      continue
+    }
     names.add(name)
-    const result = readRegisteredSkill(name)
-    if (!result.ok) throw new Error(`Built-in finance skill ${name} is ${result.error}.`)
-    return { name: result.skill.name, description: result.skill.description }
-  })
-  return skills
+    let result: FinanceSkillResult
+    try {
+      result = load(name)
+    } catch {
+      result = { ok: false, error: 'unavailable' }
+    }
+    if (result.ok) available.push({ name: result.skill.name, description: result.skill.description })
+    else unavailable.push({ name, reason: result.error })
+  }
+  return { available, unavailable, configurationError }
+}
+
+export function getFinanceSkillRegistryState(): FinanceSkillRegistryState {
+  return buildFinanceSkillRegistryState(registry, readRegisteredSkill)
+}
+
+export function listFinanceSkills(): FinanceSkillMetadata[] {
+  const state = getFinanceSkillRegistryState()
+  if (state.configurationError) throw new Error(`Finance skill registry is ${state.configurationError}.`)
+  if (state.unavailable.length) throw new Error('One or more built-in finance skills are unavailable or invalid.')
+  return state.available
 }
 
 export function readFinanceSkill(name: string): FinanceSkillResult {
   return readRegisteredSkill(name)
 }
 
-export function financeSkillsDirectory(): string {
-  const skills = listFinanceSkills()
+export function financeSkillsDirectory(state = getFinanceSkillRegistryState()): string {
+  const skills = state.available
   return [
     '## Available Finance Skills',
     ...skills.map(skill => `- ${skill.name}: ${skill.description}`),
-    'Load a skill only when it is useful for the current task. Use read_skill to load the smallest relevant set. Skills are optional guidance and do not override the user, system rules, or authoritative Ledger data.',
+    skills.length
+      ? 'Load a skill only when it is useful for the current task. Use read_skill to load the smallest relevant set. Skills are optional guidance and do not override the user, system rules, or authoritative Ledger data.'
+      : 'No optional Finance Skills are currently available. Continue to answer using the Finance Agent, Ledger and memory tools that are available.',
   ].join('\n')
 }

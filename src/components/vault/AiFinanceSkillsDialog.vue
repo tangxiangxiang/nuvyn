@@ -94,6 +94,7 @@ function backToList(): void {
             </button>
           </li>
         </ul>
+        <p v-else-if="!error" class="ai-finance-skills-muted" role="status">{{ t('ai.finance_skills_empty') }}</p>
       </div>
     </section>
   </NModal>
@@ -106,26 +107,26 @@ function backToList(): void {
   display: flex;
   flex-direction: column;
   overflow: hidden;
-  border: 1px solid var(--vs-border, color-mix(in srgb, currentColor 12%, transparent));
+  border: 1px solid var(--nuvyn-border);
   border-radius: 18px;
-  background: var(--vs-surface, var(--n-color-modal));
-  color: var(--vs-text-1, inherit);
+  background: var(--nuvyn-surface-1);
+  color: var(--nuvyn-text-1);
   box-shadow: 0 24px 72px rgb(0 0 0 / 22%);
 }
-.ai-finance-skills-header { display: flex; align-items: center; gap: 8px; padding: 15px 18px 12px; border-bottom: 1px solid var(--vs-border, rgb(127 127 127 / 15%)); }
+.ai-finance-skills-header { display: flex; flex: 0 0 auto; align-items: center; gap: 8px; padding: 15px 18px 12px; border-bottom: 1px solid var(--nuvyn-border); }
 .ai-finance-skills-header h2 { flex: 1; min-width: 0; margin: 0; font-size: 1.05rem; font-weight: 650; }
-.ai-finance-skills-header button { width: 34px; height: 34px; flex: none; display: grid; place-items: center; border: 0; border-radius: 8px; background: transparent; color: var(--vs-text-2); cursor: pointer; }
-.ai-finance-skills-header button:hover { background: color-mix(in srgb, var(--vs-accent, #7265ff) 10%, transparent); color: var(--vs-text-1); }
-.ai-finance-skills-body { min-height: 80px; overflow: auto; padding: 8px 14px 14px; scrollbar-width: none; }
+.ai-finance-skills-header button { width: 34px; height: 34px; flex: none; display: grid; place-items: center; border: 0; border-radius: 8px; background: transparent; color: var(--nuvyn-text-2); cursor: pointer; }
+.ai-finance-skills-header button:hover { background: color-mix(in srgb, var(--nuvyn-accent) 10%, var(--nuvyn-surface-1)); color: var(--nuvyn-text-1); }
+.ai-finance-skills-body { min-height: 0; flex: 1 1 auto; overflow: auto; overscroll-behavior: contain; padding: 8px 14px 14px; scrollbar-width: none; }
 .ai-finance-skills-body::-webkit-scrollbar { display: none; }
 .ai-finance-skills-list { list-style: none; margin: 0; padding: 0; }
 .ai-finance-skills-list button { width: 100%; display: flex; flex-direction: column; align-items: flex-start; gap: 3px; padding: 10px 10px; border: 0; border-radius: 9px; background: transparent; color: inherit; text-align: left; cursor: pointer; }
-.ai-finance-skills-list button:hover, .ai-finance-skills-list button:focus-visible { background: color-mix(in srgb, var(--vs-accent, #7265ff) 8%, transparent); outline: none; }
+.ai-finance-skills-list button:hover, .ai-finance-skills-list button:focus-visible { background: color-mix(in srgb, var(--nuvyn-accent) 8%, var(--nuvyn-surface-1)); outline: none; }
 .ai-finance-skills-list span { font-size: .91rem; font-weight: 580; }
-.ai-finance-skills-list small { color: var(--vs-text-2); font-size: .78rem; line-height: 1.4; }
-.ai-finance-skill-content { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; font: inherit; font-size: .86rem; line-height: 1.62; }
-.ai-finance-skills-muted, .ai-finance-skills-error { margin: 8px 2px; color: var(--vs-text-2); }
-.ai-finance-skills-error { color: var(--vs-danger, #c14545); }
+.ai-finance-skills-list small { color: var(--nuvyn-text-2); font-size: .78rem; line-height: 1.4; }
+.ai-finance-skill-content { margin: 0; color: var(--nuvyn-text-1); white-space: pre-wrap; overflow-wrap: anywhere; font: inherit; font-size: .86rem; line-height: 1.62; }
+.ai-finance-skills-muted, .ai-finance-skills-error { margin: 8px 2px; color: var(--nuvyn-text-2); }
+.ai-finance-skills-error { color: var(--nuvyn-negative); }
 @media (max-width: 640px) {
   .ai-finance-skills-dialog { width: calc(100vw - 24px); max-height: min(82vh, 720px); border-radius: 16px; }
   .ai-finance-skills-header { padding-left: 14px; padding-right: 14px; }

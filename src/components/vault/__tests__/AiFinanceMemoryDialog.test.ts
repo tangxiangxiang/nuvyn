@@ -4,10 +4,11 @@ import { flushPromises, mount } from '@vue/test-utils'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import AiFinanceMemoryDialog from '../AiFinanceMemoryDialog.vue'
 import { useI18n } from '../../../composables/useI18n'
-import { clearFinanceMemory, deleteFinanceMemory, getFinanceMemory, updateFinanceMemory } from '../../../lib/ai-api'
+import { addFinanceMemory, clearFinanceMemory, deleteFinanceMemory, getFinanceMemory, updateFinanceMemory } from '../../../lib/ai-api'
 
 vi.mock('../../../lib/ai-api', async original => ({
   ...await original<typeof import('../../../lib/ai-api')>(),
+  addFinanceMemory: vi.fn(),
   clearFinanceMemory: vi.fn(),
   deleteFinanceMemory: vi.fn(),
   getFinanceMemory: vi.fn(),
@@ -38,6 +39,10 @@ describe('AiFinanceMemoryDialog', () => {
     useI18n().setLocale('en')
     vi.clearAllMocks()
     vi.mocked(getFinanceMemory).mockResolvedValue(structuredClone(state))
+    vi.mocked(addFinanceMemory).mockResolvedValue({
+      memory: { id: 3, kind: 'agent', content: 'State assumptions clearly.', createdAt: 3, updatedAt: 3, revision: 1 },
+      usage: state.usage,
+    })
     vi.mocked(updateFinanceMemory).mockImplementation(async (id, content) => ({
       memory: { ...state.items[0]!, id, content, updatedAt: 3, revision: 2 }, usage: state.usage,
     }))
@@ -86,6 +91,20 @@ describe('AiFinanceMemoryDialog', () => {
     await nextTick()
     expect(wrapper.get('[aria-label="Edit memory: Prioritize an emergency fund."]').attributes('disabled')).toBeDefined()
     expect(wrapper.get('[aria-label="Delete memory: Prioritize an emergency fund."]').attributes('disabled')).toBeDefined()
+  })
+
+  it('lets the user add a memory explicitly, including content previously removed by the Agent', async () => {
+    const wrapper = mountDialog()
+    await flushPromises()
+    await wrapper.get('[aria-label="Add finance memory"]').trigger('click')
+    await wrapper.get('[aria-label="Memory type"]').setValue('agent')
+    await wrapper.get('textarea[aria-label="Add finance memory"]').setValue('State assumptions clearly.')
+    await wrapper.get('form').trigger('submit')
+    await flushPromises()
+
+    expect(addFinanceMemory).toHaveBeenCalledWith('agent', 'State assumptions clearly.')
+    expect(wrapper.text()).toContain('State assumptions clearly.')
+    expect(wrapper.find('form').exists()).toBe(false)
   })
 
   it('shows a load error without presenting the failed request as an empty memory list', async () => {

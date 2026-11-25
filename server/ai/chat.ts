@@ -404,7 +404,7 @@ export async function runChat(opts: RunChatOpts): Promise<{
               requireFinanceAccess()
               const { content, status } = await finance.execute(tc, result.toolCalls.length, ordinal, async () => {
                 requireFinanceAccess()
-                if (tc.name !== manageMemoryTool.name && !reading) {
+                if (tc.name === 'read_ledger' && !reading) {
                   await emit(opts.onEvent, { type: 'finance_progress', phase: 'reading' })
                   reading = true
                 }

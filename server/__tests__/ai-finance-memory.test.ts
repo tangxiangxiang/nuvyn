@@ -37,13 +37,13 @@ function request(path: string, method = 'GET', body?: unknown) {
 describe('Finance Memory repository', () => {
   it('persists by authenticated owner, normalizes duplicates, and supports CRUD', () => {
     const repository = createFinanceMemoryRepository(db)
-    const created = repository.add(auth.userId, 'user', '  Café  ', false, 10)
+    const created = repository.add(auth.userId, 'user', '  Café  ', 10)
     expect(created).toMatchObject({ ok: true, memory: { kind: 'user', content: 'Café', createdAt: 10, updatedAt: 10 } })
     if (!created.ok) throw new Error('expected memory to be added')
     expect(repository.add(auth.userId, 'user', 'Café').duplicate).toBe(true)
     expect(repository.list(addAnotherUser())).toEqual([])
 
-    const updated = repository.update(auth.userId, 'user', created.memory.id, '用户希望先保留应急资金。', false, 20)
+    const updated = repository.update(auth.userId, 'user', created.memory.id, '用户希望先保留应急资金。', 20)
     expect(updated).toMatchObject({ ok: true, memory: { content: '用户希望先保留应急资金。', updatedAt: 20 } })
     expect(repository.remove(auth.userId, 'user', created.memory.id, 30)).toMatchObject({ ok: true })
     expect(repository.list(auth.userId)).toEqual([])
@@ -88,7 +88,7 @@ describe('Finance Memory repository', () => {
     expect(repository.usage(auth.userId).user.used).toBeLessThanOrEqual(FINANCE_MEMORY_LIMITS.user)
   })
 
-  it('blocks sensitive credentials and does not restore a deleted entry without an explicit override', () => {
+  it('blocks sensitive credentials and only restores deleted entries through an explicit user operation', () => {
     const repository = createFinanceMemoryRepository(db)
     expect(repository.add(auth.userId, 'user', 'My API key is sk-test-123')).toMatchObject({ ok: false, error: 'sensitive-content' })
     expect(repository.add(auth.userId, 'user', '银行卡号是 6222021234567890123')).toMatchObject({ ok: false, error: 'sensitive-content' })
@@ -98,7 +98,23 @@ describe('Finance Memory repository', () => {
     repository.remove(auth.userId, 'user', entry.memory.id)
     expect(repository.canRestore(auth.userId, 'user', entry.memory.content)).toBe(true)
     expect(repository.add(auth.userId, 'user', entry.memory.content)).toMatchObject({ ok: false, error: 'previously-forgotten' })
-    expect(repository.add(auth.userId, 'user', entry.memory.content, true)).toMatchObject({ ok: true })
+    expect(repository.addExplicitly(auth.userId, 'user', entry.memory.content)).toMatchObject({ ok: true })
+    expect(repository.canRestore(auth.userId, 'user', entry.memory.content)).toBe(false)
+  })
+
+  it('blocks exact deleted content across memory kinds while retaining legacy tombstone hashes', () => {
+    const repository = createFinanceMemoryRepository(db)
+    const entry = repository.add(auth.userId, 'user', 'Prioritize early mortgage repayment.')
+    if (!entry.ok) throw new Error('expected memory to be added')
+    repository.remove(auth.userId, 'user', entry.memory.id)
+
+    expect(repository.add(auth.userId, 'agent', entry.memory.content)).toMatchObject({ ok: false, error: 'previously-forgotten' })
+    const active = repository.add(auth.userId, 'agent', 'Use actual Ledger data for monthly spending analysis.')
+    if (!active.ok) throw new Error('expected a separate active memory')
+    expect(repository.update(auth.userId, 'agent', active.memory.id, entry.memory.content)).toMatchObject({ ok: false, error: 'previously-forgotten' })
+    expect(repository.updateExplicitly).toBeTypeOf('function')
+    expect(repository.canRestore(auth.userId, 'agent', entry.memory.content)).toBe(true)
+    expect(repository.addExplicitly(auth.userId, 'agent', entry.memory.content)).toMatchObject({ ok: true, memory: { kind: 'agent' } })
     expect(repository.canRestore(auth.userId, 'user', entry.memory.content)).toBe(false)
   })
 
@@ -170,6 +186,18 @@ describe('Finance Memory HTTP management', () => {
     expect(db.prepare('SELECT content FROM messages WHERE session_id = ?').get(sessionId)).toEqual({ content: 'keep this chat' })
   })
 
+  it('allows an authenticated user to deliberately add content they previously deleted', async () => {
+    const repository = createFinanceMemoryRepository(db)
+    const deleted = repository.add(auth.userId, 'user', 'Remember a clear monthly budget.')
+    if (!deleted.ok) throw new Error('expected memory to be added')
+    repository.remove(auth.userId, 'user', deleted.memory.id)
+
+    const response = await request('/finance-memory', 'POST', { kind: 'user', content: deleted.memory.content })
+    expect(response.status).toBe(201)
+    expect(await response.json()).toMatchObject({ memory: { kind: 'user', content: deleted.memory.content } })
+    expect(repository.canRestore(auth.userId, 'agent', deleted.memory.content)).toBe(false)
+  })
+
   it('rejects writes while Finance Agent is running', async () => {
     const { ensureLedgerAiThread, acquireLedgerAiOperation } = await import('../ai/sessions.js')
     const thread = ensureLedgerAiThread(db, auth.userId)
@@ -187,9 +215,9 @@ describe('Finance Memory HTTP management', () => {
     const repository = createFinanceMemoryRepository(db)
     const entry = repository.add(auth.userId, 'user', 'Preserve an emergency fund.')
     if (!entry.ok) throw new Error('expected memory to be added')
-    const first = repository.update(auth.userId, 'user', entry.memory.id, 'Keep a larger emergency fund.', false, 2, entry.memory.revision)
+    const first = repository.update(auth.userId, 'user', entry.memory.id, 'Keep a larger emergency fund.', 2, entry.memory.revision)
     expect(first).toMatchObject({ ok: true, memory: { revision: 2 } })
-    expect(repository.update(auth.userId, 'user', entry.memory.id, 'Overwrite from stale tab.', false, 3, entry.memory.revision))
+    expect(repository.update(auth.userId, 'user', entry.memory.id, 'Overwrite from stale tab.', 3, entry.memory.revision))
       .toMatchObject({ ok: false, error: 'stale-revision' })
     expect(repository.remove(auth.userId, 'user', entry.memory.id, 3, entry.memory.revision))
       .toMatchObject({ ok: false, error: 'stale-revision' })
@@ -200,7 +228,7 @@ describe('Finance Memory HTTP management', () => {
     const repository = createFinanceMemoryRepository(db)
     const entry = repository.add(auth.userId, 'user', 'Preserve an emergency fund.')
     if (!entry.ok) throw new Error('expected memory to be added')
-    repository.update(auth.userId, 'user', entry.memory.id, 'Keep a larger emergency fund.', false, 2, entry.memory.revision)
+    repository.update(auth.userId, 'user', entry.memory.id, 'Keep a larger emergency fund.', 2, entry.memory.revision)
 
     const update = await request(`/finance-memory/${entry.memory.id}`, 'PATCH', {
       content: 'Overwrite a newer preference.', expectedRevision: entry.memory.revision,
