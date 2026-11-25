@@ -297,12 +297,12 @@ export async function getActiveSession(): Promise<ActiveSession> {
   return jsonOrThrow<ActiveSession>(await authFetch('/api/ai/active', { method: 'GET' }))
 }
 
-export type LedgerAiCommand = 'compact' | 'clear' | 'memory'
-export type LedgerAiServerCommand = Exclude<LedgerAiCommand, 'memory'>
+export type LedgerAiCommand = 'compact' | 'clear' | 'memory' | 'skills'
+export type LedgerAiServerCommand = Exclude<LedgerAiCommand, 'memory' | 'skills'>
 export type LedgerAiCommandOutcome = 'compacted' | 'nothing-to-compact' | 'cleared'
 
 export type FinanceMemoryKind = 'user' | 'agent'
-export type FinanceMemoryItem = { id: number; kind: FinanceMemoryKind; content: string; createdAt: number; updatedAt: number }
+export type FinanceMemoryItem = { id: number; kind: FinanceMemoryKind; content: string; createdAt: number; updatedAt: number; revision: number }
 export type FinanceMemoryUsage = {
   user: { used: number; limit: number }
   agent: { used: number; limit: number }
@@ -324,16 +324,29 @@ export async function getFinanceMemory(signal?: AbortSignal): Promise<FinanceMem
   return jsonOrThrow(await authFetch('/api/ai/finance-memory', { signal }))
 }
 
-export async function updateFinanceMemory(id: number, content: string): Promise<{ memory: FinanceMemoryItem; usage: FinanceMemoryUsage }> {
-  return jsonOrThrow(await authFetch(`/api/ai/finance-memory/${id}`, { method: 'PATCH', ...jsonBody({ content }) }))
+export async function updateFinanceMemory(id: number, content: string, expectedRevision: number): Promise<{ memory: FinanceMemoryItem; usage: FinanceMemoryUsage }> {
+  return jsonOrThrow(await authFetch(`/api/ai/finance-memory/${id}`, { method: 'PATCH', ...jsonBody({ content, expectedRevision }) }))
 }
 
-export async function deleteFinanceMemory(id: number): Promise<{ deleted: true; usage: FinanceMemoryUsage }> {
-  return jsonOrThrow(await authFetch(`/api/ai/finance-memory/${id}`, { method: 'DELETE' }))
+export async function deleteFinanceMemory(id: number, expectedRevision: number): Promise<{ deleted: true; usage: FinanceMemoryUsage }> {
+  return jsonOrThrow(await authFetch(`/api/ai/finance-memory/${id}?expectedRevision=${expectedRevision}`, { method: 'DELETE' }))
 }
 
 export async function clearFinanceMemory(): Promise<{ cleared: true; usage: FinanceMemoryUsage }> {
   return jsonOrThrow(await authFetch('/api/ai/finance-memory', { method: 'DELETE' }))
+}
+
+export type FinanceSkillName = 'monthly-review' | 'spending-analysis' | 'debt-analysis' | 'cashflow-analysis' | 'financial-planning'
+export type FinanceSkillMetadata = { name: FinanceSkillName; description: string }
+export type FinanceSkill = FinanceSkillMetadata & { content: string }
+
+export async function getFinanceSkills(signal?: AbortSignal): Promise<FinanceSkillMetadata[]> {
+  const result = await jsonOrThrow<{ skills: FinanceSkillMetadata[] }>(await authFetch('/api/ai/finance-skills', { signal }))
+  return result.skills
+}
+
+export async function getFinanceSkill(name: FinanceSkillName, signal?: AbortSignal): Promise<FinanceSkill> {
+  return jsonOrThrow(await authFetch(`/api/ai/finance-skills/${encodeURIComponent(name)}`, { signal }))
 }
 
 export async function getAiThread(scope: AiThreadScope): Promise<AiThreadState> {

@@ -23,6 +23,7 @@ const error = ref('')
 const editingId = ref<number | null>(null)
 const editContent = ref('')
 const confirmClear = ref(false)
+const conflict = ref<{ id: number; latest: FinanceMemoryItem | null; preservedDraft: boolean } | null>(null)
 const locked = computed(() => props.busy || pending.value)
 const userItems = computed(() => items.value.filter(item => item.kind === 'user'))
 const agentItems = computed(() => items.value.filter(item => item.kind === 'agent'))
@@ -45,6 +46,7 @@ watch(() => props.open, open => {
   if (open) {
     editingId.value = null
     confirmClear.value = false
+    conflict.value = null
     items.value = []
     usage.value = null
     void load()
@@ -59,6 +61,7 @@ function beginEdit(item: FinanceMemoryItem): void {
   if (locked.value) return
   editingId.value = item.id
   editContent.value = item.content
+  conflict.value = null
   error.value = ''
 }
 
@@ -72,12 +75,15 @@ async function saveEdit(item: FinanceMemoryItem): Promise<void> {
   pending.value = true
   error.value = ''
   try {
-    const result = await updateFinanceMemory(item.id, editContent.value)
+    const result = await updateFinanceMemory(item.id, editContent.value, item.revision)
     items.value = items.value.map(existing => existing.id === item.id ? result.memory : existing)
     usage.value = result.usage
+    conflict.value = null
     cancelEdit()
-  } catch {
-    error.value = t('ai.finance_memory_save_failed')
+  } catch (cause) {
+    if (typeof cause === 'object' && cause && 'status' in cause && cause.status === 409) {
+      await refreshConflict(item.id, true)
+    } else error.value = t('ai.finance_memory_save_failed')
   } finally {
     pending.value = false
   }
@@ -88,14 +94,28 @@ async function remove(item: FinanceMemoryItem): Promise<void> {
   pending.value = true
   error.value = ''
   try {
-    const result = await deleteFinanceMemory(item.id)
+    const result = await deleteFinanceMemory(item.id, item.revision)
     items.value = items.value.filter(existing => existing.id !== item.id)
     usage.value = result.usage
+    conflict.value = null
     if (editingId.value === item.id) cancelEdit()
-  } catch {
-    error.value = t('ai.finance_memory_delete_failed')
+  } catch (cause) {
+    if (typeof cause === 'object' && cause && 'status' in cause && cause.status === 409) {
+      await refreshConflict(item.id, false)
+    } else error.value = t('ai.finance_memory_delete_failed')
   } finally {
     pending.value = false
+  }
+}
+
+async function refreshConflict(id: number, preservedDraft: boolean): Promise<void> {
+  try {
+    const state = await getFinanceMemory()
+    items.value = state.items
+    usage.value = state.usage
+    conflict.value = { id, latest: state.items.find(item => item.id === id) ?? null, preservedDraft }
+  } catch {
+    error.value = t('ai.finance_memory_conflict_reload_failed')
   }
 }
 
@@ -144,6 +164,10 @@ const groups = computed(() => [
         <section v-for="group in groups" :key="group.title" class="ai-finance-memory-group" :aria-label="group.title">
           <h3>{{ group.title }}</h3>
           <article v-for="item in group.entries" :key="item.id" class="ai-finance-memory-entry" :class="{ 'is-editing': editingId === item.id }">
+            <p v-if="conflict?.id === item.id" class="ai-finance-memory-conflict" role="status">
+              {{ t(conflict.preservedDraft ? 'ai.finance_memory_conflict' : 'ai.finance_memory_conflict_delete') }}
+              <span v-if="conflict.latest">{{ t('ai.finance_memory_latest') }} {{ conflict.latest.content }}</span>
+            </p>
             <template v-if="editingId === item.id">
               <textarea
                 v-model="editContent"

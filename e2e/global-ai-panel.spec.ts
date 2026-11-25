@@ -348,8 +348,15 @@ test('AI Finance isolates its transcript and executes local commands without sen
   const commands: string[] = []
   const financeMessages: AnyRecord[] = []
   const financeMemories: AnyRecord[] = [
-    { id: 101, kind: 'user', content: '优先保留应急资金。', createdAt: 1, updatedAt: 1 },
-    { id: 102, kind: 'agent', content: '把还款本金计入现金流分析。', createdAt: 2, updatedAt: 2 },
+    { id: 101, kind: 'user', content: '优先保留应急资金。', createdAt: 1, updatedAt: 1, revision: 1 },
+    { id: 102, kind: 'agent', content: '把还款本金计入现金流分析。', createdAt: 2, updatedAt: 2, revision: 1 },
+  ]
+  const financeSkills = [
+    { name: 'monthly-review', description: 'Review monthly finances.' },
+    { name: 'spending-analysis', description: 'Analyze spending.' },
+    { name: 'debt-analysis', description: 'Analyze debt.' },
+    { name: 'cashflow-analysis', description: 'Analyze cashflow.' },
+    { name: 'financial-planning', description: 'Plan finances.' },
   ]
   const memoryState = () => {
     const user = financeMemories.filter(item => item.kind === 'user').reduce((sum, item) => sum + [...String(item.content)].length, 0)
@@ -383,6 +390,10 @@ test('AI Finance isolates its transcript and executes local commands without sen
         ]))
       case '/api/ai/ledger-session':
         return route.fulfill(jsonResponse({ session: finance, messages: financeMessages }))
+      case '/api/ai/finance-skills':
+        return route.fulfill(jsonResponse({ skills: financeSkills }))
+      case '/api/ai/finance-skills/monthly-review':
+        return route.fulfill(jsonResponse({ ...financeSkills[0], content: '# 月度财务回顾\n\n先核对收支汇总。' }))
       case '/api/ai/finance-memory':
         if (request.method() === 'DELETE') {
           financeMemories.length = 0
@@ -391,10 +402,13 @@ test('AI Finance isolates its transcript and executes local commands without sen
         return route.fulfill(jsonResponse(memoryState()))
       case '/api/ai/finance-memory/101':
         if (request.method() === 'PATCH') {
-          financeMemories[0] = { ...financeMemories[0], content: request.postDataJSON().content, updatedAt: 3 }
+          const body = request.postDataJSON()
+          if (body.expectedRevision !== financeMemories[0]!.revision) return route.fulfill(jsonResponse({ error: 'stale revision' }, 409))
+          financeMemories[0] = { ...financeMemories[0], content: body.content, updatedAt: 3, revision: Number(financeMemories[0]!.revision) + 1 }
           return route.fulfill(jsonResponse({ memory: financeMemories[0], usage: memoryState().usage }))
         }
         if (request.method() === 'DELETE') {
+          if (new URL(request.url()).searchParams.get('expectedRevision') !== String(financeMemories[0]!.revision)) return route.fulfill(jsonResponse({ error: 'stale revision' }, 409))
           const index = financeMemories.findIndex(item => item.id === 101)
           if (index >= 0) financeMemories.splice(index, 1)
           return route.fulfill(jsonResponse({ deleted: true, usage: memoryState().usage }))
@@ -402,6 +416,7 @@ test('AI Finance isolates its transcript and executes local commands without sen
         return route.fallback()
       case '/api/ai/finance-memory/102':
         if (request.method() === 'DELETE') {
+          if (new URL(request.url()).searchParams.get('expectedRevision') !== String(financeMemories.find(item => item.id === 102)?.revision)) return route.fulfill(jsonResponse({ error: 'stale revision' }, 409))
           const index = financeMemories.findIndex(item => item.id === 102)
           if (index >= 0) financeMemories.splice(index, 1)
           return route.fulfill(jsonResponse({ deleted: true, usage: memoryState().usage }))
@@ -537,10 +552,10 @@ test('AI Finance isolates its transcript and executes local commands without sen
   await sendAi(page, '  /compact  ')
   await expect(panel.getByText('当前无需压缩')).toBeVisible()
   await sendAi(page, '/unknown')
-  await expect(panel.getByText('未知命令。可用命令为 /compact、/clear 和 /memory。')).toBeVisible()
+  await expect(panel.getByText('未知命令。可用命令为 /compact、/clear、/memory 和 /skills。')).toBeVisible()
   const input = panel.locator('textarea')
   await input.fill('/')
-  await expect(panel.getByRole('option')).toHaveCount(3)
+  await expect(panel.getByRole('option')).toHaveCount(4)
   await panel.getByRole('option', { name: '/clear · 清空对话', exact: true }).click()
   await expect(page.getByText('清空财务对话？')).toHaveCount(0)
   await expect(panel.getByText('对话已清空')).toBeVisible()
@@ -580,6 +595,31 @@ test('AI Finance isolates its transcript and executes local commands without sen
   expect(chatRequests).toHaveLength(3)
   expect(financeMessages).toEqual(messagesBeforeMemory)
   await memoryDialog.getByRole('button', { name: '关闭' }).click()
+
+  const chatCountBeforeSkills = chatRequests.length
+  await input.fill('/')
+  await panel.getByRole('option', { name: '/skills · 查看财务技能', exact: true }).click()
+  const skillsDialog = page.locator('.ai-finance-skills-dialog')
+  await expect(skillsDialog).toBeVisible()
+  await expect(skillsDialog).not.toHaveClass(/enter-active/)
+  const desktopSize = page.viewportSize()!
+  await page.setViewportSize({ width: 390, height: 844 })
+  await expect(skillsDialog).not.toHaveClass(/enter-active/)
+  const mobileBounds = await skillsDialog.boundingBox()
+  expect(mobileBounds).not.toBeNull()
+  expect(mobileBounds!.x).toBeGreaterThanOrEqual(0)
+  expect(mobileBounds!.x + mobileBounds!.width).toBeLessThanOrEqual(390)
+  await page.setViewportSize(desktopSize)
+  await expect(skillsDialog.getByText('月度财务回顾')).toBeVisible()
+  await expect(skillsDialog.locator('li')).toHaveCount(5)
+  expect(chatRequests).toHaveLength(chatCountBeforeSkills)
+  expect(commands).toEqual(['compact', 'clear', 'clear'])
+  await skillsDialog.locator('li button').first().click()
+  await expect(skillsDialog.locator('pre')).toContainText('# 月度财务回顾')
+  expect(chatRequests).toHaveLength(chatCountBeforeSkills)
+  await skillsDialog.getByRole('button', { name: '返回技能列表' }).click()
+  await expect(skillsDialog.locator('li')).toHaveCount(5)
+  await skillsDialog.getByRole('button', { name: '关闭' }).click()
 
   await page.reload()
   await page.getByTestId('global-ai-trigger').click()
@@ -718,7 +758,7 @@ test.describe('AI Finance responsive layout', () => {
     await expect.poll(async () => (await input.boundingBox())!.height).toBe(compactHeight)
 
     await input.fill('/')
-    await expect(panel.getByRole('option')).toHaveCount(3)
+    await expect(panel.getByRole('option')).toHaveCount(4)
     await input.press('ArrowDown')
     await expect(panel.getByRole('option', { name: /\/clear/ })).toHaveAttribute('aria-selected', 'true')
     await input.press('Escape')

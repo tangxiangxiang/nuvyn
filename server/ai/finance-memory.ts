@@ -16,6 +16,7 @@ export type FinanceMemory = {
   content: string
   createdAt: number
   updatedAt: number
+  revision: number
 }
 
 export type FinanceMemoryUsage = {
@@ -30,19 +31,20 @@ type MemoryRow = {
   content: string
   created_at: number
   updated_at: number
+  revision: number
 }
 
 export type FinanceMemoryError =
   | 'invalid-owner' | 'invalid-kind' | 'invalid-content' | 'content-too-long'
   | 'sensitive-content' | 'duplicate' | 'previously-forgotten' | 'capacity-exceeded'
-  | 'not-found' | 'invalid-id'
+  | 'not-found' | 'invalid-id' | 'stale-revision'
 
 export type FinanceMemoryResult =
   | { ok: true; memory: FinanceMemory; usage: FinanceMemoryUsage; duplicate?: true }
   | { ok: false; error: FinanceMemoryError; usage?: FinanceMemoryUsage }
 
 function mapRow(row: MemoryRow): FinanceMemory {
-  return { id: row.id, kind: row.kind, content: row.content, createdAt: row.created_at, updatedAt: row.updated_at }
+  return { id: row.id, kind: row.kind, content: row.content, createdAt: row.created_at, updatedAt: row.updated_at, revision: row.revision }
 }
 
 function characterCount(value: string): number {
@@ -73,7 +75,7 @@ function validOwner(ownerId: number): boolean {
 
 function readRows(db: DatabaseT, ownerId: number): MemoryRow[] {
   return db.prepare(`
-    SELECT id, kind, content, created_at, updated_at
+    SELECT id, kind, content, created_at, updated_at, revision
     FROM ai_finance_memory WHERE owner_user_id = ?
     ORDER BY CASE kind WHEN 'user' THEN 0 ELSE 1 END, id ASC
   `).all(ownerId) as MemoryRow[]
@@ -150,13 +152,13 @@ export function createFinanceMemoryRepository(db: DatabaseT) {
           .run(ownerId, kind, contentHash(kind, content))
       }
       const memory = db.prepare(`
-        SELECT id, kind, content, created_at, updated_at FROM ai_finance_memory WHERE id = ? AND owner_user_id = ?
+        SELECT id, kind, content, created_at, updated_at, revision FROM ai_finance_memory WHERE id = ? AND owner_user_id = ?
       `).get(Number(result.lastInsertRowid), ownerId) as MemoryRow
       return { ok: true, memory: mapRow(memory), usage: usageFor([...rows, memory]) } as const
     })()
   }
 
-  function update(ownerId: number, kind: unknown, id: number, rawContent: unknown, restoreDeleted = false, now = Date.now()): FinanceMemoryResult {
+  function update(ownerId: number, kind: unknown, id: number, rawContent: unknown, restoreDeleted = false, now = Date.now(), expectedRevision?: number): FinanceMemoryResult {
     if (!validOwner(ownerId)) return { ok: false, error: 'invalid-owner' }
     if (kind !== 'user' && kind !== 'agent') return { ok: false, error: 'invalid-kind' }
     if (!Number.isSafeInteger(id) || id < 1) return { ok: false, error: 'invalid-id' }
@@ -169,6 +171,9 @@ export function createFinanceMemoryRepository(db: DatabaseT) {
       const rows = readRows(db, ownerId)
       const existing = rows.find(row => row.id === id && row.kind === kind)
       if (!existing) return { ok: false, error: 'not-found', usage: usageFor(rows) } as const
+      if (expectedRevision !== undefined && (!Number.isSafeInteger(expectedRevision) || expectedRevision < 1 || existing.revision !== expectedRevision)) {
+        return { ok: false, error: 'stale-revision', usage: usageFor(rows) } as const
+      }
       if (existing.content === content) return { ok: true, memory: mapRow(existing), usage: usageFor(rows), duplicate: true } as const
       if (rows.some(row => row.id !== id && row.kind === kind && row.content.normalize('NFC').trim() === content)) {
         return { ok: false, error: 'duplicate', usage: usageFor(rows) } as const
@@ -177,29 +182,35 @@ export function createFinanceMemoryRepository(db: DatabaseT) {
         return { ok: false, error: 'previously-forgotten', usage: usageFor(rows) } as const
       }
       if (!checkCapacity(rows, kind, content, id)) return { ok: false, error: 'capacity-exceeded', usage: usageFor(rows) } as const
+      const update = db.prepare(`UPDATE ai_finance_memory SET content = ?, updated_at = ?, revision = revision + 1 WHERE id = ? AND owner_user_id = ? AND kind = ?${expectedRevision === undefined ? '' : ' AND revision = ?'}`)
+        .run(content, now, id, ownerId, kind, ...(expectedRevision === undefined ? [] : [expectedRevision]))
+      if (update.changes !== 1) return { ok: false, error: 'stale-revision', usage: usageFor(readRows(db, ownerId)) } as const
       rememberDeleted(db, ownerId, kind, existing.content, now)
-      db.prepare(`UPDATE ai_finance_memory SET content = ?, updated_at = ? WHERE id = ? AND owner_user_id = ? AND kind = ?`)
-        .run(content, now, id, ownerId, kind)
       if (restoreDeleted) {
         db.prepare(`DELETE FROM ai_finance_memory_tombstones WHERE owner_user_id = ? AND kind = ? AND content_hash = ?`)
           .run(ownerId, kind, contentHash(kind, content))
       }
-      const memory = { ...existing, content, updated_at: now }
+      const memory = { ...existing, content, updated_at: now, revision: existing.revision + 1 }
       const nextRows = rows.map(row => row.id === id ? memory : row)
       return { ok: true, memory: mapRow(memory), usage: usageFor(nextRows) } as const
     })()
   }
 
-  function remove(ownerId: number, kind: unknown, id: number, now = Date.now()): { ok: true; usage: FinanceMemoryUsage } | { ok: false; error: FinanceMemoryError; usage?: FinanceMemoryUsage } {
+  function remove(ownerId: number, kind: unknown, id: number, now = Date.now(), expectedRevision?: number): { ok: true; usage: FinanceMemoryUsage } | { ok: false; error: FinanceMemoryError; usage?: FinanceMemoryUsage } {
     if (!validOwner(ownerId)) return { ok: false, error: 'invalid-owner' }
     if (kind !== 'user' && kind !== 'agent') return { ok: false, error: 'invalid-kind' }
     if (!Number.isSafeInteger(id) || id < 1) return { ok: false, error: 'invalid-id' }
     return db.transaction(() => {
-      const existing = db.prepare(`SELECT id, kind, content FROM ai_finance_memory WHERE id = ? AND owner_user_id = ? AND kind = ?`)
-        .get(id, ownerId, kind) as Pick<MemoryRow, 'id' | 'kind' | 'content'> | undefined
+      const existing = db.prepare(`SELECT id, kind, content, revision FROM ai_finance_memory WHERE id = ? AND owner_user_id = ? AND kind = ?`)
+        .get(id, ownerId, kind) as Pick<MemoryRow, 'id' | 'kind' | 'content' | 'revision'> | undefined
       if (!existing) return { ok: false, error: 'not-found' } as const
+      if (expectedRevision !== undefined && (!Number.isSafeInteger(expectedRevision) || expectedRevision < 1 || existing.revision !== expectedRevision)) {
+        return { ok: false, error: 'stale-revision' } as const
+      }
+      const result = db.prepare(`DELETE FROM ai_finance_memory WHERE id = ? AND owner_user_id = ? AND kind = ?${expectedRevision === undefined ? '' : ' AND revision = ?'}`)
+        .run(id, ownerId, kind, ...(expectedRevision === undefined ? [] : [expectedRevision]))
+      if (result.changes !== 1) return { ok: false, error: 'stale-revision' } as const
       rememberDeleted(db, ownerId, kind, existing.content, now)
-      db.prepare(`DELETE FROM ai_finance_memory WHERE id = ? AND owner_user_id = ? AND kind = ?`).run(id, ownerId, kind)
       return { ok: true, usage: usageFor(readRows(db, ownerId)) } as const
     })()
   }
@@ -225,8 +236,8 @@ export function formatFinanceMemoryContext(entries: FinanceMemory[]): string {
   const user = entries.filter(entry => entry.kind === 'user')
   const agent = entries.filter(entry => entry.kind === 'agent')
   const memory = JSON.stringify({
-    user: user.map(({ id, content }) => ({ id, content })),
-    agent: agent.map(({ id, content }) => ({ id, content })),
+    user: user.map(({ id, content, revision }) => ({ id, revision, content })),
+    agent: agent.map(({ id, content, revision }) => ({ id, revision, content })),
   }).replace(/[<>&]/gu, character => `\\u${character.charCodeAt(0).toString(16).padStart(4, '0')}`)
   return [
     '## Persistent Finance Memory',

@@ -44,6 +44,7 @@ import { generateTitle } from './title.js'
 import { ChatError } from './errors.js'
 import { compactLedgerAiThread } from './compaction.js'
 import { createFinanceMemoryRepository } from './finance-memory.js'
+import { listFinanceSkills, readFinanceSkill } from './finance-skills.js'
 import { hasDiaryBodyAccess, requireDiaryBodyAccess } from '../diaryAccess/guard.js'
 import { readDiaryAccessCapability } from '../diaryAccess/service.js'
 import { classifyDiaryPath } from '../../shared/diaryProtocol.js'
@@ -517,6 +518,32 @@ function parseFinanceMemoryId(raw: string): number | null {
   return Number.isSafeInteger(id) ? id : null
 }
 
+function parseFinanceMemoryRevision(raw: string | undefined): number | null {
+  if (!raw || !/^[1-9]\d{0,14}$/.test(raw)) return null
+  const revision = Number(raw)
+  return Number.isSafeInteger(revision) ? revision : null
+}
+
+ai.get('/finance-skills', (c) => {
+  c.header('Cache-Control', 'no-store')
+  const db = getDb()
+  if (!currentFinanceMemoryOwner(c, db)) return bad(c, 'Finance skills require authentication', 403)
+  try {
+    return c.json({ skills: listFinanceSkills() })
+  } catch {
+    return bad(c, 'Built-in finance skills are unavailable', 500)
+  }
+})
+
+ai.get('/finance-skills/:name', (c) => {
+  c.header('Cache-Control', 'no-store')
+  const db = getDb()
+  if (!currentFinanceMemoryOwner(c, db)) return bad(c, 'Finance skills require authentication', 403)
+  const result = readFinanceSkill(c.req.param('name'))
+  if (!result.ok) return bad(c, result.error === 'unknown' ? 'Unknown finance skill' : 'Finance skill is unavailable', result.error === 'unknown' ? 404 : 500)
+  return c.json(result.skill)
+})
+
 ai.get('/finance-memory', (c) => {
   c.header('Cache-Control', 'no-store')
   const db = getDb()
@@ -534,16 +561,19 @@ ai.patch('/finance-memory/:id', async (c) => {
   const id = parseFinanceMemoryId(c.req.param('id'))
   if (!id) return bad(c, 'Invalid memory id')
   const body = await c.req.json().catch(() => null) as Record<string, unknown> | null
-  if (!body || Object.keys(body).length !== 1 || typeof body.content !== 'string') return bad(c, 'Invalid memory update')
+  if (!body || Object.keys(body).length !== 2 || typeof body.content !== 'string'
+    || typeof body.expectedRevision !== 'number' || !Number.isSafeInteger(body.expectedRevision) || body.expectedRevision < 1) return bad(c, 'Invalid memory update')
   const release = lockFinanceMemoryManagement(db, owner.id)
   if (!release) return bad(c, 'Finance Agent is busy', 409)
   try {
     const repository = createFinanceMemoryRepository(db)
     const existing = repository.list(owner.id).find(item => item.id === id)
     if (!existing) return bad(c, 'Memory not found', 404)
-    const result = repository.update(owner.id, existing.kind, id, body.content)
+    // This endpoint is only the signed-in user's explicit edit action, so
+    // restoring wording they previously removed is intentional here.
+    const result = repository.update(owner.id, existing.kind, id, body.content, true, Date.now(), body.expectedRevision)
     if (!result.ok) {
-      const status = result.error === 'not-found' ? 404 : result.error === 'capacity-exceeded' ? 409 : 400
+      const status = result.error === 'not-found' ? 404 : result.error === 'capacity-exceeded' || result.error === 'stale-revision' ? 409 : 400
       return bad(c, 'Memory update failed: ' + result.error, status)
     }
     return c.json({ memory: result.memory, usage: result.usage })
@@ -559,14 +589,16 @@ ai.delete('/finance-memory/:id', (c) => {
   if (!owner) return bad(c, 'Finance memory requires authentication', 403)
   const id = parseFinanceMemoryId(c.req.param('id'))
   if (!id) return bad(c, 'Invalid memory id')
+  const expectedRevision = parseFinanceMemoryRevision(c.req.query('expectedRevision'))
+  if (expectedRevision === null) return bad(c, 'A valid expected memory revision is required')
   const release = lockFinanceMemoryManagement(db, owner.id)
   if (!release) return bad(c, 'Finance Agent is busy', 409)
   try {
     const repository = createFinanceMemoryRepository(db)
     const existing = repository.list(owner.id).find(item => item.id === id)
     if (!existing) return bad(c, 'Memory not found', 404)
-    const result = repository.remove(owner.id, existing.kind, id)
-    if (!result.ok) return bad(c, 'Memory delete failed', result.error === 'not-found' ? 404 : 400)
+    const result = repository.remove(owner.id, existing.kind, id, Date.now(), expectedRevision)
+    if (!result.ok) return bad(c, 'Memory delete failed: ' + result.error, result.error === 'not-found' ? 404 : result.error === 'stale-revision' ? 409 : 400)
     return c.json({ deleted: true as const, usage: result.usage })
   } finally {
     release()

@@ -142,7 +142,7 @@ describe('Finance Agent execution', () => {
     expect(events).not.toContain('"phase":"reading"')
     expect(events).not.toContain('"phase":"verifying"')
     expect(streamRound).toHaveBeenCalledOnce()
-    expect(streamRound.mock.calls[0]?.[0].tools.map(({ name }) => name)).toEqual(['read_ledger', 'manage_memory'])
+    expect(streamRound.mock.calls[0]?.[0].tools.map(({ name }) => name)).toEqual(['read_ledger', 'manage_memory', 'read_skill'])
     expect(streamRound.mock.calls[0]?.[0].maxOutputTokens).toBe(8192)
     expect(generateText).not.toHaveBeenCalled()
   })
@@ -163,7 +163,7 @@ describe('Finance Agent execution', () => {
     expect(events).not.toMatch(/Private intermediate|event: tool_|observation|"summary"/)
     expect(events).not.toContain('verifying')
     expect(streamRound).toHaveBeenCalledTimes(2)
-    expect(streamRound.mock.calls[0]?.[0].tools.map(({ name }) => name)).toEqual(['read_ledger', 'manage_memory'])
+    expect(streamRound.mock.calls[0]?.[0].tools.map(({ name }) => name)).toEqual(['read_ledger', 'manage_memory', 'read_skill'])
     expect(streamRound.mock.calls[1]?.[0].maxOutputTokens).toBe(8192)
     expect(generateText).not.toHaveBeenCalled()
   })
@@ -175,7 +175,7 @@ describe('Finance Agent execution', () => {
     expect(events).toContain('**-¥8,144.88**')
     expect(events).not.toContain('could not verify')
     expect(streamRound).toHaveBeenCalledTimes(2)
-    expect(streamRound.mock.calls[0]?.[0].tools.map(({ name }) => name)).toEqual(['read_ledger', 'manage_memory'])
+    expect(streamRound.mock.calls[0]?.[0].tools.map(({ name }) => name)).toEqual(['read_ledger', 'manage_memory', 'read_skill'])
     expect(generateText).not.toHaveBeenCalled()
   })
 
@@ -184,7 +184,7 @@ describe('Finance Agent execution', () => {
     const events = await send('Assume I earn ¥100 and spend ¥30. How much is left?')
     expect(events).toContain('**¥70.00**')
     expect(streamRound).toHaveBeenCalledOnce()
-    expect(streamRound.mock.calls[0]?.[0].tools.map(({ name }) => name)).toEqual(['read_ledger', 'manage_memory'])
+    expect(streamRound.mock.calls[0]?.[0].tools.map(({ name }) => name)).toEqual(['read_ledger', 'manage_memory', 'read_skill'])
     expect(generateText).not.toHaveBeenCalled()
   })
 
@@ -193,7 +193,10 @@ describe('Finance Agent execution', () => {
     const preference = '重点关注扣除还款本金后实际能留下多少钱。'
     streamRound.mockResolvedValueOnce({
       text: '',
-      toolCalls: [{ id: 'remember-1', name: 'manage_memory', input: { action: 'add', target: 'user', content: preference } }],
+      toolCalls: [{ id: 'remember-1', name: 'manage_memory', input: {
+        action: 'add', target: 'user', content: preference,
+        evidence: '重点关注扣除还款本金后实际能留下多少钱',
+      } }],
       finishReason: 'tool_calls',
     }).mockResolvedValueOnce(financeReply('我会在后续财务分析中关注还款后的实际结余。'))
     const events = await send('以后分析财务时，重点关注扣除还款本金后实际能留下多少钱。')
@@ -212,6 +215,33 @@ describe('Finance Agent execution', () => {
     streamRound.mockResolvedValueOnce(financeReply('Ordinary answer'))
     await send('Ordinary Note conversation', false)
     expect(streamRound.mock.calls.at(-1)![0].system).not.toContain('## Persistent Finance Memory')
+  })
+
+  it('loads an optional Finance Skill on demand, then uses Ledger evidence without persisting skill text', async () => {
+    streamRound.mockResolvedValueOnce({
+      text: '',
+      toolCalls: [{ id: 'skill-monthly', name: 'read_skill', input: { name: 'monthly-review' } }],
+      finishReason: 'tool_calls',
+    }).mockImplementationOnce(async (round) => {
+      expect(round.system).toContain('- monthly-review:')
+      expect(round.system).not.toContain('本月至今是有效期间')
+      expect(round.messages.filter(message => message.role === 'tool').at(-1)?.content).toContain('# 月度财务回顾')
+      return queryRound({ kind: 'cashflow', from: '2026-01-01', to: '2026-01-10' })
+    }).mockImplementationOnce(async (round) => {
+      expect(round.messages.filter(message => message.role === 'tool').map(({ content }) => String(content))).toEqual(expect.arrayContaining([
+        expect.stringContaining('# 月度财务回顾'), expect.stringContaining('"expenseMinor":82501'),
+      ]))
+      return financeReply('本月至今的普通支出为 **¥825.01**。')
+    })
+
+    const events = await send('分析一下本月财务情况。')
+    expect(events).toContain('本月至今的普通支出为 **¥825.01**。')
+    expect(events).toContain('operation":"skill_monthly_review')
+    expect(events).not.toContain('# 月度财务回顾')
+    expect(streamRound).toHaveBeenCalledTimes(3)
+    const stored = db.prepare(`SELECT content FROM messages WHERE session_id = ? AND role = 'assistant' ORDER BY id DESC LIMIT 1`).get(sessionId) as { content: string }
+    expect(stored.content).not.toContain('# 月度财务回顾')
+    expect(stored.content).toContain('skill_monthly_review')
   })
 
   it('combines general financial education and fresh Ledger evidence in one Markdown answer', async () => {
@@ -459,11 +489,11 @@ describe('Ledger analysis request boundary', () => {
   it('reads on send, refreshes aggregates after a sidecar change, supports follow-ups and isolates other workspaces', async () => {
     expect(await send('Let’s look at January')).toMatch(/event: finance_progress[\s\S]*event: done/)
     const round = streamRound.mock.calls[1]![0]
-    expect(round.tools.map(({ name }) => name)).toEqual(['read_ledger', 'manage_memory'])
+    expect(round.tools.map(({ name }) => name)).toEqual(['read_ledger', 'manage_memory', 'read_skill'])
     const results = round.messages.filter(({ role }) => role === 'tool').map(({ content }) => String(content))
     expect(results[0]).toContain('"expenseMinor":82501')
     expect(results[0]).not.toMatch(/731987|PRIVATE NOTE/)
-    expect(results[1]).toContain('Only read_ledger and manage_memory are available')
+    expect(results[1]).toContain('Only read_ledger, manage_memory, and read_skill are available')
 
     const repository = createLedgerRepository(db)
     const transaction = repository.listActiveTransactions().find(({ amountMinor }) => amountMinor === inScopeAmount)!

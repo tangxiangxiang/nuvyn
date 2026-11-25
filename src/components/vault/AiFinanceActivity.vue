@@ -17,6 +17,11 @@ const operations: Record<FinanceActivity['operation'], string> = {
   memory_add: 'ai.finance_activity_memory_add',
   memory_update: 'ai.finance_activity_memory_update',
   memory_delete: 'ai.finance_activity_memory_delete',
+  skill_monthly_review: 'ai.finance_activity_skill_monthly_review',
+  skill_spending_analysis: 'ai.finance_activity_skill_spending_analysis',
+  skill_debt_analysis: 'ai.finance_activity_skill_debt_analysis',
+  skill_cashflow_analysis: 'ai.finance_activity_skill_cashflow_analysis',
+  skill_financial_planning: 'ai.finance_activity_skill_financial_planning',
   query: 'ai.finance_query',
 }
 const icons = { success: Check, failed: X, cancelled: Circle, running: Clock, reused: Rotate }

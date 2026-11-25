@@ -15,6 +15,7 @@ import AiChatMessages from './AiChatMessages.vue'
 import AiComposer from './AiComposer.vue'
 import AiSessionPicker from './AiSessionPicker.vue'
 import AiFinanceMemoryDialog from './AiFinanceMemoryDialog.vue'
+import AiFinanceSkillsDialog from './AiFinanceSkillsDialog.vue'
 import { readStorageKey, writeStorageKey } from '../../technicalNamespace'
 
 const props = withDefaults(defineProps<{
@@ -51,6 +52,7 @@ const ledgerCommands = computed(() => [
   { command: 'compact' as const, label: t('ai.ledger_compact'), description: t('ai.finance_compact_detail') },
   { command: 'clear' as const, label: t('ai.ledger_clear'), description: t('ai.finance_clear_detail') },
   { command: 'memory' as const, label: t('ai.ledger_memory'), description: t('ai.finance_memory_title') },
+  { command: 'skills' as const, label: t('ai.ledger_skills'), description: t('ai.finance_skills_title') },
 ])
 const commandStatus = ref<LedgerAiCommandOutcome | 'compacting' | 'failed' | 'unknown' | null>(null)
 let commandController: AbortController | null = null
@@ -60,6 +62,7 @@ const composer = ref<InstanceType<typeof AiComposer> | null>(null)
 const panelRef = ref<HTMLElement | null>(null)
 const showSessionPicker = ref(false)
 const showFinanceMemory = ref(false)
+const showFinanceSkills = ref(false)
 const isDragging = ref(false)
 const isMobileViewport = ref(typeof window !== 'undefined' && window.innerWidth <= 640)
 const blockingOverlay = ref(false)
@@ -323,7 +326,7 @@ async function onSend(prompt?: string): Promise<void> {
   const active = history.value
   if (!text || active.busy.value || active.isLoading.value) return
   if (isLedger.value && text.startsWith('/')) {
-    if (text === '/compact' || text === '/clear' || text === '/memory') {
+    if (text === '/compact' || text === '/clear' || text === '/memory' || text === '/skills') {
       await onLedgerCommand(text.slice(1) as LedgerAiCommand)
     }
     else commandStatus.value = 'unknown'
@@ -353,6 +356,13 @@ async function onLedgerCommand(command: LedgerAiCommand): Promise<void> {
     ledgerDraft.value = ''
     commandStatus.value = null
     showFinanceMemory.value = true
+    return
+  }
+  if (command === 'skills') {
+    if (!isLedger.value || ledgerHistory.busy.value || commandPending.value) return
+    ledgerDraft.value = ''
+    commandStatus.value = null
+    showFinanceSkills.value = true
     return
   }
   if (!isLedger.value || !ledgerHistory.activeSession.value || ledgerHistory.busy.value || commandPending.value) return
@@ -670,6 +680,7 @@ onBeforeUnmount(() => {
 
       <AiSessionPicker v-if="showSessionPicker" @close="closeSessionPicker" />
       <AiFinanceMemoryDialog :open="showFinanceMemory" :busy="agentBusy" @close="showFinanceMemory = false" />
+      <AiFinanceSkillsDialog :open="showFinanceSkills" @close="showFinanceSkills = false" />
     </aside>
   </Transition>
 </template>

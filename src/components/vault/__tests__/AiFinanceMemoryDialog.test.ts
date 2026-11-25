@@ -16,8 +16,8 @@ vi.mock('../../../lib/ai-api', async original => ({
 
 const state = {
   items: [
-    { id: 1, kind: 'user' as const, content: 'Prioritize an emergency fund.', createdAt: 1, updatedAt: 1 },
-    { id: 2, kind: 'agent' as const, content: 'Include repayments in cashflow.', createdAt: 2, updatedAt: 2 },
+    { id: 1, kind: 'user' as const, content: 'Prioritize an emergency fund.', createdAt: 1, updatedAt: 1, revision: 1 },
+    { id: 2, kind: 'agent' as const, content: 'Include repayments in cashflow.', createdAt: 2, updatedAt: 2, revision: 1 },
   ],
   usage: {
     user: { used: 29, limit: 2_000 },
@@ -39,7 +39,7 @@ describe('AiFinanceMemoryDialog', () => {
     vi.clearAllMocks()
     vi.mocked(getFinanceMemory).mockResolvedValue(structuredClone(state))
     vi.mocked(updateFinanceMemory).mockImplementation(async (id, content) => ({
-      memory: { ...state.items[0]!, id, content, updatedAt: 3 }, usage: state.usage,
+      memory: { ...state.items[0]!, id, content, updatedAt: 3, revision: 2 }, usage: state.usage,
     }))
     vi.mocked(deleteFinanceMemory).mockResolvedValue({ deleted: true, usage: state.usage })
     vi.mocked(clearFinanceMemory).mockResolvedValue({ cleared: true, usage: {
@@ -62,12 +62,12 @@ describe('AiFinanceMemoryDialog', () => {
     await wrapper.get('textarea').setValue('Preserve an emergency fund first.')
     await wrapper.findAll('button').find(button => button.text().includes('Save'))!.trigger('click')
     await flushPromises()
-    expect(updateFinanceMemory).toHaveBeenCalledWith(1, 'Preserve an emergency fund first.')
+    expect(updateFinanceMemory).toHaveBeenCalledWith(1, 'Preserve an emergency fund first.', 1)
     expect(wrapper.text()).toContain('Preserve an emergency fund first.')
 
     await wrapper.get('[aria-label="Delete memory: Include repayments in cashflow."]').trigger('click')
     await flushPromises()
-    expect(deleteFinanceMemory).toHaveBeenCalledWith(2)
+    expect(deleteFinanceMemory).toHaveBeenCalledWith(2, 1)
     expect(wrapper.text()).not.toContain('Include repayments in cashflow.')
 
     await wrapper.findAll('button').find(button => button.text().includes('Clear all memories'))!.trigger('click')
@@ -94,5 +94,30 @@ describe('AiFinanceMemoryDialog', () => {
     await flushPromises()
     expect(wrapper.get('[role="alert"]').text()).toBe('Could not load finance memories. Please try again.')
     expect(wrapper.text()).not.toContain('There are no long-term memories yet.')
+  })
+
+  it('reloads the latest revision after a concurrent edit without losing the local draft', async () => {
+    vi.mocked(updateFinanceMemory).mockRejectedValueOnce(Object.assign(new Error('conflict'), { status: 409 }))
+    vi.mocked(getFinanceMemory)
+      .mockResolvedValueOnce(structuredClone(state))
+      .mockResolvedValueOnce({
+        ...structuredClone(state),
+        items: state.items.map(item => item.id === 1
+          ? { ...item, content: 'Latest server preference.', revision: 2 }
+          : item),
+      })
+    const wrapper = mountDialog()
+    await flushPromises()
+    await wrapper.get('[aria-label="Edit memory: Prioritize an emergency fund."]').trigger('click')
+    await wrapper.get('textarea').setValue('My unsaved preference draft.')
+    await wrapper.findAll('button').find(button => button.text().includes('Save'))!.trigger('click')
+    await flushPromises()
+
+    expect(wrapper.get('textarea').element.value).toBe('My unsaved preference draft.')
+    expect(wrapper.text()).toContain('This memory changed elsewhere.')
+    expect(wrapper.text()).toContain('Latest server preference.')
+    await wrapper.findAll('button').find(button => button.text().includes('Save'))!.trigger('click')
+    await flushPromises()
+    expect(updateFinanceMemory).toHaveBeenLastCalledWith(1, 'My unsaved preference draft.', 2)
   })
 })

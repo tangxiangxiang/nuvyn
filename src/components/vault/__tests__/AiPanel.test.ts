@@ -9,12 +9,14 @@ import { useI18n } from '../../../composables/useI18n'
 import AiPanel from '../AiPanel.vue'
 import AiChatMessages from '../AiChatMessages.vue'
 import AiComposer from '../AiComposer.vue'
-import { getAiProfiles, getFinanceMemory, runLedgerAiCommand } from '../../../lib/ai-api'
+import { getAiProfiles, getFinanceMemory, getFinanceSkill, getFinanceSkills, runLedgerAiCommand } from '../../../lib/ai-api'
 
 vi.mock('../../../lib/ai-api', async (original) => ({
   ...await original<typeof import('../../../lib/ai-api')>(),
   getAiProfiles: vi.fn(),
   getFinanceMemory: vi.fn(),
+  getFinanceSkill: vi.fn(),
+  getFinanceSkills: vi.fn(),
   updateFinanceMemory: vi.fn(),
   deleteFinanceMemory: vi.fn(),
   clearFinanceMemory: vi.fn(),
@@ -136,6 +138,16 @@ describe('global AI panel', () => {
         total: { used: 0, limit: 5_000 },
       },
     })
+    vi.mocked(getFinanceSkills).mockResolvedValue([
+      { name: 'monthly-review', description: 'Review monthly finances.' },
+      { name: 'spending-analysis', description: 'Analyze spending.' },
+      { name: 'debt-analysis', description: 'Analyze debt.' },
+      { name: 'cashflow-analysis', description: 'Analyze cashflow.' },
+      { name: 'financial-planning', description: 'Plan finances.' },
+    ])
+    vi.mocked(getFinanceSkill).mockResolvedValue({
+      name: 'monthly-review', description: 'Review monthly finances.', content: '# Monthly review',
+    })
   })
   afterEach(() => {
     vi.restoreAllMocks()
@@ -242,6 +254,21 @@ describe('global AI panel', () => {
     expect(financeHistory.sendAndStream).not.toHaveBeenCalled()
     expect(financeHistory.messages.value).toEqual(conversation)
     expect(wrapper.findComponent(AiComposer).props('modelValue')).toBe('')
+  })
+
+  it('opens finance skills locally without an LLM request or chat-history change', async () => {
+    const conversation = [{ id: 3, sessionId: 27, role: 'assistant' as const, content: 'Existing answer', createdAt: 1 }]
+    financeHistory.messages.value = conversation
+    const { wrapper } = mountPanel(undefined, { workspaceKind: 'ledger' })
+    await typeAndSend(wrapper, '/skills')
+    await flushPromises()
+    expect(getFinanceSkills).toHaveBeenCalledOnce()
+    expect(getFinanceSkill).not.toHaveBeenCalled()
+    expect(runLedgerAiCommand).not.toHaveBeenCalled()
+    expect(financeHistory.sendAndStream).not.toHaveBeenCalled()
+    expect(financeHistory.messages.value).toEqual(conversation)
+    expect(document.body.textContent).toContain('Finance skills')
+    expect(document.body.textContent).toContain('Monthly review')
   })
 
   it('uses only the send-time Note snapshot when the workspace changes during a stream', async () => {

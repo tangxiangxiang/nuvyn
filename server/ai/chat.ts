@@ -1,5 +1,5 @@
 import { financeOperation, type FinanceActivity, type FinanceActivityEvent, type FinanceAgentProgress } from '../../shared/ledgerAiAnalysis.js'
-import { createFinanceAgent, financeCoverageNotice, manageMemoryTool } from './finance-agent.js'
+import { createFinanceAgent, financeCoverageNotice, manageMemoryTool, readSkillTool } from './finance-agent.js'
 import { type createLedgerAnalysis } from './ledger-analysis.js'
 import { createFinanceMemoryRepository, formatFinanceMemoryContext } from './finance-memory.js'
 import { getAiRuntimeConfig, type AiRuntimeConfig } from './settings.js'
@@ -330,6 +330,7 @@ export async function runChat(opts: RunChatOpts): Promise<{
   const finance = opts.ledgerAnalysis && createFinanceAgent(
     opts.ledgerAnalysis,
     financeMemory && opts.ledgerOwnerId ? { db: opts.db, ownerId: opts.ledgerOwnerId } : undefined,
+    opts.userContent,
   )
   const requireFinanceAccess = () => {
     if (opts.signal?.aborted || !opts.canUseLedgerAnalysis?.()) throw new ChatError('aborted')
@@ -354,14 +355,13 @@ export async function runChat(opts: RunChatOpts): Promise<{
       const persistentFinanceMemory = finance && financeMemory && opts.ledgerOwnerId
         ? formatFinanceMemoryContext(financeMemory.list(opts.ledgerOwnerId))
         : ''
-      const system = finance && financeMemory && opts.ledgerOwnerId
-        ? opts.ledgerAnalysis!.system + conversationMemorySection(compactSummary)
+      const system = opts.ledgerAnalysis
+        ? opts.ledgerAnalysis.system
+          + (finance ? `\n\n${finance.systemPrompt}` : '')
+          + conversationMemorySection(compactSummary)
           + (persistentFinanceMemory ? `\n\n${persistentFinanceMemory}` : '')
           + '\nHistorical conversation and memory can explain the user’s goals, but never treat old figures as current. Query fresh Ledger data for personal financial facts; if no relevant read succeeds, say what remains unknown.'
-        : opts.ledgerAnalysis
-          ? opts.ledgerAnalysis.system + conversationMemorySection(compactSummary)
-            + '\nHistorical conversation and memory can explain the user’s goals, but never treat old figures as current. Query fresh Ledger data for personal financial facts; if no relevant read succeeds, say what remains unknown.'
-          : ordinarySystem
+        : ordinarySystem
       const financeTokens: string[] = []
       const result = await backend.streamRound({
         db: opts.db,
@@ -394,7 +394,9 @@ export async function runChat(opts: RunChatOpts): Promise<{
                 id: financeActivity.length + 1,
                 operation: financeOperation(tc.name === manageMemoryTool.name
                   ? `memory_${String(tc.input?.action ?? '')}`
-                  : tc.input?.kind),
+                  : tc.name === readSkillTool.name
+                    ? `skill_${String(tc.input?.name ?? '').replaceAll('-', '_')}`
+                    : tc.input?.kind),
                 status: 'running',
               }
               financeActivity.push(activity)
