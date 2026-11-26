@@ -42,7 +42,7 @@ import { generateSummary, SummaryPromptLimitError } from './summary.js'
 import { generateTags } from './tags.js'
 import { generateTitle } from './title.js'
 import { ChatError } from './errors.js'
-import { cancelAiThreadCompaction, waitForAiThreadCompaction } from './compaction.js'
+import { cancelAiThreadCompaction } from './compaction.js'
 import { createFinanceMemoryRepository } from './finance-memory.js'
 import { createFinanceCustomSkillRepository } from './finance-custom-skills.js'
 import { getFinanceSkillRegistryState, readFinanceSkill } from './finance-skills.js'
@@ -1333,7 +1333,6 @@ ai.post('/chat', async (c) => {
   }
 
   if (ledgerRequested) {
-    await waitForAiThreadCompaction(db, sessionId, c.req.raw.signal)
     if (c.req.raw.signal.aborted) return c.json({ ok: false, reason: 'aborted' }, 499 as any)
     if (!ledgerAuthIsCurrent(db, ledgerUser.id, ledgerAuthSession)) {
       return c.json({ ok: false, reason: 'ledger-analysis-auth-required' }, 403)

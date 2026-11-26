@@ -1,7 +1,7 @@
 import { Temporal } from '@js-temporal/polyfill'
 import type { Page } from '@playwright/test'
 import { expect, test } from './fixtures/auth'
-import { getTransactions, ledgerDateInput, selectOptionContaining } from './helpers/ledger-live'
+import { ensureLedgerDashboardFixtures, getTransactions, ledgerDateInput, selectOptionContaining } from './helpers/ledger-live'
 
 type LedgerModuleLabelStyle = {
   color: string
@@ -17,6 +17,8 @@ const moduleLabelViewports = [
   { width: 768, height: 1024 },
   { width: 390, height: 844 },
 ]
+
+test.describe.configure({ mode: 'serial' })
 
 async function applyTheme(page: Page, theme: 'light' | 'dark'): Promise<void> {
   if (await page.locator('html').getAttribute('data-theme') === theme) return
@@ -74,7 +76,6 @@ async function readModuleLabelStyle(page: Page, expectedCount: number): Promise<
 }
 
 test('real Ledger onboarding and expense survive dashboard refresh', async ({ page, request }) => {
-  await page.addInitScript(() => localStorage.setItem('nuvyn.theme', 'light'))
   const settingsResponsePromise = page.waitForResponse((response) => {
     const url = new URL(response.url())
     return response.request().method() === 'GET'
@@ -88,8 +89,11 @@ test('real Ledger onboarding and expense survive dashboard refresh', async ({ pa
   expect(settingsResponse.headers()['cache-control']).toBe('no-store')
   expect(await settingsResponse.json()).toBeNull()
   await expect(page.getByTestId('ledger-settings-form')).toBeVisible()
+  await page.setViewportSize(moduleLabelViewports[0]!)
+  await applyTheme(page, 'light')
   const onboardingStyleByTheme = new Map<'light' | 'dark', LedgerModuleLabelStyle>()
   for (const theme of ['light', 'dark'] as const) {
+    await page.setViewportSize(moduleLabelViewports[0]!)
     await applyTheme(page, theme)
     let themeStyle: LedgerModuleLabelStyle | null = null
     for (const viewport of moduleLabelViewports) {
@@ -101,8 +105,8 @@ test('real Ledger onboarding and expense survive dashboard refresh', async ({ pa
     if (!themeStyle) throw new Error(`No onboarding label styles were measured for ${theme}`)
     onboardingStyleByTheme.set(theme, themeStyle)
   }
-  await applyTheme(page, 'light')
   await page.setViewportSize({ width: 1280, height: 900 })
+  await applyTheme(page, 'light')
   await selectOptionContaining(page, '基础货币', 'CNY')
   await page.locator('#ledger-timezone').fill('Asia/Shanghai')
   await page.locator('#ledger-onboarding-title').click()
@@ -254,24 +258,35 @@ test('real Ledger onboarding and expense survive dashboard refresh', async ({ pa
     expect(alignment.titleBeforeSelection, `${width}px title and selector do not overlap`).toBe(true)
     expect(alignment.sameRow, `${width}px title and selector share one row`).toBe(true)
   }
+})
 
+test('Ledger module labels stay consistent across pages, themes, and viewports', async ({ page, request }) => {
+  await ensureLedgerDashboardFixtures(request)
   const moduleViews = [
     { path: '/ledger', pageTestId: 'ledger-dashboard', title: '财务概览' },
     { path: '/ledger/accounts', pageTestId: 'ledger-accounts-page', title: '账户' },
     { path: '/ledger/transactions', pageTestId: 'ledger-transactions-page', title: '交易记录' },
   ]
+
+  await page.setViewportSize(moduleLabelViewports[0]!)
+  await page.goto('/ledger')
+  await expect(page.getByTestId('ledger-dashboard')).toBeVisible()
+
   for (const theme of ['light', 'dark'] as const) {
-    const expectedStyle = onboardingStyleByTheme.get(theme)
-    if (!expectedStyle) throw new Error(`No onboarding label styles were measured for ${theme}`)
-    for (const viewport of moduleLabelViewports) {
-      await page.setViewportSize(viewport)
-      for (const view of moduleViews) {
-        await page.goto(view.path)
-        await applyTheme(page, theme)
-        await expect(page.getByTestId(view.pageTestId)).toBeVisible()
-        await expect(page.locator('h1').first()).toHaveText(view.title)
-        expect(await readModuleLabelStyle(page, 1)).toEqual(expectedStyle)
+    await page.setViewportSize(moduleLabelViewports[0]!)
+    await applyTheme(page, theme)
+    let expectedStyle: LedgerModuleLabelStyle | null = null
+    for (const view of moduleViews) {
+      await page.goto(view.path)
+      await expect(page.getByTestId(view.pageTestId)).toBeVisible()
+      await expect(page.locator('h1').first()).toHaveText(view.title)
+      for (const viewport of moduleLabelViewports) {
+        await page.setViewportSize(viewport)
+        const style = await readModuleLabelStyle(page, 1)
+        if (expectedStyle) expect(style).toEqual(expectedStyle)
+        else expectedStyle = style
       }
     }
+    if (!expectedStyle) throw new Error(`No module label styles were measured for ${theme}`)
   }
 })

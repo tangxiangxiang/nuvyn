@@ -18,6 +18,7 @@ test.beforeEach(async ({ page }, testInfo) => {
     || testInfo.title === 'creates lunar and Gregorian birthdays without guessing the birth year'
     || testInfo.title === 'keeps event calendar context aligned after date edits'
     || testInfo.title === 'Diary selected day Event distance stays on one line across viewport widths'
+    || testInfo.title === 'clears the date highlight on Escape after opening with a pointer'
     ? new Date('2026-11-16T12:00:00+08:00')
     : testInfo.title === 'closes the Diary reading dialog without selecting another date'
       ? new Date(diaryLifeFixtureYear(testInfo), 0, 20, 12)
@@ -1176,23 +1177,29 @@ test('text-only Diary days have a calendar marker and preserve bullet editing in
 test('clears the date highlight on Escape after opening with a pointer', async ({ page }) => {
   await page.goto('/diary')
   await unlockDiary(page)
-  const cell = page.locator('.diary-life-calendar [data-date$="-01-27"]')
+  const cell = page.locator('.diary-life-calendar [data-date="2026-11-15"]')
   await openEmptyDiaryDay(page, cell)
   await page.mouse.move(0, 0)
   await page.keyboard.press('Escape')
   await expect(page.getByTestId('diary-day-dialog')).toHaveCount(0)
   await expect(cell).toHaveAttribute('aria-pressed', 'false')
-  await expect(cell.locator('.life-date-badge')).toHaveCSS('outline-style', 'none')
+  const badge = cell.locator('.life-date-badge')
+  const focusRing = () => badge.evaluate(element => getComputedStyle(element, '::before').outlineStyle)
+  await expect.poll(focusRing).toBe('none')
 
+  const lunarTooltip = page.locator(`#diary-lunar-tooltip-${await cell.getAttribute('data-date')}`)
   await openEmptyDiaryDay(page, cell, async () => {
+    await page.keyboard.press('Tab')
     await cell.focus()
+    await expect.poll(focusRing).toBe('solid')
+    await expect(lunarTooltip).toBeVisible()
     await cell.press('Enter')
   })
   await page.keyboard.press('Escape')
   await expect(page.getByTestId('diary-day-dialog')).toHaveCount(0)
   await expect(cell).toHaveAttribute('aria-pressed', 'false')
   await expect(cell).toBeFocused()
-  await expect(cell.locator('.life-date-badge')).toHaveCSS('outline-style', 'solid')
+  await expect.poll(focusRing).toBe('solid')
 })
 
 test.describe('Diary local timezone boundary', () => {
@@ -1712,12 +1719,26 @@ for (const viewport of [
     const calendarBox = (await calendar.boundingBox())!
     const titleBox = (await title.boundingBox())!
     const initialMonth = `${diaryLifeFixtureYear(testInfo)}-01`
-    const todayBackground = await today.locator('.life-date-badge').evaluate(node => getComputedStyle(node).backgroundColor)
+    const todayCellBackground = await today.evaluate(node => getComputedStyle(node.closest('.n-calendar-cell')!).backgroundColor)
+    const ordinaryCell = calendar.locator('.n-calendar-cell:not(.n-calendar-cell--other-month) .life-date:not(.today)').first()
+    const ordinaryCellBackground = await ordinaryCell.evaluate(node => getComputedStyle(node.closest('.n-calendar-cell')!).backgroundColor)
+    const badgeBackground = await today.locator('.life-date-badge').evaluate(node => getComputedStyle(node).backgroundColor)
+    const badgeHighlightBackground = await today.locator('.life-date-badge').evaluate(node => getComputedStyle(node, '::before').backgroundColor)
+    const todayNumberStyle = await number.evaluate(node => {
+      const style = getComputedStyle(node)
+      return { color: style.color, fontWeight: style.fontWeight }
+    })
+    const ordinaryNumberColor = await ordinaryCell.locator('.life-date-number').evaluate(node => getComputedStyle(node).color)
 
     await expect(title).toHaveAttribute('data-month', initialMonth)
     await expect(title).toHaveText(diaryMonthLabel(initialMonth, english ? 'en' : 'zh'))
     expect(calendarBox.width).toBeLessThanOrEqual(800)
     expect(Math.abs(center(calendarBox) - viewport.width / 2)).toBeLessThan(1)
+    expect(todayCellBackground).not.toBe('rgba(0, 0, 0, 0)')
+    expect(todayCellBackground).not.toBe(ordinaryCellBackground)
+    expect(badgeBackground).toBe('rgba(0, 0, 0, 0)')
+    expect(badgeHighlightBackground).toBe('rgba(0, 0, 0, 0)')
+    expect(todayNumberStyle).toEqual({ color: ordinaryNumberColor, fontWeight: '400' })
     await expect(arrows).toHaveCount(2)
     expect(Math.abs(center(calendarBox) - center(titleBox))).toBeLessThan(1)
     await calendar.getByTestId('diary-calendar-month-picker').click()
@@ -1732,7 +1753,6 @@ for (const viewport of [
     await expect(grid).toHaveCSS('border-top-width', '0px')
     await expect(grid.locator('.n-calendar-cell').first()).toHaveCSS('border-bottom-width', '0px')
     expect(await number.evaluate(node => getComputedStyle(node, '::after').content)).toBe('none')
-    expect(await today.locator('.life-date-badge').evaluate(node => getComputedStyle(node).backgroundColor)).not.toBe('rgba(0, 0, 0, 0)')
 
     const labels = calendar.locator('.life-weekdays span')
     const dates = calendar.locator('.life-date')
@@ -1772,12 +1792,18 @@ for (const viewport of [
 
     await openEmptyDiaryDay(page, today)
     await expect(today).toHaveAttribute('aria-pressed', 'true')
-    await expect.poll(() => today.locator('.life-date-badge').evaluate(node => getComputedStyle(node).backgroundColor))
-      .not.toBe(todayBackground)
+    await expect(today).toHaveClass(/\bselected\b/)
+    await expect.poll(() => today.evaluate(node => getComputedStyle(node.closest('.n-calendar-cell')!).backgroundColor))
+      .toBe(todayCellBackground)
+    await expect.poll(() => today.locator('.life-date-badge').evaluate(node => getComputedStyle(node, '::before').backgroundColor))
+      .toBe('rgba(0, 0, 0, 0)')
     await expect(page.getByTestId('diary-edit-entry')).toHaveCount(0)
     await page.getByTestId('diary-cancel-edit').click()
     await expect(page.getByTestId('diary-day-dialog')).toHaveCount(0)
     await expect(today).toHaveAttribute('aria-pressed', 'false')
+    await expect(today).not.toHaveClass(/\bselected\b/)
+    await expect.poll(() => today.evaluate(node => getComputedStyle(node.closest('.n-calendar-cell')!).backgroundColor))
+      .toBe(todayCellBackground)
     const numberBefore = await dateNumberOffset(today)
     await page.getByTestId('diary-view-mode-events').click()
     await expect(today).toHaveAttribute('aria-pressed', 'false')

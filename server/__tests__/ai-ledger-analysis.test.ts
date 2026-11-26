@@ -720,25 +720,58 @@ describe('fixed Ledger AI session and commands', () => {
     expect(await (await aiRequest('/ledger-session', 'POST')).json()).toMatchObject({ session: { id: sessionId }, messages: [] })
   })
 
-  it('lets the next Finance request wait for the active summary before entering the session lock', async () => {
-    for (let turn = 1; turn <= 7; turn++) await send(`Ledger topic ${turn}`)
+  it('answers from the committed Finance snapshot while a newer summary is still pending', async () => {
+    generateText.mockResolvedValueOnce({ text: 'Committed Finance summary', finishReason: 'stop' })
+    for (let turn = 1; turn <= 8; turn++) await send(`Ledger topic ${turn}`)
+    await vi.waitFor(() => expect(getAiThreadCompactionState(db, sessionId)).toMatchObject({
+      compactSummary: 'Committed Finance summary',
+      compactedThroughMessageId: expect.any(Number),
+    }))
+    const committedState = getAiThreadCompactionState(db, sessionId)!
+    expect(committedState.compactedThroughMessageId).toBeGreaterThan(0)
+
+    await send('Ledger topic 9')
     let finishSummary!: (value: { text: string; finishReason: 'stop' }) => void
     generateText.mockImplementationOnce(() => new Promise((resolve) => { finishSummary = resolve }))
-    await send('Ledger topic 8')
+    await send('Ledger topic 10')
     await vi.waitFor(() => expect(finishSummary).toBeTypeOf('function'))
+    expect(getAiThreadCompactionState(db, sessionId)).toEqual(committedState)
 
     let nextRequestSettled = false
-    const nextRequest = post('', { sessionId, content: 'Ledger topic 9', ledgerAnalysis: true })
-      .then((response) => { nextRequestSettled = true; return response })
-    await new Promise<void>((resolve) => setImmediate(resolve))
-    expect(nextRequestSettled).toBe(false)
+    const nextRequest = (async () => {
+      const response = await post('', { sessionId, content: 'Ledger topic 11', ledgerAnalysis: true })
+      expect(response.status).toBe(200)
+      const events = await response.text()
+      nextRequestSettled = true
+      return events
+    })()
 
-    finishSummary({ text: 'Recent Finance working memory', finishReason: 'stop' })
-    const response = await nextRequest
-    expect(response.status).toBe(200)
-    expect(await response.text()).toContain('event: done')
-    expect(streamRound.mock.calls.at(-2)![0].system).toContain('Recent Finance working memory')
-    expect(streamRound.mock.calls.at(-2)![0].messages).not.toContainEqual(expect.objectContaining({ content: 'Ledger topic 1' }))
+    try {
+      await vi.waitFor(() => expect(nextRequestSettled).toBe(true), { timeout: 1_000 })
+      expect(await nextRequest).toContain('event: done')
+      const pendingCompactionCall = streamRound.mock.calls.at(-1)![0]
+      expect(pendingCompactionCall.system).toContain('Committed Finance summary')
+      expect(pendingCompactionCall.system).not.toContain('Next committed Finance summary')
+      for (let turn = 3; turn <= 10; turn++) {
+        expect(pendingCompactionCall.messages).toContainEqual(expect.objectContaining({ content: `Ledger topic ${turn}` }))
+      }
+      expect(pendingCompactionCall.messages).not.toContainEqual(expect.objectContaining({ content: 'Ledger topic 1' }))
+      expect(pendingCompactionCall.messages).not.toContainEqual(expect.objectContaining({ content: 'Ledger topic 2' }))
+    } finally {
+      finishSummary({ text: 'Next committed Finance summary', finishReason: 'stop' })
+      await nextRequest.catch(() => {})
+    }
+
+    await vi.waitFor(() => expect(getAiThreadCompactionState(db, sessionId)?.compactSummary)
+      .toBe('Next committed Finance summary'))
+    const updatedState = getAiThreadCompactionState(db, sessionId)!
+    expect(updatedState.compactedThroughMessageId).toBeGreaterThan(committedState.compactedThroughMessageId)
+
+    await send('Ledger topic 12')
+    const nextCommittedCall = streamRound.mock.calls.at(-1)![0]
+    expect(nextCommittedCall.system).toContain('Next committed Finance summary')
+    expect(nextCommittedCall.messages).not.toContainEqual(expect.objectContaining({ content: 'Ledger topic 3' }))
+    expect(nextCommittedCall.messages).toContainEqual(expect.objectContaining({ content: 'Ledger topic 11' }))
   })
 
   it('serializes clear against an active stream without exposing a manual compact command', async () => {

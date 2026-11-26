@@ -44,31 +44,7 @@ export function cancelAiThreadCompaction(db: DatabaseT, sessionId: number): void
   failedLedgerCompactionsByDb.get(db)?.delete(sessionId)
 }
 
-/** Wait for the current job without starting a new one or holding a session operation lock. */
-export function waitForAiThreadCompaction(
-  db: DatabaseT,
-  sessionId: number,
-  signal?: AbortSignal,
-): Promise<void> {
-  const task = inFlightByDb.get(db)?.get(sessionId)
-  if (!task || signal?.aborted || task.controller.signal.aborted) return Promise.resolve()
-
-  return new Promise((resolve) => {
-    let settled = false
-    const finish = () => {
-      if (settled) return
-      settled = true
-      task.controller.signal.removeEventListener('abort', finish)
-      signal?.removeEventListener('abort', finish)
-      resolve()
-    }
-    task.promise.then(finish, finish)
-    task.controller.signal.addEventListener('abort', finish, { once: true })
-    signal?.addEventListener('abort', finish, { once: true })
-    if (task.controller.signal.aborted || signal?.aborted) finish()
-  })
-}
-
+/** Deduplicate active work per thread and guard checkpoint commits by generation. */
 async function runCompactionOnce(opts: CompactionOptions, ledger: boolean): Promise<boolean> {
   let bySession = inFlightByDb.get(opts.db)
   if (!bySession) {

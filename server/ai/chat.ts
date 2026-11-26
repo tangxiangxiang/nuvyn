@@ -54,6 +54,7 @@ import * as messages from './messages.js'
 import * as sessions from './sessions.js'
 
 const FINANCE_MAX_OUTPUT_TOKENS = 8192
+const FINANCE_MAX_HISTORY_MESSAGES = 18
 
 // The Nuvyn context prompt (file layout, frontmatter schema, writing
 // conventions) lives in ./prompt.md so it's easy to edit as a
@@ -257,15 +258,32 @@ export async function runChat(opts: RunChatOpts): Promise<{
   } catch {
     // A summary failure must never discard or corrupt the raw transcript.
   }
-  const compacted = sessions.getAiThreadCompactionState(opts.db, opts.sessionId)
+  const readConversationSnapshot = () => {
+    const compacted = sessions.getAiThreadCompactionState(opts.db, opts.sessionId)
+    const history = opts.ledgerAnalysis
+      ? messages.listRecentMessagesAfter(
+        opts.db,
+        opts.sessionId,
+        compacted?.compactedThroughMessageId ?? 0,
+        FINANCE_MAX_HISTORY_MESSAGES,
+      ) ?? []
+      : messages.listMessagesAfter(
+        opts.db,
+        opts.sessionId,
+        compacted?.compactedThroughMessageId ?? 0,
+      ) ?? []
+    return { compacted, history }
+  }
+  // The summary and checkpoint share one row, and the bounded history is
+  // read in the same short snapshot so a concurrent compaction cannot pair
+  // a new checkpoint with an old summary (or vice versa). No provider call
+  // runs inside this transaction.
+  const { compacted, history } = opts.ledgerAnalysis
+    ? opts.db.transaction(readConversationSnapshot).deferred()
+    : readConversationSnapshot()
   const compactSummary = compacted?.compactSummary ?? ''
   // Read the uncompacted window BEFORE persisting this turn's new user
   // message so the convo builder doesn't de-dup the just-persisted row.
-  const history = messages.listMessagesAfter(
-    opts.db,
-    opts.sessionId,
-    compacted?.compactedThroughMessageId ?? 0,
-  ) ?? []
 
   // Persist the user message FIRST so a crash mid-stream only loses
   // the in-flight assistant text. See spec §3.5.
