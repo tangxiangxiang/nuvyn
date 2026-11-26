@@ -113,6 +113,8 @@ describe('Ledger account management list', () => {
 
     await flushPromises()
 
+    expect(wrapper.get('.ledger-eyebrow').text()).toBe('LEDGER')
+    expect(wrapper.get('h1').text()).toBe('账户')
     expect(wrapper.get('[data-testid="ledger-active-account-list"]').text()).toContain('bank-1')
     expect(wrapper.get('[data-testid="ledger-active-account-list"]').text()).toContain('credit-card-1')
     expect(wrapper.get('[data-testid="ledger-account-row-bank-1"] .ledger-account-icon').classes()).toContain('is-asset')

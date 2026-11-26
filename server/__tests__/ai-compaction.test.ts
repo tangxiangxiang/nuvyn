@@ -5,12 +5,18 @@ import * as messages from '../ai/messages'
 import * as sessions from '../ai/sessions'
 
 const { generateTextMock } = vi.hoisted(() => ({
-  generateTextMock: vi.fn(async () => ({ text: 'Durable memory', finishReason: 'stop' as const })),
+  generateTextMock: vi.fn(async (_options: {
+    system: string
+    user: string
+    model?: string
+    runtimeConfig?: unknown
+    signal?: AbortSignal
+  }) => ({ text: 'Durable memory', finishReason: 'stop' as const })),
 }))
 
 vi.mock('../ai/llm.js', () => ({ generateText: generateTextMock }))
 
-import { compactAiThreadIfNeeded } from '../ai/compaction'
+import { compactAiThreadIfNeeded, compactLedgerAiThreadIfNeeded } from '../ai/compaction'
 
 describe('AI thread compaction', () => {
   let db: Database.Database
@@ -72,5 +78,84 @@ describe('AI thread compaction', () => {
 
     expect(generateTextMock).not.toHaveBeenCalled()
     expect(messages.listMessages(db, session.id)).toHaveLength(40)
+  })
+
+  it('automatically archives older Ledger turns with the triggering model and keeps six recent turns', async () => {
+    const thread = sessions.ensureLedgerAiThread(db, 41)
+    for (let index = 1; index <= 8; index++) {
+      messages.appendMessage(db, thread.session.id, 'user', `Finance topic ${index}`, { privateLedgerAnalysis: true })
+      messages.appendMessage(db, thread.session.id, 'assistant', JSON.stringify({
+        v: 2,
+        text: `Finance answer ${index}`,
+        rounds: [],
+        toolCalls: [],
+        privateLedgerAnalysis: true,
+      }))
+    }
+    const runtimeConfig = { provider: 'openai' as const, source: 'db' as const, model: 'selected-model', apiKey: 'test-key' }
+
+    await compactLedgerAiThreadIfNeeded({
+      db,
+      sessionId: thread.session.id,
+      model: 'selected-model',
+      runtimeConfig,
+    })
+
+    expect(generateTextMock).toHaveBeenCalledOnce()
+    expect(generateTextMock.mock.calls[0]![0].model).toBe('selected-model')
+    expect(generateTextMock.mock.calls[0]![0].runtimeConfig).toBe(runtimeConfig)
+    expect(generateTextMock.mock.calls[0]![0].user).toContain('Finance topic 1')
+    expect(generateTextMock.mock.calls[0]![0].user).toContain('Finance topic 2')
+    expect(generateTextMock.mock.calls[0]![0].user).not.toContain('Finance topic 3')
+
+    const state = sessions.getAiThreadCompactionState(db, thread.session.id)
+    expect(state?.compactedThroughMessageId).toBe(4)
+    expect(messages.listMessages(db, thread.session.id)).toHaveLength(16)
+    expect(messages.listMessagesAfter(db, thread.session.id, state?.compactedThroughMessageId ?? 0)).toHaveLength(12)
+  })
+
+  it('deduplicates simultaneous automatic Ledger compaction requests', async () => {
+    const thread = sessions.ensureLedgerAiThread(db, 42)
+    for (let index = 1; index <= 8; index++) {
+      messages.appendMessage(db, thread.session.id, 'user', `Finance topic ${index}`, { privateLedgerAnalysis: true })
+      messages.appendMessage(db, thread.session.id, 'assistant', JSON.stringify({
+        v: 2,
+        text: `Finance answer ${index}`,
+        rounds: [],
+        toolCalls: [],
+        privateLedgerAnalysis: true,
+      }))
+    }
+    let finish!: (value: { text: string; finishReason: 'stop' }) => void
+    generateTextMock.mockImplementationOnce(() => new Promise((resolve) => { finish = resolve }))
+    const options = { db, sessionId: thread.session.id, model: 'test-model' }
+    const first = compactLedgerAiThreadIfNeeded(options)
+    const second = compactLedgerAiThreadIfNeeded(options)
+    await vi.waitFor(() => expect(finish).toBeTypeOf('function'))
+    finish({ text: 'One durable memory', finishReason: 'stop' })
+    await expect(Promise.all([first, second])).resolves.toEqual([true, true])
+    expect(generateTextMock).toHaveBeenCalledOnce()
+  })
+
+  it('uses the effective text threshold before the eight-turn window is full', async () => {
+    const thread = sessions.ensureLedgerAiThread(db, 43)
+    for (let index = 1; index <= 7; index++) {
+      const long = index > 2 ? 'x'.repeat(3_500) : 'short'
+      messages.appendMessage(db, thread.session.id, 'user', `Finance topic ${index} ${long}`, { privateLedgerAnalysis: true })
+      messages.appendMessage(db, thread.session.id, 'assistant', JSON.stringify({
+        v: 2,
+        text: `Finance answer ${index} ${long}`,
+        rounds: [],
+        toolCalls: [],
+        privateLedgerAnalysis: true,
+      }))
+    }
+
+    await compactLedgerAiThreadIfNeeded({ db, sessionId: thread.session.id, model: 'test-model' })
+
+    expect(generateTextMock).toHaveBeenCalledOnce()
+    expect(generateTextMock.mock.calls[0]![0].user).toContain('Finance topic 1')
+    expect(generateTextMock.mock.calls[0]![0].user).not.toContain('Finance topic 2')
+    expect(sessions.getAiThreadCompactionState(db, thread.session.id)?.compactedThroughMessageId).toBe(2)
   })
 })

@@ -51,6 +51,26 @@ export interface AiThreadCompactionState {
   compactedThroughMessageId: number
 }
 
+const compactionGenerations = new WeakMap<DatabaseT, Map<number, number>>()
+
+function compactionGenerationMap(db: DatabaseT): Map<number, number> {
+  let generations = compactionGenerations.get(db)
+  if (!generations) {
+    generations = new Map()
+    compactionGenerations.set(db, generations)
+  }
+  return generations
+}
+
+export function getAiThreadCompactionGeneration(db: DatabaseT, sessionId: number): number {
+  return compactionGenerationMap(db).get(sessionId) ?? 0
+}
+
+function invalidateAiThreadCompaction(db: DatabaseT, sessionId: number): void {
+  const generations = compactionGenerationMap(db)
+  generations.set(sessionId, (generations.get(sessionId) ?? 0) + 1)
+}
+
 function rowToAiThread(r: any): AiThreadRecord {
   return {
     session: rowToSession(r),
@@ -106,6 +126,7 @@ export function clearLedgerAiThread(db: DatabaseT, ownerId: number): void {
   db.transaction(() => {
     const thread = getLedgerAiThread(db, ownerId)
     if (!thread) return
+    invalidateAiThreadCompaction(db, thread.session.id)
     db.prepare('DELETE FROM messages WHERE session_id = ?').run(thread.session.id)
     db.prepare(`
       UPDATE sessions SET compact_summary = '', compacted_through_message_id = 0, updated_at = ?
@@ -202,7 +223,9 @@ export function saveAiThreadCompaction(
   expectedThroughMessageId: number,
   throughMessageId: number,
   compactSummary: string,
+  expectedGeneration: number,
 ): boolean {
+  if (getAiThreadCompactionGeneration(db, sessionId) !== expectedGeneration) return false
   const result = db.prepare(`
     UPDATE sessions
     SET compact_summary = ?, compacted_through_message_id = ?

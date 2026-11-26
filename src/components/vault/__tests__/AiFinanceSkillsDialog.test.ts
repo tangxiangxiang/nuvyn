@@ -135,6 +135,7 @@ describe('AiFinanceSkillsDialog', () => {
       global: { stubs: { NModal: ModalStub, NIcon: true, teleport: true } },
     })
     await flushPromises()
+    expect(wrapper.text()).not.toContain('Custom skills')
     await wrapper.get('[aria-label="Add skill"]').trigger('click')
     await wrapper.get('input').setValue('Unfinished procedure')
     await wrapper.findAll('input')[1]!.setValue('This draft must be discarded.')
@@ -142,7 +143,8 @@ describe('AiFinanceSkillsDialog', () => {
     await wrapper.findAll('.ai-finance-skill-actions button').find(button => button.text() === 'Cancel')!.trigger('click')
 
     expect(wrapper.text()).toContain('Built-in skills')
-    expect(wrapper.text()).toContain('Custom skills')
+    expect(wrapper.text()).not.toContain('Custom skills')
+    expect(wrapper.find('[aria-label="Add skill"]').exists()).toBe(true)
     expect(wrapper.text()).not.toContain('Unfinished procedure')
     expect(createFinanceSkill).not.toHaveBeenCalled()
 

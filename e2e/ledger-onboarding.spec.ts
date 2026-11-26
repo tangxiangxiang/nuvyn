@@ -1,8 +1,80 @@
 import { Temporal } from '@js-temporal/polyfill'
+import type { Page } from '@playwright/test'
 import { expect, test } from './fixtures/auth'
 import { getTransactions, ledgerDateInput, selectOptionContaining } from './helpers/ledger-live'
 
+type LedgerModuleLabelStyle = {
+  color: string
+  fontSize: string
+  fontWeight: string
+  letterSpacing: string
+  marginBottom: string
+  textTransform: string
+}
+
+const moduleLabelViewports = [
+  { width: 1280, height: 900 },
+  { width: 768, height: 1024 },
+  { width: 390, height: 844 },
+]
+
+async function applyTheme(page: Page, theme: 'light' | 'dark'): Promise<void> {
+  if (await page.locator('html').getAttribute('data-theme') === theme) return
+  await page.locator('.theme-toggle').click()
+  await expect(page.locator('html')).toHaveAttribute('data-theme', theme)
+}
+
+async function readModuleLabelStyle(page: Page, expectedCount: number): Promise<LedgerModuleLabelStyle> {
+  const labels = page.getByTestId('ledger-module-label')
+  await expect(labels).toHaveCount(expectedCount)
+  await expect(labels.first()).toBeVisible()
+
+  const styles = await labels.evaluateAll((elements) => elements.map((element) => {
+    const style = getComputedStyle(element)
+    return {
+      text: element.textContent?.trim() ?? '',
+      color: style.color,
+      fontSize: style.fontSize,
+      fontWeight: style.fontWeight,
+      letterSpacing: style.letterSpacing,
+      marginBottom: style.marginBottom,
+      textTransform: style.textTransform,
+    }
+  }))
+  const [first, ...remaining] = styles
+  if (!first) throw new Error('Ledger module label is missing')
+  expect(first.text).toBe('LEDGER')
+  expect(first).toMatchObject({
+    fontSize: '11.2px',
+    fontWeight: '750',
+    letterSpacing: '1.12px',
+    marginBottom: '7px',
+    textTransform: 'uppercase',
+  })
+  for (const style of remaining) expect(style).toEqual(first)
+
+  const colorMatchesAccent = await labels.evaluateAll((elements) => {
+    const probe = document.createElement('span')
+    probe.style.color = 'var(--accent)'
+    document.body.append(probe)
+    const accent = getComputedStyle(probe).color
+    probe.remove()
+    return elements.every((element) => getComputedStyle(element).color === accent)
+  })
+  expect(colorMatchesAccent).toBe(true)
+
+  return {
+    color: first.color,
+    fontSize: first.fontSize,
+    fontWeight: first.fontWeight,
+    letterSpacing: first.letterSpacing,
+    marginBottom: first.marginBottom,
+    textTransform: first.textTransform,
+  }
+}
+
 test('real Ledger onboarding and expense survive dashboard refresh', async ({ page, request }) => {
+  await page.addInitScript(() => localStorage.setItem('nuvyn.theme', 'light'))
   const settingsResponsePromise = page.waitForResponse((response) => {
     const url = new URL(response.url())
     return response.request().method() === 'GET'
@@ -16,8 +88,24 @@ test('real Ledger onboarding and expense survive dashboard refresh', async ({ pa
   expect(settingsResponse.headers()['cache-control']).toBe('no-store')
   expect(await settingsResponse.json()).toBeNull()
   await expect(page.getByTestId('ledger-settings-form')).toBeVisible()
+  const onboardingStyleByTheme = new Map<'light' | 'dark', LedgerModuleLabelStyle>()
+  for (const theme of ['light', 'dark'] as const) {
+    await applyTheme(page, theme)
+    let themeStyle: LedgerModuleLabelStyle | null = null
+    for (const viewport of moduleLabelViewports) {
+      await page.setViewportSize(viewport)
+      const style = await readModuleLabelStyle(page, 2)
+      if (themeStyle) expect(style).toEqual(themeStyle)
+      else themeStyle = style
+    }
+    if (!themeStyle) throw new Error(`No onboarding label styles were measured for ${theme}`)
+    onboardingStyleByTheme.set(theme, themeStyle)
+  }
+  await applyTheme(page, 'light')
+  await page.setViewportSize({ width: 1280, height: 900 })
   await selectOptionContaining(page, '基础货币', 'CNY')
   await page.locator('#ledger-timezone').fill('Asia/Shanghai')
+  await page.locator('#ledger-onboarding-title').click()
   await page.getByRole('button', { name: '保存设置并继续' }).click()
 
   await expect(page.getByTestId('ledger-account-form')).toBeVisible()
@@ -28,6 +116,7 @@ test('real Ledger onboarding and expense survive dashboard refresh', async ({ pa
   await page.getByRole('button', { name: '继续' }).click()
 
   await expect(page.getByTestId('ledger-dashboard')).toBeVisible()
+  expect(await readModuleLabelStyle(page, 1)).toEqual(onboardingStyleByTheme.get('light'))
   await expect(page.locator('.ledger-dashboard-actions')).toHaveCount(1)
   await expect(page.getByTestId('ledger-record-button')).toHaveCount(1)
   await expect(page.locator('.ledger-metric-card')).toHaveCount(3)
@@ -164,5 +253,25 @@ test('real Ledger onboarding and expense survive dashboard refresh', async ({ pa
       .toBeLessThanOrEqual(1)
     expect(alignment.titleBeforeSelection, `${width}px title and selector do not overlap`).toBe(true)
     expect(alignment.sameRow, `${width}px title and selector share one row`).toBe(true)
+  }
+
+  const moduleViews = [
+    { path: '/ledger', pageTestId: 'ledger-dashboard', title: '财务概览' },
+    { path: '/ledger/accounts', pageTestId: 'ledger-accounts-page', title: '账户' },
+    { path: '/ledger/transactions', pageTestId: 'ledger-transactions-page', title: '交易记录' },
+  ]
+  for (const theme of ['light', 'dark'] as const) {
+    const expectedStyle = onboardingStyleByTheme.get(theme)
+    if (!expectedStyle) throw new Error(`No onboarding label styles were measured for ${theme}`)
+    for (const viewport of moduleLabelViewports) {
+      await page.setViewportSize(viewport)
+      for (const view of moduleViews) {
+        await page.goto(view.path)
+        await applyTheme(page, theme)
+        await expect(page.getByTestId(view.pageTestId)).toBeVisible()
+        await expect(page.locator('h1').first()).toHaveText(view.title)
+        expect(await readModuleLabelStyle(page, 1)).toEqual(expectedStyle)
+      }
+    }
   }
 })

@@ -2,6 +2,7 @@
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { NButton, NCard, NEmpty, NList, NListItem, NModal, NNumberAnimation, NResult, NSelect, NSpin } from 'naive-ui'
 import LedgerFirstAccountForm from '../components/ledger/LedgerFirstAccountForm.vue'
+import LedgerModuleEyebrow from '../components/ledger/LedgerModuleEyebrow.vue'
 import PagePullRefreshIndicator from '../components/PagePullRefreshIndicator.vue'
 import { usePagePullRefresh } from '../composables/usePagePullRefresh'
 import LedgerAnimatedMoney from '../components/ledger/LedgerAnimatedMoney.vue'
@@ -10,7 +11,6 @@ import LedgerAccountIcon from '../components/ledger/LedgerAccountIcon.vue'
 import { ledgerAccountTypeOptionsForNature } from '../features/ledger/accountPresentation'
 import { ledgerWorkspaceReadErrorMessage } from '../features/ledger/ledgerErrors'
 import { useLedgerStore } from '../features/ledger/ledgerStore'
-import { workspaceDisplayNames } from '../lib/workspace'
 
 const store = useLedgerStore()
 const createOpen = ref(false)
@@ -100,7 +100,7 @@ function onAccountSaved(): void {
     />
     <header class="ledger-page-header">
       <div>
-        <p class="ledger-eyebrow">{{ workspaceDisplayNames.ledger }}</p>
+        <LedgerModuleEyebrow />
         <h1>账户</h1>
         <p>查看余额、维护账户，或恢复已归档账户。</p>
       </div>
@@ -228,7 +228,6 @@ function onAccountSaved(): void {
   box-sizing: border-box;
 }
 .ledger-page-header { display: flex; align-items: flex-end; justify-content: space-between; gap: 24px; margin-bottom: 28px; }
-.ledger-eyebrow { margin: 0 0 7px; color: var(--accent); font-size: .7rem; font-weight: 750; letter-spacing: .1em; text-transform: uppercase; }
 .ledger-page-header h1 { margin: 0; color: var(--text-h); font-size: clamp(1.85rem, 3vw, 2.35rem); font-weight: 720; letter-spacing: -.035em; line-height: 1.16; }
 .ledger-page-header p:not(.ledger-eyebrow) { margin: 8px 0 0; color: var(--text-muted); font-size: .78rem; }
 .ledger-page-actions { display: flex; align-items: center; flex-wrap: wrap; gap: 9px; }

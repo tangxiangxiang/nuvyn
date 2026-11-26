@@ -6726,6 +6726,15 @@ body:has(.ledger-detail-sheet-card) .n-modal-mask {
   background: var(--vs-accent-bg);
   color: var(--vs-accent);
 }
+.ai-panel .ai-prompt-menu.ai-command-menu button {
+  box-sizing: border-box;
+  display: flex;
+  align-items: center;
+  height: 36px;
+  min-height: 36px;
+  padding: 0 10px;
+  line-height: 1;
+}
 
 .ai-panel .ai-composer-card {
   display: flex;
@@ -7050,8 +7059,6 @@ body:has(.ledger-detail-sheet-card) .n-modal-mask {
   to { opacity: 0; }
 }
 
-.ai-command-name { display: block; font-weight: 600; }
-.ai-command-description { display: block; margin-top: 3px; color: var(--vs-text-2); font-size: .75rem; }
 @media (max-width: 640px) {
   .ai-panel .ai-input { font-size: 1rem; }
   .ai-panel .ai-header-btn,

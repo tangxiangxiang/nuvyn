@@ -340,6 +340,13 @@ describe('Ledger live transaction history workspace', () => {
     await flushPromises()
   })
 
+  it('uses the fixed Ledger module label while keeping the page title localized', async () => {
+    const wrapper = await mountView()
+
+    expect(wrapper.get('.ledger-eyebrow').text()).toBe('LEDGER')
+    expect(wrapper.get('h1').text()).toBe('交易记录')
+  })
+
   it.each([api.getLedgerSettings, api.listLedgerAccounts, api.listLedgerCategories])('shows a recoverable workspace error and can retry', async (read) => {
     read.mockRejectedValueOnce(new LedgerApiError('offline', 503, 'ledger-write-busy'))
     const wrapper = await mountView()

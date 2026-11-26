@@ -19,6 +19,7 @@ import { useLedgerStore } from '../../features/ledger/ledgerStore'
 import LedgerCashflowTrend from './LedgerCashflowTrend.vue'
 import LedgerDatePicker from './LedgerDatePicker.vue'
 import LedgerAnimatedMoney from './LedgerAnimatedMoney.vue'
+import LedgerModuleEyebrow from './LedgerModuleEyebrow.vue'
 import LedgerAccountIcon from './LedgerAccountIcon.vue'
 
 type LedgerTransactionNavigationFilters = {
@@ -597,7 +598,7 @@ function animatedMoneyParts(minor: number, currency: string, key: MetricKey): { 
   <section class="ledger-dashboard" data-testid="ledger-dashboard" :aria-busy="refreshing ? 'true' : undefined">
     <header class="ledger-dashboard-header">
       <div>
-        <p class="ledger-eyebrow">LEDGER</p>
+        <LedgerModuleEyebrow />
         <h1>财务概览</h1>
         <p v-if="store.settings.value">{{ store.settings.value.baseCurrency }} · {{ store.settings.value.timezone }}</p>
       </div>
@@ -1002,15 +1003,6 @@ function animatedMoneyParts(minor: number, currency: string, key: MetricKey): { 
   align-items: end;
   gap: 28px;
   margin-bottom: 28px;
-}
-
-.ledger-eyebrow {
-  margin: 0 0 7px;
-  color: var(--accent);
-  font-size: .7rem;
-  font-weight: 750;
-  letter-spacing: .1em;
-  text-transform: uppercase;
 }
 
 .ledger-dashboard-header h1 {

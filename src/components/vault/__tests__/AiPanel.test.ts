@@ -6,6 +6,7 @@ import { AppShellContextKey, type NoteAiContextBridge } from '../../../composabl
 import type { AiLiveContextCapture, AiDocumentContext, AiLiveContextSnapshot } from '../../../composables/vault/aiLiveContext'
 import { useAiHistory, useLedgerAiHistory } from '../../../composables/vault/useAiHistory'
 import { useI18n } from '../../../composables/useI18n'
+import { useToast } from '../../../composables/useToast'
 import AiPanel from '../AiPanel.vue'
 import AiChatMessages from '../AiChatMessages.vue'
 import AiComposer from '../AiComposer.vue'
@@ -212,45 +213,42 @@ describe('global AI panel', () => {
     expect(wrapper.find('[data-testid="global-ai-close"]').exists()).toBe(true)
   })
 
-  it('executes only the local commands and keeps existing messages until clear succeeds', async () => {
+  it('keeps compact internal and protects Finance messages until clear succeeds', async () => {
     const conversation = [{ id: 2, sessionId: 27, role: 'assistant' as const, content: 'Private answer', createdAt: 1 }]
     financeHistory.messages.value = conversation
+    const toast = useToast()
+    for (const item of toast.toasts.value) toast.dismiss(item.id)
     const command = vi.mocked(runLedgerAiCommand)
     const { wrapper } = mountPanel(undefined, { workspaceKind: 'ledger' })
     await typeAndSend(wrapper, '/missing')
-    expect(wrapper.text()).toContain('Unknown command')
+    expect(toast.toasts.value.at(-1)?.message).toBe('Unknown command. Use /clear, /memory, or /skills.')
     expect(financeHistory.sendAndStream).not.toHaveBeenCalled()
     expect(command).not.toHaveBeenCalled()
 
-    let finish!: (value: { outcome: 'compacted' }) => void
-    command.mockImplementationOnce(() => new Promise(resolve => { finish = resolve }))
     await typeAndSend(wrapper, '  /compact  ')
-    expect(wrapper.text()).toContain('Compacting conversation')
-    await typeAndSend(wrapper, '/compact')
-    expect(command).toHaveBeenCalledOnce()
-    expect(command.mock.calls[0]?.[0]).toBe('compact')
-    expect(command.mock.calls[0]?.[2]).toBe('profile-default')
-    finish({ outcome: 'compacted' })
-    await nextTick()
-    await nextTick()
-    expect(wrapper.text()).toContain('Conversation compacted')
+    expect(toast.toasts.value.at(-1)?.message).toBe('Unknown command. Use /clear, /memory, or /skills.')
+    expect(toast.toasts.value).toHaveLength(2)
+    expect(command).not.toHaveBeenCalled()
+    expect(financeHistory.sendAndStream).not.toHaveBeenCalled()
     expect(financeHistory.messages.value).toEqual(conversation)
 
     command.mockRejectedValueOnce(new Error('could not clear'))
     await typeAndSend(wrapper, '/clear')
     await flushPromises()
-    expect(command).toHaveBeenCalledTimes(2)
-    expect(wrapper.text()).toContain('Command failed')
+    expect(command).toHaveBeenCalledTimes(1)
+    expect(command.mock.calls[0]?.[0]).toBe('clear')
+    expect(toast.toasts.value.at(-1)?.message).toBe('Command failed. Please try again.')
     expect(financeHistory.messages.value).toEqual(conversation)
 
     command.mockResolvedValueOnce({ outcome: 'cleared' })
     await typeAndSend(wrapper, '/clear')
     await flushPromises()
-    expect(command).toHaveBeenCalledTimes(3)
-    expect(wrapper.text()).toContain('Conversation cleared')
+    expect(command).toHaveBeenCalledTimes(2)
+    expect(toast.toasts.value).toHaveLength(3)
     expect(financeHistory.messages.value).toEqual([])
     expect(wrapper.get('h2').text()).toBe('What would you like to explore today?')
     expect(wrapper.findComponent(AiComposer).props('modelValue')).toBe('')
+    for (const item of toast.toasts.value) toast.dismiss(item.id)
   })
 
   it('opens finance memory locally without sending a chat request or modifying history', async () => {

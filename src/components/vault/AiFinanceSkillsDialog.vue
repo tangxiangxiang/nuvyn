@@ -275,7 +275,7 @@ async function removeSkill(): Promise<void> {
           <NIcon :size="18" aria-hidden="true"><ChevronLeft /></NIcon>
         </button>
         <h2>{{ view === 'list' ? t('ai.finance_skills_title') : view === 'add' ? t('ai.finance_skill_add') : selectedName }}</h2>
-        <button v-if="view === 'list'" type="button" :aria-label="t('ai.finance_skill_add')" :title="t('ai.finance_skill_add')" :disabled="loading" @click="beginAdd">
+        <button v-if="view === 'list' && !customSkills.length" type="button" :aria-label="t('ai.finance_skill_add')" :title="t('ai.finance_skill_add')" :disabled="loading" @click="beginAdd">
           <NIcon :size="18" aria-hidden="true"><Plus /></NIcon>
         </button>
         <button type="button" :aria-label="t('ai.close')" @click="emit('close')">
@@ -355,9 +355,14 @@ async function removeSkill(): Promise<void> {
               </li>
             </ul>
           </section>
-          <section class="ai-finance-skills-group" :aria-label="t('ai.finance_skills_custom')">
-            <h3>{{ t('ai.finance_skills_custom') }}</h3>
-            <ul v-if="customSkills.length" class="ai-finance-skills-list">
+          <section v-if="customSkills.length" class="ai-finance-skills-group" :aria-label="t('ai.finance_skills_custom')">
+            <header class="ai-finance-skills-group-header">
+              <h3>{{ t('ai.finance_skills_custom') }}</h3>
+              <button type="button" :aria-label="t('ai.finance_skill_add')" :title="t('ai.finance_skill_add')" :disabled="loading" @click="beginAdd">
+                <NIcon :size="18" aria-hidden="true"><Plus /></NIcon>
+              </button>
+            </header>
+            <ul class="ai-finance-skills-list">
               <li v-for="skill in customSkills" :key="skill.name">
                 <button type="button" @click="openSkill(skill.name)">
                   <span>{{ displayName(skill) }}</span>
@@ -365,7 +370,6 @@ async function removeSkill(): Promise<void> {
                 </button>
               </li>
             </ul>
-            <p v-else class="ai-finance-skills-muted">{{ t('ai.finance_skills_custom_empty') }}</p>
           </section>
         </template>
       </div>
@@ -395,6 +399,11 @@ async function removeSkill(): Promise<void> {
 .ai-finance-skills-body::-webkit-scrollbar { display: none; }
 .ai-finance-skills-group + .ai-finance-skills-group { margin-top: 12px; }
 .ai-finance-skills-group h3 { margin: 9px 10px 4px; color: var(--nuvyn-text-2); font-size: .78rem; font-weight: 650; }
+.ai-finance-skills-group-header { display: flex; align-items: center; justify-content: space-between; margin: 9px 10px 4px; }
+.ai-finance-skills-group-header h3 { margin: 0; }
+.ai-finance-skills-group-header button { width: 28px; height: 28px; display: grid; place-items: center; border: 0; border-radius: 8px; background: transparent; color: var(--nuvyn-text-2); cursor: pointer; }
+.ai-finance-skills-group-header button:hover { background: color-mix(in srgb, var(--nuvyn-accent) 10%, var(--nuvyn-surface-1)); color: var(--nuvyn-text-1); }
+.ai-finance-skills-group-header button:focus-visible { outline: 2px solid var(--nuvyn-accent); outline-offset: 2px; }
 .ai-finance-skills-list { list-style: none; margin: 0; padding: 0; }
 .ai-finance-skills-list button { width: 100%; display: flex; flex-direction: column; align-items: flex-start; gap: 3px; padding: 10px 10px; border: 0; border-radius: 9px; background: transparent; color: inherit; text-align: left; cursor: pointer; }
 .ai-finance-skills-list button:hover { background: color-mix(in srgb, var(--nuvyn-accent) 8%, var(--nuvyn-surface-1)); }

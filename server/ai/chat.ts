@@ -44,7 +44,7 @@ import {
 } from './llm.js'
 import { TOOL_DEFINITIONS, executeToolCall } from './tools.js'
 import { deriveToolSafetyPolicy } from './tool-safety.js'
-import { compactAiThreadIfNeeded } from './compaction.js'
+import { compactAiThreadIfNeeded, compactLedgerAiThreadIfNeeded } from './compaction.js'
 import {
   parseStoredContent,
   type NormalizedRound,
@@ -582,19 +582,48 @@ export async function runChat(opts: RunChatOpts): Promise<{
   const assistantId = assistantResult.message.id
   await emit(opts.onEvent, { type: 'done', userId, assistantId, ...(ledgerReplyInterrupted ? { interrupted: true } : {}) })
 
-  // Start the next compaction after the visible answer has completed. The
-  // next turn awaits this same per-thread job if it has not finished yet.
-  if (!opts.ledgerAnalysis) void compactAiThreadIfNeeded({ db: opts.db, sessionId: opts.sessionId, model: opts.model, runtimeConfig }).catch(() => {})
+  // Ordinary sessions retain the existing automatic compaction lifecycle.
+  if (!opts.ledgerAnalysis) {
+    void compactAiThreadIfNeeded({ db: opts.db, sessionId: opts.sessionId, model: opts.model, runtimeConfig }).catch(() => {})
+  }
 
   return { userId, assistantId, fullText }
 }
 
-/** Retain recent Ledger follow-ups without sending other workspaces' history. */
+export function scheduleLedgerAiCompaction(opts: RunChatOpts, runtimeConfig: AiRuntimeConfig): void {
+  const controller = new AbortController()
+  const signal = opts.signal ? AbortSignal.any([opts.signal, controller.signal]) : controller.signal
+  const canContinue = () => {
+    if (signal.aborted) return false
+    try {
+      return opts.canUseLedgerAnalysis?.() ?? true
+    } catch {
+      return false
+    }
+  }
+  if (!canContinue()) {
+    controller.abort()
+    return
+  }
+  const authCheck = setInterval(() => {
+    if (!canContinue()) controller.abort()
+  }, 1000)
+  void compactLedgerAiThreadIfNeeded({
+    db: opts.db,
+    sessionId: opts.sessionId,
+    model: opts.model,
+    runtimeConfig,
+    signal,
+    canSave: canContinue,
+  }).catch(() => {}).finally(() => clearInterval(authCheck))
+}
+
+/** Retain a bounded Ledger window so compaction can summarize before turns age out. */
 function ledgerConversationHistory(
   history: { role: 'user' | 'assistant'; content: string }[],
 ): NormalizedMessage[] {
   const context: NormalizedMessage[] = []
-  for (let index = history.length - 1; index > 0 && context.length < 12; index--) {
+  for (let index = history.length - 1; index > 0 && context.length < 16; index--) {
     const answer = history[index]
     const question = history[index - 1]
     if (answer.role !== 'assistant' || question.role !== 'user') continue

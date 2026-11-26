@@ -3,6 +3,7 @@ import { computed, ref, watch } from 'vue'
 import { NStep, NSteps } from 'naive-ui'
 import LedgerFirstAccountForm from './LedgerFirstAccountForm.vue'
 import LedgerInitializationForm from './LedgerInitializationForm.vue'
+import LedgerModuleEyebrow from './LedgerModuleEyebrow.vue'
 import LedgerPendingCreateRecovery from './LedgerPendingCreateRecovery.vue'
 import { ledgerErrorMessage } from '../../features/ledger/ledgerErrors'
 import { useLedgerStore } from '../../features/ledger/ledgerStore'
@@ -56,7 +57,7 @@ async function retryRecovery(): Promise<void> {
   >
     <div class="ledger-onboarding-heading">
       <div>
-        <p class="ledger-eyebrow">{{ ledgerName }}首次使用</p>
+        <LedgerModuleEyebrow />
         <h1 id="ledger-onboarding-title">把{ledgerName}设置好，开始记账</h1>
       </div>
     </div>
@@ -88,7 +89,6 @@ async function retryRecovery(): Promise<void> {
 <style scoped>
 .ledger-onboarding { --ledger-content-width: 620px; display: grid; align-content: center; justify-items: center; gap: 24px; width: min(100%, 980px); min-height: calc(100vh - 52px); margin: 0 auto; padding: 46px 28px 64px; box-sizing: border-box; }
 .ledger-onboarding-heading { display: flex; align-items: flex-end; justify-content: space-between; gap: 28px; width: min(100%, var(--ledger-content-width)); text-align: left; }
-.ledger-eyebrow { margin: 0 0 6px; color: var(--accent); font-size: .75rem; font-weight: 700; letter-spacing: .04em; text-transform: uppercase; }
 .ledger-onboarding-heading h1 { margin: 0; color: var(--text-h); font-size: clamp(1.7rem, 3vw, 2.2rem); line-height: 1.2; }
 .ledger-onboarding-steps { width: min(100%, var(--ledger-content-width)); margin: -8px 0 0; }
 .ledger-onboarding-stage { display: flex; align-items: flex-start; width: min(100%, var(--ledger-content-width)); height: 666px; }

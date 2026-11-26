@@ -9,6 +9,7 @@ import { ledgerErrorMessage, ledgerFieldError } from '../../features/ledger/ledg
 import { useLedgerStore } from '../../features/ledger/ledgerStore'
 import { ledgerSelectNodeProps } from '../../features/ledger/naiveControls'
 import { workspaceDisplayNames } from '../../lib/workspace'
+import LedgerModuleEyebrow from './LedgerModuleEyebrow.vue'
 import LedgerPendingCreateRecovery from './LedgerPendingCreateRecovery.vue'
 
 const store = useLedgerStore()
@@ -134,7 +135,7 @@ async function retryPendingSettings(): Promise<void> {
     @submit.prevent="submit"
   >
     <div>
-      <p class="ledger-eyebrow">{{ isEditing ? `${ledgerName}设置` : `开始使用${ledgerName}` }}</p>
+      <LedgerModuleEyebrow />
       <h2>{{ isEditing ? `确认${ledgerName}设置` : `先设置你的${ledgerName}` }}</h2>
     </div>
 
@@ -206,7 +207,6 @@ async function retryPendingSettings(): Promise<void> {
   background: var(--bg-soft);
   box-shadow: 0 12px 36px color-mix(in srgb, #0f172a 12%, transparent);
 }
-.ledger-eyebrow { margin: 0 0 6px; color: var(--accent); font-size: .75rem; font-weight: 700; letter-spacing: .04em; text-transform: uppercase; }
 .ledger-onboarding-card h2 { margin: 0; color: var(--text-h); font-size: 1.45rem; line-height: 1.3; }
 .ledger-form-field { display: grid; gap: 6px; }
 .ledger-form-field :deep(.n-form-item-label) { color: var(--text-h); font-size: .83rem; font-weight: 650; }

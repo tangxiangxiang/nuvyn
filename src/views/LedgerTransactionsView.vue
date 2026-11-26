@@ -45,8 +45,8 @@ import { usePagePullRefresh } from '../composables/usePagePullRefresh'
 import PagePullRefreshIndicator from '../components/PagePullRefreshIndicator.vue'
 import { ledgerSelectNodeProps } from '../features/ledger/naiveControls'
 import LedgerDatePicker from '../components/ledger/LedgerDatePicker.vue'
+import LedgerModuleEyebrow from '../components/ledger/LedgerModuleEyebrow.vue'
 import LedgerAnimatedMoney from '../components/ledger/LedgerAnimatedMoney.vue'
-import { workspaceDisplayNames } from '../lib/workspace'
 import { ledgerAccountSelectOptions, renderLedgerAccountLabel, renderLedgerCategoryLabel } from '../components/ledger/ledgerSelectRenderers'
 
 const store = useLedgerStore()
@@ -778,7 +778,7 @@ const visibleTransactionColumns = computed(() => {
     />
     <header class="ledger-transactions-header">
       <div>
-        <p class="ledger-eyebrow">{{ workspaceDisplayNames.ledger }}</p>
+        <LedgerModuleEyebrow />
         <h1>交易记录</h1>
         <p>查看所有收入、支出和账户间转账。</p>
       </div>
@@ -1070,7 +1070,6 @@ const visibleTransactionColumns = computed(() => {
 .ledger-transactions-page { width: min(100%, 1120px); margin: 0 auto; padding: 34px 28px 64px; box-sizing: border-box; }
 .ledger-transactions-header { display: flex; align-items: flex-end; justify-content: space-between; gap: 22px; margin-bottom: 22px; }
 .ledger-transactions-header-actions { display: flex; align-items: center; gap: 10px; }
-.ledger-eyebrow { margin: 0 0 5px; color: var(--accent); font-size: .75rem; font-weight: 700; letter-spacing: .05em; text-transform: uppercase; }
 .ledger-transactions-header h1 { margin: 0; color: var(--text-h); font-size: 2rem; line-height: 1.2; }
 .ledger-transactions-header p:not(.ledger-eyebrow) { margin: 8px 0 0; color: var(--text-muted); font-size: .84rem; }
 .ledger-primary-button,

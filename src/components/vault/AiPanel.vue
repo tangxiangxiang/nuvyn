@@ -6,9 +6,10 @@ import { useAiHistory, useLedgerAiHistory } from '../../composables/vault/useAiH
 import type { AiLiveContextCapture } from '../../composables/vault/aiLiveContext'
 import { AppShellContextKey } from '../../composables/appShellContext'
 import { useI18n } from '../../composables/useI18n'
+import { useToast } from '../../composables/useToast'
 import type { DiaryCalendarMode } from '../../composables/appShellContext'
 import type { WorkspaceKind } from '../../lib/workspace'
-import { getAiProfiles, runLedgerAiCommand, type AiModelOption, type LedgerAiCommand, type LedgerAiCommandOutcome } from '../../lib/ai-api'
+import { getAiProfiles, runLedgerAiCommand, type AiModelOption, type LedgerAiCommand } from '../../lib/ai-api'
 import { displayContextForCapture } from './aiContextPaths'
 import { resolveAiQuickPrompts } from './aiQuickPrompts'
 import AiChatMessages from './AiChatMessages.vue'
@@ -42,6 +43,7 @@ const history = computed(() => isLedger.value ? ledgerHistory : ordinaryHistory)
 const ordinaryHistoryReady = ref(false)
 const title = computed(() => t(isLedger.value ? 'ai.finance' : 'ai.assistant'))
 const { t } = useI18n()
+const toast = useToast()
 const ordinaryDraft = ref('')
 const ledgerDraft = ref('')
 const draft = computed({
@@ -51,13 +53,11 @@ const draft = computed({
     else ordinaryDraft.value = value
   },
 })
-const ledgerCommands = computed(() => [
-  { command: 'compact' as const, label: t('ai.ledger_compact'), description: t('ai.finance_compact_detail') },
-  { command: 'clear' as const, label: t('ai.ledger_clear'), description: t('ai.finance_clear_detail') },
-  { command: 'memory' as const, label: t('ai.ledger_memory'), description: t('ai.finance_memory_title') },
-  { command: 'skills' as const, label: t('ai.ledger_skills'), description: t('ai.finance_skills_title') },
-])
-const commandStatus = ref<LedgerAiCommandOutcome | 'compacting' | 'failed' | 'unknown' | null>(null)
+const ledgerCommands = [
+  { command: 'clear' as const },
+  { command: 'memory' as const },
+  { command: 'skills' as const },
+]
 let commandController: AbortController | null = null
 let ordinaryHistoryLoadStarted = false
 let ordinaryModelRefreshStarted = false
@@ -336,14 +336,13 @@ async function onSend(prompt?: string): Promise<void> {
   const active = history.value
   if (!text || active.busy.value || active.isLoading.value) return
   if (isLedger.value && text.startsWith('/')) {
-    if (text === '/compact' || text === '/clear' || text === '/memory' || text === '/skills') {
+    if (text === '/clear' || text === '/memory' || text === '/skills') {
       await onLedgerCommand(text.slice(1) as LedgerAiCommand)
     }
-    else commandStatus.value = 'unknown'
+    else toast.error(t('ai.ledger_command_unknown'))
     return
   }
   if (!selectedModel.value || (isLedger.value && (commandPending.value || !active.activeSession.value))) return
-  if (isLedger.value) commandStatus.value = null
 
   // Snapshot both the Note context and its file-change bus synchronously.
   // A later route change cannot replace this request's security boundary.
@@ -365,34 +364,30 @@ async function onLedgerCommand(command: LedgerAiCommand): Promise<void> {
   if (command === 'memory') {
     if (!isLedger.value || ledgerHistory.busy.value || commandPending.value) return
     ledgerDraft.value = ''
-    commandStatus.value = null
     showFinanceMemory.value = true
     return
   }
   if (command === 'skills') {
     if (!isLedger.value || ledgerHistory.busy.value || commandPending.value) return
     ledgerDraft.value = ''
-    commandStatus.value = null
     showFinanceSkills.value = true
     return
   }
-  if (!isLedger.value || !ledgerHistory.activeSession.value || ledgerHistory.busy.value || commandPending.value) return
+  if (command !== 'clear' || !isLedger.value || !ledgerHistory.activeSession.value || ledgerHistory.busy.value || commandPending.value) return
   const controller = new AbortController()
   commandController = controller
   commandPending.value = true
-  commandStatus.value = command === 'compact' ? 'compacting' : null
   const initialDraft = ledgerDraft.value
   try {
-    const { outcome } = await runLedgerAiCommand(command, controller.signal, command === 'compact' ? selectedModel.value?.profileId : undefined)
+    const { outcome } = await runLedgerAiCommand(command, controller.signal)
     if (controller.signal.aborted) return
     if (outcome === 'cleared') {
       ledgerHistory.messages.value = []
       ledgerHistory.errorState.value = null
     }
     if (ledgerDraft.value === initialDraft) ledgerDraft.value = ''
-    commandStatus.value = outcome
   } catch {
-    if (!controller.signal.aborted) commandStatus.value = 'failed'
+    if (!controller.signal.aborted) toast.error(t('ai.ledger_command_failed'))
   } finally {
     commandController = null
     commandPending.value = false
@@ -689,9 +684,6 @@ onBeforeUnmount(() => {
           :show-icon="false"
           class="ai-ledger-status"
         >{{ t(history.errorState.value === 'ledger-analysis-uninitialized' ? 'ai.ledger_uninitialized' : 'ai.ledger_unavailable') }}</NAlert>
-        <p v-if="isLedger && commandStatus" class="ai-ledger-status" role="status">
-          {{ t(`ai.ledger_command_${commandStatus}`) }}
-        </p>
         <p v-if="isLedger && ledgerLoadFailed" class="ai-ledger-status" role="status">{{ t('ai.ledger_unavailable') }}</p>
       </template>
 

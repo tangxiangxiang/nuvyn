@@ -138,9 +138,15 @@ describe('sessions service', () => {
 
       expect(otherVault.session.id).not.toBe(first.session.id)
       expect(userMessage.ok).toBe(true)
-      expect(sessions.saveAiThreadCompaction(db, first.session.id, 0, userMessage.ok ? userMessage.message.id : 1, 'Summary'))
+      expect(sessions.saveAiThreadCompaction(
+        db, first.session.id, 0, userMessage.ok ? userMessage.message.id : 1, 'Summary',
+        sessions.getAiThreadCompactionGeneration(db, first.session.id),
+      ))
         .toBe(true)
-      expect(sessions.saveAiThreadCompaction(db, first.session.id, 0, 999, 'Stale summary')).toBe(false)
+      expect(sessions.saveAiThreadCompaction(
+        db, first.session.id, 0, 999, 'Stale summary',
+        sessions.getAiThreadCompactionGeneration(db, first.session.id),
+      )).toBe(false)
       expect(messages.listMessages(db, first.session.id)?.map((message) => message.content))
         .toEqual(['Keep this message'])
     })
@@ -164,7 +170,10 @@ describe('sessions service', () => {
       const legacy = sessions.createSession(db)
 
       expect(sessions.getAiThreadCompactionState(db, legacy.id)).toBeNull()
-      expect(sessions.saveAiThreadCompaction(db, legacy.id, 0, 1, 'Summary')).toBe(false)
+      expect(sessions.saveAiThreadCompaction(
+        db, legacy.id, 0, 1, 'Summary',
+        sessions.getAiThreadCompactionGeneration(db, legacy.id),
+      )).toBe(false)
     })
   })
 })

@@ -34,7 +34,7 @@ import { computeFileDiff } from '../history/diff.js'
 import { validateHistoryPaths } from '../history/validation.js'
 import * as sessions from './sessions.js'
 import * as messages from './messages.js'
-import { runChat, type ChatContext, type ChatEvent } from './chat.js'
+import { runChat, scheduleLedgerAiCompaction, type ChatContext, type ChatEvent, type RunChatOpts } from './chat.js'
 import { parseAiLiveContext } from './live-context.js'
 import { generateSlug } from './slug.js'
 import { CommitMessagePromptLimitError, generateCommitMessage } from './commitMessage.js'
@@ -42,7 +42,7 @@ import { generateSummary, SummaryPromptLimitError } from './summary.js'
 import { generateTags } from './tags.js'
 import { generateTitle } from './title.js'
 import { ChatError } from './errors.js'
-import { compactLedgerAiThread } from './compaction.js'
+import { cancelAiThreadCompaction, waitForAiThreadCompaction } from './compaction.js'
 import { createFinanceMemoryRepository } from './finance-memory.js'
 import { createFinanceCustomSkillRepository } from './finance-custom-skills.js'
 import { getFinanceSkillRegistryState, readFinanceSkill } from './finance-skills.js'
@@ -743,11 +743,8 @@ ai.post('/ledger-session', (c) => {
 
 ai.post('/ledger-session/command', async (c) => {
   c.header('Cache-Control', 'no-store')
-  const body = await c.req.json().catch(() => null) as { command?: unknown; profileId?: unknown } | null
-  if (body?.command !== 'compact' && body?.command !== 'clear') return bad(c, 'Unknown Ledger AI command')
-  if (body.profileId !== undefined && (body.command !== 'compact' || typeof body.profileId !== 'string' || !body.profileId || body.profileId.length > 100)) {
-    return bad(c, 'Invalid Ledger AI profile')
-  }
+  const body = await c.req.json().catch(() => null) as { command?: unknown } | null
+  if (body?.command !== 'clear') return bad(c, 'Unknown Ledger AI command')
   const user = c.get('authUser')
   const authSessionId = c.get('authSessionId')
   const db = getDb()
@@ -755,35 +752,14 @@ ai.post('/ledger-session/command', async (c) => {
     return bad(c, 'Ledger session requires authentication', 403)
   }
   const thread = sessions.getLedgerAiThread(db, user.id)
-  if (!thread) return c.json({ outcome: body.command === 'clear' ? 'cleared' : 'nothing-to-compact' })
+  if (!thread) return c.json({ outcome: 'cleared' })
 
   const release = sessions.acquireLedgerAiOperation(db, thread.session.id)
   if (!release) return bad(c, 'Ledger AI is busy', 409)
   try {
-    if (body.command === 'clear') {
-      sessions.clearLedgerAiThread(db, user.id)
-      return c.json({ outcome: 'cleared' })
-    }
-    let runtimeConfig: ReturnType<typeof resolveAiRuntimeConfig>
-    try {
-      runtimeConfig = typeof body.profileId === 'string'
-        ? profileRuntime(db, body.profileId)
-        : resolveAiRuntimeConfig(db)
-    } catch (error) {
-      if (error instanceof AiProfileError) return bad(c, error.message, error.status, error.code)
-      return bad(c, 'Ledger AI profile is unavailable', 503)
-    }
-    const compacted = await compactLedgerAiThread({
-      db,
-      sessionId: thread.session.id,
-      model: runtimeConfig.model,
-      runtimeConfig,
-      signal: c.req.raw.signal,
-      canSave: () => ledgerAuthIsCurrent(db, user.id, authSessionId),
-    })
-    return c.json({ outcome: compacted ? 'compacted' : 'nothing-to-compact' })
-  } catch {
-    return bad(c, 'Ledger AI command failed', 503)
+    cancelAiThreadCompaction(db, thread.session.id)
+    sessions.clearLedgerAiThread(db, user.id)
+    return c.json({ outcome: 'cleared' })
   } finally {
     release()
   }
@@ -1356,7 +1332,15 @@ ai.post('/chat', async (c) => {
     return c.json({ ok: false, reason: 'no-api-key' }, 503)
   }
 
-  const release = ledgerRequested ? sessions.acquireLedgerAiOperation(db, sessionId) : null
+  if (ledgerRequested) {
+    await waitForAiThreadCompaction(db, sessionId, c.req.raw.signal)
+    if (c.req.raw.signal.aborted) return c.json({ ok: false, reason: 'aborted' }, 499 as any)
+    if (!ledgerAuthIsCurrent(db, ledgerUser.id, ledgerAuthSession)) {
+      return c.json({ ok: false, reason: 'ledger-analysis-auth-required' }, 403)
+    }
+  }
+
+  let release = ledgerRequested ? sessions.acquireLedgerAiOperation(db, sessionId) : null
   if (ledgerRequested && !release) return c.json({ ok: false, reason: 'ledger-session-busy' }, 409)
 
   // Ordinary sessions are validated in runChat, which throws
@@ -1458,7 +1442,7 @@ ai.post('/chat', async (c) => {
         }
       }
 
-      await runChat({
+      const runChatOptions: RunChatOpts = {
         db,
         sessionId,
         userContent,
@@ -1475,7 +1459,13 @@ ai.post('/chat', async (c) => {
         canUseLedgerAnalysis: ledgerRequested ? ledgerSessionIsCurrent : undefined,
         signal,
         onEvent: writeEvent,
-      })
+      }
+      await runChat(runChatOptions)
+      if (ledgerRequested) {
+        release?.()
+        release = null
+        scheduleLedgerAiCompaction(runChatOptions, runtimeConfig)
+      }
     } catch (err) {
       if (err instanceof ChatError && err.reason === 'aborted') return
       const reason = err instanceof ChatError ? err.reason : 'unknown'

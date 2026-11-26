@@ -233,7 +233,10 @@ describe('GET /api/ai/thread', () => {
     for (let i = 1; i <= 100; i += 1) {
       insert.run(thread.session.id, i % 2 ? 'user' : 'assistant', `message-${i}`, i)
     }
-    expect(aiSessions.saveAiThreadCompaction(testDbRef.value!, thread.session.id, 0, 20, 'summary')).toBe(true)
+    expect(aiSessions.saveAiThreadCompaction(
+      testDbRef.value!, thread.session.id, 0, 20, 'summary',
+      aiSessions.getAiThreadCompactionGeneration(testDbRef.value!, thread.session.id),
+    )).toBe(true)
 
     const url = `/thread?scope=${encodeURIComponent(JSON.stringify(scope))}`
     const response = await call('GET', url)

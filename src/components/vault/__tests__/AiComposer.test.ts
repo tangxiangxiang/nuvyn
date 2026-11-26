@@ -72,7 +72,7 @@ describe('AiComposer', () => {
 
   it('uses the same one-row starting height for ordinary prompts and Ledger commands', () => {
     const ordinary = mountComposer()
-    const ledger = mountComposer({ commands: [{ command: 'clear', label: 'Clear conversation' }] })
+    const ledger = mountComposer({ commands: [{ command: 'clear' }] })
     expect(ordinary.findComponent(NInput).props('autosize')).toEqual({ minRows: 1, maxRows: 5 })
     expect(ledger.findComponent(NInput).props('autosize')).toEqual({ minRows: 1, maxRows: 5 })
   })
@@ -167,14 +167,15 @@ describe('AiComposer', () => {
     expect(wrapper.emitted('update:modelValue')).toBeUndefined()
   })
 
-  it('handles Ledger commands through Enter and menu click without changing the ordinary prompt behavior', async () => {
-    const wrapper = mountComposer({ modelValue: ' /compact ', commands: [
-      { command: 'compact', label: 'Compact conversation' },
-      { command: 'clear', label: 'Clear conversation' },
+  it('keeps the Finance command menu compact and handles clear through Enter or click', async () => {
+    const wrapper = mountComposer({ modelValue: ' /clear ', commands: [
+      { command: 'clear' },
+      { command: 'memory' },
+      { command: 'skills' },
     ] })
     const input = wrapper.get('textarea')
     await input.trigger('focus')
-    expect(wrapper.get('[role="option"]').text()).toContain('/compact')
+    expect(wrapper.get('[role="option"]').text()).toBe('/clear')
     await input.trigger('keydown', { key: 'Enter', isComposing: true })
     await input.trigger('keydown', { key: 'Enter', shiftKey: true })
     expect(wrapper.emitted('send')).toBeUndefined()
@@ -182,7 +183,8 @@ describe('AiComposer', () => {
     expect(wrapper.emitted('send')).toHaveLength(1)
 
     await wrapper.setProps({ modelValue: '/' })
-    const clear = wrapper.findAll('[role="option"]')[1]
+    expect(wrapper.findAll('[role="option"]')).toHaveLength(3)
+    const clear = wrapper.findAll('[role="option"]')[0]
     await clear.trigger('click')
     expect(wrapper.emitted('command')).toEqual([['clear']])
     await wrapper.setProps({ busy: true, modelValue: '/clear' })

@@ -16,7 +16,7 @@ const props = withDefaults(defineProps<{
   selectedModelProfileId?: string | null
   modelSelectorDisabled?: boolean
   prompts?: Array<{ label: string; text: string }>
-  commands?: Array<{ label: string; command: LedgerAiCommand; description?: string }>
+  commands?: Array<{ command: LedgerAiCommand }>
   placeholder?: string
 }>(), {
   canSend: true,
@@ -50,10 +50,10 @@ const modelTrigger = ref<HTMLButtonElement | null>(null)
 const modelMenuId = useId()
 const slashText = computed(() => props.commands ? props.modelValue.trim() : props.modelValue)
 const slashQuery = computed(() => /^\/([^\s/]*)$/.exec(slashText.value)?.[1] ?? null)
-const matchingOptions = computed<Array<{ label: string; text: string; command?: LedgerAiCommand; description?: string }>>(() => {
+const matchingOptions = computed<Array<{ label: string; text: string; command?: LedgerAiCommand }>>(() => {
   const query = (slashQuery.value ?? '').toLocaleLowerCase()
   const commands = (props.commands ?? []).filter(({ command }) => command.startsWith(query))
-    .map(({ label, command, description }) => ({ label: `/${command} · ${label}`, text: `/${command}`, command, description }))
+    .map(({ command }) => ({ label: `/${command}`, text: `/${command}`, command }))
   const prompts = props.commands ? [] : props.prompts.filter(prompt => prompt.label.toLocaleLowerCase().includes(query))
   return [...commands, ...prompts]
 })
@@ -226,7 +226,7 @@ defineExpose({ focus })
       </template>
       <div v-if="!modelOptions.length" class="ai-model-menu-heading">{{ t('ai.models_unavailable') }}</div>
     </div>
-    <div v-if="showPrompts" :id="menuId" class="ai-prompt-menu" role="listbox" :aria-label="t(commands ? 'ai.finance_commands' : 'ai.prompt_templates')">
+    <div v-if="showPrompts" :id="menuId" class="ai-prompt-menu" :class="{ 'ai-command-menu': !!commands }" role="listbox" :aria-label="t(commands ? 'ai.finance_commands' : 'ai.prompt_templates')">
       <div v-if="!commands" class="ai-prompt-menu-heading">{{ t('ai.prompt_templates') }}</div>
       <button
         v-for="(prompt, index) in matchingOptions"
@@ -243,10 +243,7 @@ defineExpose({ focus })
         @pointerdown.prevent
         @click="chooseOption(index, true)"
       >
-        <template v-if="prompt.command">
-          <span class="ai-command-name">{{ prompt.text }}</span>
-          <small class="ai-command-description">{{ prompt.description ?? prompt.label }}</small>
-        </template>
+        <template v-if="prompt.command">{{ prompt.text }}</template>
         <template v-else>{{ prompt.label }}</template>
       </button>
       <div v-if="!matchingOptions.length" class="ai-prompt-menu-heading">{{ t('ai.no_matching_prompts') }}</div>
@@ -260,7 +257,7 @@ defineExpose({ focus })
         :value="modelValue"
         :placeholder="inputPlaceholder"
         :bordered="false"
-        :theme-overrides="{ color: 'transparent', colorFocus: 'transparent', borderRadius: '0', boxShadowFocus: 'none' }"
+        :theme-overrides="{ color: 'transparent', colorHover: 'transparent', colorFocus: 'transparent', borderRadius: '0', boxShadowFocus: 'none' }"
         :input-props="{
           class: 'ai-input',
           'aria-label': inputPlaceholder,

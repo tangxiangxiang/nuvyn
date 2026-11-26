@@ -43,7 +43,13 @@ const streamRound = vi.hoisted(() => vi.fn(async ({ messages, onToken, tools }: 
   await onToken(text)
   return { text, toolCalls: [], finishReason: 'stop' as const }
 }))
-const generateText = vi.hoisted(() => vi.fn(async (_opts: { system: string; user: string }) => ({
+const generateText = vi.hoisted(() => vi.fn(async (_opts: {
+  system: string
+  user: string
+  model?: string
+  runtimeConfig?: unknown
+  signal?: AbortSignal
+}) => ({
   text: 'Working memory: the user wants to understand spending patterns.',
   finishReason: 'stop' as const,
 })))
@@ -633,46 +639,41 @@ describe('fixed Ledger AI session and commands', () => {
     expect((await post('', { sessionId: other, content: 'Other owner', ledgerAnalysis: true })).status).toBe(404)
   })
 
-  it('compacts complete private turns, preserves the transcript and sync baseline, then clears only the fixed thread', async () => {
+  it('automatically compacts Finance history before its bounded eight-turn window expires', async () => {
     const command = (command: string, extra = {}) => aiRequest('/ledger-session/command', 'POST', { command, ...extra })
-    expect(await (await command('compact')).json()).toEqual({ outcome: 'nothing-to-compact' })
-    expect(generateText).not.toHaveBeenCalled()
+    expect((await command('compact')).status).toBe(400)
     expect((await command('unknown')).status).toBe(400)
-    expect((await post('', { sessionId, content: ' /clear ', ledgerAnalysis: true })).status).toBe(400)
+    expect(generateText).not.toHaveBeenCalled()
+    expect((await post('', { sessionId, content: ' /compact ', ledgerAnalysis: true })).status).toBe(400)
+
     await send('Ordinary history', false)
-    await send('Compare January spending')
-    streamRound.mockRejectedValueOnce(new Error('interrupted'))
-    await send('Incomplete private turn')
-    streamRound.mockResolvedValueOnce(queryRound(scope)).mockResolvedValueOnce(
-      financeReply('The recorded spending total is ¥825.01.', 'length'),
-    )
-    await send('Truncated private turn')
-    await send('Keep this recent context')
-    await send('Keep the latest topic')
+    for (let turn = 1; turn <= 7; turn++) await send(`Ledger topic ${turn}`)
+    expect(generateText).not.toHaveBeenCalled()
+
     const memory = createFinanceMemoryRepository(db).add(auth.userId, 'user', 'Keep an emergency reserve first.')
     expect(memory.ok).toBe(true)
     const baseline = syncLedgerAiContext(db, auth.userId)
-    const checkpointBefore = getAiThreadCompactionState(db, sessionId)
+    await send('Ledger topic 8')
+    expect(streamRound.mock.calls.at(-1)![0].messages).toContainEqual(expect.objectContaining({ content: 'Ledger topic 1' }))
+    await vi.waitFor(() => expect(generateText).toHaveBeenCalledOnce())
 
-    generateText.mockRejectedValueOnce(new Error('provider offline'))
-    expect((await command('compact')).status).toBe(503)
-    expect(getAiThreadCompactionState(db, sessionId)).toEqual(checkpointBefore)
-
-    expect(await (await command('compact')).json()).toEqual({ outcome: 'compacted' })
-    const summaryCall = generateText.mock.calls.at(-1)![0]
+    const summaryCall = generateText.mock.calls[0]![0]
+    expect(summaryCall.model).toBe('fixture')
     expect(summaryCall.system).toContain('Omit balances')
-    expect(summaryCall.user).toContain('Compare January spending')
-    expect(summaryCall.user).not.toMatch(/Incomplete private turn|Truncated private turn|Keep this recent context|Ordinary history|82501|PRIVATE NOTE/)
+    expect(summaryCall.user).toContain('Ledger topic 1')
+    expect(summaryCall.user).toContain('Ledger topic 2')
+    expect(summaryCall.user).not.toMatch(/Ledger topic [3-8]|PRIVATE NOTE|82501/)
     const checkpoint = getAiThreadCompactionState(db, sessionId)!
     expect(checkpoint.compactSummary).toContain('spending patterns')
-    expect(checkpoint.compactedThroughMessageId).toBeGreaterThan(0)
+    expect(checkpoint.compactedThroughMessageId).toBe(6)
+
     const reopened = await (await aiRequest('/ledger-session', 'POST')).json() as { messages: unknown[] }
-    expect(reopened.messages).toHaveLength(10)
+    expect(reopened.messages).toHaveLength(16)
     await send('Fresh figures please')
     expect(streamRound.mock.calls.at(-1)![0].system).toContain(checkpoint.compactSummary)
     expect(streamRound.mock.calls.at(-1)![0].system).toContain('use fresh read_ledger data')
     expect(streamRound.mock.calls.at(-1)![0].system).toContain('Keep an emergency reserve first.')
-    expect(streamRound.mock.calls.at(-1)![0].messages).not.toContainEqual(expect.objectContaining({ content: 'Compare January spending' }))
+    expect(streamRound.mock.calls.at(-1)![0].messages).not.toContainEqual(expect.objectContaining({ content: 'Ledger topic 1' }))
 
     expect(await (await command('clear', { sessionId: ordinaryId })).json()).toEqual({ outcome: 'cleared' })
     expect(getAiThreadCompactionState(db, sessionId)).toEqual({ compactSummary: '', compactedThroughMessageId: 0 })
@@ -685,22 +686,62 @@ describe('fixed Ledger AI session and commands', () => {
     expect(createLedgerRepository(db).listActiveTransactions()).toHaveLength(2)
   })
 
-  it('does not publish a partial checkpoint when a later summary batch fails', async () => {
-    await send('Long financial topic ' + 'part '.repeat(3_000))
-    await send('Keep this exchange')
-    await send('Keep this other exchange')
-    generateText
-      .mockResolvedValueOnce({ text: 'First summary batch', finishReason: 'stop' })
-      .mockRejectedValueOnce(new Error('Second batch failed'))
-    const response = await aiRequest('/ledger-session/command', 'POST', { command: 'compact' })
-    expect(response.status).toBe(503)
+  it('keeps Finance Q&A available after automatic compaction fails and throttles retries', async () => {
+    generateText.mockRejectedValueOnce(new Error('provider offline'))
+    for (let turn = 1; turn <= 8; turn++) {
+      const response = await send(`Ledger topic ${turn}`)
+      if (turn === 8) expect(response).toContain('event: done')
+    }
+    await send('Ledger topic 9')
+    expect(generateText).toHaveBeenCalledOnce()
+    await send('Ledger topic 10')
+    await vi.waitFor(() => expect(generateText).toHaveBeenCalledTimes(2))
     expect(generateText).toHaveBeenCalledTimes(2)
-    expect(getAiThreadCompactionState(db, sessionId)).toEqual({ compactSummary: '', compactedThroughMessageId: 0 })
-    const reopened = await (await aiRequest('/ledger-session', 'POST')).json() as { messages: unknown[] }
-    expect(reopened.messages).toHaveLength(6)
+    expect(getAiThreadCompactionState(db, sessionId)?.compactedThroughMessageId).toBeGreaterThan(0)
+    expect((await (await aiRequest('/ledger-session', 'POST')).json() as { messages: unknown[] }).messages).toHaveLength(20)
   })
 
-  it('serializes commands against an active stream and against each other', async () => {
+  it('invalidates an automatic summary when clear happens during compression', async () => {
+    for (let turn = 1; turn <= 7; turn++) await send(`Ledger topic ${turn}`)
+    let finishSummary!: (value: { text: string; finishReason: 'stop' }) => void
+    let summarySignal: AbortSignal | undefined
+    generateText.mockImplementationOnce((options) => new Promise((resolve) => {
+      summarySignal = options.signal
+      finishSummary = resolve
+    }))
+    await send('Ledger topic 8')
+    await vi.waitFor(() => expect(finishSummary).toBeTypeOf('function'))
+
+    expect((await aiRequest('/ledger-session/command', 'POST', { command: 'clear' })).status).toBe(200)
+    expect(summarySignal?.aborted).toBe(true)
+    finishSummary({ text: 'Stale summary must never return', finishReason: 'stop' })
+    await new Promise<void>((resolve) => setImmediate(resolve))
+    expect(getAiThreadCompactionState(db, sessionId)).toEqual({ compactSummary: '', compactedThroughMessageId: 0 })
+    expect(await (await aiRequest('/ledger-session', 'POST')).json()).toMatchObject({ session: { id: sessionId }, messages: [] })
+  })
+
+  it('lets the next Finance request wait for the active summary before entering the session lock', async () => {
+    for (let turn = 1; turn <= 7; turn++) await send(`Ledger topic ${turn}`)
+    let finishSummary!: (value: { text: string; finishReason: 'stop' }) => void
+    generateText.mockImplementationOnce(() => new Promise((resolve) => { finishSummary = resolve }))
+    await send('Ledger topic 8')
+    await vi.waitFor(() => expect(finishSummary).toBeTypeOf('function'))
+
+    let nextRequestSettled = false
+    const nextRequest = post('', { sessionId, content: 'Ledger topic 9', ledgerAnalysis: true })
+      .then((response) => { nextRequestSettled = true; return response })
+    await new Promise<void>((resolve) => setImmediate(resolve))
+    expect(nextRequestSettled).toBe(false)
+
+    finishSummary({ text: 'Recent Finance working memory', finishReason: 'stop' })
+    const response = await nextRequest
+    expect(response.status).toBe(200)
+    expect(await response.text()).toContain('event: done')
+    expect(streamRound.mock.calls.at(-2)![0].system).toContain('Recent Finance working memory')
+    expect(streamRound.mock.calls.at(-2)![0].messages).not.toContainEqual(expect.objectContaining({ content: 'Ledger topic 1' }))
+  })
+
+  it('serializes clear against an active stream without exposing a manual compact command', async () => {
     let resolveRound!: () => void
     streamRound.mockImplementationOnce(async () => {
       await new Promise<void>((resolve) => { resolveRound = resolve })
@@ -713,28 +754,10 @@ describe('fixed Ledger AI session and commands', () => {
     const clear = () => aiRequest('/ledger-session/command', 'POST', { command: 'clear' })
     try {
       expect((await clear()).status).toBe(409)
-      expect((await compact()).status).toBe(409)
+      expect((await compact()).status).toBe(400)
     } finally {
       resolveRound()
       await events
-    }
-    await send('Second finished turn')
-    await send('Third finished turn')
-
-    let finishSummary!: () => void
-    generateText.mockImplementationOnce(async () => {
-      await new Promise<void>((resolve) => { finishSummary = resolve })
-      return { text: 'Saved memory', finishReason: 'stop' }
-    })
-    const pending = compact()
-    await vi.waitFor(() => expect(finishSummary).toBeTypeOf('function'))
-    try {
-      expect((await clear()).status).toBe(409)
-      expect((await compact()).status).toBe(409)
-      expect((await post('', { sessionId, content: 'Concurrent chat', ledgerAnalysis: true })).status).toBe(409)
-    } finally {
-      finishSummary()
-      expect((await pending).status).toBe(200)
     }
     expect((await clear()).status).toBe(200)
   })

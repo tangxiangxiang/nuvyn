@@ -112,6 +112,8 @@ describe('Ledger initialization and first-account onboarding', () => {
 
     const settingsForm = wrapper.get('[data-testid="ledger-settings-form"]')
     expect(wrapper.find('[data-testid="ledger-settings-form"]').exists()).toBe(true)
+    expect(wrapper.findAll('[data-testid="ledger-module-label"]')).toHaveLength(2)
+    expect(wrapper.findAll('[data-testid="ledger-module-label"]').map((label) => label.text())).toEqual(['LEDGER', 'LEDGER'])
     expect(naiveSelectValue(settingsForm, '基础货币')).toBe('CNY')
     expect(wrapper.find('[data-testid="ledger-account-form"]').exists()).toBe(false)
     expect(wrapper.text()).toContain('先设置你的账本')
@@ -229,6 +231,8 @@ describe('Ledger initialization and first-account onboarding', () => {
     await editSettingsButton!.trigger('click')
 
     const editSettingsForm = wrapper.get('[data-testid="ledger-settings-form"]')
+    expect(editSettingsForm.get('[data-testid="ledger-module-label"]').text()).toBe('LEDGER')
+    expect(editSettingsForm.text()).toContain('确认账本设置')
     await setNaiveSelect(editSettingsForm, '基础货币', 'JPY')
     await editSettingsForm.get('input[name="timezone"]').setValue('Asia/Tokyo')
     api.getLedgerSettings.mockResolvedValue(editedSettings)

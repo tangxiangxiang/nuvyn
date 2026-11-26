@@ -299,9 +299,9 @@ export async function getActiveSession(): Promise<ActiveSession> {
   return jsonOrThrow<ActiveSession>(await authFetch('/api/ai/active', { method: 'GET' }))
 }
 
-export type LedgerAiCommand = 'compact' | 'clear' | 'memory' | 'skills'
-export type LedgerAiServerCommand = Exclude<LedgerAiCommand, 'memory' | 'skills'>
-export type LedgerAiCommandOutcome = 'compacted' | 'nothing-to-compact' | 'cleared'
+export type LedgerAiCommand = 'clear' | 'memory' | 'skills'
+export type LedgerAiServerCommand = 'clear'
+export type LedgerAiCommandOutcome = 'cleared'
 
 export type FinanceMemoryKind = 'user' | 'agent'
 export type FinanceMemoryItem = { id: number; kind: FinanceMemoryKind; content: string; createdAt: number; updatedAt: number; revision: number }
@@ -316,9 +316,9 @@ export async function openLedgerAiSession(signal?: AbortSignal): Promise<AiThrea
   return jsonOrThrow(await authFetch('/api/ai/ledger-session', { method: 'POST', signal }))
 }
 
-export async function runLedgerAiCommand(command: LedgerAiServerCommand, signal?: AbortSignal, profileId?: string): Promise<{ outcome: LedgerAiCommandOutcome }> {
+export async function runLedgerAiCommand(command: LedgerAiServerCommand, signal?: AbortSignal): Promise<{ outcome: LedgerAiCommandOutcome }> {
   return jsonOrThrow(await authFetch('/api/ai/ledger-session/command', {
-    method: 'POST', ...jsonBody({ command, ...(profileId && command === 'compact' ? { profileId } : {}) }), signal,
+    method: 'POST', ...jsonBody({ command }), signal,
   }))
 }
 
