@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { lunarOccurrenceInYear, lunarToSolar, nextLunarOccurrence, solarToLunar, type ChineseEventDateRule } from '../lunarCalendar'
+import { lunarOccurrenceInYear, lunarToSolar, nextLunarOccurrence, solarToLunar, solarToLunarDetails, type ChineseEventDateRule } from '../lunarCalendar'
 
 const mayNineteenth: ChineseEventDateRule = {
   calendar: 'chinese',
@@ -17,6 +17,45 @@ describe('shared Chinese lunar calendar conversion', () => {
     expect(solarToLunar('2027-02-05')).toEqual({ year: 2026, month: 12, day: 29, isLeapMonth: false })
     expect(solarToLunar('2027-02-06')).toEqual({ year: 2027, month: 1, day: 1, isLeapMonth: false })
     expect(lunarToSolar({ year: 2026, month: 12, day: 10, isLeapMonth: false })).toBe('2027-01-17')
+  })
+
+  it('computes calendar GanZhi with lunar-year and solar-term boundaries', () => {
+    expect(solarToLunarDetails('2026-02-16')).toMatchObject({
+      year: 2025,
+      month: 12,
+      day: 29,
+      isLeapMonth: false,
+      yearGanZhi: '乙巳',
+      zodiac: '蛇',
+      monthGanZhi: '庚寅',
+      dayGanZhi: '辛酉',
+    })
+    expect(solarToLunarDetails('2026-02-17')).toMatchObject({
+      year: 2026,
+      month: 1,
+      day: 1,
+      isLeapMonth: false,
+      yearGanZhi: '丙午',
+      zodiac: '马',
+      monthGanZhi: '庚寅',
+      dayGanZhi: '壬戌',
+    })
+    expect(solarToLunarDetails('2026-02-03')?.monthGanZhi).toBe('己丑')
+    expect(solarToLunarDetails('2026-02-04')?.monthGanZhi).toBe('庚寅')
+  })
+
+  it('preserves leap-month fields alongside GanZhi details', () => {
+    expect(solarToLunarDetails('2023-03-22')).toMatchObject({
+      year: 2023,
+      month: 2,
+      day: 1,
+      isLeapMonth: true,
+      yearGanZhi: '癸卯',
+      zodiac: '兔',
+      monthGanZhi: '乙卯',
+      dayGanZhi: '己卯',
+    })
+    expect(solarToLunarDetails('2026-02-30')).toBeNull()
   })
 
   it('distinguishes regular and leap months and skips multiple absent leap years', () => {

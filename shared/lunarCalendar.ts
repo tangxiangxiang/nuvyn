@@ -14,6 +14,13 @@ export interface LunarDate {
   isLeapMonth: boolean
 }
 
+export interface LunarCalendarDetails extends LunarDate {
+  yearGanZhi: string
+  zodiac: string
+  monthGanZhi: string
+  dayGanZhi: string
+}
+
 export interface ChineseEventDateRule {
   calendar: 'chinese'
   lunarMonth: number
@@ -34,7 +41,7 @@ function isSupportedSolarDate(date: string): boolean {
   }
 }
 
-export function solarToLunar(date: string): LunarDate | null {
+function convertSolarDate(date: string): { lunar: Lunar; lunarDate: LunarDate } | null {
   if (!isSupportedSolarDate(date)) return null
   const [year, month, day] = date.split('-').map(Number)
   try {
@@ -48,7 +55,28 @@ export function solarToLunar(date: string): LunarDate | null {
     }
     if (result.year < MIN_LUNAR_YEAR || result.year > MAX_LUNAR_YEAR || result.month < 1 || result.month > 12
       || result.day < 1 || result.day > 30) return null
-    return result
+    return { lunar, lunarDate: result }
+  } catch {
+    return null
+  }
+}
+
+export function solarToLunar(date: string): LunarDate | null {
+  return convertSolarDate(date)?.lunarDate ?? null
+}
+
+export function solarToLunarDetails(date: string): LunarCalendarDetails | null {
+  const converted = convertSolarDate(date)
+  if (!converted) return null
+  const { lunar, lunarDate } = converted
+  try {
+    return {
+      ...lunarDate,
+      yearGanZhi: lunar.getYearInGanZhi(),
+      zodiac: lunar.getYearShengXiao(),
+      monthGanZhi: lunar.getMonthInGanZhi(),
+      dayGanZhi: lunar.getDayInGanZhi(),
+    }
   } catch {
     return null
   }

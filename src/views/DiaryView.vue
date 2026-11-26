@@ -1561,7 +1561,7 @@ onBeforeUnmount(() => {
     <template v-if="access.isUnlocked.value">
       <div class="diary-life-calendar-stage">
         <div v-if="calendarError" class="diary-life-error" role="alert">{{ calendarError }} <NButton text @click="retryCalendarStage()">重试</NButton></div>
-        <DiaryLifeCalendar :markers="markers" :today="today" :selected-date="selected" :month="month" :revision="calendarRevision" @select="open" @month="month = $event" />
+        <DiaryLifeCalendar :markers="markers" :today="today" :selected-date="selected" :month="month" :revision="calendarRevision" :view-mode="mode" @select="open" @month="month = $event" />
       </div>
       <div v-if="mode === 'tasks' && undatedTaskCount > 0" class="diary-undated-task-notice" data-testid="diary-undated-task-notice" role="status">
         <span>发现 {{ undatedTaskCount }} 条历史待办缺少截止日期，补充后会显示在日历中。</span>

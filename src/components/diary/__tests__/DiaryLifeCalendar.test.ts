@@ -19,7 +19,7 @@ type CalendarMarker = { source?: string; emoji?: string; count?: number; hasTask
 
 function mountCalendar(markers: Record<string, CalendarMarker> = {}, options: { today?: string; month?: string } = {}) {
   const wrapper = mount(DiaryLifeCalendar, {
-    props: { today: options.today ?? '2026-11-16', selectedDate: null, month: options.month ?? '2026-11-01', revision: 0, markers },
+    props: { today: options.today ?? '2026-11-16', selectedDate: null, month: options.month ?? '2026-11-01', revision: 0, viewMode: 'diary', markers },
   })
   const calendar = wrapper.get('.diary-life-calendar')
   let time = 0
@@ -39,6 +39,18 @@ function mountCalendar(markers: Record<string, CalendarMarker> = {}, options: { 
 }
 
 describe('Diary calendar wheel navigation', () => {
+  it('shows lunar month names on day one and lunar day labels across leap months and year rollover', () => {
+    const yearBoundary = mountCalendar({}, { month: '2027-02-01', today: '2027-02-06' })
+    expect(yearBoundary.wrapper.get('.life-date[data-date="2027-02-05"] .life-date-lunar').text()).toBe('廿九')
+    expect(yearBoundary.wrapper.get('.life-date[data-date="2027-02-06"] .life-date-lunar').text()).toBe('正月')
+    yearBoundary.wrapper.unmount()
+
+    const leapMonth = mountCalendar({}, { month: '2023-03-01', today: '2023-03-22' })
+    expect(leapMonth.wrapper.get('.life-date[data-date="2023-03-22"] .life-date-lunar').text()).toBe('闰二月')
+    expect(leapMonth.wrapper.get('.life-date[data-date="2023-03-23"] .life-date-lunar').text()).toBe('初二')
+    leapMonth.wrapper.unmount()
+  })
+
   it('localizes the month heading while preserving the yyyy-MM picker value', () => {
     const { wrapper } = mountCalendar()
     expect(wrapper.get('.life-month-label').text()).toBe('2026年11月')

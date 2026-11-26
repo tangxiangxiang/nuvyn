@@ -1,20 +1,49 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, ref } from 'vue'
-import { NCalendar, NDatePicker } from 'naive-ui'
+import { computed, onBeforeUnmount, ref, watch, type CSSProperties } from 'vue'
+import { NCalendar, NDatePicker, NTooltip } from 'naive-ui'
 import { useI18n } from '../../composables/useI18n'
 import { diaryCalendarMonthFromFields, diaryDateFromCalendarFields, naiveCalendarValueForMonth } from './diaryCalendarAdapter'
 import { shouldAnimateTodoDayMarker, todoDayMarkerAssets, type TodoDayMarkerAssets } from '../../features/diary/deadlineReminderAssets'
 import type { TodoDayVisualState } from '../../features/diary/deadlineVisualState'
 import DiaryAnimatedEmoji from './DiaryAnimatedEmoji.vue'
+import { lunarDayLabel, lunarMonthLabel, solarToLunarDetails, type LunarCalendarDetails } from '../../../shared/lunarCalendar'
+import { lunarZodiacIcon } from '../../features/diary/lunarZodiac'
 
 const PIXEL_WHEEL_MONTH_THRESHOLD = 220
 const LINE_WHEEL_MONTH_THRESHOLD = 6
 const WHEEL_GESTURE_GAP_MS = 120
 const WHEEL_TAIL_MAX_DELTA = 24
 const WHEEL_RESTART_MIN_INCREASE = 12
-const props = defineProps<{ today: string; selectedDate: string | null; month: string; revision: number; markers: Record<string, { source?: string; emoji?: string; count?: number; hasEntries?: boolean; hasAttachments?: boolean; hasTasks?: boolean; todoDayState?: TodoDayVisualState }> }>()
+const props = defineProps<{
+  today: string
+  selectedDate: string | null
+  month: string
+  revision: number
+  viewMode: 'diary' | 'events' | 'tasks'
+  markers: Record<string, { source?: string; emoji?: string; count?: number; hasEntries?: boolean; hasAttachments?: boolean; hasTasks?: boolean; todoDayState?: TodoDayVisualState }>
+}>()
 const emit = defineEmits<{ select: [date: string]; month: [date: string] }>()
 const { locale } = useI18n()
+const lunarDateDetailsCache = new Map<string, LunarCalendarDetails | null>()
+const activeLunarTooltipDate = ref<string | null>(null)
+const focusedLunarDate = ref<string | null>(null)
+const hoveredLunarDate = ref<string | null>(null)
+const calendarContext = computed(() => `${props.month}:${props.revision}:${props.viewMode}`)
+const lunarTooltipContentStyle: CSSProperties = {
+  backgroundColor: 'var(--nuvyn-surface-1)',
+  color: 'var(--text)',
+  padding: '7px 10px',
+  borderRadius: '8px',
+  boxShadow: 'none',
+  pointerEvents: 'none',
+  width: 'max-content',
+  minWidth: '0',
+  maxWidth: 'calc(100vw - 24px)',
+}
+const lunarTooltipThemeOverrides = {
+  boxShadow: 'none',
+}
+let lunarTooltipTimer: ReturnType<typeof setTimeout> | null = null
 interface TodoMarkerPresentation extends TodoDayMarkerAssets {
   state: TodoDayVisualState
   animate: boolean
@@ -49,6 +78,89 @@ const weekdays = computed(() => locale.value === 'zh'
   ? ['周一', '周二', '周三', '周四', '周五', '周六', '周日']
   : ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'])
 const dateFor = (year: number, month: number, date: number) => diaryDateFromCalendarFields({ year, month, date }) ?? ''
+function lunarDateDetails(date: string): LunarCalendarDetails | null {
+  if (lunarDateDetailsCache.has(date)) return lunarDateDetailsCache.get(date) ?? null
+  if (lunarDateDetailsCache.size >= 420) lunarDateDetailsCache.clear()
+  const details = solarToLunarDetails(date)
+  lunarDateDetailsCache.set(date, details)
+  return details
+}
+
+function lunarDateLabel(date: string): string {
+  const lunar = lunarDateDetails(date)
+  if (!lunar) return ''
+  return lunar.day === 1
+    ? `${lunar.isLeapMonth ? '闰' : ''}${lunarMonthLabel(lunar.month)}`
+    : lunarDayLabel(lunar.day)
+}
+
+function lunarFullDateLabel(date: string): string {
+  const lunar = lunarDateDetails(date)
+  if (!lunar) return ''
+  const month = `${lunar.isLeapMonth ? '闰' : ''}${lunarMonthLabel(lunar.month)}`
+  return `农历 ${month}${lunarDayLabel(lunar.day)}日`
+}
+
+function lunarTooltipId(date: string): string {
+  return `diary-lunar-tooltip-${date}`
+}
+
+function clearLunarTooltipTimer() {
+  if (lunarTooltipTimer) clearTimeout(lunarTooltipTimer)
+  lunarTooltipTimer = null
+}
+
+function scheduleLunarTooltip(date: string | null) {
+  clearLunarTooltipTimer()
+  if (!date) {
+    activeLunarTooltipDate.value = null
+    return
+  }
+  if (activeLunarTooltipDate.value === date) return
+  activeLunarTooltipDate.value = null
+  lunarTooltipTimer = setTimeout(() => {
+    activeLunarTooltipDate.value = date
+    lunarTooltipTimer = null
+  }, 300)
+}
+
+function onLunarPointerEnter(date: string, event: PointerEvent) {
+  if (event.pointerType !== 'mouse') return
+  hoveredLunarDate.value = date
+  scheduleLunarTooltip(hoveredLunarDate.value ?? focusedLunarDate.value)
+}
+
+function onLunarPointerLeave(date: string, event: PointerEvent) {
+  if (event.pointerType !== 'mouse') return
+  if (hoveredLunarDate.value === date) hoveredLunarDate.value = null
+  scheduleLunarTooltip(focusedLunarDate.value ?? hoveredLunarDate.value)
+}
+
+function onCalendarDateFocus(date: string, event: FocusEvent) {
+  const target = event.currentTarget
+  if (!(target instanceof HTMLElement) || !target.matches(':focus-visible')) return
+  focusedLunarDate.value = date
+  scheduleLunarTooltip(hoveredLunarDate.value ?? focusedLunarDate.value)
+}
+
+function onCalendarDateBlur(date: string) {
+  if (focusedLunarDate.value === date) focusedLunarDate.value = null
+  scheduleLunarTooltip(hoveredLunarDate.value ?? focusedLunarDate.value)
+}
+
+function clearLunarTooltip() {
+  clearLunarTooltipTimer()
+  activeLunarTooltipDate.value = null
+  focusedLunarDate.value = null
+  hoveredLunarDate.value = null
+}
+
+function selectCalendarDate(date: string, event: MouseEvent) {
+  clearLunarTooltip()
+  selectDate(date, event)
+}
+
+watch(calendarContext, clearLunarTooltip)
 const calendarRef = ref<InstanceType<typeof NCalendar> | null>(null)
 const calendarPickerRevision = ref(0)
 const calendarKey = computed(() => `${props.revision}-${calendarPickerRevision.value}`)
@@ -68,6 +180,7 @@ let wheelTail: { peak: number; low: number } | null = null
 
 onBeforeUnmount(() => {
   if (suppressCalendarClickTimer) clearTimeout(suppressCalendarClickTimer)
+  clearLunarTooltipTimer()
 })
 
 function navigateMonthByGesture(offset: number) {
@@ -246,27 +359,73 @@ function selectDate(date: string, event: MouseEvent) {
     <template #default="{ year, month, date }">
       <button type="button" class="life-date" :class="{ today: dateFor(year, month, date) === today, selected: selectedDate === dateFor(year, month, date) }"
         :data-date="dateFor(year, month, date)" :aria-label="dateFor(year, month, date)" :aria-pressed="selectedDate === dateFor(year, month, date)"
-        @click.stop="selectDate(dateFor(year, month, date), $event)">
-        <span class="life-date-badge"><span class="life-date-number">{{ date }}</span></span>
-        <span
-          v-if="markers[dateFor(year, month, date)]"
-          class="life-marker"
-          :class="{ 'life-marker--with-task': Boolean(todoMarkers[dateFor(year, month, date)]) }"
-        >
-          <img v-if="markers[dateFor(year, month, date)]?.source" :class="{ 'life-event-marker': Boolean(markers[dateFor(year, month, date)]?.emoji) }" :src="markers[dateFor(year, month, date)]?.source" alt="">
-          <span v-else-if="markers[dateFor(year, month, date)]?.emoji" class="life-event-marker">{{ markers[dateFor(year, month, date)]?.emoji }}</span>
-          <span v-else-if="markers[dateFor(year, month, date)]?.hasEntries || markers[dateFor(year, month, date)]?.hasAttachments" class="life-entry-marker" aria-label="有日记内容">•</span>
-          <small v-if="(markers[dateFor(year, month, date)]?.count ?? 0) > 1">+{{ markers[dateFor(year, month, date)]!.count! - 1 }}</small>
-          <DiaryAnimatedEmoji
-            v-if="todoMarkers[dateFor(year, month, date)]"
-            class="life-task-marker"
-            :class="{ 'life-task-marker--completed-late': todoMarkers[dateFor(year, month, date)]?.state === 'completed-late' }"
-            :data-todo-day-state="todoMarkers[dateFor(year, month, date)]?.state"
-            :animated-src="todoMarkers[dateFor(year, month, date)]?.animatedSrc ?? null"
-            :static-src="todoMarkers[dateFor(year, month, date)]!.staticSrc"
-            :animate="todoMarkers[dateFor(year, month, date)]?.animate ?? false"
-            :alt="todoMarkerAlt(todoMarkers[dateFor(year, month, date)]!.state)"
-          />
+        :aria-describedby="activeLunarTooltipDate === dateFor(year, month, date) ? lunarTooltipId(dateFor(year, month, date)) : undefined"
+        @focus="onCalendarDateFocus(dateFor(year, month, date), $event)"
+        @blur="onCalendarDateBlur(dateFor(year, month, date))"
+        @click.stop="selectCalendarDate(dateFor(year, month, date), $event)">
+        <span class="life-date-content">
+          <span class="life-date-heading">
+            <NTooltip
+              v-if="lunarDateDetails(dateFor(year, month, date))"
+              :show="activeLunarTooltipDate === dateFor(year, month, date)"
+              trigger="manual"
+              placement="top"
+              :delay="0"
+              :duration="0"
+              :animated="false"
+              :raw="true"
+              :show-arrow="false"
+              :theme-overrides="lunarTooltipThemeOverrides"
+              :content-style="lunarTooltipContentStyle"
+            >
+              <template #trigger>
+                <span
+                  class="life-date-lunar"
+                  @pointerenter="onLunarPointerEnter(dateFor(year, month, date), $event)"
+                  @pointerleave="onLunarPointerLeave(dateFor(year, month, date), $event)"
+                >{{ lunarDateLabel(dateFor(year, month, date)) }}</span>
+              </template>
+              <div :id="lunarTooltipId(dateFor(year, month, date))" class="life-lunar-tooltip" role="tooltip">
+                <div class="life-lunar-tooltip-ganzhi">
+                  <span>{{ lunarDateDetails(dateFor(year, month, date))?.yearGanZhi }}</span>
+                  <DiaryAnimatedEmoji
+                    v-if="lunarZodiacIcon(lunarDateDetails(dateFor(year, month, date))?.zodiac ?? '')"
+                    class="life-lunar-tooltip-zodiac"
+                    :animated-src="null"
+                    :static-src="lunarZodiacIcon(lunarDateDetails(dateFor(year, month, date))?.zodiac ?? '')?.src ?? ''"
+                    :animate="false"
+                    :alt="lunarZodiacIcon(lunarDateDetails(dateFor(year, month, date))?.zodiac ?? '')?.alt ?? ''"
+                  />
+                  <span>年 {{ lunarDateDetails(dateFor(year, month, date))?.monthGanZhi }}月 {{ lunarDateDetails(dateFor(year, month, date))?.dayGanZhi }}日</span>
+                </div>
+                <div class="life-lunar-tooltip-date">{{ lunarFullDateLabel(dateFor(year, month, date)) }}</div>
+              </div>
+            </NTooltip>
+            <span v-else class="life-date-lunar">{{ lunarDateLabel(dateFor(year, month, date)) }}</span>
+            <span class="life-date-badge"><span class="life-date-number">{{ date }}</span></span>
+          </span>
+          <span class="life-marker-slot">
+            <span
+              v-if="markers[dateFor(year, month, date)]"
+              class="life-marker"
+              :class="{ 'life-marker--with-task': Boolean(todoMarkers[dateFor(year, month, date)]) }"
+            >
+              <img v-if="markers[dateFor(year, month, date)]?.source" :class="{ 'life-event-marker': Boolean(markers[dateFor(year, month, date)]?.emoji) }" :src="markers[dateFor(year, month, date)]?.source" alt="">
+              <span v-else-if="markers[dateFor(year, month, date)]?.emoji" class="life-event-marker">{{ markers[dateFor(year, month, date)]?.emoji }}</span>
+              <span v-else-if="markers[dateFor(year, month, date)]?.hasEntries || markers[dateFor(year, month, date)]?.hasAttachments" class="life-entry-marker" aria-label="有日记内容">•</span>
+              <small v-if="(markers[dateFor(year, month, date)]?.count ?? 0) > 1">+{{ markers[dateFor(year, month, date)]!.count! - 1 }}</small>
+              <DiaryAnimatedEmoji
+                v-if="todoMarkers[dateFor(year, month, date)]"
+                class="life-task-marker"
+                :class="{ 'life-task-marker--completed-late': todoMarkers[dateFor(year, month, date)]?.state === 'completed-late' }"
+                :data-todo-day-state="todoMarkers[dateFor(year, month, date)]?.state"
+                :animated-src="todoMarkers[dateFor(year, month, date)]?.animatedSrc ?? null"
+                :static-src="todoMarkers[dateFor(year, month, date)]!.staticSrc"
+                :animate="todoMarkers[dateFor(year, month, date)]?.animate ?? false"
+                :alt="todoMarkerAlt(todoMarkers[dateFor(year, month, date)]!.state)"
+              />
+            </span>
+          </span>
         </span>
       </button>
     </template>
@@ -275,6 +434,11 @@ function selectDate(date: string, event: MouseEvent) {
 
 <style scoped>
 .diary-life-calendar {
+  --diary-calendar-grid-line: color-mix(
+    in srgb,
+    var(--nuvyn-border) 65%,
+    transparent
+  );
   flex: 0 0 auto;
   align-self: center;
   width: min(100%, 800px);
@@ -433,19 +597,60 @@ function selectDate(date: string, event: MouseEvent) {
   grid-template-rows: repeat(6, 80px);
   height: 480px;
   min-height: 480px;
-  margin-top: -8px;
+  margin-top: 4px;
   border: 0;
-  border-radius: 0;
+  border-radius: 12px;
+  overflow: hidden;
   background: transparent;
 }
 
 .diary-life-calendar :deep(.n-calendar-cell),
 .diary-life-calendar :deep(.n-calendar-cell:hover),
 .diary-life-calendar :deep(.n-calendar-cell--selected) {
+  position: relative;
   min-width: 0;
   padding: 0;
   border: 0;
+  border-radius: 0;
   background: transparent;
+}
+
+.diary-life-calendar :deep(.n-calendar-cell:has(.life-date.today)) {
+  background: color-mix(in srgb, var(--accent) 6%, transparent);
+}
+
+.diary-life-calendar :deep(.n-calendar-cell::before) {
+  position: absolute;
+  inset: 0;
+  box-sizing: border-box;
+  border-right: 1px solid var(--diary-calendar-grid-line);
+  border-bottom: 1px solid var(--diary-calendar-grid-line);
+  content: '';
+  pointer-events: none;
+}
+
+.diary-life-calendar :deep(.n-calendar-cell:nth-child(-n + 7)::before) {
+  border-top: 1px solid var(--diary-calendar-grid-line);
+}
+
+.diary-life-calendar :deep(.n-calendar-cell:nth-child(7n + 1)::before) {
+  border-left: 1px solid var(--diary-calendar-grid-line);
+}
+
+.diary-life-calendar :deep(.n-calendar-cell:first-child::before) {
+  border-top-left-radius: 12px;
+}
+
+.diary-life-calendar :deep(.n-calendar-cell:nth-child(7)::before) {
+  border-top-right-radius: 12px;
+}
+
+.diary-life-calendar :deep(.n-calendar-cell:nth-last-child(7)::before) {
+  border-bottom-left-radius: 12px;
+}
+
+.diary-life-calendar :deep(.n-calendar-cell:last-child::before) {
+  border-bottom-right-radius: 12px;
 }
 
 .diary-life-calendar :deep(.n-calendar-date),
@@ -454,9 +659,8 @@ function selectDate(date: string, event: MouseEvent) {
 }
 
 .life-date {
-  display: grid;
-  grid-template-rows: minmax(0, 1fr) 44px 24px;
-  justify-items: center;
+  position: relative;
+  display: block;
   width: 100%;
   height: 100%;
   padding: 0;
@@ -468,60 +672,150 @@ function selectDate(date: string, event: MouseEvent) {
   cursor: pointer;
 }
 
+.life-date-content {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  grid-template-rows: 20px minmax(0, 1fr);
+  padding: 8px 10px;
+  box-sizing: border-box;
+  pointer-events: none;
+}
+
+.life-date-heading {
+  display: flex;
+  min-width: 0;
+  height: 20px;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 4px;
+}
+
+.life-date-lunar {
+  overflow: hidden;
+  max-width: calc(100% - 18px);
+  pointer-events: auto;
+  color: var(--text-muted);
+  cursor: help;
+  font-size: 12px;
+  font-weight: 400;
+  line-height: 18px;
+  white-space: nowrap;
+}
+
+.life-lunar-tooltip {
+  display: grid;
+  justify-items: center;
+  gap: 4px;
+  max-width: calc(100vw - 24px);
+  white-space: nowrap;
+}
+
+.life-lunar-tooltip-ganzhi {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text);
+  font-size: 13px;
+  font-weight: 400;
+  line-height: 18px;
+}
+
+.life-lunar-tooltip-zodiac {
+  width: 15px;
+  height: 15px;
+  flex: none;
+  margin-inline: 1px;
+  object-fit: contain;
+}
+
+.life-lunar-tooltip-date {
+  color: var(--text-muted);
+  font-size: 12px;
+  font-weight: 400;
+  line-height: 16px;
+}
+
 .diary-life-calendar :deep(.n-calendar-cell--other-month) .life-date {
   color: var(--text-muted);
   opacity: 0.7;
 }
 
 .life-date-badge {
+  position: relative;
   display: grid;
-  grid-row: 2;
   place-items: center;
-  width: min(44px, 100%);
-  height: 44px;
+  min-width: 18px;
+  height: 20px;
+  flex: none;
   box-sizing: border-box;
+  line-height: 18px;
+}
+
+.life-date-badge::before {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 28px;
+  height: 28px;
+  box-sizing: border-box;
+  transform: translate(-50%, -50%);
   border: 1px solid transparent;
   border-radius: 8px;
+  background: transparent;
+  content: '';
 }
 
 .life-date:focus-visible {
   outline: none;
 }
 
-.life-date:focus-visible .life-date-badge {
+.life-date:focus-visible .life-date-badge::before {
   outline: 2px solid var(--accent);
   outline-offset: -2px;
 }
 
-.life-date.selected .life-date-badge {
+.life-date.selected .life-date-badge::before {
   border-color: color-mix(in srgb, var(--accent) 26%, transparent);
   background: color-mix(in srgb, var(--accent) 13%, transparent);
 }
 
-.life-date.today:not(.selected) .life-date-badge {
-  background: color-mix(in srgb, var(--accent) 8%, transparent);
+.life-date.today:not(.selected) .life-date-badge::before {
+  background: transparent;
 }
 
-.life-date.today.selected .life-date-badge {
-  border-color: color-mix(in srgb, var(--accent) 32%, transparent);
-  background: color-mix(in srgb, var(--accent) 15%, transparent);
+.life-date.today.selected .life-date-badge::before {
+  border-color: transparent;
+  background: transparent;
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .life-date:hover:not(.today):not(.selected) .life-date-badge::before {
+    background: color-mix(in srgb, var(--nuvyn-surface-2) 35%, transparent);
+  }
 }
 
 .life-date-number {
   position: relative;
+  white-space: nowrap;
 }
 
-.life-date.today .life-date-number,
 .life-date.selected .life-date-number {
   color: var(--accent);
   font-weight: 650;
 }
 
+.life-date.today .life-date-number {
+  color: var(--text);
+  font-weight: 400;
+}
+
 .life-marker {
-  grid-row: 3;
   display: flex;
   min-width: 0;
   max-width: 100%;
+  height: 21px;
+  flex: none;
   align-items: center;
   justify-content: center;
   gap: 2px;
@@ -554,6 +848,14 @@ function selectDate(date: string, event: MouseEvent) {
   opacity: 0.65;
 }
 
+.life-marker-slot {
+  display: flex;
+  width: 100%;
+  min-height: 0;
+  align-items: center;
+  justify-content: center;
+}
+
 .life-entry-marker {
   color: var(--accent);
   font-size: 22px;
@@ -581,8 +883,17 @@ function selectDate(date: string, event: MouseEvent) {
     grid-template-rows: repeat(6, 68px);
     height: 408px;
     min-height: 408px;
-    margin-top: -4px;
+    margin-top: 8px;
   }
-  .life-date { grid-template-rows: minmax(0, 1fr) 44px 22px; }
+  .life-date-content { padding-inline: 4px; }
+  .life-date-heading { gap: 0; }
+  .life-date-lunar { font-size: 10px; line-height: 16px; }
+  .life-date-badge { min-width: 16px; height: 18px; font-size: 14px; line-height: 16px; }
+}
+
+@media (max-width: 360px) {
+  .life-date-content { padding-inline: 2px; }
+  .life-date-lunar { font-size: 8px; }
+  .life-date-badge { min-width: 14px; font-size: 12px; }
 }
 </style>
