@@ -33,4 +33,17 @@ describe('renderAiMarkdown', () => {
     expect(html).toContain('<code>[[target]]</code>')
     expect(html).not.toContain('href="javascript:')
   })
+
+  it('wraps tables in a scrollable container for every workspace', () => {
+    const html = renderAiMarkdown('| Month | Total |\n| --- | ---: |\n| May | 42 |')
+    expect(html).toContain('<div class="ai-table-scroll" tabindex="0">')
+    expect(html).toContain('</table>')
+    expect(html).toContain('</div>')
+  })
+
+  it('keeps financial number alignment as a finance-only formatting behavior', () => {
+    const table = '| Amount |\n| --- |\n| ¥42.00 |'
+    expect(renderAiMarkdown(table)).not.toContain('ai-finance-number')
+    expect(renderAiMarkdown(table, { finance: true })).toContain('class="ai-finance-number"')
+  })
 })

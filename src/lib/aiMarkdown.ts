@@ -10,11 +10,11 @@ const md = new MarkdownIt({
   typographer: true,
 })
 md.use(wikiLinkPlugin)
-md.renderer.rules.table_open = (tokens, index, options, env, renderer) =>
-  ((env as AiMarkdownEnv).finance ? '<div class="ai-table-scroll" tabindex="0">' : '') +
+md.renderer.rules.table_open = (tokens, index, options, _env, renderer) =>
+  '<div class="ai-table-scroll" tabindex="0">' +
   renderer.renderToken(tokens, index, options)
-md.renderer.rules.table_close = (tokens, index, options, env, renderer) =>
-  renderer.renderToken(tokens, index, options) + ((env as AiMarkdownEnv).finance ? '</div>' : '')
+md.renderer.rules.table_close = (tokens, index, options, _env, renderer) =>
+  renderer.renderToken(tokens, index, options) + '</div>'
 
 md.renderer.rules.td_open = (tokens, index, options, env, renderer) => {
   const cell = tokens[index]

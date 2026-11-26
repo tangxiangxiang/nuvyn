@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, ref, useId, watch } from 'vue'
 import { NButton, NIcon, NInput, type InputInst } from 'naive-ui'
-import { ArrowUp, Check, ChevronDown, PlayerStop, Send } from '@vicons/tabler'
+import { ArrowUp, Check, ChevronDown, PlayerStop } from '@vicons/tabler'
 import type { LedgerAiCommand } from '../../lib/ai-api'
 import type { AiModelOption } from '../../lib/ai-api'
 import { useI18n } from '../../composables/useI18n'
@@ -256,7 +256,7 @@ defineExpose({ focus })
         ref="inputEl"
         class="ai-input-control"
         type="textarea"
-        :autosize="{ minRows: commands ? 1 : 2, maxRows: 5 }"
+        :autosize="{ minRows: 1, maxRows: 5 }"
         :value="modelValue"
         :placeholder="inputPlaceholder"
         :bordered="false"
@@ -308,8 +308,7 @@ defineExpose({ focus })
           >
             <NIcon class="ai-send-icon" aria-hidden="true">
               <PlayerStop v-if="busy" />
-              <ArrowUp v-else-if="commands" />
-              <Send v-else />
+              <ArrowUp v-else />
             </NIcon>
           </NButton>
         </div>

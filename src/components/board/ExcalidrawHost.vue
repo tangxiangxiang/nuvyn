@@ -5,6 +5,7 @@ import type {
   ExcalidrawIslandLangCode,
   ExcalidrawIslandTheme,
   BoardEditorMenuOptions,
+  BoardAiTriggerOptions,
 } from '../../features/board/engine/excalidraw/reactIsland'
 import type { BoardRuntimeAsset, ExcalidrawRuntimeScene } from '../../features/board/engine/types'
 import type { BoardMaterial } from '../../../shared/boardMaterialProtocol'
@@ -14,6 +15,7 @@ const props = withDefaults(defineProps<{
   theme?: ExcalidrawIslandTheme
   langCode?: ExcalidrawIslandLangCode
   editorMenu?: BoardEditorMenuOptions
+  aiTrigger?: BoardAiTriggerOptions
 }>(), {
   theme: 'light',
   langCode: 'en',
@@ -44,6 +46,7 @@ onMounted(() => {
       theme: props.theme,
       langCode: props.langCode,
       editorMenu: props.editorMenu,
+      aiTrigger: props.aiTrigger,
       onChange: (scene) => emit('change', scene),
       onAssetsChanged: (assets) => emit('assetsChanged', assets),
       onAssetError: (error) => emit('assetError', error),
@@ -63,8 +66,8 @@ onMounted(() => {
   })
 })
 
-watch([() => props.theme, () => props.langCode, () => props.editorMenu], ([theme, langCode, editorMenu]) => {
-  island?.update({ theme, langCode, editorMenu })
+watch([() => props.theme, () => props.langCode, () => props.editorMenu, () => props.aiTrigger], ([theme, langCode, editorMenu, aiTrigger]) => {
+  island?.update({ theme, langCode, editorMenu, aiTrigger })
 })
 
 onBeforeUnmount(() => {

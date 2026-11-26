@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { nextTick, onActivated, onBeforeUnmount, onMounted, ref } from 'vue'
+import { nextTick, onActivated, onBeforeUnmount, onDeactivated, onMounted, ref } from 'vue'
 import type { FinanceAgentPhase } from '../../../shared/ledgerAiAnalysis'
 import { NButton, NIcon } from 'naive-ui'
 import type { Message } from '../../lib/ai-api'
@@ -9,7 +9,7 @@ import AiFinanceActivity from './AiFinanceActivity.vue'
 import AiMarkdown from './AiMarkdown.vue'
 import { useI18n } from '../../composables/useI18n'
 
-const props = defineProps<{
+const props = withDefaults(defineProps<{
   messages: Message[]
   currentPath: string | null
   noteLinkContext?: { paths: string[]; openLink: (path: string, anchor?: string) => Promise<void> } | null
@@ -19,7 +19,9 @@ const props = defineProps<{
   showWelcome?: boolean
   promptsDisabled?: boolean
   financePhase?: FinanceAgentPhase | null
-}>()
+}>(), {
+  showWelcome: true,
+})
 
 const emit = defineEmits<{
   prompt: [text: string]
@@ -46,20 +48,24 @@ function followLatest() {
   lastScrollTop = el.scrollTop
 }
 
-onMounted(() => {
-  if (!props.finance || !viewport.value || !content.value || typeof ResizeObserver === 'undefined') return
+function observeContent(): void {
+  observer?.disconnect()
+  if (!viewport.value || !content.value || typeof ResizeObserver === 'undefined') return
   observer = new ResizeObserver(() => {
     if (following.value) followLatest()
   })
   observer.observe(viewport.value)
   observer.observe(content.value)
-})
+}
+
+onMounted(observeContent)
 onActivated(async () => {
-  if (!props.finance) return
+  observeContent()
   await nextTick()
   if (following.value) followLatest()
   else if (viewport.value) viewport.value.scrollTop = lastScrollTop
 })
+onDeactivated(() => observer?.disconnect())
 onBeforeUnmount(() => observer?.disconnect())
 </script>
 
@@ -70,19 +76,19 @@ onBeforeUnmount(() => observer?.disconnect())
       class="ai-messages"
       :class="{ 'is-empty': props.messages.length === 0, 'has-messages': props.messages.length > 0 }"
       role="log"
-      :tabindex="finance ? 0 : undefined"
+      tabindex="0"
       aria-live="polite"
-      @scroll.passive="finance && onScroll()"
+      @scroll.passive="onScroll"
     >
       <div ref="content" class="ai-message-list">
         <div v-if="props.messages.length === 0">
-          <div v-if="!finance || showWelcome" class="ai-empty-chat">
-            <template v-if="finance">
-              <NIcon class="ai-finance-welcome-icon" aria-hidden="true"><Wallet /></NIcon>
-              <h2>{{ t('ai.finance_welcome') }}</h2>
-              <p class="ai-empty-hint">{{ emptyHint }}</p>
-            </template>
-            <div v-else class="ai-suggestion-heading">{{ t('ai.suggestions') }}</div>
+          <div v-if="props.showWelcome !== false" class="ai-empty-chat">
+            <NIcon class="ai-welcome-icon" aria-hidden="true">
+              <Wallet v-if="finance" />
+              <Stars v-else />
+            </NIcon>
+            <h2>{{ t(finance ? 'ai.finance_welcome' : 'ai.assistant_welcome') }}</h2>
+            <p class="ai-empty-hint">{{ emptyHint ?? t(currentPath ? 'ai.empty_hint_note' : 'ai.empty_hint_vault') }}</p>
             <div class="ai-quick-prompts" :aria-label="t('ai.quick_prompts')">
               <NButton
                 v-for="(prompt, index) in props.quickPrompts"
@@ -103,10 +109,6 @@ onBeforeUnmount(() => observer?.disconnect())
                 <span>{{ prompt.label }}</span>
               </NButton>
             </div>
-
-            <div v-if="!finance" class="ai-empty-hint">
-              {{ props.emptyHint ?? t(props.currentPath ? 'ai.empty_hint_note' : 'ai.empty_hint_vault') }}
-            </div>
           </div>
         </div>
 
@@ -117,11 +119,6 @@ onBeforeUnmount(() => observer?.disconnect())
           class="ai-message"
           :class="[message.role, { 'ai-streaming': message.id === 0 }]"
         >
-          <div
-            v-if="!finance && message.role === 'assistant'"
-            class="ai-avatar"
-            aria-hidden="true"
-          ><NIcon aria-hidden="true"><Stars /></NIcon></div>
           <div class="ai-bubble">
             <AiFinanceActivity
               v-if="finance && message.blocks?.financeActivity?.length"
@@ -129,10 +126,11 @@ onBeforeUnmount(() => observer?.disconnect())
               :streaming="message.id === 0"
             />
             <AiMarkdown
-              v-if="message.role === 'assistant' && message.content && (finance || message.id !== 0)"
+              v-if="message.role === 'assistant' && message.content"
               :content="message.content"
               :source-path="currentPath"
               :finance="finance"
+              :streaming="message.id === 0"
               :note-link-context="props.noteLinkContext"
             />
             <div v-else-if="message.content" class="ai-text" :class="{ 'ai-streaming-text': message.role === 'assistant' && message.id === 0 }">
@@ -153,7 +151,7 @@ onBeforeUnmount(() => observer?.disconnect())
         </p>
       </div>
     </div>
-    <NButton v-if="finance && !following" class="ai-scroll-latest" size="small" round :aria-label="t('ai.finance_scroll_latest')" @click="followLatest">
+    <NButton v-if="!following" class="ai-scroll-latest" size="small" round :aria-label="t('ai.scroll_latest')" @click="followLatest">
       <NIcon aria-hidden="true"><ArrowDown /></NIcon>
     </NButton>
   </div>
@@ -167,16 +165,15 @@ onBeforeUnmount(() => observer?.disconnect())
   display: flex;
 }
 .ai-message-region > .ai-messages { width: 100%; }
-.ai-message-list { display: flex; flex-direction: column; gap: 12px; }
-.is-finance .ai-messages:focus-visible { outline: 1px solid var(--vs-accent); outline-offset: -2px; }
-.is-finance .ai-message-list { flex: 1 0 auto; gap: 16px; }
-.is-finance .is-empty .ai-message-list { justify-content: center; padding-bottom: min(8vh, 52px); box-sizing: border-box; }
-.is-finance .ai-empty-chat { align-items: center; text-align: center; padding: 12px 0; }
-.ai-finance-welcome-icon { color: var(--vs-accent); font-size: 28px; }
-.is-finance .ai-empty-chat h2 { margin: 10px 0 0; color: var(--vs-text-1); font-size: 1.15rem; }
-.is-finance .ai-empty-hint { margin: 6px 0 14px; padding: 0; font-size: 0.82rem; }
-.is-finance .ai-quick-prompts { align-self: center; }
-.is-finance .ai-quick-prompt { min-height: 36px; font-size: 0.85rem; padding-inline: 10px; }
+.ai-message-list { display: flex; flex: 1 0 auto; flex-direction: column; gap: 16px; }
+.ai-messages:focus-visible { outline: 1px solid var(--vs-accent); outline-offset: -2px; }
+.is-empty .ai-message-list { justify-content: center; padding-bottom: min(8vh, 52px); box-sizing: border-box; }
+.ai-empty-chat { align-items: center; text-align: center; padding: 12px 0; }
+.ai-welcome-icon { color: var(--vs-accent); font-size: 28px; }
+.ai-empty-chat h2 { margin: 10px 0 0; color: var(--vs-text-1); font-size: 1.15rem; }
+.ai-empty-chat > .ai-empty-hint { margin: 6px 0 14px; padding: 0; font-size: 0.82rem; }
+.ai-quick-prompts { align-self: center; max-width: min(100%, 440px); }
+.ai-quick-prompt { min-height: 36px; font-size: 0.85rem; padding-inline: 10px; }
 .ai-finance-activity + .ai-markdown { margin-top: 6px; }
 .ai-finance-phase { margin: 0; font-size: 0.75rem; color: var(--vs-text-2); }
 .ai-scroll-latest { position: absolute; z-index: 1; bottom: 8px; left: 50%; transform: translateX(-50%); }
@@ -224,13 +221,6 @@ onBeforeUnmount(() => observer?.disconnect())
   gap: 0;
   padding: 0 0 10px;
   color: var(--vs-text-2);
-}
-.ai-suggestion-heading {
-  margin-top: 6px;
-  color: var(--vs-text-3);
-  font-size: 0.7rem;
-  font-weight: 600;
-  line-height: 1.3;
 }
 .ai-quick-prompts {
   display: flex;

@@ -27,6 +27,8 @@ const draft = ref({ title: '', description: '', content: '' })
 const confirmDelete = ref(false)
 const latestVersion = ref<FinanceSkill | null>(null)
 const isConflict = ref(false)
+const isInstanceConflict = ref(false)
+const editBaseline = ref<{ name: string; id: number; revision: number } | null>(null)
 
 const builtinSkills = computed(() => skills.value.filter(skill => skill.source === 'builtin'))
 const customSkills = computed(() => skills.value.filter(skill => skill.source === 'custom'))
@@ -61,6 +63,19 @@ function displayDescription(skill: Pick<FinanceSkillMetadata, 'name' | 'descript
 function clearConflict(): void {
   latestVersion.value = null
   isConflict.value = false
+  isInstanceConflict.value = false
+}
+
+function errorCode(cause: unknown): string {
+  if (!cause || typeof cause !== 'object') return ''
+  if ('body' in cause && cause.body && typeof cause.body === 'object' && 'code' in cause.body && typeof cause.body.code === 'string') {
+    return cause.body.code
+  }
+  if ('message' in cause && typeof cause.message === 'string') {
+    if (cause.message.includes('stale-instance')) return 'stale-instance'
+    if (cause.message.includes('stale-revision')) return 'stale-revision'
+  }
+  return ''
 }
 
 async function loadList(): Promise<void> {
@@ -106,8 +121,10 @@ async function openSkill(name: string): Promise<void> {
 function backToList(): void {
   selected.value = null
   view.value = 'list'
+  draft.value = { title: '', description: '', content: '' }
   error.value = ''
   confirmDelete.value = false
+  editBaseline.value = null
   clearConflict()
 }
 
@@ -115,6 +132,7 @@ function beginAdd(): void {
   selected.value = null
   draft.value = { title: '', description: '', content: '' }
   view.value = 'add'
+  editBaseline.value = null
   error.value = ''
   clearConflict()
 }
@@ -126,10 +144,31 @@ function beginEdit(): void {
     description: selected.value.description,
     content: selected.value.content,
   }
+  editBaseline.value = {
+    name: selected.value.name,
+    id: selected.value.id,
+    revision: selected.value.revision,
+  }
   view.value = 'edit'
   error.value = ''
   confirmDelete.value = false
   clearConflict()
+}
+
+function cancelDraft(): void {
+  if (pending.value) return
+  if (view.value === 'add') {
+    backToList()
+    return
+  }
+  if (view.value !== 'edit') return
+  draft.value = selected.value
+    ? { title: selected.value.title, description: selected.value.description, content: selected.value.content }
+    : { title: '', description: '', content: '' }
+  view.value = selected.value ? 'detail' : 'list'
+  confirmDelete.value = false
+  error.value = isInstanceConflict.value ? t('ai.finance_skill_instance_conflict') : ''
+  if (!isInstanceConflict.value) clearConflict()
 }
 
 async function saveDraft(): Promise<void> {
@@ -142,35 +181,49 @@ async function saveDraft(): Promise<void> {
       selected.value = result.skill
       skills.value = [
         ...skills.value.filter(skill => skill.name !== result.skill.name),
-        { name: result.skill.name, title: result.skill.title, description: result.skill.description, source: 'custom', revision: result.skill.revision },
+        { id: result.skill.id, name: result.skill.name, title: result.skill.title, description: result.skill.description, source: 'custom', revision: result.skill.revision },
       ]
       view.value = 'detail'
       clearConflict()
     } else if (view.value === 'edit' && selected.value?.source === 'custom') {
+      const baseline = editBaseline.value
+      if (!baseline) return
+      const retryVersion = isConflict.value && !isInstanceConflict.value && latestVersion.value?.source === 'custom'
+        ? latestVersion.value
+        : null
       const result = await updateFinanceSkill(selected.value.name, {
         ...draft.value,
-        expectedRevision: selected.value.revision ?? 1,
+        expectedId: retryVersion?.id ?? baseline.id,
+        expectedRevision: retryVersion?.revision ?? baseline.revision,
       })
       selected.value = result.skill
+      editBaseline.value = { name: result.skill.name, id: result.skill.id, revision: result.skill.revision }
       skills.value = skills.value.map(skill => skill.name === result.skill.name
-        ? { name: result.skill.name, title: result.skill.title, description: result.skill.description, source: 'custom', revision: result.skill.revision }
+        ? { id: result.skill.id, name: result.skill.name, title: result.skill.title, description: result.skill.description, source: 'custom', revision: result.skill.revision }
         : skill)
       view.value = 'detail'
       clearConflict()
     }
   } catch (cause) {
-    const stale = typeof cause === 'object' && cause !== null
-      && 'status' in cause && cause.status === 409
-      && 'message' in cause && typeof cause.message === 'string' && cause.message.includes('stale-revision')
-    if (stale && selected.value?.source === 'custom') {
+    const code = errorCode(cause)
+    if ((code === 'stale-revision' || code === 'stale-instance') && editBaseline.value) {
       try {
-        const latest = await getFinanceSkill(selected.value.name)
-        latestVersion.value = latest
-        selected.value = latest
-        isConflict.value = true
-        error.value = t('ai.finance_skill_conflict')
+        const latest = await getFinanceSkill(editBaseline.value.name)
+        if (code === 'stale-instance' || latest.id !== editBaseline.value.id) {
+          latestVersion.value = latest
+          isInstanceConflict.value = true
+          isConflict.value = true
+          error.value = t('ai.finance_skill_instance_conflict')
+        } else {
+          latestVersion.value = latest
+          selected.value = latest
+          isConflict.value = true
+          error.value = t('ai.finance_skill_conflict')
+        }
       } catch {
-        error.value = t('ai.finance_skill_conflict_reload_failed')
+        isInstanceConflict.value = code === 'stale-instance'
+        isConflict.value = isInstanceConflict.value
+        error.value = isInstanceConflict.value ? t('ai.finance_skill_instance_missing') : t('ai.finance_skill_conflict_reload_failed')
       }
     } else error.value = t(view.value === 'add' ? 'ai.finance_skill_add_failed' : 'ai.finance_skill_save_failed')
   } finally {
@@ -184,23 +237,28 @@ async function removeSkill(): Promise<void> {
   pending.value = true
   error.value = ''
   try {
-    await deleteFinanceSkill(skill.name, skill.revision ?? 1)
+    await deleteFinanceSkill(skill.name, skill.id, skill.revision)
     skills.value = skills.value.filter(item => item.name !== skill.name)
     backToList()
   } catch (cause) {
-    const stale = typeof cause === 'object' && cause !== null
-      && 'status' in cause && cause.status === 409
-      && 'message' in cause && typeof cause.message === 'string' && cause.message.includes('stale-revision')
-    if (stale) {
+    const code = errorCode(cause)
+    if (code === 'stale-revision' || code === 'stale-instance') {
       try {
         const latest = await getFinanceSkill(skill.name)
-        selected.value = latest
         latestVersion.value = latest
         isConflict.value = true
         confirmDelete.value = false
-        error.value = t('ai.finance_skill_conflict_delete')
+        if (code === 'stale-instance' || latest.id !== skill.id) {
+          isInstanceConflict.value = true
+          error.value = t('ai.finance_skill_instance_conflict')
+        } else {
+          selected.value = latest
+          error.value = t('ai.finance_skill_conflict_delete')
+        }
       } catch {
-        error.value = t('ai.finance_skill_conflict_reload_failed')
+        isInstanceConflict.value = code === 'stale-instance'
+        isConflict.value = isInstanceConflict.value
+        error.value = isInstanceConflict.value ? t('ai.finance_skill_instance_missing') : t('ai.finance_skill_conflict_reload_failed')
       }
     } else error.value = t('ai.finance_skill_delete_failed')
   } finally {
@@ -252,8 +310,8 @@ async function removeSkill(): Promise<void> {
             <pre>{{ latestVersion.content }}</pre>
           </div>
           <div class="ai-finance-skill-actions">
-            <button type="button" :disabled="pending" @click="view = 'detail'; clearConflict()">{{ t('ai.finance_memory_cancel') }}</button>
-            <button class="is-primary" type="submit" :disabled="pending || !canSaveDraft">
+            <button type="button" :disabled="pending" @click="cancelDraft">{{ t('ai.finance_memory_cancel') }}</button>
+            <button class="is-primary" type="submit" :disabled="pending || !canSaveDraft || isInstanceConflict">
               <NIcon :size="16" aria-hidden="true"><Check /></NIcon>{{ t('ai.finance_memory_save') }}
             </button>
           </div>
@@ -267,7 +325,7 @@ async function removeSkill(): Promise<void> {
             <span>{{ latestVersion.description }}</span>
             <pre>{{ latestVersion.content }}</pre>
           </div>
-          <div v-if="selected.source === 'custom'" class="ai-finance-skill-actions">
+          <div v-if="selected.source === 'custom' && !isInstanceConflict" class="ai-finance-skill-actions">
             <div v-if="confirmDelete" class="ai-finance-skill-delete-confirm" role="group">
               <span>{{ t('ai.finance_skill_delete_confirm', { title: selected.title }) }}</span>
               <button type="button" :disabled="pending" @click="confirmDelete = false">{{ t('ai.finance_memory_cancel') }}</button>

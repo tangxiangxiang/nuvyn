@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import Database from 'better-sqlite3'
 import app from '../index.js'
 import { createFinanceAgent, manageSkillTool, readSkillTool } from '../ai/finance-agent.js'
@@ -84,17 +84,25 @@ describe('Finance custom skill repository', () => {
 
   })
 
-  it('uses revision checks, tombstones deleted names, and allows explicit user restoration', () => {
+  it('uses id plus revision to reject ABA updates and deletes across explicit restoration', () => {
     const repository = createFinanceCustomSkillRepository(db)
     const created = repository.create(auth.userId, input('custom-savings-method'), 10)
     if (!created.ok) throw new Error('expected skill to be created')
-    const updated = repository.update(auth.userId, created.skill.name, { content: 'Review savings against the stated goal.' }, 1, 20)
+    const updated = repository.update(auth.userId, created.skill.name, { content: 'Review savings against the stated goal.' }, created.skill.id, 1, 20)
     expect(updated).toMatchObject({ ok: true, skill: { revision: 2, updatedAt: 20 } })
-    expect(repository.update(auth.userId, created.skill.name, { content: 'Stale overwrite.' }, 1)).toMatchObject({ ok: false, error: 'stale-revision' })
-    expect(repository.remove(auth.userId, created.skill.name, 1)).toMatchObject({ ok: false, error: 'stale-revision' })
-    expect(repository.remove(auth.userId, created.skill.name, 2, 30)).toMatchObject({ ok: true })
+    expect(repository.update(auth.userId, created.skill.name, { content: 'Stale overwrite.' }, created.skill.id, 1)).toMatchObject({ ok: false, error: 'stale-revision' })
+    expect(repository.remove(auth.userId, created.skill.name, created.skill.id, 1)).toMatchObject({ ok: false, error: 'stale-revision' })
+    expect(repository.remove(auth.userId, created.skill.name, created.skill.id, 2, 30)).toMatchObject({ ok: true })
     expect(repository.create(auth.userId, input(created.skill.name))).toMatchObject({ ok: false, error: 'previously-deleted' })
-    expect(repository.createExplicitly(auth.userId, input(created.skill.name), 40)).toMatchObject({ ok: true, skill: { revision: 1 } })
+    const restored = repository.createExplicitly(auth.userId, input(created.skill.name), 40)
+    expect(restored).toMatchObject({ ok: true, skill: { revision: 1 } })
+    if (!restored.ok) throw new Error('expected explicit restoration')
+    expect(restored.skill.id).not.toBe(created.skill.id)
+    expect(repository.update(auth.userId, created.skill.name, { content: 'Old client overwrite.' }, created.skill.id, 2))
+      .toMatchObject({ ok: false, error: 'stale-instance' })
+    expect(repository.remove(auth.userId, created.skill.name, created.skill.id, 2))
+      .toMatchObject({ ok: false, error: 'stale-instance' })
+    expect(repository.get(auth.userId, created.skill.name)?.content).toBe(input(created.skill.name).content)
   })
 
   it('generates an internal slug from the title and reuses a deleted slug only on explicit user creation', () => {
@@ -103,7 +111,7 @@ describe('Finance custom skill repository', () => {
     const first = repository.createForUser(auth.userId, createInput)
     expect(first).toMatchObject({ ok: true, skill: { name: 'custom-monthly-review' } })
     if (!first.ok) throw new Error('expected user skill to be created')
-    expect(repository.remove(auth.userId, first.skill.name, 1).ok).toBe(true)
+    expect(repository.remove(auth.userId, first.skill.name, first.skill.id, 1).ok).toBe(true)
     const restored = repository.createForUser(auth.userId, createInput)
     expect(restored).toMatchObject({ ok: true, skill: { name: 'custom-monthly-review' } })
   })
@@ -132,27 +140,50 @@ describe('Finance custom skill HTTP API', () => {
       title: '个人月度回顾', description: '按偏好复盘月度收支', content: '先列收入、支出和还款，再分析结余。',
     })
     expect(create.status).toBe(201)
-    const created = await create.json() as { skill: { name: string; revision: number; source: string } }
-    expect(created.skill).toMatchObject({ name: expect.stringMatching(/^custom-/), revision: 1, source: 'custom' })
+    const created = await create.json() as { skill: { id: number; name: string; revision: number; source: string } }
+    expect(created.skill).toMatchObject({ id: expect.any(Number), name: expect.stringMatching(/^custom-/), revision: 1, source: 'custom' })
 
     const update = await request(`/finance-skills/${created.skill.name}`, 'PATCH', {
-      title: '个人月度财务回顾', description: '按偏好复盘月度收支', content: '先列收入、支出和还款，再比较上月同期。', expectedRevision: 1,
+      title: '个人月度财务回顾', description: '按偏好复盘月度收支', content: '先列收入、支出和还款，再比较上月同期。', expectedId: created.skill.id, expectedRevision: 1,
     })
     expect(update.status).toBe(200)
-    const changed = await update.json() as { skill: { revision: number; content: string } }
+    const changed = await update.json() as { skill: { id: number; revision: number; content: string } }
     expect(changed.skill).toMatchObject({ revision: 2, content: '先列收入、支出和还款，再比较上月同期。' })
     const stale = await request(`/finance-skills/${created.skill.name}`, 'PATCH', {
-      content: 'Overwrite stale content.', expectedRevision: 1,
+      content: 'Overwrite stale content.', expectedId: created.skill.id, expectedRevision: 1,
     })
     expect(stale.status).toBe(409)
-    expect((await request(`/finance-skills/${created.skill.name}?expectedRevision=2`, 'DELETE')).status).toBe(200)
+    expect((await request(`/finance-skills/${created.skill.name}?expectedId=${changed.skill.id}&expectedRevision=2`, 'DELETE')).status).toBe(200)
     expect((await request(`/finance-skills/${created.skill.name}`)).status).toBe(404)
 
     const restored = await request('/finance-skills', 'POST', {
       title: '个人月度财务回顾', description: '按偏好复盘月度收支', content: '重新创建的分析流程。',
     })
     expect(restored.status).toBe(201)
-    expect((await restored.json() as { skill: { name: string } }).skill.name).toBe(created.skill.name)
+    const restoredSkill = (await restored.json() as { skill: { id: number; name: string } }).skill
+    expect(restoredSkill.name).toBe(created.skill.name)
+    expect(restoredSkill.id).not.toBe(created.skill.id)
+    const staleRestoreUpdate = await request(`/finance-skills/${created.skill.name}`, 'PATCH', {
+      content: 'Stale computer update.', expectedId: created.skill.id, expectedRevision: 1,
+    })
+    expect(staleRestoreUpdate.status).toBe(409)
+    expect(await staleRestoreUpdate.json()).toMatchObject({ code: 'stale-instance' })
+    const staleRestoreDelete = await request(`/finance-skills/${created.skill.name}?expectedId=${created.skill.id}&expectedRevision=1`, 'DELETE')
+    expect(staleRestoreDelete.status).toBe(409)
+    expect(await staleRestoreDelete.json()).toMatchObject({ code: 'stale-instance' })
+    expect((await request(`/finance-skills/${created.skill.name}`)).status).toBe(200)
+  })
+
+  it('requires instance identity for HTTP edits and deletes', async () => {
+    const createdResponse = await request('/finance-skills', 'POST', {
+      title: 'Instance check', description: 'Validate instance identity.', content: 'Compare the same periods.',
+    })
+    const created = (await createdResponse.json() as { skill: { id: number; name: string } }).skill
+    expect((await request(`/finance-skills/${created.name}`, 'PATCH', {
+      content: 'A revision without identity must not write.', expectedRevision: 1,
+    })).status).toBe(400)
+    expect((await request(`/finance-skills/${created.name}?expectedRevision=1`, 'DELETE')).status).toBe(400)
+    expect((await request(`/finance-skills/${created.name}`)).status).toBe(200)
   })
 
   it('rejects body-supplied owner ids, built-in mutations, and writes while the finance operation is locked', async () => {
@@ -160,7 +191,7 @@ describe('Finance custom skill HTTP API', () => {
       title: 'Wrong owner', description: 'No client-selected owner', content: 'Procedure only.', ownerId: addAnotherUser(),
     })).status).toBe(400)
     expect((await request('/finance-skills/monthly-review', 'PATCH', {
-      title: 'Overwrite built-in', expectedRevision: 1,
+      title: 'Overwrite built-in', expectedId: 1, expectedRevision: 1,
     })).status).toBe(400)
 
     const { ensureLedgerAiThread, acquireLedgerAiOperation } = await import('../ai/sessions.js')
@@ -185,6 +216,66 @@ describe('Finance Agent custom skill learning', () => {
     return agent.execute({ id: name + Math.random(), name, input: inputValue }, 1, 0, async () => {})
   }
 
+  it('rejects stale Agent writes and reloads a recreated same-name skill as a new instance', async () => {
+    const repository = createFinanceCustomSkillRepository(db)
+    const original = repository.create(auth.userId, input('custom-aba-learning'))
+    if (!original.ok) throw new Error('expected initial skill')
+    const agent = createFinanceAgent(createLedgerAnalysis(ledgerContext), { db, ownerId: auth.userId }, evidence)
+    const firstRead = await callTool(agent, readSkillTool.name, { name: original.skill.name })
+    expect(JSON.parse(firstRead.content)).toMatchObject({ id: original.skill.id, revision: 1 })
+
+    expect(repository.remove(auth.userId, original.skill.name, original.skill.id, 1).ok).toBe(true)
+    const restored = repository.createExplicitly(auth.userId, input(original.skill.name, {
+      title: 'Restored monthly method',
+      content: 'The restored instance has its own procedure.',
+    }))
+    if (!restored.ok) throw new Error('expected explicit restoration')
+    expect(restored.skill.id).not.toBe(original.skill.id)
+
+    const secondRead = await callTool(agent, readSkillTool.name, { name: original.skill.name })
+    expect(secondRead.status).toBe('success')
+    expect(JSON.parse(secondRead.content)).toMatchObject({
+      id: restored.skill.id,
+      revision: 1,
+      content: restored.skill.content,
+    })
+    const staleWrite = await callTool(agent, manageSkillTool.name, {
+      action: 'update', name: original.skill.name, expectedId: original.skill.id, expectedRevision: 1,
+      content: 'The stale Agent must not overwrite the restored method.', evidence,
+    })
+    expect(staleWrite.status).toBe('failed')
+    expect(JSON.parse(staleWrite.content)).toMatchObject({ ok: false, error: expect.stringContaining('deleted or recreated') })
+    expect(repository.get(auth.userId, original.skill.name)?.content).toBe(restored.skill.content)
+    expect(agent.systemPrompt).toContain(`"id":${restored.skill.id}`)
+  })
+
+  it('reuses one request metadata snapshot and refreshes it once after a successful write', async () => {
+    const prepareSpy = vi.spyOn(db, 'prepare')
+    const metadataQueryCount = () => prepareSpy.mock.calls.filter(([sql]) =>
+      sql.includes('SELECT id, name, title, description, revision') && sql.includes('FROM ai_finance_skills'),
+    ).length
+    const agent = createFinanceAgent(createLedgerAnalysis(ledgerContext), { db, ownerId: auth.userId }, evidence)
+    void agent.systemPrompt
+    void agent.systemPrompt
+    agent.availableTools(true)
+    agent.availableTools(true)
+    expect(metadataQueryCount()).toBe(1)
+
+    const created = await callTool(agent, manageSkillTool.name, {
+      action: 'create', name: 'custom-request-snapshot', title: 'Request snapshot',
+      description: 'Visible immediately within this request.', content: 'Compare equivalent periods.', evidence,
+    })
+    expect(created.status).toBe('success')
+    expect(agent.systemPrompt).toContain('custom-request-snapshot')
+    agent.availableTools(true)
+    void agent.systemPrompt
+    expect(metadataQueryCount()).toBe(2)
+    const nextRequest = createFinanceAgent(createLedgerAnalysis(ledgerContext), { db, ownerId: auth.userId }, evidence)
+    expect(nextRequest.systemPrompt).toContain('custom-request-snapshot')
+    expect(metadataQueryCount()).toBe(3)
+    prepareSpy.mockRestore()
+  })
+
   it('creates, discovers, loads, updates and reloads a user-approved method in one request', async () => {
     const memory = createFinanceMemoryRepository(db)
     const agent = createFinanceAgent(createLedgerAnalysis(ledgerContext), { db, ownerId: auth.userId }, `以后分析月度财务时，先列收入、支出，再比较上月同期。`)
@@ -205,11 +296,12 @@ describe('Finance Agent custom skill learning', () => {
     expect(JSON.parse(firstRead.content)).toMatchObject({ ok: true, source: 'custom', revision: 1, content: expect.stringContaining('上月同期') })
 
     const updated = await callTool(agent, manageSkillTool.name, {
-      action: 'update', name: 'custom-monthly-report', expectedRevision: 1,
+      action: 'update', name: 'custom-monthly-report', expectedId: JSON.parse(firstRead.content).id, expectedRevision: 1,
       content: '先列收入、支出和还款，再与上月同期比较，最后最多给三条建议。', evidence,
     })
     expect(updated.status).toBe('success')
     expect(JSON.parse(updated.content)).toMatchObject({ ok: true, action: 'update', skill: { revision: 2 } })
+    expect(agent.systemPrompt).toContain('"revision":2')
     const secondRead = await callTool(agent, readSkillTool.name, { name: 'custom-monthly-report' })
     expect(JSON.parse(secondRead.content)).toMatchObject({ ok: true, revision: 2, content: expect.stringContaining('最多给三条建议') })
     expect(memory.list(auth.userId)).toEqual([])
@@ -280,7 +372,7 @@ describe('Finance Agent custom skill learning', () => {
     const repository = createFinanceCustomSkillRepository(db)
     const skill = repository.create(auth.userId, input('custom-deleted-method'))
     if (!skill.ok) throw new Error('expected custom skill')
-    repository.remove(auth.userId, skill.skill.name, skill.skill.revision)
+    repository.remove(auth.userId, skill.skill.name, skill.skill.id, skill.skill.revision)
     const agent = createFinanceAgent(createLedgerAnalysis(ledgerContext), { db, ownerId: auth.userId }, 'Please use my existing analysis style.')
     expect(manageSkillTool.parameters.properties.action.enum).toEqual(['create', 'update'])
     expect(agent.availableTools(true).find(tool => tool.name === 'manage_skill')).toBeDefined()

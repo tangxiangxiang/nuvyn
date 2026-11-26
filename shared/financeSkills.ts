@@ -21,12 +21,23 @@ export const FINANCE_CUSTOM_SKILL_LIMITS = {
   writesPerRequest: 2,
 } as const
 
-export type FinanceSkillMetadata = {
+export type BuiltinFinanceSkillMetadata = {
+  name: BuiltinFinanceSkillName
+  title: string
+  description: string
+  source: 'builtin'
+  id?: never
+  revision?: never
+}
+
+export type CustomFinanceSkillMetadata = {
   name: string
   title: string
   description: string
-  source: FinanceSkillSource
-  revision?: number
+  source: 'custom'
+  id: number
+  revision: number
 }
 
-export type FinanceSkill = FinanceSkillMetadata & { content: string }
+export type FinanceSkillMetadata = BuiltinFinanceSkillMetadata | CustomFinanceSkillMetadata
+export type FinanceSkill = (BuiltinFinanceSkillMetadata | CustomFinanceSkillMetadata) & { content: string }

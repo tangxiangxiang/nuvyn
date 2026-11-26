@@ -531,9 +531,15 @@ function parseFinanceSkillRevision(raw: string | undefined): number | null {
   return Number.isSafeInteger(revision) ? revision : null
 }
 
+function parseFinanceSkillId(raw: string | undefined): number | null {
+  if (!raw || !/^[1-9]\d{0,14}$/.test(raw)) return null
+  const id = Number(raw)
+  return Number.isSafeInteger(id) ? id : null
+}
+
 function financeSkillMutationStatus(error: string): number {
   if (error === 'not-found') return 404
-  if (['duplicate', 'previously-deleted', 'count-exceeded', 'capacity-exceeded', 'stale-revision'].includes(error)) return 409
+  if (['duplicate', 'previously-deleted', 'count-exceeded', 'capacity-exceeded', 'stale-instance', 'stale-revision'].includes(error)) return 409
   return 400
 }
 
@@ -585,16 +591,17 @@ ai.patch('/finance-skills/:name', async (c) => {
   if (!owner) return bad(c, 'Finance skills require authentication', 403)
   const name = c.req.param('name')
   const body = await c.req.json().catch(() => null) as Record<string, unknown> | null
-  if (!body || !Number.isSafeInteger(body.expectedRevision) || typeof body.expectedRevision !== 'number'
+  if (!body || !Number.isSafeInteger(body.expectedId) || typeof body.expectedId !== 'number'
+    || body.expectedId < 1 || !Number.isSafeInteger(body.expectedRevision) || typeof body.expectedRevision !== 'number'
     || body.expectedRevision < 1 || !Object.keys(body).some(key => ['title', 'description', 'content'].includes(key))
-    || Object.keys(body).some(key => !['expectedRevision', 'title', 'description', 'content'].includes(key))) return bad(c, 'Invalid finance skill update')
+    || Object.keys(body).some(key => !['expectedId', 'expectedRevision', 'title', 'description', 'content'].includes(key))) return bad(c, 'Invalid finance skill update')
   const patch = { title: body.title, description: body.description, content: body.content }
   if (Object.values(patch).some(value => value !== undefined && typeof value !== 'string')) return bad(c, 'Invalid finance skill update')
   const release = lockFinanceMemoryManagement(db, owner.id)
   if (!release) return bad(c, 'Finance Agent is busy', 409)
   try {
-    const result = createFinanceCustomSkillRepository(db).update(owner.id, name, patch, body.expectedRevision)
-    if (!result.ok) return bad(c, 'Finance skill update failed: ' + result.error, financeSkillMutationStatus(result.error))
+    const result = createFinanceCustomSkillRepository(db).update(owner.id, name, patch, body.expectedId, body.expectedRevision)
+    if (!result.ok) return bad(c, 'Finance skill update failed: ' + result.error, financeSkillMutationStatus(result.error), result.error)
     return c.json({ skill: result.skill, usage: result.usage })
   } finally {
     release()
@@ -606,13 +613,15 @@ ai.delete('/finance-skills/:name', (c) => {
   const db = getDb()
   const owner = currentFinanceMemoryOwner(c, db)
   if (!owner) return bad(c, 'Finance skills require authentication', 403)
+  const expectedId = parseFinanceSkillId(c.req.query('expectedId'))
   const expectedRevision = parseFinanceSkillRevision(c.req.query('expectedRevision'))
+  if (expectedId === null) return bad(c, 'A valid expected finance skill instance is required')
   if (expectedRevision === null) return bad(c, 'A valid expected finance skill revision is required')
   const release = lockFinanceMemoryManagement(db, owner.id)
   if (!release) return bad(c, 'Finance Agent is busy', 409)
   try {
-    const result = createFinanceCustomSkillRepository(db).remove(owner.id, c.req.param('name'), expectedRevision)
-    if (!result.ok) return bad(c, 'Finance skill delete failed: ' + result.error, financeSkillMutationStatus(result.error))
+    const result = createFinanceCustomSkillRepository(db).remove(owner.id, c.req.param('name'), expectedId, expectedRevision)
+    if (!result.ok) return bad(c, 'Finance skill delete failed: ' + result.error, financeSkillMutationStatus(result.error), result.error)
     return c.json({ deleted: true as const, usage: result.usage })
   } finally {
     release()

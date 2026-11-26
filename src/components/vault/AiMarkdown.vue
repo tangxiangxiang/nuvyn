@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed } from 'vue'
+import { onBeforeUnmount, ref, watch } from 'vue'
 import { renderAiMarkdown } from '../../lib/aiMarkdown'
 import { useOptionalVaultContext } from '../../composables/vault/context/useVaultContext'
 import { getLinkIndex } from '../../composables/vault/useLinkIndex'
@@ -9,22 +9,60 @@ const props = defineProps<{
   content: string
   sourcePath?: string | null
   finance?: boolean
+  streaming?: boolean
   noteLinkContext?: { paths: string[]; openLink: (path: string, anchor?: string) => Promise<void> } | null
 }>()
 
 const vaultContext = useOptionalVaultContext()
 const linkIndex = getLinkIndex(vaultContext?.fileChanges)
-const html = computed(() => renderAiMarkdown(props.content, {
-  sourcePath: props.sourcePath ?? undefined,
-  finance: props.finance,
-  resolver: (ref, _anchor, context) => ({
-    target: resolveWikiTarget(
-      ref,
-      context?.sourcePath ?? props.sourcePath ?? '',
-      vaultContext ? [...linkIndex.value.paths] : props.noteLinkContext?.paths ?? [],
-    ),
-  }),
-}))
+const html = ref('')
+let renderFrame: number | null = null
+
+function cancelScheduledRender(): void {
+  if (renderFrame === null) return
+  cancelAnimationFrame(renderFrame)
+  renderFrame = null
+}
+
+function renderCurrent(): void {
+  html.value = renderAiMarkdown(props.content, {
+    sourcePath: props.sourcePath ?? undefined,
+    finance: props.finance,
+    resolver: (ref, _anchor, context) => ({
+      target: resolveWikiTarget(
+        ref,
+        context?.sourcePath ?? props.sourcePath ?? '',
+        vaultContext ? [...linkIndex.value.paths] : props.noteLinkContext?.paths ?? [],
+      ),
+    }),
+  })
+}
+
+function scheduleRender(): void {
+  if (!props.streaming) {
+    cancelScheduledRender()
+    renderCurrent()
+    return
+  }
+  if (renderFrame !== null) return
+  if (typeof requestAnimationFrame === 'undefined') {
+    renderCurrent()
+    return
+  }
+  renderFrame = requestAnimationFrame(() => {
+    renderFrame = null
+    renderCurrent()
+  })
+}
+
+watch(() => [props.content, props.sourcePath, props.finance, props.noteLinkContext?.paths, linkIndex.value.paths], scheduleRender, { immediate: true, deep: true })
+watch(() => props.streaming, (streaming) => {
+  if (!streaming) {
+    cancelScheduledRender()
+    renderCurrent()
+  }
+})
+onBeforeUnmount(cancelScheduledRender)
 
 function onLinkClick(event: MouseEvent) {
   if (event.button !== 0) return
@@ -52,29 +90,33 @@ function onLinkClick(event: MouseEvent) {
 .ai-markdown :deep(pre) { max-width: 100%; overflow-x: auto; }
 .ai-markdown :deep(code) { overflow-wrap: anywhere; }
 .ai-markdown :deep(a) { overflow-wrap: anywhere; }
-
-/* Tight typography for the narrow AI panel — the global .vault .article
-   rules are tuned for the full-width reading surface (1.72rem h1, 1.5
-   line-height, 1.45em list indent). They dwarf the right-rail column.
-   This block rescales every level so the chat reads as a transcript,
-   not a published article, and matches the metadata-panel density. */
-.ai-markdown :deep(:where(h1, h2, h3, h4, h5, h6)) {
-  line-height: 1.3;
-  letter-spacing: -0.005em;
+.ai-markdown :deep(.ai-table-scroll) {
+  max-width: 100%;
+  overflow-x: auto;
+  scrollbar-width: none;
+  overscroll-behavior-x: contain;
 }
+.ai-markdown :deep(.ai-table-scroll::-webkit-scrollbar),
+.ai-markdown :deep(pre::-webkit-scrollbar) { display: none; }
+.ai-markdown :deep(.ai-table-scroll:focus-visible) { outline: 1px solid var(--vs-accent); }
+.ai-markdown :deep(.ai-table-scroll table) { width: max-content; min-width: 100%; }
+.ai-markdown :deep(.ai-table-scroll :is(th, td)) { max-width: 18rem; }
+
+/* Shared Ledger-quality typography for every AI workspace. */
+.ai-markdown :deep(:where(h1, h2, h3, h4, h5, h6)) { line-height: 1.3; letter-spacing: -0.005em; }
 .ai-markdown :deep(h1) {
-  font-size: 0.92rem;
+  font-size: 1.08rem;
   font-weight: 600;
   margin: 0.85em 0 0.4em;
 }
 .ai-markdown :deep(h2) {
-  font-size: 0.84rem;
+  font-size: 1rem;
   font-weight: 600;
   margin: 0.85em 0 0.35em;
   color: var(--vs-text-1, var(--text));
 }
 .ai-markdown :deep(h3) {
-  font-size: 0.8rem;
+  font-size: 0.92rem;
   font-weight: 600;
   margin: 0.75em 0 0.3em;
   color: var(--vs-text-2, var(--text-muted));
@@ -89,8 +131,8 @@ function onLinkClick(event: MouseEvent) {
 }
 .ai-markdown :deep(:where(p, ul, ol, blockquote, dl)) {
   margin: 0.45em 0;
-  font-size: 0.82rem;
-  line-height: 1.55;
+  font-size: 0.875rem;
+  line-height: 1.65;
 }
 .ai-markdown :deep(ul),
 .ai-markdown :deep(ol) { padding-left: 1.2em; }
@@ -112,6 +154,9 @@ function onLinkClick(event: MouseEvent) {
    bg-soft fill, mono font, capped at the bubble's right edge with
    horizontal scroll for overflow. */
 .ai-markdown :deep(pre) {
+  max-width: 100%;
+  overflow-x: auto;
+  scrollbar-width: none;
   font-family: var(--mono, ui-monospace, SFMono-Regular, Menlo, monospace);
   font-size: 0.76rem;
   line-height: 1.5;
@@ -127,6 +172,9 @@ function onLinkClick(event: MouseEvent) {
   padding: 0;
   border-radius: 0;
   font-size: inherit;
+  white-space: pre;
+  overflow-wrap: normal;
+  word-break: normal;
 }
 
 /* Blockquote — left accent bar instead of full border, like the
@@ -174,20 +222,5 @@ function onLinkClick(event: MouseEvent) {
   text-decoration: none;
 }
 .ai-markdown :deep(a:hover) { text-decoration: underline; }
-.ai-finance-markdown :deep(:is(p, ul, ol, blockquote)) { font-size: 0.875rem; line-height: 1.65; }
-.ai-finance-markdown :deep(h1) { font-size: 1.08rem; }
-.ai-finance-markdown :deep(h2) { font-size: 1rem; }
-.ai-finance-markdown :deep(h3) { font-size: 0.92rem; }
-.ai-finance-markdown :deep(.ai-table-scroll),
-.ai-finance-markdown :deep(pre) {
-  max-width: 100%;
-  overflow-x: auto;
-  scrollbar-width: none;
-}
-.ai-finance-markdown :deep(.ai-table-scroll::-webkit-scrollbar),
-.ai-finance-markdown :deep(pre::-webkit-scrollbar) { display: none; }
-.ai-finance-markdown :deep(.ai-table-scroll:focus-visible) { outline: 1px solid var(--vs-accent); }
-.ai-finance-markdown :deep(.ai-table-scroll table) { width: max-content; min-width: 100%; }
-.ai-finance-markdown :deep(.ai-table-scroll :is(th, td)) { max-width: 18rem; }
-.ai-finance-markdown :deep(.ai-table-scroll .ai-finance-number) { text-align: right; }
+.ai-finance-markdown :deep(.ai-finance-number) { text-align: right; }
 </style>

@@ -33,6 +33,12 @@ import {
 export type ExcalidrawIslandTheme = 'light' | 'dark'
 export type ExcalidrawIslandLangCode = 'zh-CN' | 'en'
 
+export interface BoardAiTriggerOptions {
+  label: string
+  open: boolean
+  onClick: () => void
+}
+
 export interface BoardEditorMenuOptions {
   title: string
   saveStatusLabel: string
@@ -71,6 +77,7 @@ export interface ExcalidrawIslandMountOptions {
   langCode: ExcalidrawIslandLangCode
   libraryReturnUrl?: string
   editorMenu?: BoardEditorMenuOptions
+  aiTrigger?: BoardAiTriggerOptions
   onChange?: (scene: ExcalidrawRuntimeScene) => void
   onAssetsChanged?: (assets: readonly BoardRuntimeAsset[]) => void
   onAssetError?: (error: unknown) => void
@@ -81,7 +88,7 @@ export interface ExcalidrawIslandMountOptions {
 }
 
 export interface ExcalidrawIslandHandle {
-  update(options: { theme: ExcalidrawIslandTheme, langCode: ExcalidrawIslandLangCode, editorMenu?: BoardEditorMenuOptions }): void
+  update(options: { theme: ExcalidrawIslandTheme, langCode: ExcalidrawIslandLangCode, editorMenu?: BoardEditorMenuOptions, aiTrigger?: BoardAiTriggerOptions }): void
   insertSvgMaterial(material: BoardMaterial): Promise<void>
   insertImage(blob: Blob, mimeType: string, engineFileId: string): Promise<void>
   unmount(): void
@@ -415,6 +422,7 @@ function ExcalidrawIslandContent({
   onReady,
   onError,
   editorMenu,
+  aiTrigger,
   onApiReady,
 }: ExcalidrawIslandRenderOptions): React.ReactNode {
   const [excalidrawAPI, setExcalidrawAPI] = React.useState<ExcalidrawImperativeAPI | null>(null)
@@ -481,6 +489,38 @@ function ExcalidrawIslandContent({
       onChange: handleChange,
       isCollaborating: false,
       aiEnabled: false,
+      renderTopRightUI: aiTrigger ? () => React.createElement(
+        'button',
+        {
+          type: 'button',
+          className: `sidebar-trigger${aiTrigger.open ? ' active' : ''}`,
+          title: aiTrigger.label,
+          'aria-label': aiTrigger.label,
+          'aria-pressed': aiTrigger.open,
+          'data-testid': 'immersive-global-ai-trigger',
+          onClick: (event: React.MouseEvent<HTMLButtonElement>) => {
+            event.stopPropagation()
+            aiTrigger.onClick()
+          },
+        },
+        React.createElement(
+          'svg',
+          {
+            viewBox: '0 0 24 24',
+            fill: 'none',
+            stroke: 'currentColor',
+            strokeWidth: 2,
+            strokeLinecap: 'round',
+            strokeLinejoin: 'round',
+            'aria-hidden': true,
+          },
+          [
+            'M17.8 19.817l-2.172 1.138a.392.392 0 0 1-.568-.41l.415-2.411l-1.757-1.707a.389.389 0 0 1 .217-.665l2.428-.352l1.086-2.193a.392.392 0 0 1 .702 0l1.086 2.193l2.428.352a.39.39 0 0 1 .217.665l-1.757 1.707l.414 2.41a.39.39 0 0 1-.567.411L17.8 19.817z',
+            'M6.2 19.817l-2.172 1.138a.392.392 0 0 1-.568-.41l.415-2.411l-1.757-1.707a.389.389 0 0 1 .217-.665l2.428-.352l1.086-2.193a.392.392 0 0 1 .702 0l1.086 2.193l2.428.352a.39.39 0 0 1 .217.665l-1.757 1.707l.414 2.41a.39.39 0 0 1-.567.411L6.2 19.817z',
+            'M12 9.817l-2.172 1.138a.392.392 0 0 1-.568-.41l.415-2.411l-1.757-1.707a.389.389 0 0 1 .217-.665l2.428-.352l1.086-2.193a.392.392 0 0 1 .702 0l1.086 2.193l2.428.352a.39.39 0 0 1 .217.665l-1.757 1.707l.414 2.41a.39.39 0 0 1-.567.411L12 9.817z',
+          ].map(d => React.createElement('path', { key: d, d })),
+        ),
+      ) : undefined,
       UIOptions: {
         tools: { image: true },
         canvasActions: { export: false, saveToActiveFile: false },
@@ -501,6 +541,7 @@ export async function mountExcalidrawIsland(
   let currentTheme = options.theme
   let currentLangCode = options.langCode
   let currentEditorMenu = options.editorMenu
+  let currentAiTrigger = options.aiTrigger
   let currentAPI: ExcalidrawImperativeAPI | null = null
   let resolveAPI: ((api: ExcalidrawImperativeAPI) => void) | null = null
   const apiReady = new Promise<ExcalidrawImperativeAPI>((resolve) => {
@@ -515,6 +556,7 @@ export async function mountExcalidrawIsland(
       langCode: currentLangCode,
       libraryReturnUrl,
       editorMenu: currentEditorMenu,
+      aiTrigger: currentAiTrigger,
       initialScene: options.initialScene,
       onChange: options.onChange,
       onAssetsChanged: options.onAssetsChanged,
@@ -538,6 +580,7 @@ export async function mountExcalidrawIsland(
       currentTheme = nextOptions.theme
       currentLangCode = nextOptions.langCode
       currentEditorMenu = nextOptions.editorMenu
+      currentAiTrigger = nextOptions.aiTrigger
       render()
     },
     async insertSvgMaterial(material: BoardMaterial): Promise<void> {

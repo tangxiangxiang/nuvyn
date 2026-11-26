@@ -12,6 +12,14 @@ import {
 import type { AnyRecord } from './helpers/edit-program'
 import { ensureVaultLeftDrawerOpen, selectWorkspace } from './helpers/workspace-navigation'
 import { unlockDiary } from './helpers/diary-life'
+import {
+  boardCard,
+  clearBoardRecovery,
+  createBoardThroughUi,
+  deleteBoardIfExists,
+  goBackToBoardHome,
+  waitForEditorReady,
+} from './helpers/board'
 
 async function computedColorForToken(
   element: Locator,
@@ -324,7 +332,7 @@ test('a workspace modal takes priority over the floating AI panel and consumes t
   await expect(trigger).toBeFocused()
 })
 
-test('quick prompts follow the active workspace and Diary view without replacing the draft or sending', async ({ page }) => {
+test('Diary and Board show a non-interactive AI status while Note and Ledger keep separate drafts', async ({ page }) => {
   await page.setViewportSize({ width: 1024, height: 768 })
   await page.addInitScript(() => {
     Object.defineProperty(navigator, 'language', { configurable: true, get: () => 'zh-CN' })
@@ -336,8 +344,11 @@ test('quick prompts follow the active workspace and Diary view without replacing
   const prompts = panel.locator('.ai-quick-prompt')
   const composer = panel.locator('textarea')
   let chatRequests = 0
+  const aiRequests: string[] = []
   page.on('request', (request) => {
-    if (new URL(request.url()).pathname === '/api/ai/chat') chatRequests += 1
+    const path = new URL(request.url()).pathname
+    if (path.startsWith('/api/ai/')) aiRequests.push(path)
+    if (path === '/api/ai/chat') chatRequests += 1
   })
 
   await expect(prompts).toHaveCount(3)
@@ -354,29 +365,58 @@ test('quick prompts follow the active workspace and Diary view without replacing
   await expect(panel.locator('.ai-empty-hint')).toHaveText('了解你的财务状况，合理规划每一笔钱。')
   await expect(composer).toHaveValue('')
   await composer.fill('财务草稿')
+  const requestsBeforeUnavailableWorkspaces = aiRequests.length
   expect(chatRequests).toBe(0)
 
   await selectWorkspace(page, 'board')
   await expect(panel).toBeVisible()
-  await expect(prompts).toHaveText(['头脑风暴', '整理思路', '设计信息结构'])
-  await expect(panel.locator('.ai-empty-hint')).toHaveText('可以帮助你头脑风暴和整理思路。')
-  await expect(composer).toHaveValue('草稿在切换工作区后仍要保留')
+  await expect(panel.locator('[data-testid="ai-coming-soon"]')).toContainText('开发中')
+  await expect(panel.locator('.ai-coming-soon')).toContainText('当前模块的 AI 功能尚未开放，敬请期待。')
+  await expect(prompts).toHaveCount(0)
+  await expect(composer).toHaveCount(0)
+  await expect(panel.getByTestId('global-ai-new-session')).toHaveCount(0)
+  await expect(panel.getByTestId('global-ai-history')).toHaveCount(0)
+  expect(aiRequests).toHaveLength(requestsBeforeUnavailableWorkspaces)
 
   await selectWorkspace(page, 'diary')
   await unlockDiary(page)
   await expect(panel).toBeVisible()
-  await expect(prompts).toHaveText(['梳理心情', '自我反思', '培养记录习惯'])
-  await expect(panel.locator('.ai-empty-hint')).toHaveText('可以帮你梳理心情和思考，不会读取你的日记。')
+  await expect(panel.locator('[data-testid="ai-coming-soon"]')).toContainText('开发中')
+  await expect(prompts).toHaveCount(0)
+  await expect(composer).toHaveCount(0)
+  expect(aiRequests).toHaveLength(requestsBeforeUnavailableWorkspaces)
+  const comingSoonTitle = panel.locator('.ai-coming-soon h2')
+  const lightTitleColor = await comingSoonTitle.evaluate(element => getComputedStyle(element).color)
+  await page.locator('.navbar .theme-toggle').click()
+  await expect(page.locator('html')).toHaveAttribute('data-theme', 'dark')
+  await expect.poll(() => comingSoonTitle.evaluate(element => getComputedStyle(element).color)).not.toBe(lightTitleColor)
+  await page.locator('.navbar .theme-toggle').click()
+  await expect(page.locator('html')).toHaveAttribute('data-theme', 'light')
 
   await page.getByTestId('diary-view-mode-events').click()
-  await expect(prompts).toHaveText(['规划重要日程', '准备生日纪念日', '制定活动计划'])
-  await expect(panel.locator('.ai-empty-hint')).toHaveText('可以帮你规划重要日期和活动安排。')
+  await expect(panel.locator('[data-testid="ai-coming-soon"]')).toContainText('当前模块的 AI 功能尚未开放，敬请期待。')
   await page.getByTestId('diary-view-mode-tasks').click()
-  await expect(prompts).toHaveText(['拆解复杂任务', '梳理任务优先级', '制定执行计划'])
-  await expect(panel.locator('.ai-empty-hint')).toHaveText('可以帮你拆解任务、梳理优先级。')
-  await expect(composer).toHaveValue('草稿在切换工作区后仍要保留')
+  await expect(panel.locator('[data-testid="ai-coming-soon"]')).toContainText('开发中')
+  expect(aiRequests).toHaveLength(requestsBeforeUnavailableWorkspaces)
+  await page.setViewportSize({ width: 390, height: 844 })
+  await expect(panel).toHaveCSS('width', '390px')
+  const centered = await panel.evaluate(element => {
+    const header = element.querySelector('.ai-header')!.getBoundingClientRect()
+    const panelBounds = element.getBoundingClientRect()
+    const content = element.querySelector('.ai-coming-soon')!.getBoundingClientRect()
+    return {
+      horizontalOffset: content.left + content.width / 2 - (panelBounds.left + panelBounds.width / 2),
+      verticalOffset: content.top + content.height / 2 - (header.bottom + panelBounds.bottom) / 2,
+    }
+  })
+  expect(Math.abs(centered.horizontalOffset)).toBeLessThan(2)
+  expect(Math.abs(centered.verticalOffset)).toBeLessThan(2)
+  await page.setViewportSize({ width: 1024, height: 768 })
+
   await selectWorkspace(page, 'ledger')
   await expect(composer).toHaveValue('财务草稿')
+  await selectWorkspace(page, 'note')
+  await expect(composer).toHaveValue('草稿在切换工作区后仍要保留')
   expect(chatRequests).toBe(0)
 })
 
@@ -406,6 +446,8 @@ test('AI Finance isolates its transcript and executes local commands without sen
     { name: 'financial-planning', title: 'Financial planning', description: 'Plan finances.', source: 'builtin' },
   ]
   const customFinanceSkills = new Map<string, AnyRecord>()
+  let nextCustomFinanceSkillId = 800
+  let financeSkillCreateRequests = 0
   const memoryState = () => {
     const user = financeMemories.filter(item => item.kind === 'user').reduce((sum, item) => sum + [...String(item.content)].length, 0)
     const agent = financeMemories.filter(item => item.kind === 'agent').reduce((sum, item) => sum + [...String(item.content)].length, 0)
@@ -440,8 +482,10 @@ test('AI Finance isolates its transcript and executes local commands without sen
         return route.fulfill(jsonResponse({ session: finance, messages: financeMessages }))
       case '/api/ai/finance-skills':
         if (request.method() === 'POST') {
+          financeSkillCreateRequests++
           const body = request.postDataJSON()
           const skill = {
+            id: nextCustomFinanceSkillId++,
             name: 'custom-personal-monthly-review',
             ...body,
             source: 'custom',
@@ -455,8 +499,8 @@ test('AI Finance isolates its transcript and executes local commands without sen
         return route.fulfill(jsonResponse({
           skills: [
             ...financeSkills,
-            ...customFinanceSkills.values().map(skill => ({
-              name: skill.name, title: skill.title, description: skill.description,
+            ...[...customFinanceSkills.values()].map(skill => ({
+              id: skill.id, name: skill.name, title: skill.title, description: skill.description,
               source: 'custom', revision: skill.revision,
             })),
           ],
@@ -468,13 +512,16 @@ test('AI Finance isolates its transcript and executes local commands without sen
         if (request.method() === 'GET') return route.fulfill(skill ? jsonResponse(skill) : jsonResponse({ error: 'not found' }, 404))
         if (request.method() === 'PATCH' && skill) {
           const body = request.postDataJSON()
+          if (body.expectedId !== skill.id) return route.fulfill(jsonResponse({ error: 'stale-instance', code: 'stale-instance' }, 409))
           if (body.expectedRevision !== skill.revision) return route.fulfill(jsonResponse({ error: 'stale-revision' }, 409))
           const updated = { ...skill, ...body, revision: Number(skill.revision) + 1, updatedAt: 4 }
+          delete updated.expectedId
           delete updated.expectedRevision
           customFinanceSkills.set(skill.name, updated)
           return route.fulfill(jsonResponse({ skill: updated, usage: { count: customFinanceSkills.size } }))
         }
         if (request.method() === 'DELETE' && skill) {
+          if (new URL(request.url()).searchParams.get('expectedId') !== String(skill.id)) return route.fulfill(jsonResponse({ error: 'stale-instance', code: 'stale-instance' }, 409))
           if (new URL(request.url()).searchParams.get('expectedRevision') !== String(skill.revision)) return route.fulfill(jsonResponse({ error: 'stale-revision' }, 409))
           customFinanceSkills.delete(skill.name)
           return route.fulfill(jsonResponse({ deleted: true, usage: { count: customFinanceSkills.size } }))
@@ -530,7 +577,7 @@ test('AI Finance isolates its transcript and executes local commands without sen
         const interrupted = body.ledgerAnalysis === true && number === 2
         const reply = body.ledgerAnalysis
           ? `### Ledger analysis ${number}\n\n**推断** · 支出和还款会共同影响可支配资金。\n\n- 日常支出：¥825.01`
-          : 'Board conversation'
+          : 'Ordinary conversation'
         const text = interrupted ? reply + '\n\n回答因长度限制未完成，部分分析内容可能缺失。' : reply
         const activity = [
           { id: 1, operation: 'accounts', status: 'success' },
@@ -602,6 +649,7 @@ test('AI Finance isolates its transcript and executes local commands without sen
   await expect(execution.locator('[data-status="running"]')).toContainText('计算收支情况')
   await selectWorkspace(page, 'board')
   await expect(progress).toHaveCount(0)
+  await expect(panel.locator('[data-testid="ai-coming-soon"]')).toContainText('开发中')
   await selectWorkspace(page, 'ledger')
   await expect(progress).toHaveText('正在查询账本…')
   await page.evaluate(() => window.dispatchEvent(new Event('finance-fixture-answer')))
@@ -623,11 +671,13 @@ test('AI Finance isolates its transcript and executes local commands without sen
 
   await selectWorkspace(page, 'board')
   await expect(panel.getByText('Ledger analysis 2')).toHaveCount(0)
-  await expect(panel.getByText('Previous Note conversation')).toBeVisible()
-  await sendAi(page, '帮我整理思路')
-  await expect(panel.getByText('Board conversation')).toBeVisible()
+  await expect(panel.locator('[data-testid="ai-coming-soon"]')).toContainText('开发中')
+  await expect(panel.getByText('Previous Note conversation')).toHaveCount(0)
+  await expect(panel.getByTestId('global-ai-new-session')).toHaveCount(0)
+  await expect(panel.getByTestId('global-ai-history')).toHaveCount(0)
+  await expect(panel.locator('textarea')).toHaveCount(0)
   expect(chatRequests.map(({ sessionId, ledgerAnalysis, liveContext }) => [sessionId, ledgerAnalysis, liveContext])).toEqual([
-    [finance.id, true, undefined], [finance.id, true, undefined], [ordinary.id, undefined, undefined],
+    [finance.id, true, undefined], [finance.id, true, undefined],
   ])
 
   await selectWorkspace(page, 'ledger')
@@ -661,7 +711,7 @@ test('AI Finance isolates its transcript and executes local commands without sen
   await expect(panel.getByText('Ledger analysis 2')).toHaveCount(0)
   await expect(input).toHaveValue('')
   expect(commands).toEqual(['compact', 'clear', 'clear'])
-  expect(chatRequests).toHaveLength(3)
+  expect(chatRequests).toHaveLength(2)
 
   const messagesBeforeMemory = structuredClone(financeMessages)
   await input.fill('/')
@@ -730,7 +780,7 @@ test('AI Finance isolates its transcript and executes local commands without sen
   await expect(memoryDialog.getByRole('heading', { name: '用户记忆' })).toBeVisible()
   await expect(memoryDialog.getByRole('heading', { name: '分析经验' })).toBeVisible()
   await expect(memoryDialog.getByText('优先保留应急资金。')).toBeVisible()
-  expect(chatRequests).toHaveLength(3)
+  expect(chatRequests).toHaveLength(2)
   expect(financeMessages).toEqual(messagesBeforeMemory)
   expect(commands).toEqual(['compact', 'clear', 'clear'])
 
@@ -758,7 +808,7 @@ test('AI Finance isolates its transcript and executes local commands without sen
   await expect(memoryDialog.getByText('这不会删除原始聊天中的相关内容。')).toBeVisible()
   await memoryDialog.getByRole('button', { name: '清空全部记忆' }).click()
   await expect(memoryDialog.getByText('还没有长期记忆。')).toBeVisible()
-  expect(chatRequests).toHaveLength(3)
+  expect(chatRequests).toHaveLength(2)
   expect(financeMessages).toEqual(messagesBeforeMemory)
   await memoryDialog.getByRole('button', { name: '关闭' }).click()
 
@@ -816,6 +866,17 @@ test('AI Finance isolates its transcript and executes local commands without sen
   await skillsDialog.getByRole('button', { name: '返回技能列表' }).click()
   await expect(skillsDialog.locator('li')).toHaveCount(5)
   await skillsDialog.getByRole('button', { name: '新增技能' }).click()
+  await skillsDialog.getByRole('textbox', { name: '标题' }).fill('未保存的草稿')
+  await skillsDialog.getByRole('textbox', { name: '简短描述' }).fill('取消后应清除')
+  await skillsDialog.getByRole('textbox', { name: 'Markdown 正文' }).fill('不会被创建。')
+  const createCountBeforeCancel = financeSkillCreateRequests
+  await skillsDialog.getByRole('button', { name: '取消' }).click()
+  await expect(skillsDialog.locator('li')).toHaveCount(5)
+  expect(financeSkillCreateRequests).toBe(createCountBeforeCancel)
+  await skillsDialog.getByRole('button', { name: '新增技能' }).click()
+  await expect(skillsDialog.getByRole('textbox', { name: '标题' })).toHaveValue('')
+  await expect(skillsDialog.getByRole('textbox', { name: '简短描述' })).toHaveValue('')
+  await expect(skillsDialog.getByRole('textbox', { name: 'Markdown 正文' })).toHaveValue('')
   await skillsDialog.getByRole('textbox', { name: '标题' }).fill('个人月度回顾')
   await skillsDialog.getByRole('textbox', { name: '简短描述' }).fill('按我的偏好复盘收支')
   await skillsDialog.getByRole('textbox', { name: 'Markdown 正文' }).fill('先列收入和支出，再比较上月同期。')
@@ -1008,4 +1069,182 @@ test.describe('AI Finance responsive layout', () => {
     expect((await input.boundingBox())!.y).toBeLessThan(410)
     await expect(panel.locator('.ai-send')).toBeInViewport()
   })
+})
+
+test('uses the Ledger panel shell across ordinary AI and Ledger workspaces', async ({ page }, testInfo) => {
+  await page.setViewportSize({ width: 1280, height: 900 })
+  await page.route('**/api/ai/profiles', route => route.fulfill(jsonResponse({
+    activeProfileId: 'ai-panel-visual',
+    profiles: [{
+      id: 'ai-panel-visual',
+      name: 'Visual test model',
+      provider: 'openai',
+      model: 'test-model',
+      configured: true,
+      credentialError: null,
+    }],
+  })))
+  await page.route('**/api/ai/ledger-session', route => route.fulfill(jsonResponse({
+    session: { id: 41, title: 'AI Finance', createdAt: 1, updatedAt: 1 },
+    messages: [],
+  })))
+  await gotoVaultReady(page)
+  const trigger = page.getByTestId('global-ai-trigger')
+  await trigger.click()
+  const panel = page.getByTestId('global-ai-panel')
+  await expect(panel.getByRole('heading', { name: 'What can I help with?' })).toBeVisible()
+  await expect(panel.locator('.ai-avatar')).toHaveCount(0)
+  await expect(panel.locator('.ai-quick-prompt')).toHaveCount(3)
+  await expect(panel).toHaveCSS('width', '720px')
+  const ordinaryComposerHeight = (await panel.locator('textarea.ai-input').boundingBox())!.height
+  const assistantScreenshot = await panel.screenshot({
+    path: testInfo.outputPath('ai-assistant-panel-after.png'),
+    animations: 'disabled',
+  })
+  await testInfo.attach('AI assistant panel', {
+    body: assistantScreenshot,
+    contentType: 'image/png',
+  })
+
+  for (const width of [390, 430, 768, 1024, 1280]) {
+    await page.setViewportSize({ width, height: 840 })
+    await expect(panel).toHaveCSS('width', width <= 640 ? `${width}px` : '720px')
+    const bounds = await panel.evaluate(element => {
+      const rect = element.getBoundingClientRect()
+      const composer = element.querySelector('.ai-composer')!.getBoundingClientRect()
+      return { left: rect.left, right: rect.right, bottom: rect.bottom, composerBottom: composer.bottom }
+    })
+    expect(bounds.left).toBeGreaterThanOrEqual(0)
+    expect(bounds.right).toBeLessThanOrEqual(width)
+    expect(bounds.bottom).toBeLessThanOrEqual(840)
+    expect(bounds.composerBottom).toBeLessThanOrEqual(bounds.bottom)
+  }
+
+  const lightBackground = await panel.evaluate(element => getComputedStyle(element).backgroundColor)
+  await page.locator('.navbar .theme-toggle').click()
+  await expect(page.locator('html')).toHaveAttribute('data-theme', 'dark')
+  await expect.poll(() => panel.evaluate(element => getComputedStyle(element).backgroundColor)).not.toBe(lightBackground)
+  await page.locator('.navbar .theme-toggle').click()
+  await expect(page.locator('html')).toHaveAttribute('data-theme', 'light')
+
+  await page.setViewportSize({ width: 390, height: 840 })
+  await expect(panel.locator('.ai-send')).toBeInViewport()
+  await panel.getByTestId('ai-model-selector').click()
+  const modelOption = panel.getByTestId('ai-model-option-ai-panel-visual')
+  await expect(modelOption).toBeVisible()
+  await expect(modelOption).toBeInViewport()
+  await page.keyboard.press('Escape')
+  await page.evaluate(() => {
+    const viewport = window.visualViewport!
+    Object.defineProperty(viewport, 'height', { configurable: true, value: 410 })
+    viewport.dispatchEvent(new Event('resize'))
+  })
+  await expect(panel).toHaveCSS('height', '410px')
+  await expect(panel.locator('.ai-send')).toBeInViewport()
+
+  await page.setViewportSize({ width: 1280, height: 900 })
+  await selectWorkspace(page, 'ledger')
+  await expect(panel.locator('.ai-floating-title')).toHaveText('AI Finance')
+  await expect(panel.getByRole('heading', { name: 'What would you like to explore today?' })).toBeVisible()
+  await expect(panel.locator('.ai-avatar')).toHaveCount(0)
+  await expect(panel).toHaveCSS('width', '720px')
+  expect((await panel.locator('textarea.ai-input').boundingBox())!.height).toBe(ordinaryComposerHeight)
+  const financeScreenshot = await panel.screenshot({
+    path: testInfo.outputPath('ai-finance-panel-after.png'),
+    animations: 'disabled',
+  })
+  await testInfo.attach('AI Finance panel', {
+    body: financeScreenshot,
+    contentType: 'image/png',
+  })
+})
+
+test('places the immersive AI trigger beside Excalidraw actions and restores the navbar trigger', async ({ page, request }) => {
+  let boardId = ''
+  const aiRequests: string[] = []
+  page.on('request', (requestEvent) => {
+    const path = new URL(requestEvent.url()).pathname
+    if (path.startsWith('/api/ai/')) aiRequests.push(path)
+  })
+  try {
+    await page.goto('/board')
+    await expect(page.getByTestId('board-home')).toBeVisible()
+    const themeToggle = page.locator('.theme-toggle')
+    if (await page.locator('html').getAttribute('data-theme') !== 'light') await themeToggle.click()
+    await expect(page.locator('html')).toHaveAttribute('data-theme', 'light')
+
+    boardId = await createBoardThroughUi(page)
+    const aiTrigger = page.getByTestId('immersive-global-ai-trigger')
+    const nativeButton = page.locator('.layer-ui__wrapper__top-right .sidebar-trigger__label-element')
+    const panel = page.getByTestId('global-ai-panel')
+
+    await expect(page.getByTestId('global-ai-trigger')).toHaveCount(0)
+    await expect(aiTrigger).toHaveCount(1)
+    await expect(nativeButton).toBeVisible()
+    for (const width of [1280, 1024, 768]) {
+      await page.setViewportSize({ width, height: 840 })
+      const geometry = await page.evaluate(() => {
+        const ai = document.querySelector<HTMLElement>('[data-testid="immersive-global-ai-trigger"]')
+        const native = document.querySelector<HTMLElement>('.layer-ui__wrapper__top-right .sidebar-trigger__label-element')
+        if (!ai || !native) throw new Error('Excalidraw top-right actions are not mounted')
+        const aiRect = ai.getBoundingClientRect()
+        const nativeRect = native.getBoundingClientRect()
+        return { aiRight: aiRect.right, nativeLeft: nativeRect.left, gap: nativeRect.left - aiRect.right }
+      })
+      expect(geometry.aiRight).toBeLessThanOrEqual(geometry.nativeLeft)
+      expect(geometry.gap).toBeGreaterThanOrEqual(8)
+      await expect(aiTrigger).toBeInViewport()
+      await expect(nativeButton).toBeInViewport()
+    }
+
+    const requestsBeforeOpeningComingSoon = aiRequests.length
+    await aiTrigger.click()
+    await expect(panel).toBeVisible()
+    await expect(panel.locator('[data-testid="ai-coming-soon"]')).toContainText(/开发中|Coming soon/)
+    await expect(panel.getByTestId('global-ai-new-session')).toHaveCount(0)
+    await expect(panel.getByTestId('global-ai-history')).toHaveCount(0)
+    await expect(panel.locator('.ai-quick-prompt')).toHaveCount(0)
+    await expect(panel.locator('textarea')).toHaveCount(0)
+    expect(aiRequests).toHaveLength(requestsBeforeOpeningComingSoon)
+    await expect(aiTrigger).toHaveAttribute('aria-pressed', 'true')
+    await panel.getByTestId('global-ai-close').click()
+    await expect(panel).toBeHidden()
+    await expect(aiTrigger).toHaveAttribute('aria-pressed', 'false')
+
+    await nativeButton.click()
+    await expect(nativeButton).toHaveAttribute('aria-pressed', 'true')
+    await page.keyboard.press('Escape')
+    await expect(nativeButton).toHaveAttribute('aria-pressed', 'false')
+
+    await goBackToBoardHome(page)
+    await expect(page.getByTestId('immersive-global-ai-trigger')).toHaveCount(0)
+    await expect(page.getByTestId('global-ai-trigger')).toBeVisible()
+
+    if (await page.locator('html').getAttribute('data-theme') !== 'dark') await themeToggle.click()
+    await expect(page.locator('html')).toHaveAttribute('data-theme', 'dark')
+    await boardCard(page, boardId).getByRole('button', { name: /打开白板|Open Board/ }).click()
+    await waitForEditorReady(page)
+    await expect(page.locator('[data-board-excalidraw-root] .excalidraw.theme--dark')).toBeVisible()
+    await page.setViewportSize({ width: 768, height: 840 })
+    const darkGeometry = await page.evaluate(() => {
+      const ai = document.querySelector<HTMLElement>('[data-testid="immersive-global-ai-trigger"]')!.getBoundingClientRect()
+      const native = document.querySelector<HTMLElement>('.layer-ui__wrapper__top-right .sidebar-trigger__label-element')!.getBoundingClientRect()
+      return native.left - ai.right
+    })
+    expect(darkGeometry).toBeGreaterThanOrEqual(8)
+
+    await aiTrigger.click()
+    await expect(panel).toBeVisible()
+    await goBackToBoardHome(page)
+    await expect(panel).toBeVisible()
+    await expect(page.getByTestId('global-ai-trigger')).toHaveAttribute('aria-pressed', 'true')
+    await expect(page.getByTestId('immersive-global-ai-trigger')).toHaveCount(0)
+    await panel.getByTestId('global-ai-close').click()
+    await expect(panel).toBeHidden()
+  } finally {
+    if (boardId) {
+      await clearBoardRecovery(page, boardId).catch(() => {})
+      await deleteBoardIfExists(request, boardId).catch(() => {})
+    }
+  }
 })

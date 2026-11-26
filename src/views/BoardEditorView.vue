@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, ref, shallowRef, watch } from 'vue'
+import { computed, inject, onBeforeUnmount, onMounted, ref, shallowRef, watch } from 'vue'
 import { NButton, NSpin } from 'naive-ui'
 import { onBeforeRouteLeave, onBeforeRouteUpdate, useRoute, useRouter } from 'vue-router'
 import ExcalidrawHost from '../components/board/ExcalidrawHost.vue'
@@ -28,6 +28,7 @@ import {
   type ExcalidrawRuntimeScene,
 } from '../features/board/engine/types'
 import { useI18n } from '../composables/useI18n'
+import { AppShellContextKey } from '../composables/appShellContext'
 import { workspaceDisplayNames } from '../lib/workspace'
 import { useTheme } from '../composables/useTheme'
 import { useToast } from '../composables/useToast'
@@ -54,7 +55,7 @@ import {
   type BoardSaveState,
 } from '../features/board/saveCoordinator'
 import { useBoardFavorites } from '../composables/useBoardFavorites'
-import type { BoardEditorMenuOptions } from '../features/board/engine/excalidraw/reactIsland'
+import type { BoardAiTriggerOptions, BoardEditorMenuOptions } from '../features/board/engine/excalidraw/reactIsland'
 import type { BoardMaterial } from '../../shared/boardMaterialProtocol'
 import { createBoardReference } from '../lib/boardReferences'
 import { copyTextToClipboard } from '../components/vault/workspaceTabActions'
@@ -87,6 +88,7 @@ interface BoardDeleteLifecycleSnapshot {
 
 const route = useRoute()
 const router = useRouter()
+const appShell = inject(AppShellContextKey, null)
 const { locale, t } = useI18n()
 const { theme } = useTheme()
 const toast = useToast()
@@ -951,6 +953,12 @@ const editorMenu = computed<BoardEditorMenuOptions>(() => ({
   onOpenAttachments: () => { showAttachmentPicker.value = true },
 }))
 
+const aiTrigger = computed<BoardAiTriggerOptions | undefined>(() => appShell?.toggleGlobalAi ? ({
+  label: t('ai.assistant'),
+  open: appShell.globalAiOpen?.value ?? false,
+  onClick: appShell.toggleGlobalAi,
+}) : undefined)
+
 function createEngineFileId(): string {
   const id = globalThis.crypto?.randomUUID?.()
   if (!id) throw new Error('The browser cannot create an Excalidraw image ID.')
@@ -1273,6 +1281,7 @@ onBeforeUnmount(() => {
         :theme="theme"
         :lang-code="excalidrawLangCode"
         :editor-menu="editorMenu"
+        :ai-trigger="aiTrigger"
         @change="onHostChange"
         @assets-changed="onHostAssetsChanged"
         @asset-error="onHostAssetError"

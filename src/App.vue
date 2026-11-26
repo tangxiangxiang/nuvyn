@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, provide, ref, watch, watchEffect } from 'vue'
-import { NButton, NIcon } from 'naive-ui'
+import { NButton } from 'naive-ui'
 import { useRoute, useRouter } from 'vue-router'
 import NavBar from './components/NavBar.vue'
 import AiPanel from './components/vault/AiPanel.vue'
@@ -33,7 +33,6 @@ import { preventNativePullRefresh } from './lib/preventNativePullRefresh'
 import { createIndexedDbBoardCheckpointStore } from './features/board/checkpointStore'
 import { NUVYN_BROWSER_STORAGE_KEYS, ownerScopedStorageKey, readStorageKey, writeStorageKey } from './technicalNamespace'
 import { resetLegacyAiHistory } from './composables/vault/useAiHistory'
-import { Stars } from '@vicons/tabler'
 import type { AttachmentReference } from '../shared/attachmentProtocol'
 
 const route = useRoute()
@@ -275,13 +274,6 @@ const globalAiModelPreferenceStorageKey = computed(() => {
   const owner = auth.user.value
   return owner ? ownerScopedStorageKey(NUVYN_BROWSER_STORAGE_KEYS.aiModelProfile, owner) : null
 })
-const showImmersiveBoardAiTrigger = computed(() => (
-  showRoutedContent.value
-  && auth.state.value === 'authenticated'
-  && workspaceKind.value === 'board'
-  && chromeStyle.value === 'immersive'
-))
-
 let globalAiOwner: string | null = null
 watch(
   [() => auth.state.value, () => auth.user.value?.id ?? null, () => auth.user.value?.username ?? null],
@@ -560,21 +552,6 @@ provide(VaultViewModeKey, { mode: viewMode, set: setViewMode, toggle: toggleView
     @logout="onLogout"
     @lock-diary="lockDiary"
   />
-  <NButton
-    v-if="showImmersiveBoardAiTrigger"
-    class="global-ai-immersive-trigger"
-    attr-type="button"
-    size="small"
-    quaternary
-    :bordered="false"
-    :title="t('ai.assistant')"
-    :aria-label="t('ai.assistant')"
-    :aria-pressed="globalAiOpen"
-    data-testid="immersive-global-ai-trigger"
-    @click="toggleGlobalAi"
-  >
-    <NIcon aria-hidden="true"><Stars /></NIcon>
-  </NButton>
   <AiPanel
     v-if="auth.state.value === 'authenticated'"
     :key="globalAiPositionStorageKey ?? 'anonymous'"

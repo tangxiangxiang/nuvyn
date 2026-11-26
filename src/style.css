@@ -984,29 +984,6 @@ body.brand-constellation-active * {
   transition: color 0.15s, background-color 0.15s, border-color 0.15s;
 }
 
-.global-ai-immersive-trigger {
-  position: fixed;
-  z-index: 1501;
-  top: max(env(safe-area-inset-top, 0px), 8px);
-  right: max(env(safe-area-inset-right, 0px), 8px);
-  display: inline-flex;
-  width: 32px;
-  height: 32px;
-  align-items: center;
-  justify-content: center;
-  padding: 0;
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  background: color-mix(in srgb, var(--bg) 88%, transparent);
-  color: var(--text-muted);
-  -webkit-backdrop-filter: blur(12px);
-  backdrop-filter: blur(12px);
-}
-.global-ai-immersive-trigger:hover,
-.global-ai-immersive-trigger[aria-pressed='true'] {
-  color: var(--accent);
-  background: var(--bg-soft);
-}
 .navbar .mobile-workspace-selector:hover {
   color: var(--accent);
   background: color-mix(in srgb, var(--accent) 12%, transparent);
@@ -6483,8 +6460,8 @@ body:has(.ledger-detail-sheet-card) .n-modal-mask {
   --code-bg: var(--bg-soft);
   position: fixed;
   z-index: 1500;
-  width: min(460px, calc(100vw - 24px));
-  height: min(80dvh, 720px);
+  width: min(720px, calc(100vw - 32px));
+  height: min(80dvh, 860px);
   min-height: min(320px, calc(100dvh - var(--ai-floating-chrome-bottom, 0px) - 16px));
   max-height: calc(100dvh - var(--ai-floating-chrome-bottom, 0px) - 16px);
   box-sizing: border-box;
@@ -6539,15 +6516,17 @@ body:has(.ledger-detail-sheet-card) .n-modal-mask {
   transform: translateY(-4px);
 }
 @media (max-width: 640px) {
-  .ai-panel.ai-floating-panel {
-    inset: env(safe-area-inset-top, 0px) 0 env(safe-area-inset-bottom, 0px);
-    width: auto;
-    height: auto;
+  .ai-panel.ai-floating-panel.is-mobile {
+    inset: var(--ai-viewport-top, 0px) 0 auto;
+    width: 100%;
+    height: var(--ai-viewport-height, 100dvh);
     min-height: 0;
     max-height: none;
     border: 0;
     border-radius: 0;
     box-shadow: none;
+    padding: env(safe-area-inset-top, 0px) env(safe-area-inset-right, 0px)
+      env(safe-area-inset-bottom, 0px) env(safe-area-inset-left, 0px);
   }
   .ai-floating-drag-region { cursor: default; touch-action: auto; }
   .ai-floating-enter-active,
@@ -6645,19 +6624,21 @@ body:has(.ledger-detail-sheet-card) .n-modal-mask {
   color: var(--vs-text-1);
 }
 
-/* Message stream. Each turn is a row: avatar (left) + text for
-   assistant, right-aligned bubble for user. Generous gap so the
-   stream reads as a chat, not a tight list. */
+/* Shared message stream for every workspace. */
 .ai-panel .ai-messages {
   flex: 1 1 auto;
   min-height: 0;
   overflow-y: auto;
   box-sizing: border-box;
-  padding: 12px 14px 10px;
+  padding: 16px clamp(14px, 3vw, 24px);
   display: flex;
   flex-direction: column;
-  gap: 12px;
+  gap: 16px;
+  overflow-x: hidden;
+  scrollbar-width: none;
+  overscroll-behavior: contain;
 }
+.ai-panel .ai-messages::-webkit-scrollbar { display: none; }
 .ai-panel .ai-messages.is-empty {
   align-items: stretch;
   justify-content: flex-start;
@@ -6665,77 +6646,63 @@ body:has(.ledger-detail-sheet-card) .n-modal-mask {
 
 .ai-panel .ai-message {
   display: flex;
-  gap: 7px;
+  gap: 0;
   align-items: flex-start;
   min-width: 0;
 }
 .ai-panel .ai-message.user { flex-direction: row-reverse; }
 
-/* Assistant avatar: 22×22 square with the AI sparkle, accent-tinted.
-   Sized to anchor the message visually without competing with the
-   text. The fill uses `currentColor` so swapping the icon re-tints
-   the whole glyph uniformly. */
-.ai-panel .ai-avatar {
-  display: inline-flex;
-  width: 20px;
-  height: 20px;
-  flex-shrink: 0;
-  align-items: center;
-  justify-content: center;
-  color: color-mix(in srgb, var(--vs-accent) 78%, var(--vs-text-2));
-  background: color-mix(in srgb, var(--vs-accent) 9%, transparent);
-  border-radius: 5px;
-}
-.ai-panel .ai-avatar :where(svg) { width: 13px; height: 13px; display: block; }
 
 /* Assistant text is plain (no background, no padding) so the message
    stream reads as continuous prose, like a chat transcript, rather
    than a stack of UI cards. User turns get a subtle bubble so they
    read as "from me". */
 .ai-panel .ai-bubble {
-  font-size: 0.84rem;
-  line-height: 1.5;
+  font-size: 0.875rem;
+  line-height: 1.65;
   color: var(--vs-text-1);
   word-wrap: break-word;
   white-space: pre-wrap;
   min-width: 0;
-  max-width: calc(100% - 30px);
+  max-width: 100%;
+  overflow-wrap: anywhere;
 }
 .ai-panel .ai-message.assistant .ai-bubble {
   background: transparent;
   padding: 1px 0;
+  width: 100%;
 }
 .ai-panel .ai-message.user .ai-bubble {
   background: color-mix(in srgb, var(--vs-accent, var(--accent)) 9%, transparent);
-  padding: 5px 9px;
-  border-radius: 6px;
-  border-bottom-right-radius: 2px;
+  padding: 7px 12px;
+  border-radius: 12px 12px 4px 12px;
   border: 0;
-  max-width: 88%;
+  max-width: 85%;
 }
 
 /* Composer — one compact surface for the message field and its actions. */
 .ai-panel .ai-composer {
   position: relative;
   flex: 0 0 auto;
-  padding: 8px 10px 10px;
+  padding: 8px clamp(12px, 3vw, 22px) 10px;
   background: transparent;
 }
 
 .ai-panel .ai-prompt-menu {
   position: absolute;
-  bottom: 100%;
-  left: 10px;
-  right: 10px;
+  bottom: calc(100% + 2px);
+  inset-inline: clamp(12px, 3vw, 22px);
   z-index: 2;
   max-height: 220px;
   overflow-y: auto;
+  scrollbar-width: none;
   padding: 5px;
   background: var(--vs-bg-1);
   border: 1px solid var(--vs-border);
   border-radius: 8px;
   box-shadow: 0 4px 16px #0002;
 }
+.ai-panel .ai-prompt-menu::-webkit-scrollbar { display: none; }
 .ai-panel .ai-prompt-menu-heading {
   padding: 5px 7px;
   color: var(--vs-text-2);
@@ -6793,16 +6760,14 @@ body:has(.ledger-detail-sheet-card) .n-modal-mask {
   outline: none;
   min-height: 32px;
   overflow-y: auto;
-  scrollbar-width: thin;
-  scrollbar-color: var(--vs-border) transparent;
+  scrollbar-width: none;
 }
 .ai-panel .ai-input-control {
   width: 100%;
   min-width: 0;
   background: transparent;
 }
-.ai-panel .ai-input::-webkit-scrollbar { width: 4px; }
-.ai-panel .ai-input::-webkit-scrollbar-thumb { background: var(--vs-border); border-radius: 4px; }
+.ai-panel .ai-input::-webkit-scrollbar { display: none; }
 .ai-panel .ai-input::placeholder {
   color: var(--vs-text-2);
   opacity: 1;
@@ -6814,9 +6779,9 @@ body:has(.ledger-detail-sheet-card) .n-modal-mask {
   align-items: center;
   justify-content: space-between;
   gap: 6px;
-  padding: 2px 10px 9px;
+  padding: 2px 8px 6px 12px;
   border-top: 0;
-  min-height: 43px;
+  min-height: 38px;
   box-sizing: border-box;
 }
 .ai-panel .ai-toolbar-left {
@@ -7085,47 +7050,11 @@ body:has(.ledger-detail-sheet-card) .n-modal-mask {
   to { opacity: 0; }
 }
 
-/* Finance needs more room for long analyses while sharing the same floating shell. */
-.ai-panel.ai-floating-panel.is-finance:not(.is-mobile) {
-  width: min(720px, calc(100vw - 32px));
-  height: min(80dvh, 860px);
-}
-.ai-panel.is-finance .ai-messages {
-  padding: 16px clamp(14px, 3vw, 24px);
-  overflow-x: hidden;
-  scrollbar-width: none;
-  overscroll-behavior: contain;
-}
-.ai-panel.is-finance .ai-bubble { overflow-wrap: anywhere; }
-.ai-panel.is-finance .ai-message.assistant .ai-bubble {
-  width: 100%;
-  max-width: 100%;
-}
-.ai-panel.is-finance .ai-message.user .ai-bubble {
-  max-width: 85%;
-  border-radius: 12px 12px 4px 12px;
-  padding: 7px 12px;
-}
-.ai-panel.is-finance .ai-composer { padding-inline: clamp(12px, 3vw, 22px); }
-.ai-panel.is-finance .ai-input { padding: 10px 12px 5px; scrollbar-width: none; }
-.ai-panel.is-finance .ai-input::-webkit-scrollbar,
-.ai-panel.is-finance .ai-messages::-webkit-scrollbar { display: none; }
-.ai-panel.is-finance .ai-toolbar { min-height: 38px; padding: 2px 8px 6px 12px; }
-.ai-panel.is-finance .ai-prompt-menu {
-  bottom: calc(100% + 2px);
-  inset-inline: clamp(12px, 3vw, 22px);
-}
 .ai-command-name { display: block; font-weight: 600; }
 .ai-command-description { display: block; margin-top: 3px; color: var(--vs-text-2); font-size: .75rem; }
 @media (max-width: 640px) {
-  .ai-panel.ai-floating-panel.is-finance {
-    inset: var(--ai-viewport-top, 0px) 0 auto;
-    height: var(--ai-viewport-height, 100dvh);
-    padding: env(safe-area-inset-top, 0px) env(safe-area-inset-right, 0px)
-      env(safe-area-inset-bottom, 0px) env(safe-area-inset-left, 0px);
-  }
-  .ai-panel.is-finance .ai-input { font-size: 1rem; }
-  .ai-panel.is-finance .ai-header-btn,
-  .ai-panel.is-finance .ai-send { width: 40px; height: 40px; }
-  .ai-panel.is-finance .ai-prompt-menu button { min-height: 44px; }
+  .ai-panel .ai-input { font-size: 1rem; }
+  .ai-panel .ai-header-btn,
+  .ai-panel .ai-send { width: 40px; height: 40px; }
+  .ai-panel .ai-prompt-menu button { min-height: 44px; }
 }

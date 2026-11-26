@@ -59,7 +59,7 @@ export const readSkillTool = {
 
 export const manageSkillTool = {
   name: 'manage_skill',
-  description: 'Create or update only this authenticated user’s reusable custom Finance Skills. Use sparingly, only when the current user explicitly provides, corrects, or approves a reusable analysis method. Do not create a skill merely because analysis succeeded. Prefer updating a relevant existing custom skill. Store procedures only, never current balances, period totals, transactions, private records, credentials, or Ledger snapshots. Evidence must be an exact quote from the current user message; the server checks its source, not semantic equivalence. Built-in skills are read-only. This tool cannot delete skills. Never claim a skill was saved unless ok=true.',
+  description: 'Create or update only this authenticated user’s reusable custom Finance Skills. Use sparingly, only when the current user explicitly provides, corrects, or approves a reusable analysis method. Do not create a skill merely because analysis succeeded. Prefer updating a relevant existing custom skill. For update, provide the current expectedId and expectedRevision from its metadata or read_skill result. Store procedures only, never current balances, period totals, transactions, private records, credentials, or Ledger snapshots. Evidence must be an exact quote from the current user message; the server checks its source, not semantic equivalence. Built-in skills are read-only. This tool cannot delete skills. Never claim a skill was saved unless ok=true.',
   parameters: {
     type: 'object',
     additionalProperties: false,
@@ -69,6 +69,7 @@ export const manageSkillTool = {
       title: { type: 'string', maxLength: FINANCE_CUSTOM_SKILL_LIMITS.titleCharacters },
       description: { type: 'string', maxLength: FINANCE_CUSTOM_SKILL_LIMITS.descriptionCharacters },
       content: { type: 'string', maxLength: FINANCE_CUSTOM_SKILL_LIMITS.contentCharacters },
+      expectedId: { type: 'integer', minimum: 1, description: 'Database identity returned by the current custom skill metadata or read_skill result.' },
       expectedRevision: { type: 'integer', minimum: 1 },
       evidence: { type: 'string', maxLength: 2_000, description: 'Exact meaningful wording from the current user message.' },
     },
@@ -84,6 +85,7 @@ type SkillToolInput = {
   title?: string
   description?: string
   content: string
+  expectedId?: number
   expectedRevision?: number
   evidence: string
 }
@@ -107,14 +109,15 @@ function parseMemoryToolInput(value: unknown): MemoryToolInput | null {
 function parseManageSkillInput(value: unknown): SkillToolInput | null {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return null
   const input = value as Record<string, unknown>
-  if (Object.keys(input).some(key => !['action', 'name', 'title', 'description', 'content', 'expectedRevision', 'evidence'].includes(key))) return null
+  if (Object.keys(input).some(key => !['action', 'name', 'title', 'description', 'content', 'expectedId', 'expectedRevision', 'evidence'].includes(key))) return null
   if (input.action !== 'create' && input.action !== 'update') return null
   if (!isValidFinanceCustomSkillName(input.name) || typeof input.content !== 'string' || typeof input.evidence !== 'string') return null
   if (input.title !== undefined && typeof input.title !== 'string') return null
   if (input.description !== undefined && typeof input.description !== 'string') return null
+  if (input.expectedId !== undefined && (typeof input.expectedId !== 'number' || !Number.isSafeInteger(input.expectedId) || input.expectedId < 1)) return null
   if (input.expectedRevision !== undefined && (typeof input.expectedRevision !== 'number' || !Number.isSafeInteger(input.expectedRevision) || input.expectedRevision < 1)) return null
-  if (input.action === 'create' && (typeof input.title !== 'string' || typeof input.description !== 'string' || input.expectedRevision !== undefined)) return null
-  if (input.action === 'update' && typeof input.expectedRevision !== 'number') return null
+  if (input.action === 'create' && (typeof input.title !== 'string' || typeof input.description !== 'string' || input.expectedId !== undefined || input.expectedRevision !== undefined)) return null
+  if (input.action === 'update' && (typeof input.expectedId !== 'number' || typeof input.expectedRevision !== 'number')) return null
   return input as unknown as SkillToolInput
 }
 
@@ -142,6 +145,7 @@ function customSkillErrorMessage(error: string): string {
   const messages: Record<string, string> = {
     'invalid-owner': 'Custom skill operation is unavailable.',
     'invalid-name': 'Use a stable lowercase custom skill slug beginning with custom-.',
+    'invalid-id': 'A valid custom skill instance id is required.',
     'builtin-name': 'Built-in Finance Skills are read-only.',
     'invalid-title': 'A non-empty custom skill title is required.',
     'invalid-description': 'A non-empty custom skill description is required.',
@@ -152,6 +156,7 @@ function customSkillErrorMessage(error: string): string {
     'count-exceeded': `The user already has the maximum of ${FINANCE_CUSTOM_SKILL_LIMITS.count} custom skills. Update a relevant skill or ask the user to remove one.`,
     'capacity-exceeded': `Custom skill body capacity is limited to ${FINANCE_CUSTOM_SKILL_LIMITS.totalContentCharacters} characters total. Update or remove an existing skill; do not truncate content.`,
     'not-found': 'The requested custom skill does not exist for this user.',
+    'stale-instance': 'This custom skill was deleted or recreated after it was loaded. Do not retry the write against the new instance; load its latest metadata first.',
     'stale-revision': 'This custom skill changed since it was loaded. Read the latest version and try again without overwriting newer content.',
   }
   return messages[error] ?? 'Custom skill operation failed.'
@@ -182,7 +187,11 @@ export function createFinanceAgent(
 ) {
   const memoryRepository = memory ? createFinanceMemoryRepository(memory.db) : null
   const customSkillRepository = memory ? createFinanceCustomSkillRepository(memory.db) : null
-  const currentSkillRegistry = () => skillRegistry ?? getFinanceSkillRegistryState(memory?.db, memory?.ownerId)
+  let requestSkillRegistry = skillRegistry ?? getFinanceSkillRegistryState(memory?.db, memory?.ownerId)
+  const currentSkillRegistry = () => requestSkillRegistry
+  const refreshSkillRegistry = () => {
+    if (!skillRegistry) requestSkillRegistry = getFinanceSkillRegistryState(memory?.db, memory?.ownerId)
+  }
   const delivered = new Map<number, FinanceObservation>()
   const observations = new Map<string, number>()
   const attempts = new Map<string, number>()
@@ -195,7 +204,7 @@ export function createFinanceAgent(
   let exhausted = false
   let memoryWrites = 0
   let skillWrites = 0
-  const loadedSkillRevisions = new Map<string, number | undefined>()
+  const loadedSkillIdentities = new Map<string, { id: number | undefined; revision: number | undefined }>()
 
   function canQuery() {
     return canUseTools() && remaining > MAX_BATCH * errorBytes
@@ -270,6 +279,7 @@ export function createFinanceAgent(
     let skillMutationDuplicate = false
     let skillResult = false
     let skillName: string | null = null
+    let deliveredSkillIdentity: { id: number | undefined; revision: number | undefined } | undefined
     let skillReused = false
     if (exhausted) {
       content = encodeError(budgetError, observation)
@@ -344,14 +354,18 @@ export function createFinanceAgent(
                 ...(input.title !== undefined ? { title: input.title } : {}),
                 ...(input.description !== undefined ? { description: input.description } : {}),
                 content: input.content,
-              }, input.expectedRevision!)
+              }, input.expectedId!, input.expectedRevision!)
           skillMutationSucceeded = result.ok
           skillMutationDuplicate = result.ok && 'duplicate' in result && result.duplicate === true
+          if ((result.ok && !('duplicate' in result && result.duplicate))
+            || (!result.ok && (result.error === 'stale-instance' || result.error === 'stale-revision'))) {
+            refreshSkillRegistry()
+          }
           content = JSON.stringify(result.ok
             ? {
                 ok: true,
                 action: input.action,
-                skill: { name: result.skill.name, title: result.skill.title, revision: result.skill.revision },
+                skill: { name: result.skill.name, title: result.skill.title, id: result.skill.id, revision: result.skill.revision },
                 ...(skillMutationDuplicate ? { duplicate: true } : {}),
                 usage: result.usage,
               }
@@ -376,16 +390,23 @@ export function createFinanceAgent(
         if (!result.ok) {
           content = JSON.stringify({ ok: false, error: result.error === 'unknown' ? 'Unknown finance skill.' : 'Finance skill could not be loaded.' })
         } else {
-          const priorRevision = loadedSkillRevisions.get(name)
-          const alreadyLoaded = loadedSkillRevisions.has(name)
-          const sameRevision = alreadyLoaded && priorRevision === result.skill.revision
+          const identity = {
+            id: result.skill.source === 'custom' ? result.skill.id : undefined,
+            revision: result.skill.revision,
+          }
+          const priorIdentity = loadedSkillIdentities.get(name)
+          const alreadyLoaded = loadedSkillIdentities.has(name)
+          const sameRevision = alreadyLoaded
+            && priorIdentity?.id === identity.id
+            && priorIdentity?.revision === identity.revision
           if (sameRevision) {
             skillReused = true
-            content = JSON.stringify({ ok: true, name, revision: result.skill.revision, reused: true, instruction: 'This skill revision is already loaded for this request; continue using its earlier content.' })
-          } else if (!alreadyLoaded && loadedSkillRevisions.size >= FINANCE_SKILL_LIMITS.perRequest) {
+            content = JSON.stringify({ ok: true, name, ...(identity.id ? { id: identity.id } : {}), revision: result.skill.revision, reused: true, instruction: 'This skill instance and revision are already loaded for this request; continue using its earlier content.' })
+          } else if (!alreadyLoaded && loadedSkillIdentities.size >= FINANCE_SKILL_LIMITS.perRequest) {
             content = JSON.stringify({ ok: false, error: 'Finance skill load limit reached for this request.' })
           } else {
             skillName = result.skill.name
+            deliveredSkillIdentity = identity
             content = JSON.stringify({ ok: true, ...result.skill })
             skillResult = true
           }
@@ -461,8 +482,7 @@ export function createFinanceAgent(
       if ('omittedExpenseCategoryCount' in result && (result.omittedExpenseCategoryCount ?? 0) > 0) omittedCategories = true
     }
     if (skillResult && skillName) {
-      const skill = currentSkillRegistry().available.find(item => item.name === skillName)
-      loadedSkillRevisions.set(skillName, skill?.revision)
+      if (deliveredSkillIdentity) loadedSkillIdentities.set(skillName, deliveredSkillIdentity)
     }
     return {
       content,

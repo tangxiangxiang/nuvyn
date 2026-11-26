@@ -4,7 +4,7 @@ import app from '../index.js'
 import { createFinanceAgent, readSkillTool } from '../ai/finance-agent.js'
 import { createLedgerAnalysis } from '../ai/ledger-analysis.js'
 import { createFinanceMemoryRepository } from '../ai/finance-memory.js'
-import { buildFinanceSkillRegistryState, FINANCE_SKILL_LIMITS, financeSkillsDirectory, listFinanceSkills, parseFinanceSkillDocument, readFinanceSkill, type FinanceSkillName, type FinanceSkillRegistryEntry } from '../ai/finance-skills.js'
+import { BUILTIN_FINANCE_SKILL_NAMES, buildFinanceSkillRegistryState, createFinanceBuiltinSkillCache, FINANCE_SKILL_LIMITS, financeSkillsDirectory, listFinanceSkills, parseFinanceSkillDocument, readFinanceSkill, type FinanceSkillName, type FinanceSkillRegistryEntry } from '../ai/finance-skills.js'
 import type { LedgerAiContext } from '../ledger/aiContext.js'
 import { authenticatedRequest, closeAuthTestContext, createAuthenticatedTestContext, type AuthenticatedTestContext } from './helpers/auth.js'
 
@@ -94,6 +94,40 @@ describe('Finance Skills Registry', () => {
     expect(state.available).toEqual([])
     expect(state.unavailable).toEqual([{ name: 'monthly-review', reason: 'unavailable' }])
     expect(buildFinanceSkillRegistryState([], () => ({ ok: false, error: 'unknown' })).configurationError).toBe('empty')
+  })
+
+  it('caches validated built-in skill reads and returns isolated registry snapshots', () => {
+    const entries: FinanceSkillRegistryEntry[] = BUILTIN_FINANCE_SKILL_NAMES.map(name => ({ name, file: `${name}/SKILL.md` }))
+    let reads = 0
+    const cache = createFinanceBuiltinSkillCache(entries, name => {
+      reads++
+      return readFinanceSkill(name)
+    }, true)
+
+    const first = cache.getState()
+    first.available[0]!.description = 'caller mutation'
+    const second = cache.getState()
+    expect(second.available[0]!.description).not.toBe('caller mutation')
+    expect(cache.read('monthly-review').ok).toBe(true)
+    expect(reads).toBe(5)
+  })
+
+  it('retries failed built-in reads without rereading skills that already validated', () => {
+    const entries: FinanceSkillRegistryEntry[] = [
+      { name: 'monthly-review', file: 'monthly-review/SKILL.md' },
+      { name: 'spending-analysis', file: 'spending-analysis/SKILL.md' },
+    ]
+    const reads = new Map<string, number>()
+    const cache = createFinanceBuiltinSkillCache(entries, name => {
+      const count = (reads.get(name) ?? 0) + 1
+      reads.set(name, count)
+      if (name === 'monthly-review' && count === 1) return { ok: false, error: 'unavailable' }
+      return readFinanceSkill(name)
+    }, true)
+
+    expect(cache.getState().unavailable).toEqual([{ name: 'monthly-review', reason: 'unavailable' }])
+    expect(cache.getState().available.map(skill => skill.name)).toEqual(['monthly-review', 'spending-analysis'])
+    expect(reads).toEqual(new Map([['monthly-review', 2], ['spending-analysis', 1]]))
   })
 
   it('provides a Phase 2A Finance Agent when every optional skill is unavailable', async () => {

@@ -16,6 +16,7 @@ import AiComposer from './AiComposer.vue'
 import AiSessionPicker from './AiSessionPicker.vue'
 import AiFinanceMemoryDialog from './AiFinanceMemoryDialog.vue'
 import AiFinanceSkillsDialog from './AiFinanceSkillsDialog.vue'
+import AiComingSoon from './AiComingSoon.vue'
 import { readStorageKey, writeStorageKey } from '../../technicalNamespace'
 
 const props = withDefaults(defineProps<{
@@ -36,7 +37,9 @@ const appShell = inject(AppShellContextKey, null)
 const ordinaryHistory = useAiHistory()
 const ledgerHistory = useLedgerAiHistory(ordinaryHistory)
 const isLedger = computed(() => props.workspaceKind === 'ledger')
+const isComingSoon = computed(() => props.workspaceKind === 'diary' || props.workspaceKind === 'board')
 const history = computed(() => isLedger.value ? ledgerHistory : ordinaryHistory)
+const ordinaryHistoryReady = ref(false)
 const title = computed(() => t(isLedger.value ? 'ai.finance' : 'ai.assistant'))
 const { t } = useI18n()
 const ordinaryDraft = ref('')
@@ -56,6 +59,8 @@ const ledgerCommands = computed(() => [
 ])
 const commandStatus = ref<LedgerAiCommandOutcome | 'compacting' | 'failed' | 'unknown' | null>(null)
 let commandController: AbortController | null = null
+let ordinaryHistoryLoadStarted = false
+let ordinaryModelRefreshStarted = false
 const commandPending = ref(false)
 const ledgerLoadFailed = ref(false)
 const composer = ref<InstanceType<typeof AiComposer> | null>(null)
@@ -68,7 +73,7 @@ const isMobileViewport = ref(typeof window !== 'undefined' && window.innerWidth 
 const blockingOverlay = ref(false)
 const panelObscured = computed(() => blockingOverlay.value || showSessionPicker.value || showFinanceMemory.value)
 const visualViewport = ref<{ top: number; height: number } | null>(null)
-const panelWidth = computed(() => isLedger.value ? 720 : 460)
+const panelWidth = 720
 const position = ref<{ left: number; top: number } | null>(null)
 const aiProfiles = ref<AiModelOption[]>([])
 const profilesLoaded = ref(false)
@@ -122,7 +127,7 @@ async function loadAiModelOptions(): Promise<void> {
 }
 
 function selectModelProfile(profileId: string): void {
-  if (agentBusy.value || !availableModelOptions.value.some(option => option.profileId === profileId)) return
+  if (isComingSoon.value || agentBusy.value || !availableModelOptions.value.some(option => option.profileId === profileId)) return
   selectedProfileId.value = profileId
   history.value.errorState.value = null
   hasSavedProfileSelection.value = true
@@ -131,6 +136,7 @@ function selectModelProfile(profileId: string): void {
 }
 
 function onModelMenuOpen(): void {
+  if (isComingSoon.value) return
   if (profileListFailed.value || history.value.errorState.value === 'ai-model-unavailable') {
     void loadAiModelOptions()
   }
@@ -174,7 +180,7 @@ const emptyHint = computed(() => quickPromptState.value.emptyHint)
 
 const panelStyle = computed(() => {
   if (isMobileViewport.value) {
-    return isLedger.value && visualViewport.value
+    return visualViewport.value
       ? { '--ai-viewport-top': `${visualViewport.value.top}px`, '--ai-viewport-height': `${visualViewport.value.height}px` }
       : undefined
   }
@@ -205,7 +211,7 @@ function readSavedPosition(): { left: number; top: number } | null {
 function workspaceChromeBottom(): number {
   const navbar = document.querySelector<HTMLElement>('.navbar')
   const navRect = navbar?.getBoundingClientRect()
-  const immersiveTrigger = document.querySelector<HTMLElement>('.global-ai-immersive-trigger')
+  const immersiveTrigger = document.querySelector<HTMLElement>('[data-testid="immersive-global-ai-trigger"]')
   const triggerRect = immersiveTrigger?.getBoundingClientRect()
   return Math.max(
     navRect && navRect.height > 0 ? navRect.bottom : 0,
@@ -214,7 +220,7 @@ function workspaceChromeBottom(): number {
 }
 
 function defaultPosition(): { left: number; top: number } {
-  const width = Math.min(panelWidth.value, window.innerWidth - (isLedger.value ? 32 : 24))
+  const width = Math.min(panelWidth, window.innerWidth - 32)
   return {
     left: Math.max(12, window.innerWidth - width - 16),
     top: Math.max(12, workspaceChromeBottom() + 12),
@@ -225,10 +231,10 @@ function clampPosition(next: { left: number; top: number }): { left: number; top
   const rect = panelRef.value?.getBoundingClientRect()
   const width = rect && rect.width > 0
     ? rect.width
-    : Math.min(panelWidth.value, window.innerWidth - (isLedger.value ? 32 : 24))
+    : Math.min(panelWidth, window.innerWidth - 32)
   const height = rect && rect.height > 0
     ? rect.height
-    : Math.min(window.innerHeight * 0.8, isLedger.value ? 860 : 720)
+    : Math.min(window.innerHeight * 0.8, 860)
   const minTop = Math.max(8, workspaceChromeBottom() + 8)
   const maxLeft = Math.max(8, window.innerWidth - width - 8)
   const maxTop = Math.max(minTop, window.innerHeight - height - 8)
@@ -253,7 +259,10 @@ function restoreDefaultPosition(): void {
 }
 
 function syncVisualViewport(): void {
-  if (window.innerWidth > 640) return
+  if (window.innerWidth > 640) {
+    visualViewport.value = null
+    return
+  }
   const viewport = window.visualViewport
   visualViewport.value = viewport?.scale === 1
     ? { top: viewport.offsetTop, height: viewport.height }
@@ -322,6 +331,7 @@ function finishDrag(event: PointerEvent): void {
 }
 
 async function onSend(prompt?: string): Promise<void> {
+  if (isComingSoon.value) return
   const text = (prompt ?? draft.value).trim()
   const active = history.value
   if (!text || active.busy.value || active.isLoading.value) return
@@ -351,6 +361,7 @@ async function onSend(prompt?: string): Promise<void> {
 }
 
 async function onLedgerCommand(command: LedgerAiCommand): Promise<void> {
+  if (isComingSoon.value) return
   if (command === 'memory') {
     if (!isLedger.value || ledgerHistory.busy.value || commandPending.value) return
     ledgerDraft.value = ''
@@ -389,26 +400,45 @@ async function onLedgerCommand(command: LedgerAiCommand): Promise<void> {
 }
 
 watch([isLedger, () => props.open], ([ledger, open]) => {
-  if (!ledger || !open || ledgerHistory.activeSession.value || ledgerHistory.isLoading.value) return
+  if (isComingSoon.value || !ledger || !open || ledgerHistory.activeSession.value || ledgerHistory.isLoading.value) return
   ledgerLoadFailed.value = false
   void ledgerHistory.loadActive().catch(() => { ledgerLoadFailed.value = true })
 }, { immediate: true })
 
 watch(isLedger, (ledger) => {
-  if (props.open) {
-    const previousWidth = Math.min(ledger ? 460 : 720, window.innerWidth - (ledger ? 24 : 32))
-    if (!position.value || position.value.left === Math.max(12, window.innerWidth - previousWidth - 16)) {
-      position.value = defaultPosition()
-    }
-    void normalizePosition()
-  }
+  if (props.open) void normalizePosition()
   if (ledger) {
     showSessionPicker.value = false
     historyTrigger = null
   }
 })
 
+function loadAvailableWorkspaceAiData(): void {
+  if (isComingSoon.value) return
+  if (!ordinaryHistoryLoadStarted) {
+    ordinaryHistoryLoadStarted = true
+    void ordinaryHistory.loadActive().catch(() => {}).finally(() => { ordinaryHistoryReady.value = true })
+  }
+  if (!ordinaryModelRefreshStarted) {
+    ordinaryModelRefreshStarted = true
+    void ordinaryHistory.refreshModel().catch(() => {})
+  }
+  if (!profilesLoaded.value && !profilesLoading.value) void loadAiModelOptions()
+}
+
+watch(isComingSoon, (comingSoon) => {
+  if (!comingSoon) {
+    loadAvailableWorkspaceAiData()
+    return
+  }
+  showSessionPicker.value = false
+  showFinanceMemory.value = false
+  showFinanceSkills.value = false
+  historyTrigger = null
+})
+
 async function onNewConversation(): Promise<void> {
+  if (isComingSoon.value) return
   if (ordinaryHistory.busy.value || ordinaryHistory.isLoading.value) return
   draft.value = ''
   await ordinaryHistory.createSession()
@@ -416,6 +446,7 @@ async function onNewConversation(): Promise<void> {
 }
 
 async function useQuickPrompt(text: string): Promise<void> {
+  if (isComingSoon.value) return
   if (isLedger.value) {
     await onSend(text)
     return
@@ -426,6 +457,7 @@ async function useQuickPrompt(text: string): Promise<void> {
 }
 
 function openSessionPicker(event: MouseEvent): void {
+  if (isComingSoon.value) return
   historyTrigger = event.currentTarget instanceof HTMLElement ? event.currentTarget : null
   showSessionPicker.value = true
 }
@@ -512,9 +544,7 @@ watch(() => props.open, (open, _previous, onCleanup) => {
 }, { immediate: true, flush: 'post' })
 
 onMounted(() => {
-  void ordinaryHistory.loadActive().catch(() => {})
-  void ordinaryHistory.refreshModel().catch(() => {})
-  void loadAiModelOptions()
+  loadAvailableWorkspaceAiData()
   window.addEventListener('resize', syncViewport)
   window.visualViewport?.addEventListener('resize', syncViewport)
   window.visualViewport?.addEventListener('scroll', syncVisualViewport)
@@ -550,7 +580,7 @@ onBeforeUnmount(() => {
       ref="panelRef"
       v-show="props.open"
       class="ai-panel ai-floating-panel"
-      :class="{ 'is-dragging': isDragging, 'is-mobile': isMobileViewport, 'is-obscured': panelObscured, 'is-finance': isLedger }"
+      :class="{ 'is-dragging': isDragging, 'is-mobile': isMobileViewport, 'is-obscured': panelObscured }"
       :style="panelStyle"
       :aria-label="title"
       :aria-hidden="panelObscured || undefined"
@@ -572,7 +602,7 @@ onBeforeUnmount(() => {
         </div>
         <div class="ai-header-actions">
           <NButton
-            v-if="!isLedger"
+            v-if="!isLedger && !isComingSoon"
             class="ai-header-btn"
             attr-type="button"
             text
@@ -584,7 +614,7 @@ onBeforeUnmount(() => {
             @click="onNewConversation"
           ><NIcon aria-hidden="true"><MessagePlus /></NIcon></NButton>
           <NButton
-            v-if="!isLedger"
+            v-if="!isLedger && !isComingSoon"
             class="ai-header-btn"
             attr-type="button"
             text
@@ -607,33 +637,38 @@ onBeforeUnmount(() => {
         </div>
       </header>
 
-      <div v-if="profilesLoaded && !availableModelOptions.length" class="ai-no-key-banner" role="status">
-        {{ t('ai.models_unavailable') }}
-      </div>
-      <div v-else-if="profileListFailed" class="ai-no-key-banner" role="status">
-        {{ t('ai.models_load_failed') }}
-      </div>
-      <div v-else-if="modelUnavailable" class="ai-no-key-banner" role="status">
-        {{ t(selectedProfileId ? 'ai.model_unavailable' : 'ai.model_choose') }}
-      </div>
-      <div v-else-if="history.errorState.value === 'ai-model-unavailable'" class="ai-no-key-banner" role="status">
-        {{ t('ai.model_unavailable') }}
-      </div>
+      <template v-if="!isComingSoon">
+        <div v-if="profilesLoaded && !availableModelOptions.length" class="ai-no-key-banner" role="status">
+          {{ t('ai.models_unavailable') }}
+        </div>
+        <div v-else-if="profileListFailed" class="ai-no-key-banner" role="status">
+          {{ t('ai.models_load_failed') }}
+        </div>
+        <div v-else-if="modelUnavailable" class="ai-no-key-banner" role="status">
+          {{ t(selectedProfileId ? 'ai.model_unavailable' : 'ai.model_choose') }}
+        </div>
+        <div v-else-if="history.errorState.value === 'ai-model-unavailable'" class="ai-no-key-banner" role="status">
+          {{ t('ai.model_unavailable') }}
+        </div>
+      </template>
+
+      <AiComingSoon v-if="isComingSoon" />
 
       <KeepAlive>
         <AiChatMessages
-          v-if="!isLedger"
+          v-if="!isComingSoon && !isLedger"
           key="ordinary"
           :messages="ordinaryHistory.messages.value"
           :current-path="displayPath"
           :note-link-context="noteLinkContext"
           :quick-prompts="quickPrompts"
           :empty-hint="emptyHint"
+          :show-welcome="ordinaryHistoryReady && !ordinaryHistory.isLoading.value"
           @prompt="useQuickPrompt"
         />
 
         <AiChatMessages
-          v-else
+          v-else-if="!isComingSoon"
           key="finance"
           finance
           :messages="ledgerHistory.messages.value"
@@ -647,18 +682,21 @@ onBeforeUnmount(() => {
         />
       </KeepAlive>
 
-      <NAlert
-        v-if="history.errorState.value?.startsWith('ledger-analysis-')"
-        type="warning"
-        :show-icon="false"
-        class="ai-ledger-status"
-      >{{ t(history.errorState.value === 'ledger-analysis-uninitialized' ? 'ai.ledger_uninitialized' : 'ai.ledger_unavailable') }}</NAlert>
-      <p v-if="isLedger && commandStatus" class="ai-ledger-status" role="status">
-        {{ t(`ai.ledger_command_${commandStatus}`) }}
-      </p>
-      <p v-if="isLedger && ledgerLoadFailed" class="ai-ledger-status" role="status">{{ t('ai.ledger_unavailable') }}</p>
+      <template v-if="!isComingSoon">
+        <NAlert
+          v-if="history.errorState.value?.startsWith('ledger-analysis-')"
+          type="warning"
+          :show-icon="false"
+          class="ai-ledger-status"
+        >{{ t(history.errorState.value === 'ledger-analysis-uninitialized' ? 'ai.ledger_uninitialized' : 'ai.ledger_unavailable') }}</NAlert>
+        <p v-if="isLedger && commandStatus" class="ai-ledger-status" role="status">
+          {{ t(`ai.ledger_command_${commandStatus}`) }}
+        </p>
+        <p v-if="isLedger && ledgerLoadFailed" class="ai-ledger-status" role="status">{{ t('ai.ledger_unavailable') }}</p>
+      </template>
 
       <AiComposer
+        v-if="!isComingSoon"
         ref="composer"
         v-model="draft"
         :busy="history.busy.value"
@@ -678,9 +716,9 @@ onBeforeUnmount(() => {
         @stop="history.stop"
       />
 
-      <AiSessionPicker v-if="showSessionPicker" @close="closeSessionPicker" />
-      <AiFinanceMemoryDialog :open="showFinanceMemory" :busy="agentBusy" @close="showFinanceMemory = false" />
-      <AiFinanceSkillsDialog :open="showFinanceSkills" @close="showFinanceSkills = false" />
+      <AiSessionPicker v-if="!isComingSoon && showSessionPicker" @close="closeSessionPicker" />
+      <AiFinanceMemoryDialog v-if="!isComingSoon" :open="showFinanceMemory" :busy="agentBusy" @close="showFinanceMemory = false" />
+      <AiFinanceSkillsDialog v-if="!isComingSoon" :open="showFinanceSkills" @close="showFinanceSkills = false" />
     </aside>
   </Transition>
 </template>

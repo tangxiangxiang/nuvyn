@@ -162,6 +162,16 @@ describe('global AI panel', () => {
     expect(history.loadThread).not.toHaveBeenCalled()
   })
 
+  it('does not flash the ordinary welcome while history is loading', async () => {
+    history.isLoading.value = true
+    const { wrapper } = mountPanel(undefined, { workspaceKind: 'vault' })
+    await nextTick()
+    expect(wrapper.findComponent(AiChatMessages).props('showWelcome')).toBe(false)
+    history.isLoading.value = false
+    await nextTick()
+    expect(wrapper.findComponent(AiChatMessages).props('showWelcome')).toBe(true)
+  })
+
   it('captures the current Note snapshot synchronously and sends no thread scope', async () => {
     const events: string[] = []
     const capture = documentCapture('notes/a.md')
@@ -314,7 +324,8 @@ describe('global AI panel', () => {
 
     await wrapper.setProps({ workspaceKind: 'diary' })
     await nextTick()
-    expect(wrapper.findComponent(AiComposer).props('selectedModelProfileId')).toBe('profile-default')
+    expect(wrapper.find('[data-testid="ai-coming-soon"]').exists()).toBe(true)
+    expect(wrapper.findComponent(AiComposer).exists()).toBe(false)
 
     await wrapper.setProps({ workspaceKind: 'vault' })
     await nextTick()
@@ -365,7 +376,60 @@ describe('global AI panel', () => {
     expect(otherWorkspace.wrapper.findComponent(AiChatMessages).props('emptyHint')).toBe(useI18n().t('ai.empty_hint_ledger'))
   })
 
-  it('updates prompts with the workspace and Diary view while preserving the draft and conversation', async () => {
+  it.each(['diary', 'board'] as const)('shows a clean coming soon state in %s without loading AI data', async (workspaceKind) => {
+    const { wrapper } = mountPanel(undefined, { workspaceKind })
+    await flushPromises()
+
+    const panel = wrapper.get('[data-testid="global-ai-panel"]')
+    expect(panel.find('.ai-floating-title').text()).toBe('AI assistant')
+    expect(panel.find('[data-testid="ai-coming-soon"]').text()).toContain('Coming soon')
+    expect(panel.find('[data-testid="ai-coming-soon"]').text()).toContain('AI features for this module are not available yet.')
+    expect(panel.find('[data-testid="global-ai-close"]').exists()).toBe(true)
+    expect(panel.find('[data-testid="global-ai-new-session"]').exists()).toBe(false)
+    expect(panel.find('[data-testid="global-ai-history"]').exists()).toBe(false)
+    expect(panel.find('.ai-no-key-banner').exists()).toBe(false)
+    expect(panel.findComponent(AiChatMessages).exists()).toBe(false)
+    expect(panel.findComponent(AiComposer).exists()).toBe(false)
+    expect(panel.find('[data-testid="ai-finance-memory-dialog"]').exists()).toBe(false)
+    expect(panel.find('[data-testid="ai-finance-skills-dialog"]').exists()).toBe(false)
+    expect(getAiProfiles).not.toHaveBeenCalled()
+    expect(history.loadActive).not.toHaveBeenCalled()
+    expect(history.refreshModel).not.toHaveBeenCalled()
+    expect(financeHistory.loadActive).not.toHaveBeenCalled()
+    expect(history.createSession).not.toHaveBeenCalled()
+    expect(history.sendAndStream).not.toHaveBeenCalled()
+    expect(financeHistory.sendAndStream).not.toHaveBeenCalled()
+    expect(getFinanceMemory).not.toHaveBeenCalled()
+    expect(getFinanceSkills).not.toHaveBeenCalled()
+  })
+
+  it('keeps Note draft and conversation hidden but intact in Diary and Board', async () => {
+    const conversation = [{ id: 44, sessionId: 12, role: 'assistant' as const, content: 'Note conversation stays private', createdAt: 1 }]
+    history.messages.value = conversation
+    const { wrapper } = mountPanel(undefined, { workspaceKind: 'vault' })
+    await flushPromises()
+    await wrapper.get('textarea').setValue('Note draft stays here')
+
+    for (const workspaceKind of ['diary', 'board'] as const) {
+      await wrapper.setProps({ workspaceKind })
+      await nextTick()
+      expect(wrapper.find('[data-testid="ai-coming-soon"]').exists()).toBe(true)
+      expect(wrapper.findComponent(AiComposer).exists()).toBe(false)
+      expect(wrapper.findComponent(AiChatMessages).exists()).toBe(false)
+      expect(wrapper.text()).not.toContain('Note conversation stays private')
+      expect(history.messages.value).toEqual(conversation)
+      expect(history.createSession).not.toHaveBeenCalled()
+      expect(history.sendAndStream).not.toHaveBeenCalled()
+    }
+
+    await wrapper.setProps({ workspaceKind: 'vault' })
+    await nextTick()
+    expect((wrapper.get('textarea').element as HTMLTextAreaElement).value).toBe('Note draft stays here')
+    expect(wrapper.text()).toContain('Note conversation stays private')
+    expect(history.messages.value).toEqual(conversation)
+  })
+
+  it('updates prompts with the available workspace while keeping Ledger state separate', async () => {
     history.messages.value = []
     const capture = vi.fn(() => documentCapture())
     const wrapper = mount(AiPanel, {
@@ -400,12 +464,11 @@ describe('global AI panel', () => {
     const conversation = [{ id: 1, sessionId: 1, role: 'assistant' as const, content: 'kept', createdAt: 1 }]
     history.messages.value = conversation
     await wrapper.setProps({ workspaceKind: 'diary', diaryViewMode: 'events' })
-    expect(wrapper.findComponent(AiChatMessages).props('quickPrompts').map(prompt => prompt.label)).toEqual([
-      'Plan an important date', 'Plan a birthday or anniversary', 'Plan an activity',
-    ])
-    expect(wrapper.findComponent(AiChatMessages).props('messages')).toEqual(conversation)
-    expect(wrapper.findComponent(AiComposer).props('modelValue')).toBe('')
-    expect(wrapper.findComponent(AiChatMessages).props('emptyHint')).toBe('I can help you plan important dates and activities.')
+    expect(wrapper.find('[data-testid="ai-coming-soon"]').exists()).toBe(true)
+    expect(wrapper.findComponent(AiChatMessages).exists()).toBe(false)
+    expect(wrapper.findComponent(AiComposer).exists()).toBe(false)
+    expect(wrapper.text()).not.toContain('kept')
+    expect(history.messages.value).toEqual(conversation)
     await wrapper.setProps({ workspaceKind: 'ledger' })
     expect(wrapper.findComponent(AiComposer).props('modelValue')).toBe(expectedDraft)
     expect(wrapper.findComponent(AiChatMessages).props('messages')).toEqual([])

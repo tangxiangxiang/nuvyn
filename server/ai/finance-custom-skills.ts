@@ -1,12 +1,10 @@
 import { createHash } from 'node:crypto'
 import type { Database as DatabaseT } from 'better-sqlite3'
-import { BUILTIN_FINANCE_SKILL_NAMES, FINANCE_CUSTOM_SKILL_LIMITS, type FinanceSkill, type FinanceSkillMetadata } from '../../shared/financeSkills.js'
+import { BUILTIN_FINANCE_SKILL_NAMES, FINANCE_CUSTOM_SKILL_LIMITS, type CustomFinanceSkillMetadata, type FinanceSkill, type FinanceSkillMetadata } from '../../shared/financeSkills.js'
 
 export { FINANCE_CUSTOM_SKILL_LIMITS }
 
-export type FinanceCustomSkill = FinanceSkill & {
-  source: 'custom'
-  revision: number
+export type FinanceCustomSkill = Extract<FinanceSkill, { source: 'custom' }> & {
   createdAt: number
   updatedAt: number
 }
@@ -15,7 +13,7 @@ export type FinanceCustomSkillUsage = { count: number; countLimit: number; conte
 export type FinanceCustomSkillError =
   | 'invalid-owner' | 'invalid-name' | 'builtin-name' | 'invalid-title' | 'invalid-description' | 'invalid-content'
   | 'too-long' | 'duplicate' | 'previously-deleted' | 'count-exceeded' | 'capacity-exceeded'
-  | 'not-found' | 'stale-revision'
+  | 'not-found' | 'invalid-id' | 'stale-instance' | 'stale-revision'
 
 export type FinanceCustomSkillMutation =
   | { ok: true; skill: FinanceCustomSkill; usage: FinanceCustomSkillUsage; duplicate?: true }
@@ -32,6 +30,7 @@ type CustomSkillRow = {
   created_at: number
   updated_at: number
 }
+type CustomSkillMetadataRow = Pick<CustomSkillRow, 'id' | 'name' | 'title' | 'description' | 'revision'>
 
 type CustomSkillInput = { name: unknown; title: unknown; description: unknown; content: unknown }
 type CustomSkillPatch = { title?: unknown; description?: unknown; content?: unknown }
@@ -61,6 +60,7 @@ export function isValidFinanceCustomSkillName(name: unknown): name is string {
 
 function mapRow(row: CustomSkillRow): FinanceCustomSkill {
   return {
+    id: row.id,
     name: row.name,
     title: row.title,
     description: row.description,
@@ -72,8 +72,8 @@ function mapRow(row: CustomSkillRow): FinanceCustomSkill {
   }
 }
 
-function metadata(skill: FinanceCustomSkill): FinanceSkillMetadata {
-  return { name: skill.name, title: skill.title, description: skill.description, source: 'custom', revision: skill.revision }
+function metadata(row: CustomSkillMetadataRow): CustomFinanceSkillMetadata {
+  return { id: row.id, name: row.name, title: row.title, description: row.description, source: 'custom', revision: row.revision }
 }
 
 function rowsFor(db: DatabaseT, ownerId: number): CustomSkillRow[] {
@@ -129,7 +129,12 @@ export function createFinanceCustomSkillRepository(db: DatabaseT) {
   }
 
   function listMetadata(ownerId: number): FinanceSkillMetadata[] {
-    return list(ownerId).map(metadata)
+    if (!validOwner(ownerId)) return []
+    const rows = db.prepare(`
+      SELECT id, name, title, description, revision
+      FROM ai_finance_skills WHERE owner_user_id = ? ORDER BY title COLLATE NOCASE, name
+    `).all(ownerId) as CustomSkillMetadataRow[]
+    return rows.map(metadata)
   }
 
   function usage(ownerId: number): FinanceCustomSkillUsage {
@@ -159,7 +164,7 @@ export function createFinanceCustomSkillRepository(db: DatabaseT) {
       if (currentRows.length >= FINANCE_CUSTOM_SKILL_LIMITS.count) return { ok: false, error: 'count-exceeded', usage: usageFor(currentRows) } as const
       const total = usageFor(currentRows).contentCharacters + characterCount(validated.value.content)
       if (total > FINANCE_CUSTOM_SKILL_LIMITS.totalContentCharacters) return { ok: false, error: 'capacity-exceeded', usage: usageFor(currentRows) } as const
-      const inserted = db.prepare(`
+      db.prepare(`
         INSERT INTO ai_finance_skills (owner_user_id, name, title, description, content, revision, created_at, updated_at)
         VALUES (?, ?, ?, ?, ?, 1, ?, ?)
       `).run(ownerId, validated.value.name, validated.value.title, validated.value.description, validated.value.content, now, now)
@@ -168,7 +173,6 @@ export function createFinanceCustomSkillRepository(db: DatabaseT) {
       }
       const skill = get(ownerId, validated.value.name)
       if (!skill) throw new Error('Created finance skill could not be read back')
-      void inserted
       return { ok: true, skill, usage: usageFor([...currentRows, { content: skill.content }]) } as const
     })()
   }
@@ -202,9 +206,10 @@ export function createFinanceCustomSkillRepository(db: DatabaseT) {
     return createExplicitly(ownerId, { ...raw, name }, now)
   }
 
-  function update(ownerId: number, name: string, patch: CustomSkillPatch, expectedRevision: number, now = Date.now()): FinanceCustomSkillMutation {
+  function update(ownerId: number, name: string, patch: CustomSkillPatch, expectedId: number, expectedRevision: number, now = Date.now()): FinanceCustomSkillMutation {
     if (!validOwner(ownerId)) return { ok: false, error: 'invalid-owner' }
     if (!isValidFinanceCustomSkillName(name)) return { ok: false, error: 'invalid-name' }
+    if (!Number.isSafeInteger(expectedId) || expectedId < 1) return { ok: false, error: 'invalid-id' }
     if (!Number.isSafeInteger(expectedRevision) || expectedRevision < 1) return { ok: false, error: 'stale-revision' }
     if (!patch || typeof patch !== 'object' || !Object.keys(patch).length || Object.keys(patch).some(key => !['title', 'description', 'content'].includes(key))) {
       return { ok: false, error: 'invalid-content' }
@@ -213,6 +218,7 @@ export function createFinanceCustomSkillRepository(db: DatabaseT) {
       const currentRows = rowsFor(db, ownerId)
       const existing = currentRows.find(row => row.name === name)
       if (!existing) return { ok: false, error: 'not-found', usage: usageFor(currentRows) } as const
+      if (existing.id !== expectedId) return { ok: false, error: 'stale-instance', usage: usageFor(currentRows) } as const
       if (existing.revision !== expectedRevision) return { ok: false, error: 'stale-revision', usage: usageFor(currentRows) } as const
       const title = patch.title === undefined ? existing.title : normalizeField(patch.title, false)
       if (!title) return { ok: false, error: 'invalid-title', usage: usageFor(currentRows) } as const
@@ -233,27 +239,37 @@ export function createFinanceCustomSkillRepository(db: DatabaseT) {
       const result = db.prepare(`
         UPDATE ai_finance_skills
         SET title = ?, description = ?, content = ?, revision = revision + 1, updated_at = ?
-        WHERE owner_user_id = ? AND name = ? AND revision = ?
-      `).run(title, description, content, now, ownerId, name, expectedRevision)
-      if (result.changes !== 1) return { ok: false, error: 'stale-revision', usage: usageFor(rowsFor(db, ownerId)) } as const
+        WHERE owner_user_id = ? AND name = ? AND id = ? AND revision = ?
+      `).run(title, description, content, now, ownerId, name, expectedId, expectedRevision)
+      if (result.changes !== 1) {
+        const latest = get(ownerId, name)
+        const error = !latest ? 'not-found' : latest.id !== expectedId ? 'stale-instance' : 'stale-revision'
+        return { ok: false, error, usage: usageFor(rowsFor(db, ownerId)) } as const
+      }
       const skill = get(ownerId, name)
       if (!skill) throw new Error('Updated finance skill could not be read back')
       return { ok: true, skill, usage: usageFor(currentRows.map(row => row.name === name ? { content: skill.content } : row)) } as const
     })()
   }
 
-  function remove(ownerId: number, name: string, expectedRevision: number, now = Date.now()): { ok: true; usage: FinanceCustomSkillUsage } | { ok: false; error: FinanceCustomSkillError; usage?: FinanceCustomSkillUsage } {
+  function remove(ownerId: number, name: string, expectedId: number, expectedRevision: number, now = Date.now()): { ok: true; usage: FinanceCustomSkillUsage } | { ok: false; error: FinanceCustomSkillError; usage?: FinanceCustomSkillUsage } {
     if (!validOwner(ownerId)) return { ok: false, error: 'invalid-owner' }
     if (!isValidFinanceCustomSkillName(name)) return { ok: false, error: 'invalid-name' }
+    if (!Number.isSafeInteger(expectedId) || expectedId < 1) return { ok: false, error: 'invalid-id' }
     if (!Number.isSafeInteger(expectedRevision) || expectedRevision < 1) return { ok: false, error: 'stale-revision' }
     return db.transaction(() => {
       const currentRows = rowsFor(db, ownerId)
       const existing = currentRows.find(row => row.name === name)
       if (!existing) return { ok: false, error: 'not-found', usage: usageFor(currentRows) } as const
+      if (existing.id !== expectedId) return { ok: false, error: 'stale-instance', usage: usageFor(currentRows) } as const
       if (existing.revision !== expectedRevision) return { ok: false, error: 'stale-revision', usage: usageFor(currentRows) } as const
-      const result = db.prepare('DELETE FROM ai_finance_skills WHERE owner_user_id = ? AND name = ? AND revision = ?')
-        .run(ownerId, name, expectedRevision)
-      if (result.changes !== 1) return { ok: false, error: 'stale-revision', usage: usageFor(rowsFor(db, ownerId)) } as const
+      const result = db.prepare('DELETE FROM ai_finance_skills WHERE owner_user_id = ? AND name = ? AND id = ? AND revision = ?')
+        .run(ownerId, name, expectedId, expectedRevision)
+      if (result.changes !== 1) {
+        const latest = get(ownerId, name)
+        const error = !latest ? 'not-found' : latest.id !== expectedId ? 'stale-instance' : 'stale-revision'
+        return { ok: false, error, usage: usageFor(rowsFor(db, ownerId)) } as const
+      }
       db.prepare(`
         INSERT INTO ai_finance_skill_tombstones (owner_user_id, name, title, deleted_at)
         VALUES (?, ?, ?, ?)

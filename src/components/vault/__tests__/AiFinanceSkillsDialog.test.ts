@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import AiFinanceSkillsDialog from '../AiFinanceSkillsDialog.vue'
 import { useI18n } from '../../../composables/useI18n'
 import { createFinanceSkill, deleteFinanceSkill, getFinanceSkill, getFinanceSkills, updateFinanceSkill } from '../../../lib/ai-api'
+import type { FinanceSkillMetadata } from '../../../../shared/financeSkills'
 
 vi.mock('../../../lib/ai-api', async original => ({
   ...await original<typeof import('../../../lib/ai-api')>(),
@@ -15,7 +16,7 @@ vi.mock('../../../lib/ai-api', async original => ({
   deleteFinanceSkill: vi.fn(),
 }))
 
-const metadata = [
+const metadata: FinanceSkillMetadata[] = [
   { name: 'monthly-review', title: 'monthly-review', description: 'Review the month.', source: 'builtin' as const },
   { name: 'spending-analysis', title: 'spending-analysis', description: 'Analyze spending.', source: 'builtin' as const },
   { name: 'debt-analysis', title: 'debt-analysis', description: 'Review debt.', source: 'builtin' as const },
@@ -23,10 +24,10 @@ const metadata = [
   { name: 'financial-planning', title: 'financial-planning', description: 'Plan finances.', source: 'builtin' as const },
 ]
 
-const customMetadata = { name: 'custom-monthly-report', title: 'Personal monthly review', description: 'Review finances in my preferred order.', source: 'custom' as const, revision: 1 }
+const customMetadata = { id: 12, name: 'custom-monthly-report', title: 'Personal monthly review', description: 'Review finances in my preferred order.', source: 'custom' as const, revision: 1 }
 
 const customSkill = {
-  name: 'custom-monthly-report', title: 'Personal monthly review', description: 'Review finances in my preferred order.',
+  id: 12, name: 'custom-monthly-report', title: 'Personal monthly review', description: 'Review finances in my preferred order.',
   source: 'custom' as const, revision: 1, content: '# Personal monthly review\n\nCompare the same period.',
 }
 
@@ -128,6 +129,48 @@ describe('AiFinanceSkillsDialog', () => {
     expect(wrapper.text()).not.toContain('custom-monthly-report')
   })
 
+  it('cancels a new skill back to the list and clears its draft', async () => {
+    const wrapper = mount(AiFinanceSkillsDialog, {
+      props: { open: true },
+      global: { stubs: { NModal: ModalStub, NIcon: true, teleport: true } },
+    })
+    await flushPromises()
+    await wrapper.get('[aria-label="Add skill"]').trigger('click')
+    await wrapper.get('input').setValue('Unfinished procedure')
+    await wrapper.findAll('input')[1]!.setValue('This draft must be discarded.')
+    await wrapper.get('textarea').setValue('Unfinished body.')
+    await wrapper.findAll('.ai-finance-skill-actions button').find(button => button.text() === 'Cancel')!.trigger('click')
+
+    expect(wrapper.text()).toContain('Built-in skills')
+    expect(wrapper.text()).toContain('Custom skills')
+    expect(wrapper.text()).not.toContain('Unfinished procedure')
+    expect(createFinanceSkill).not.toHaveBeenCalled()
+
+    await wrapper.get('[aria-label="Add skill"]').trigger('click')
+    expect((wrapper.findAll('input')[0]!.element as HTMLInputElement).value).toBe('')
+    expect((wrapper.findAll('input')[1]!.element as HTMLInputElement).value).toBe('')
+    expect((wrapper.get('textarea').element as HTMLTextAreaElement).value).toBe('')
+  })
+
+  it('cancels editing back to the original detail without writing', async () => {
+    vi.mocked(getFinanceSkills).mockResolvedValueOnce([...metadata, customMetadata])
+    vi.mocked(getFinanceSkill).mockResolvedValueOnce(customSkill)
+    const wrapper = mount(AiFinanceSkillsDialog, {
+      props: { open: true },
+      global: { stubs: { NModal: ModalStub, NIcon: true, teleport: true } },
+    })
+    await flushPromises()
+    await wrapper.findAll('.ai-finance-skills-list button').find(button => button.text().includes('Personal monthly review'))!.trigger('click')
+    await flushPromises()
+    await wrapper.findAll('.ai-finance-skill-actions button').find(button => button.text().includes('Edit skill'))!.trigger('click')
+    await wrapper.get('textarea').setValue('Unsaved text.')
+    await wrapper.findAll('.ai-finance-skill-actions button').find(button => button.text() === 'Cancel')!.trigger('click')
+
+    expect(wrapper.text()).toContain('Compare the same period.')
+    expect(wrapper.text()).not.toContain('Unsaved text.')
+    expect(updateFinanceSkill).not.toHaveBeenCalled()
+  })
+
   it('preserves an edit draft on revision conflict and retries against the latest revision', async () => {
     vi.mocked(getFinanceSkills).mockResolvedValueOnce([...metadata, customMetadata])
     vi.mocked(getFinanceSkill)
@@ -154,8 +197,63 @@ describe('AiFinanceSkillsDialog', () => {
     await wrapper.get('form').trigger('submit')
     await flushPromises()
     expect(updateFinanceSkill).toHaveBeenLastCalledWith('custom-monthly-report', {
-      title: 'Personal monthly review', description: 'Review finances in my preferred order.', content: 'My unsaved procedure.', expectedRevision: 2,
+      title: 'Personal monthly review', description: 'Review finances in my preferred order.', content: 'My unsaved procedure.', expectedId: 12, expectedRevision: 2,
     })
+  })
+
+  it('preserves the draft and blocks writes when the skill instance was replaced', async () => {
+    vi.mocked(getFinanceSkills).mockResolvedValueOnce([...metadata, customMetadata])
+    vi.mocked(getFinanceSkill)
+      .mockResolvedValueOnce(customSkill)
+      .mockResolvedValueOnce({ ...customSkill, id: 99, content: 'A different skill instance.' })
+    vi.mocked(updateFinanceSkill).mockRejectedValueOnce(Object.assign(
+      new Error('Finance skill update failed: stale-instance'),
+      { status: 409, body: { code: 'stale-instance' } },
+    ))
+    const wrapper = mount(AiFinanceSkillsDialog, {
+      props: { open: true },
+      global: { stubs: { NModal: ModalStub, NIcon: true, teleport: true } },
+    })
+    await flushPromises()
+    await wrapper.findAll('.ai-finance-skills-list button').find(button => button.text().includes('Personal monthly review'))!.trigger('click')
+    await flushPromises()
+    await wrapper.findAll('.ai-finance-skill-actions button').find(button => button.text().includes('Edit skill'))!.trigger('click')
+    await wrapper.get('textarea').setValue('Keep this draft for the user.')
+    await wrapper.get('form').trigger('submit')
+    await flushPromises()
+
+    expect((wrapper.get('textarea').element as HTMLTextAreaElement).value).toBe('Keep this draft for the user.')
+    expect(wrapper.text()).toContain('original skill was deleted or recreated')
+    expect(wrapper.text()).toContain('A different skill instance.')
+    expect((wrapper.get('form button[type="submit"]').element as HTMLButtonElement).disabled).toBe(true)
+    expect(updateFinanceSkill).toHaveBeenCalledOnce()
+  })
+
+  it('does not retry deletion after the named skill was replaced', async () => {
+    vi.mocked(getFinanceSkills).mockResolvedValueOnce([...metadata, customMetadata])
+    vi.mocked(getFinanceSkill)
+      .mockResolvedValueOnce(customSkill)
+      .mockResolvedValueOnce({ ...customSkill, id: 99, content: 'The replacement instance remains intact.' })
+    vi.mocked(deleteFinanceSkill).mockRejectedValueOnce(Object.assign(
+      new Error('Finance skill delete failed: stale-instance'),
+      { status: 409, body: { code: 'stale-instance' } },
+    ))
+    const wrapper = mount(AiFinanceSkillsDialog, {
+      props: { open: true },
+      global: { stubs: { NModal: ModalStub, NIcon: true, teleport: true } },
+    })
+    await flushPromises()
+    await wrapper.findAll('.ai-finance-skills-list button').find(button => button.text().includes('Personal monthly review'))!.trigger('click')
+    await flushPromises()
+    await wrapper.findAll('.ai-finance-skill-actions button').find(button => button.text().includes('Delete skill'))!.trigger('click')
+    await wrapper.findAll('.ai-finance-skill-delete-confirm button').find(button => button.text().includes('Delete skill'))!.trigger('click')
+    await flushPromises()
+
+    expect(deleteFinanceSkill).toHaveBeenCalledOnce()
+    expect(deleteFinanceSkill).toHaveBeenCalledWith('custom-monthly-report', 12, 1)
+    expect(wrapper.text()).toContain('original skill was deleted or recreated')
+    expect(wrapper.text()).toContain('The replacement instance remains intact.')
+    expect(wrapper.find('.ai-finance-skill-delete-confirm').exists()).toBe(false)
   })
 
   it('requires a named confirmation before deleting only a custom skill', async () => {
@@ -173,7 +271,7 @@ describe('AiFinanceSkillsDialog', () => {
     expect(deleteFinanceSkill).not.toHaveBeenCalled()
     await wrapper.findAll('button').find(button => button.text() === 'Delete skill')!.trigger('click')
     await flushPromises()
-    expect(deleteFinanceSkill).toHaveBeenCalledWith('custom-monthly-report', 1)
+    expect(deleteFinanceSkill).toHaveBeenCalledWith('custom-monthly-report', 12, 1)
     expect(wrapper.text()).toContain('Built-in skills')
   })
 })

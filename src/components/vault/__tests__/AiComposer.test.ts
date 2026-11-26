@@ -2,6 +2,7 @@
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { mount } from '@vue/test-utils'
+import { NInput } from 'naive-ui'
 import AiComposer from '../AiComposer.vue'
 import { useI18n } from '../../../composables/useI18n'
 
@@ -67,6 +68,13 @@ describe('AiComposer', () => {
     expect(wrapper.find('.ai-toolbar-left button').attributes('aria-haspopup')).toBe('listbox')
     expect(wrapper.find('.ai-toolbar-right .ai-send').exists()).toBe(true)
     expect(wrapper.find('.ai-tool-button, .ai-context-chip, .ai-context-picker').exists()).toBe(false)
+  })
+
+  it('uses the same one-row starting height for ordinary prompts and Ledger commands', () => {
+    const ordinary = mountComposer()
+    const ledger = mountComposer({ commands: [{ command: 'clear', label: 'Clear conversation' }] })
+    expect(ordinary.findComponent(NInput).props('autosize')).toEqual({ minRows: 1, maxRows: 5 })
+    expect(ledger.findComponent(NInput).props('autosize')).toEqual({ minRows: 1, maxRows: 5 })
   })
 
   it('groups configured models and emits a selection without changing the draft', async () => {
