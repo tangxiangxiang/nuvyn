@@ -158,4 +158,39 @@ describe('AI thread compaction', () => {
     expect(generateTextMock.mock.calls[0]![0].user).not.toContain('Finance topic 2')
     expect(sessions.getAiThreadCompactionState(db, thread.session.id)?.compactedThroughMessageId).toBe(2)
   })
+
+  it('skips interrupted or cancelled Ledger turns and catches up multi-batch backlogs', async () => {
+    const thread = sessions.ensureLedgerAiThread(db, 44)
+    for (let index = 1; index <= 14; index++) {
+      messages.appendMessage(db, thread.session.id, 'user', `Backlog topic ${index}`, { privateLedgerAnalysis: true })
+      messages.appendMessage(db, thread.session.id, 'assistant', JSON.stringify({
+        v: 2,
+        text: `Backlog answer ${index}`,
+        rounds: [],
+        toolCalls: [],
+        privateLedgerAnalysis: true,
+      }))
+      if (index === 3 || index === 9) {
+        messages.appendMessage(db, thread.session.id, 'user', `Bad topic ${index}`, { privateLedgerAnalysis: true })
+        messages.appendMessage(db, thread.session.id, 'assistant', JSON.stringify({
+          v: 2,
+          text: '',
+          rounds: [],
+          toolCalls: [],
+          privateLedgerAnalysis: true,
+          cancelled: true,
+          interrupted: true,
+        }))
+      }
+    }
+
+    await compactLedgerAiThreadIfNeeded({ db, sessionId: thread.session.id, model: 'test-model' })
+
+    const state = sessions.getAiThreadCompactionState(db, thread.session.id)
+    expect(state?.compactSummary).toBe('Durable memory')
+    expect(generateTextMock).toHaveBeenCalledOnce()
+    expect(generateTextMock.mock.calls[0]![0].user).not.toContain('Bad topic')
+    const remaining = messages.listMessagesAfter(db, thread.session.id, state?.compactedThroughMessageId ?? 0) ?? []
+    expect(messages.extractCompleteLedgerTurns(remaining)).toHaveLength(6)
+  })
 })

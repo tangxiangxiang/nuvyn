@@ -1413,14 +1413,14 @@ ai.post('/chat', async (c) => {
       const controller = new AbortController()
       stream.onAbort(() => controller.abort())
       const signal = AbortSignal.any([controller.signal, c.req.raw.signal])
-      const ledgerSessionIsCurrent = () => {
-        if (signal.aborted) return false
+      const ledgerAuthValid = () => {
         try {
           return ledgerAuthIsCurrent(db, ledgerUser.id, ledgerAuthSession)
         } catch {
           return false
         }
       }
+      const ledgerSessionIsCurrent = () => !signal.aborted && ledgerAuthValid()
       if (ledgerRequested) {
         if (!ledgerSessionIsCurrent()) throw new ChatError('aborted')
         // The synchronous checks guard tool reads and final output. This
@@ -1463,7 +1463,7 @@ ai.post('/chat', async (c) => {
       if (ledgerRequested) {
         release?.()
         release = null
-        scheduleLedgerAiCompaction(runChatOptions, runtimeConfig)
+        scheduleLedgerAiCompaction(runChatOptions, runtimeConfig, ledgerAuthValid)
       }
     } catch (err) {
       if (err instanceof ChatError && err.reason === 'aborted') return

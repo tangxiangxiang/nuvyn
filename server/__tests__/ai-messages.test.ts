@@ -156,4 +156,40 @@ describe('messages service', () => {
       expect(messages.listMessages(db, s.id)).toBeNull()
     })
   })
+
+  describe('Ledger history window helpers', () => {
+    it('reads bounded windows with keyset cursors and extracts only complete Finance turns', () => {
+      const thread = sessions.ensureLedgerAiThread(db, 77)
+      const sid = thread.session.id
+      const financeAnswer = (text: string, extra: Record<string, unknown> = {}) => JSON.stringify({
+        v: 2, text, rounds: [], toolCalls: [], privateLedgerAnalysis: true, ...extra,
+      })
+
+      messages.appendMessage(db, sid, 'user', 'Ordinary user')
+      messages.appendMessage(db, sid, 'assistant', 'Ordinary assistant')
+      messages.appendMessage(db, sid, 'user', 'Turn 1', { privateLedgerAnalysis: true })
+      const a1 = messages.appendMessage(db, sid, 'assistant', financeAnswer('Answer 1'))
+      messages.appendMessage(db, sid, 'user', 'Interrupted', { privateLedgerAnalysis: true })
+      messages.appendMessage(db, sid, 'assistant', financeAnswer('Partial', { interrupted: true }))
+      messages.appendMessage(db, sid, 'user', 'Cancelled', { privateLedgerAnalysis: true })
+      messages.appendMessage(db, sid, 'assistant', financeAnswer('', { cancelled: true }))
+      messages.appendMessage(db, sid, 'user', 'Dangling', { privateLedgerAnalysis: true })
+      messages.appendMessage(db, sid, 'user', 'Turn 2', { privateLedgerAnalysis: true })
+      const a2 = messages.appendMessage(db, sid, 'assistant', financeAnswer('Answer 2'))
+
+      if (!a1.ok || !a2.ok) throw new Error('expected messages to append')
+
+      const page1 = messages.listRecentMessagesWindowAfter(db, sid, 0, 3)!
+      expect(page1).toHaveLength(3)
+      expect(messages.hasMessagesAfterBefore(db, sid, 0, page1[0]!.id)).toBe(true)
+
+      const page2 = messages.listRecentMessagesWindowAfter(db, sid, 0, 20, page1[0]!.id)!
+      const combined = [...page2, ...page1]
+      expect(messages.extractCompleteLedgerTurns(combined).map((t) => [t.userText, t.assistantText])).toEqual([
+        ['Turn 1', 'Answer 1'],
+        ['Turn 2', 'Answer 2'],
+      ])
+      expect(messages.hasMessagesAfterBefore(db, sid, 0, page2[0]!.id)).toBe(false)
+    })
+  })
 })

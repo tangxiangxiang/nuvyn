@@ -11,6 +11,7 @@ const COMPACT_AT_LEDGER_TURNS = 8
 const KEEP_RECENT_MESSAGES = 20
 const KEEP_RECENT_LEDGER_TURNS = 6
 const RETRY_LEDGER_COMPACTION_AFTER_TURNS = 2
+const MAX_LEDGER_COMPACTION_PASSES = 4
 const KEEP_RECENT_MIN_MESSAGES = 8
 const KEEP_RECENT_CHARS = 18_000
 const MAX_BATCH_CHARS = 14_000
@@ -26,7 +27,12 @@ type CompactionOptions = {
   canSave?: () => boolean
 }
 
-type CompactionTask = { promise: Promise<boolean>; controller: AbortController }
+type CompactionTask = {
+  promise: Promise<boolean>
+  controller: AbortController
+  signal: AbortSignal
+  generation: number
+}
 
 const inFlightByDb = new WeakMap<DatabaseT, Map<number, CompactionTask>>()
 const failedLedgerCompactionsByDb = new WeakMap<DatabaseT, Map<number, number>>()
@@ -40,27 +46,40 @@ export async function compactLedgerAiThreadIfNeeded(opts: CompactionOptions): Pr
 }
 
 export function cancelAiThreadCompaction(db: DatabaseT, sessionId: number): void {
-  inFlightByDb.get(db)?.get(sessionId)?.controller.abort()
+  const bySession = inFlightByDb.get(db)
+  const task = bySession?.get(sessionId)
+  if (task) {
+    task.controller.abort()
+    bySession?.delete(sessionId)
+  }
   failedLedgerCompactionsByDb.get(db)?.delete(sessionId)
 }
 
 /** Deduplicate active work per thread and guard checkpoint commits by generation. */
 async function runCompactionOnce(opts: CompactionOptions, ledger: boolean): Promise<boolean> {
+  if (opts.signal?.aborted || opts.canSave?.() === false) return false
   let bySession = inFlightByDb.get(opts.db)
   if (!bySession) {
     bySession = new Map()
     inFlightByDb.set(opts.db, bySession)
   }
+  const generation = sessions.getAiThreadCompactionGeneration(opts.db, opts.sessionId)
   const pending = bySession.get(opts.sessionId)
-  if (pending) return pending.promise
+  if (pending) {
+    if (!pending.signal.aborted && !pending.controller.signal.aborted && pending.generation === generation) {
+      return pending.promise
+    }
+    // An aborting or cleared task must never block compaction for the active thread.
+    pending.controller.abort()
+    bySession.delete(opts.sessionId)
+  }
 
   const controller = new AbortController()
   const signal = opts.signal ? AbortSignal.any([opts.signal, controller.signal]) : controller.signal
-  const generation = sessions.getAiThreadCompactionGeneration(opts.db, opts.sessionId)
   const canSave = () => generation === sessions.getAiThreadCompactionGeneration(opts.db, opts.sessionId)
     && (opts.canSave?.() ?? true)
   const runOptions = { ...opts, signal, canSave }
-  const task: CompactionTask = { controller, promise: Promise.resolve(false) }
+  const task: CompactionTask = { controller, signal, generation, promise: Promise.resolve(false) }
   task.promise = compactNow(runOptions, ledger).catch((error: unknown) => {
     if (ledger && !signal.aborted && generation === sessions.getAiThreadCompactionGeneration(opts.db, opts.sessionId)) {
       const state = sessions.getAiThreadCompactionState(opts.db, opts.sessionId)
@@ -83,14 +102,26 @@ async function runCompactionOnce(opts: CompactionOptions, ledger: boolean): Prom
 }
 
 async function compactNow(opts: CompactionOptions, ledger = false): Promise<boolean> {
+  if (!ledger) return compactPass(opts, false)
+  let compactedAny = false
+  for (let pass = 0; pass < MAX_LEDGER_COMPACTION_PASSES; pass++) {
+    if (opts.signal?.aborted || opts.canSave?.() === false) throw new Error('AI compaction was cancelled')
+    const compacted = await compactPass(opts, true)
+    if (!compacted) break
+    compactedAny = true
+  }
+  return compactedAny
+}
+
+async function compactPass(opts: CompactionOptions, ledger: boolean): Promise<boolean> {
   const state = sessions.getAiThreadCompactionState(opts.db, opts.sessionId)
   if (!state) return false
   const pending = messages.listMessagesAfter(opts.db, opts.sessionId, state.compactedThroughMessageId)
   if (!pending) return false
 
-  const ledgerTurns = ledger ? completeLedgerTurns(pending) : []
+  const ledgerTurns = ledger ? messages.extractCompleteLedgerTurns(pending) : []
   const pendingChars = ledger
-    ? ledgerTurns.reduce((total, turn) => total + turn.reduce((turnChars, message) => turnChars + formatMessage(message, true).length, 0), 0)
+    ? ledgerTurns.reduce((total, turn) => total + formatMessage(turn.question, true).length + formatMessage(turn.answer, true).length, 0)
     : pending.reduce((total, message) => total + message.content.length, 0)
   if (!ledger && pending.length <= COMPACT_AT_MESSAGES && pendingChars <= COMPACT_AT_CHARS) return false
 
@@ -98,14 +129,15 @@ async function compactNow(opts: CompactionOptions, ledger = false): Promise<bool
     const failureWatermark = failedLedgerCompactionsByDb.get(opts.db)?.get(opts.sessionId)
     const newTurnsAfterFailure = failureWatermark === undefined
       ? RETRY_LEDGER_COMPACTION_AFTER_TURNS
-      : ledgerTurns.filter((turn) => turn.at(-1)!.id > failureWatermark).length
+      : ledgerTurns.filter((turn) => turn.answer.id > failureWatermark).length
     const thresholdReached = pending.length >= COMPACT_AT_MESSAGES
       || pendingChars >= COMPACT_AT_CHARS
       || ledgerTurns.length >= COMPACT_AT_LEDGER_TURNS
     if (!thresholdReached || newTurnsAfterFailure < RETRY_LEDGER_COMPACTION_AFTER_TURNS) return false
   }
 
-  const turns = ledger ? ledgerTurns.slice(0, -KEEP_RECENT_LEDGER_TURNS)
+  const turns = ledger
+    ? ledgerTurns.slice(0, -KEEP_RECENT_LEDGER_TURNS).map((turn) => [turn.question, turn.answer])
     : groupCompleteTurns(pending.slice(0, findCompactionCutoff(pending)))
   if (!turns.length) return false
   let checkpoint = state.compactedThroughMessageId
@@ -158,21 +190,6 @@ async function compactNow(opts: CompactionOptions, ledger = false): Promise<bool
   if (ledger) save(turns.at(-1)!.at(-1)!.id)
   if (ledger) failedLedgerCompactionsByDb.get(opts.db)?.delete(opts.sessionId)
   return true
-}
-
-function completeLedgerTurns(input: Message[]): Message[][] {
-  const turns: Message[][] = []
-  for (let index = 1; index < input.length; index++) {
-    const question = input[index - 1]
-    const answer = input[index]
-    if (question.role !== 'user' || answer.role !== 'assistant') continue
-    const prompt = messages.parseStoredContent(question.content)
-    const reply = messages.parseStoredContent(answer.content)
-    if (prompt.kind !== 'envelope' || !prompt.envelope.privateLedgerAnalysis) continue
-    if (reply.kind !== 'envelope' || !reply.envelope.privateLedgerAnalysis || reply.envelope.interrupted) continue
-    turns.push([question, answer])
-  }
-  return turns
 }
 
 function findCompactionCutoff(pending: Message[]): number {

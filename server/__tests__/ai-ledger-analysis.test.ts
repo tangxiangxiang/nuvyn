@@ -794,6 +794,133 @@ describe('fixed Ledger AI session and commands', () => {
     }
     expect((await clear()).status).toBe(200)
   })
+
+  it('expands Finance history beyond 8 turns while compaction is slow and restores the normal window after catch-up', async () => {
+    let finishFirstPass!: (value: { text: string; finishReason: 'stop' }) => void
+    generateText.mockImplementationOnce(() => new Promise((resolve) => { finishFirstPass = resolve }))
+    generateText.mockResolvedValueOnce({ text: 'Caught-up Finance summary', finishReason: 'stop' })
+
+    for (let turn = 1; turn <= 8; turn++) {
+      expect(await send(`Ledger topic ${turn}`)).toContain('event: done')
+    }
+    await vi.waitFor(() => expect(finishFirstPass).toBeTypeOf('function'))
+
+    for (let turn = 9; turn <= 12; turn++) {
+      expect(await send(`Ledger topic ${turn}`)).toContain('event: done')
+    }
+    const backlogCall = streamRound.mock.calls.at(-1)![0]
+    for (let turn = 1; turn <= 11; turn++) {
+      expect(backlogCall.messages).toContainEqual(expect.objectContaining({ content: `Ledger topic ${turn}` }))
+    }
+    expect(backlogCall.system).not.toContain('Earlier uncompacted conversation turns were omitted')
+    expect(getAiThreadCompactionState(db, sessionId)).toEqual({ compactSummary: '', compactedThroughMessageId: 0 })
+
+    finishFirstPass({ text: 'First Finance summary', finishReason: 'stop' })
+    await vi.waitFor(() => expect(getAiThreadCompactionState(db, sessionId)?.compactSummary).toBe('Caught-up Finance summary'))
+    expect(generateText).toHaveBeenCalledTimes(2)
+
+    expect(await send('Ledger topic 13')).toContain('event: done')
+    const recoveredCall = streamRound.mock.calls.at(-1)![0]
+    expect(recoveredCall.system).toContain('Caught-up Finance summary')
+    for (let turn = 1; turn <= 6; turn++) {
+      expect(recoveredCall.messages).not.toContainEqual(expect.objectContaining({ content: `Ledger topic ${turn}` }))
+    }
+    for (let turn = 7; turn <= 12; turn++) {
+      expect(recoveredCall.messages).toContainEqual(expect.objectContaining({ content: `Ledger topic ${turn}` }))
+    }
+  })
+
+  it('keeps uncompacted Finance turns after failure, ignores interrupted or cancelled turns, and isolates ordinary AI and Ledger data', async () => {
+    const memory = createFinanceMemoryRepository(db).add(auth.userId, 'user', 'Track dining separately.')
+    expect(memory.ok).toBe(true)
+    const baseline = syncLedgerAiContext(db, auth.userId)
+    await send('Ordinary note question', false)
+
+    generateText.mockRejectedValueOnce(new Error('provider offline'))
+    for (let turn = 1; turn <= 8; turn++) {
+      expect(await send(`Valid topic ${turn}`)).toContain('event: done')
+    }
+    await vi.waitFor(() => expect(generateText).toHaveBeenCalledOnce())
+
+    // Mix in interrupted and cancelled Finance attempts across multiple raw rows.
+    for (let bad = 1; bad <= 4; bad++) {
+      streamRound.mockImplementationOnce(async () => { throw new Error('transient outage') })
+      expect(await send(`Interrupted topic ${bad}`)).toContain('event: error')
+
+      const abortController = new AbortController()
+      streamRound.mockImplementationOnce(async () => {
+        abortController.abort()
+        return queryRound({ kind: 'accounts' })
+      })
+      await (await post('', { sessionId, content: `Cancelled topic ${bad}`, ledgerAnalysis: true }, { signal: abortController.signal })).text()
+    }
+
+    expect(await send('Valid topic 9')).toContain('event: done')
+    const afterFailureCall = streamRound.mock.calls.at(-1)![0]
+    for (let turn = 1; turn <= 8; turn++) {
+      expect(afterFailureCall.messages).toContainEqual(expect.objectContaining({ content: `Valid topic ${turn}` }))
+    }
+    expect(JSON.stringify(afterFailureCall.messages)).not.toMatch(/Interrupted topic|Cancelled topic|Ordinary note question/)
+    expect(generateText).toHaveBeenCalledOnce()
+
+    // Ordinary AI, Finance Memory, and Ledger data remain isolated and intact.
+    expect(await send('Ordinary follow-up', false)).toContain('event: done')
+    expect(streamRound.mock.calls.at(-1)![0].system).not.toContain('Track dining separately.')
+    expect(createFinanceMemoryRepository(db).list(auth.userId)).toMatchObject([{ content: 'Track dining separately.' }])
+    expect(syncLedgerAiContext(db, auth.userId)).toBe(baseline)
+  })
+
+  it('degrades bounded history cleanly when uncompacted turns exceed the context budget', async () => {
+    generateText.mockRejectedValueOnce(new Error('provider down'))
+    generateText.mockRejectedValueOnce(new Error('provider down'))
+    const padding = '账'.repeat(1_800)
+    for (let turn = 1; turn <= 10; turn++) {
+      streamRound.mockResolvedValueOnce(financeReply(`Long answer ${turn} ${padding}`))
+      expect(await send(`Long question ${turn} ${padding}`)).toContain('event: done')
+    }
+    const beforeState = getAiThreadCompactionState(db, sessionId)
+    expect(beforeState).toEqual({ compactSummary: '', compactedThroughMessageId: 0 })
+
+    streamRound.mockResolvedValueOnce(financeReply('Bounded answer'))
+    expect(await send('Final bounded question')).toContain('event: done')
+    const boundedCall = streamRound.mock.calls.at(-1)![0]
+    const historicalMessages = boundedCall.messages.slice(0, -1)
+    expect(historicalMessages.length).toBeGreaterThan(0)
+    expect(historicalMessages.length % 2).toBe(0)
+    expect(historicalMessages.length).toBeLessThan(20)
+    expect(historicalMessages).toContainEqual(expect.objectContaining({ content: expect.stringContaining('Long question 10') }))
+    expect(historicalMessages).not.toContainEqual(expect.objectContaining({ content: expect.stringContaining('Long question 1 ') }))
+    expect(boundedCall.system).toContain('Earlier uncompacted conversation turns were omitted')
+    expect(getAiThreadCompactionState(db, sessionId)).toEqual(beforeState)
+    expect((await (await aiRequest('/ledger-session', 'POST')).json() as { messages: unknown[] }).messages).toHaveLength(22)
+  })
+
+  it('lets a cleared thread answer and compact again while an aborted compaction task is still exiting', async () => {
+    for (let turn = 1; turn <= 7; turn++) await send(`Old topic ${turn}`)
+    let finishOldTask!: (value: { text: string; finishReason: 'stop' }) => void
+    generateText.mockImplementationOnce(() => new Promise((resolve) => { finishOldTask = resolve }))
+    expect(await send('Old topic 8')).toContain('event: done')
+    await vi.waitFor(() => expect(finishOldTask).toBeTypeOf('function'))
+
+    expect((await aiRequest('/ledger-session/command', 'POST', { command: 'clear' })).status).toBe(200)
+
+    let finishNewTask!: (value: { text: string; finishReason: 'stop' }) => void
+    generateText.mockImplementationOnce(() => new Promise((resolve) => { finishNewTask = resolve }))
+    for (let turn = 1; turn <= 8; turn++) {
+      expect(await send(`Fresh topic ${turn}`)).toContain('event: done')
+    }
+    await vi.waitFor(() => expect(finishNewTask).toBeTypeOf('function'))
+    expect(generateText).toHaveBeenCalledTimes(2)
+
+    finishOldTask({ text: 'Stale summary from cleared thread', finishReason: 'stop' })
+    await new Promise<void>((resolve) => setImmediate(resolve))
+    expect(getAiThreadCompactionState(db, sessionId)).toEqual({ compactSummary: '', compactedThroughMessageId: 0 })
+
+    finishNewTask({ text: 'Fresh summary after clear', finishReason: 'stop' })
+    await vi.waitFor(() => expect(getAiThreadCompactionState(db, sessionId)?.compactSummary).toBe('Fresh summary after clear'))
+    expect(generateText.mock.calls[1]![0].user).toContain('Fresh topic 1')
+    expect(generateText.mock.calls[1]![0].user).not.toContain('Old topic')
+  })
 })
 
 describe('Ledger revision cache', () => {

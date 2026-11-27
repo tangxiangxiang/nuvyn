@@ -1,13 +1,13 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, ref, watch, type CSSProperties } from 'vue'
-import { NCalendar, NDatePicker, NTooltip } from 'naive-ui'
+import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue'
+import { NCalendar, NDatePicker } from 'naive-ui'
 import { useI18n } from '../../composables/useI18n'
 import { diaryCalendarMonthFromFields, diaryDateFromCalendarFields, naiveCalendarValueForMonth } from './diaryCalendarAdapter'
 import { shouldAnimateTodoDayMarker, todoDayMarkerAssets, type TodoDayMarkerAssets } from '../../features/diary/deadlineReminderAssets'
 import type { TodoDayVisualState } from '../../features/diary/deadlineVisualState'
 import DiaryAnimatedEmoji from './DiaryAnimatedEmoji.vue'
 import { lunarDayLabel, lunarMonthLabel, solarToLunarDetails, type LunarCalendarDetails } from '../../../shared/lunarCalendar'
-import { lunarZodiacIcon } from '../../features/diary/lunarZodiac'
+import LunarCalendarPopover from './LunarCalendarPopover.vue'
 
 const PIXEL_WHEEL_MONTH_THRESHOLD = 220
 const LINE_WHEEL_MONTH_THRESHOLD = 6
@@ -25,25 +25,14 @@ const props = defineProps<{
 const emit = defineEmits<{ select: [date: string]; month: [date: string] }>()
 const { locale } = useI18n()
 const lunarDateDetailsCache = new Map<string, LunarCalendarDetails | null>()
-const activeLunarTooltipDate = ref<string | null>(null)
-const focusedLunarDate = ref<string | null>(null)
-const hoveredLunarDate = ref<string | null>(null)
+const activeLunarPopoverDate = ref<string | null>(null)
+const activeLunarTrigger = ref<HTMLButtonElement | null>(null)
+const lunarPopoverPosition = ref({ x: 0, y: 0 })
 const calendarContext = computed(() => `${props.month}:${props.revision}:${props.viewMode}`)
-const lunarTooltipContentStyle: CSSProperties = {
-  backgroundColor: 'var(--nuvyn-surface-1)',
-  color: 'var(--text)',
-  padding: '7px 10px',
-  borderRadius: '8px',
-  boxShadow: 'none',
-  pointerEvents: 'none',
-  width: 'max-content',
-  minWidth: '0',
-  maxWidth: 'calc(100vw - 24px)',
-}
-const lunarTooltipThemeOverrides = {
-  boxShadow: 'none',
-}
-let lunarTooltipTimer: ReturnType<typeof setTimeout> | null = null
+const activeLunarPopoverDetails = computed(() => activeLunarPopoverDate.value
+  ? lunarDateDetails(activeLunarPopoverDate.value)
+  : null)
+const LUNAR_POPOVER_ID = 'diary-lunar-calendar-popover'
 interface TodoMarkerPresentation extends TodoDayMarkerAssets {
   state: TodoDayVisualState
   animate: boolean
@@ -94,73 +83,84 @@ function lunarDateLabel(date: string): string {
     : lunarDayLabel(lunar.day)
 }
 
-function lunarFullDateLabel(date: string): string {
-  const lunar = lunarDateDetails(date)
-  if (!lunar) return ''
-  const month = `${lunar.isLeapMonth ? '闰' : ''}${lunarMonthLabel(lunar.month)}`
-  return `农历 ${month}${lunarDayLabel(lunar.day)}日`
+function updateLunarPopoverPosition() {
+  const trigger = activeLunarTrigger.value
+  if (!trigger?.isConnected) return
+  const bounds = trigger.getBoundingClientRect()
+  const popoverWidth = Math.min(340, window.innerWidth - 24)
+  const minX = popoverWidth / 2 + 12
+  const maxX = window.innerWidth - popoverWidth / 2 - 12
+  const x = Math.min(Math.max(bounds.left + bounds.width / 2, minX), maxX)
+  lunarPopoverPosition.value = { x, y: bounds.top }
 }
 
-function lunarTooltipId(date: string): string {
-  return `diary-lunar-tooltip-${date}`
+function removeLunarPopoverListeners() {
+  document.removeEventListener('pointerdown', onLunarPopoverPointerDown, true)
+  document.removeEventListener('scroll', updateLunarPopoverPosition, true)
+  window.removeEventListener('resize', updateLunarPopoverPosition)
+  document.removeEventListener('keydown', onLunarPopoverKeydown, true)
 }
 
-function clearLunarTooltipTimer() {
-  if (lunarTooltipTimer) clearTimeout(lunarTooltipTimer)
-  lunarTooltipTimer = null
+function closeLunarPopover(restoreFocus = false) {
+  const trigger = activeLunarTrigger.value
+  const date = activeLunarPopoverDate.value
+  activeLunarPopoverDate.value = null
+  activeLunarTrigger.value = null
+  removeLunarPopoverListeners()
+  if (restoreFocus && date) {
+    void nextTick(() => {
+      if (trigger?.isConnected) {
+        trigger.focus()
+        return
+      }
+      const replacement = [...document.querySelectorAll<HTMLButtonElement>('.life-date-lunar')]
+        .find(button => button.closest('.life-date')?.getAttribute('data-date') === date)
+      replacement?.focus()
+    })
+  }
 }
 
-function scheduleLunarTooltip(date: string | null) {
-  clearLunarTooltipTimer()
-  if (!date) {
-    activeLunarTooltipDate.value = null
+function onLunarPopoverPointerDown(event: PointerEvent) {
+  const target = event.target
+  if (!(target instanceof Element)) return
+  if (!activeLunarPopoverDate.value) return
+  if (activeLunarTrigger.value?.contains(target)) return
+  if (target.closest('.life-date')) return
+  if (document.getElementById(LUNAR_POPOVER_ID)?.contains(target)) return
+  closeLunarPopover()
+}
+
+function onLunarPopoverKeydown(event: KeyboardEvent) {
+  if (event.key !== 'Escape' || activeLunarPopoverDate.value === null) return
+  event.preventDefault()
+  event.stopPropagation()
+  closeLunarPopover(true)
+}
+
+function toggleLunarPopover(date: string, event: MouseEvent) {
+  const trigger = event.currentTarget
+  if (!(trigger instanceof HTMLButtonElement)) return
+  if (activeLunarPopoverDate.value === date) {
+    closeLunarPopover()
     return
   }
-  if (activeLunarTooltipDate.value === date) return
-  activeLunarTooltipDate.value = null
-  lunarTooltipTimer = setTimeout(() => {
-    activeLunarTooltipDate.value = date
-    lunarTooltipTimer = null
-  }, 300)
-}
 
-function onLunarPointerEnter(date: string, event: PointerEvent) {
-  if (event.pointerType !== 'mouse') return
-  hoveredLunarDate.value = date
-  scheduleLunarTooltip(hoveredLunarDate.value ?? focusedLunarDate.value)
-}
-
-function onLunarPointerLeave(date: string, event: PointerEvent) {
-  if (event.pointerType !== 'mouse') return
-  if (hoveredLunarDate.value === date) hoveredLunarDate.value = null
-  scheduleLunarTooltip(focusedLunarDate.value ?? hoveredLunarDate.value)
-}
-
-function onCalendarDateFocus(date: string, event: FocusEvent) {
-  const target = event.currentTarget
-  if (!(target instanceof HTMLElement) || !target.matches(':focus-visible')) return
-  focusedLunarDate.value = date
-  scheduleLunarTooltip(hoveredLunarDate.value ?? focusedLunarDate.value)
-}
-
-function onCalendarDateBlur(date: string) {
-  if (focusedLunarDate.value === date) focusedLunarDate.value = null
-  scheduleLunarTooltip(hoveredLunarDate.value ?? focusedLunarDate.value)
-}
-
-function clearLunarTooltip() {
-  clearLunarTooltipTimer()
-  activeLunarTooltipDate.value = null
-  focusedLunarDate.value = null
-  hoveredLunarDate.value = null
+  closeLunarPopover()
+  activeLunarPopoverDate.value = date
+  activeLunarTrigger.value = trigger
+  updateLunarPopoverPosition()
+  document.addEventListener('pointerdown', onLunarPopoverPointerDown, true)
+  document.addEventListener('scroll', updateLunarPopoverPosition, true)
+  window.addEventListener('resize', updateLunarPopoverPosition)
+  document.addEventListener('keydown', onLunarPopoverKeydown, true)
 }
 
 function selectCalendarDate(date: string, event: MouseEvent) {
-  clearLunarTooltip()
+  closeLunarPopover()
   selectDate(date, event)
 }
 
-watch(calendarContext, clearLunarTooltip)
+watch(calendarContext, () => closeLunarPopover())
 const calendarRef = ref<InstanceType<typeof NCalendar> | null>(null)
 const calendarPickerRevision = ref(0)
 const calendarKey = computed(() => `${props.revision}-${calendarPickerRevision.value}`)
@@ -180,7 +180,7 @@ let wheelTail: { peak: number; low: number } | null = null
 
 onBeforeUnmount(() => {
   if (suppressCalendarClickTimer) clearTimeout(suppressCalendarClickTimer)
-  clearLunarTooltipTimer()
+  closeLunarPopover()
 })
 
 function navigateMonthByGesture(offset: number) {
@@ -323,6 +323,14 @@ function selectDate(date: string, event: MouseEvent) {
 </script>
 
 <template>
+  <LunarCalendarPopover
+    :show="activeLunarPopoverDate !== null"
+    :date="activeLunarPopoverDate ?? ''"
+    :details="activeLunarPopoverDetails"
+    :today="today"
+    :x="lunarPopoverPosition.x"
+    :y="lunarPopoverPosition.y"
+  />
   <NCalendar
     :key="calendarKey"
     ref="calendarRef"
@@ -357,77 +365,55 @@ function selectDate(date: string, event: MouseEvent) {
       </div>
     </template>
     <template #default="{ year, month, date }">
-      <button type="button" class="life-date" :class="{ today: dateFor(year, month, date) === today, selected: selectedDate === dateFor(year, month, date) }"
-        :data-date="dateFor(year, month, date)" :aria-label="dateFor(year, month, date)" :aria-pressed="selectedDate === dateFor(year, month, date)"
-        :aria-describedby="activeLunarTooltipDate === dateFor(year, month, date) ? lunarTooltipId(dateFor(year, month, date)) : undefined"
-        @focus="onCalendarDateFocus(dateFor(year, month, date), $event)"
-        @blur="onCalendarDateBlur(dateFor(year, month, date))"
-        @click.stop="selectCalendarDate(dateFor(year, month, date), $event)">
-        <span class="life-date-content">
-          <span class="life-date-heading">
-            <NTooltip
-              v-if="lunarDateDetails(dateFor(year, month, date))"
-              :show="activeLunarTooltipDate === dateFor(year, month, date)"
-              trigger="manual"
-              placement="top"
-              :delay="0"
-              :duration="0"
-              :animated="false"
-              :raw="true"
-              :show-arrow="false"
-              :theme-overrides="lunarTooltipThemeOverrides"
-              :content-style="lunarTooltipContentStyle"
-            >
-              <template #trigger>
-                <span
-                  class="life-date-lunar"
-                  @pointerenter="onLunarPointerEnter(dateFor(year, month, date), $event)"
-                  @pointerleave="onLunarPointerLeave(dateFor(year, month, date), $event)"
-                >{{ lunarDateLabel(dateFor(year, month, date)) }}</span>
-              </template>
-              <div :id="lunarTooltipId(dateFor(year, month, date))" class="life-lunar-tooltip" role="tooltip">
-                <div class="life-lunar-tooltip-ganzhi">
-                  <span>{{ lunarDateDetails(dateFor(year, month, date))?.yearGanZhi }}</span>
-                  <DiaryAnimatedEmoji
-                    v-if="lunarZodiacIcon(lunarDateDetails(dateFor(year, month, date))?.zodiac ?? '')"
-                    class="life-lunar-tooltip-zodiac"
-                    :animated-src="null"
-                    :static-src="lunarZodiacIcon(lunarDateDetails(dateFor(year, month, date))?.zodiac ?? '')?.src ?? ''"
-                    :animate="false"
-                    :alt="lunarZodiacIcon(lunarDateDetails(dateFor(year, month, date))?.zodiac ?? '')?.alt ?? ''"
-                  />
-                  <span>年 {{ lunarDateDetails(dateFor(year, month, date))?.monthGanZhi }}月 {{ lunarDateDetails(dateFor(year, month, date))?.dayGanZhi }}日</span>
-                </div>
-                <div class="life-lunar-tooltip-date">{{ lunarFullDateLabel(dateFor(year, month, date)) }}</div>
-              </div>
-            </NTooltip>
-            <span v-else class="life-date-lunar">{{ lunarDateLabel(dateFor(year, month, date)) }}</span>
-            <span class="life-date-badge"><span class="life-date-number">{{ date }}</span></span>
-          </span>
-          <span class="life-marker-slot">
-            <span
-              v-if="markers[dateFor(year, month, date)]"
-              class="life-marker"
-              :class="{ 'life-marker--with-task': Boolean(todoMarkers[dateFor(year, month, date)]) }"
-            >
-              <img v-if="markers[dateFor(year, month, date)]?.source" :class="{ 'life-event-marker': Boolean(markers[dateFor(year, month, date)]?.emoji) }" :src="markers[dateFor(year, month, date)]?.source" alt="">
-              <span v-else-if="markers[dateFor(year, month, date)]?.emoji" class="life-event-marker">{{ markers[dateFor(year, month, date)]?.emoji }}</span>
-              <span v-else-if="markers[dateFor(year, month, date)]?.hasEntries || markers[dateFor(year, month, date)]?.hasAttachments" class="life-entry-marker" aria-label="有日记内容">•</span>
-              <small v-if="(markers[dateFor(year, month, date)]?.count ?? 0) > 1">+{{ markers[dateFor(year, month, date)]!.count! - 1 }}</small>
-              <DiaryAnimatedEmoji
-                v-if="todoMarkers[dateFor(year, month, date)]"
-                class="life-task-marker"
-                :class="{ 'life-task-marker--completed-late': todoMarkers[dateFor(year, month, date)]?.state === 'completed-late' }"
-                :data-todo-day-state="todoMarkers[dateFor(year, month, date)]?.state"
-                :animated-src="todoMarkers[dateFor(year, month, date)]?.animatedSrc ?? null"
-                :static-src="todoMarkers[dateFor(year, month, date)]!.staticSrc"
-                :animate="todoMarkers[dateFor(year, month, date)]?.animate ?? false"
-                :alt="todoMarkerAlt(todoMarkers[dateFor(year, month, date)]!.state)"
-              />
+      <div class="life-date" :class="{ today: dateFor(year, month, date) === today, selected: selectedDate === dateFor(year, month, date) }"
+        :data-date="dateFor(year, month, date)">
+        <button
+          type="button"
+          class="life-date-action"
+          :aria-label="dateFor(year, month, date)"
+          :aria-pressed="selectedDate === dateFor(year, month, date)"
+          @click.stop="selectCalendarDate(dateFor(year, month, date), $event)"
+        >
+          <span class="life-date-content" aria-hidden="true">
+            <span class="life-date-heading">
+              <span class="life-date-lunar-placeholder">{{ lunarDateLabel(dateFor(year, month, date)) }}</span>
+              <span class="life-date-badge"><span class="life-date-number">{{ date }}</span></span>
+            </span>
+            <span class="life-marker-slot">
+              <span
+                v-if="markers[dateFor(year, month, date)]"
+                class="life-marker"
+                :class="{ 'life-marker--with-task': Boolean(todoMarkers[dateFor(year, month, date)]) }"
+              >
+                <img v-if="markers[dateFor(year, month, date)]?.source" :class="{ 'life-event-marker': Boolean(markers[dateFor(year, month, date)]?.emoji) }" :src="markers[dateFor(year, month, date)]?.source" alt="">
+                <span v-else-if="markers[dateFor(year, month, date)]?.emoji" class="life-event-marker">{{ markers[dateFor(year, month, date)]?.emoji }}</span>
+                <span v-else-if="markers[dateFor(year, month, date)]?.hasEntries || markers[dateFor(year, month, date)]?.hasAttachments" class="life-entry-marker">•</span>
+                <small v-if="(markers[dateFor(year, month, date)]?.count ?? 0) > 1">+{{ markers[dateFor(year, month, date)]!.count! - 1 }}</small>
+                <DiaryAnimatedEmoji
+                  v-if="todoMarkers[dateFor(year, month, date)]"
+                  class="life-task-marker"
+                  :class="{ 'life-task-marker--completed-late': todoMarkers[dateFor(year, month, date)]?.state === 'completed-late' }"
+                  :data-todo-day-state="todoMarkers[dateFor(year, month, date)]?.state"
+                  :animated-src="todoMarkers[dateFor(year, month, date)]?.animatedSrc ?? null"
+                  :static-src="todoMarkers[dateFor(year, month, date)]!.staticSrc"
+                  :animate="todoMarkers[dateFor(year, month, date)]?.animate ?? false"
+                  :alt="todoMarkerAlt(todoMarkers[dateFor(year, month, date)]!.state)"
+                />
+              </span>
             </span>
           </span>
-        </span>
-      </button>
+        </button>
+        <button
+          v-if="lunarDateDetails(dateFor(year, month, date))"
+          type="button"
+          class="life-date-lunar"
+          :aria-label="`${dateFor(year, month, date)}，农历${lunarDateLabel(dateFor(year, month, date))}，查看历法详情`"
+          aria-haspopup="dialog"
+          :aria-expanded="activeLunarPopoverDate === dateFor(year, month, date)"
+          :aria-controls="activeLunarPopoverDate === dateFor(year, month, date) ? LUNAR_POPOVER_ID : undefined"
+          @click.stop="toggleLunarPopover(dateFor(year, month, date), $event)"
+        >{{ lunarDateLabel(dateFor(year, month, date)) }}</button>
+      </div>
     </template>
   </NCalendar>
 </template>
@@ -672,6 +658,21 @@ function selectDate(date: string, event: MouseEvent) {
   cursor: pointer;
 }
 
+.life-date-action {
+  position: absolute;
+  inset: 0;
+  display: block;
+  width: 100%;
+  height: 100%;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  line-height: 1;
+  cursor: pointer;
+}
+
 .life-date-content {
   position: absolute;
   inset: 0;
@@ -691,49 +692,40 @@ function selectDate(date: string, event: MouseEvent) {
   gap: 4px;
 }
 
+.life-date-lunar-placeholder,
 .life-date-lunar {
   overflow: hidden;
-  max-width: calc(100% - 18px);
-  pointer-events: auto;
   color: var(--text-muted);
-  cursor: help;
   font-size: 12px;
   font-weight: 400;
   line-height: 18px;
   white-space: nowrap;
 }
 
-.life-lunar-tooltip {
-  display: grid;
-  justify-items: center;
-  gap: 4px;
-  max-width: calc(100vw - 24px);
-  white-space: nowrap;
+.life-date-lunar {
+  position: absolute;
+  z-index: 2;
+  top: 8px;
+  left: 10px;
+  display: block;
+  max-width: calc(100% - 34px);
+  padding: 0;
+  border: 0;
+  background: transparent;
+  font-family: inherit;
+  text-align: left;
+  appearance: none;
+  cursor: pointer;
 }
 
-.life-lunar-tooltip-ganzhi {
-  display: flex;
-  align-items: center;
-  justify-content: center;
+.life-date-lunar:hover {
   color: var(--text);
-  font-size: 13px;
-  font-weight: 400;
-  line-height: 18px;
 }
 
-.life-lunar-tooltip-zodiac {
-  width: 15px;
-  height: 15px;
-  flex: none;
-  margin-inline: 1px;
-  object-fit: contain;
-}
-
-.life-lunar-tooltip-date {
-  color: var(--text-muted);
-  font-size: 12px;
-  font-weight: 400;
-  line-height: 16px;
+.life-date-lunar:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+  border-radius: 2px;
 }
 
 .diary-life-calendar :deep(.n-calendar-cell--other-month) .life-date {
@@ -766,11 +758,11 @@ function selectDate(date: string, event: MouseEvent) {
   content: '';
 }
 
-.life-date:focus-visible {
+.life-date-action:focus-visible {
   outline: none;
 }
 
-.life-date:focus-visible .life-date-badge::before {
+.life-date-action:focus-visible .life-date-badge::before {
   outline: 2px solid var(--accent);
   outline-offset: -2px;
 }
@@ -887,13 +879,17 @@ function selectDate(date: string, event: MouseEvent) {
   }
   .life-date-content { padding-inline: 4px; }
   .life-date-heading { gap: 0; }
+  .life-date-lunar-placeholder,
   .life-date-lunar { font-size: 10px; line-height: 16px; }
+  .life-date-lunar { left: 4px; }
   .life-date-badge { min-width: 16px; height: 18px; font-size: 14px; line-height: 16px; }
 }
 
 @media (max-width: 360px) {
   .life-date-content { padding-inline: 2px; }
+  .life-date-lunar-placeholder,
   .life-date-lunar { font-size: 8px; }
+  .life-date-lunar { left: 2px; }
   .life-date-badge { min-width: 14px; font-size: 12px; }
 }
 </style>

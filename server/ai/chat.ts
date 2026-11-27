@@ -50,11 +50,21 @@ import {
   type NormalizedRound,
   type ToolCallRecord,
 } from './messages.js'
+import type { Message } from '../../src/lib/ai-api.js'
 import * as messages from './messages.js'
 import * as sessions from './sessions.js'
 
 const FINANCE_MAX_OUTPUT_TOKENS = 8192
-const FINANCE_MAX_HISTORY_MESSAGES = 18
+const FINANCE_TOTAL_CONTEXT_CHAR_BUDGET = 112_000
+const FINANCE_TOOL_AND_SKILL_RESERVE_CHARS = 48_000
+const FINANCE_OUTPUT_AND_FRAMING_RESERVE_CHARS = 16_384
+const FINANCE_HISTORY_MAX_CHARS = 32_000
+const FINANCE_HISTORY_MESSAGE_MAX_CHARS = 2_000
+const FINANCE_MAX_EXPANDED_HISTORY_TURNS = 32
+const FINANCE_HISTORY_BATCH_SIZE = 32
+const FINANCE_MAX_HISTORY_SCAN_MESSAGES = 160
+const FINANCE_HISTORICAL_FACT_GUARD = '\nHistorical conversation and memory can explain the user’s goals, but never treat old figures as current. Query fresh Ledger data for personal financial facts; if no relevant read succeeds, say what remains unknown.'
+const FINANCE_TRUNCATED_HISTORY_NOTICE = '\nNote: Earlier uncompacted conversation turns were omitted to stay within the context budget. Do not assume the visible history includes every uncompacted turn.'
 
 // The Nuvyn context prompt (file layout, frontmatter schema, writing
 // conventions) lives in ./prompt.md so it's easy to edit as a
@@ -258,27 +268,52 @@ export async function runChat(opts: RunChatOpts): Promise<{
   } catch {
     // A summary failure must never discard or corrupt the raw transcript.
   }
+  const financeMemory = opts.ledgerAnalysis && opts.ledgerOwnerId
+    ? createFinanceMemoryRepository(opts.db)
+    : null
+  const finance = opts.ledgerAnalysis && createFinanceAgent(
+    opts.ledgerAnalysis,
+    financeMemory && opts.ledgerOwnerId ? { db: opts.db, ownerId: opts.ledgerOwnerId } : undefined,
+    opts.userContent,
+  )
   const readConversationSnapshot = () => {
     const compacted = sessions.getAiThreadCompactionState(opts.db, opts.sessionId)
-    const history = opts.ledgerAnalysis
-      ? messages.listRecentMessagesAfter(
-        opts.db,
-        opts.sessionId,
-        compacted?.compactedThroughMessageId ?? 0,
-        FINANCE_MAX_HISTORY_MESSAGES,
-      ) ?? []
-      : messages.listMessagesAfter(
+    const compactSummary = compacted?.compactSummary ?? ''
+    if (!opts.ledgerAnalysis) {
+      const history = messages.listMessagesAfter(
         opts.db,
         opts.sessionId,
         compacted?.compactedThroughMessageId ?? 0,
       ) ?? []
-    return { compacted, history }
+      return { compacted, ledgerHistory: buildConvoFromHistory(history, opts.userContent), ledgerHistoryTruncated: false }
+    }
+    const persistentFinanceMemory = finance && financeMemory && opts.ledgerOwnerId
+      ? formatFinanceMemoryContext(financeMemory.list(opts.ledgerOwnerId))
+      : ''
+    const historyBudget = computeFinanceHistoryCharBudget({
+      ledgerSystemChars: opts.ledgerAnalysis.system.length,
+      financeSystemChars: finance ? finance.systemPrompt.length + 2 : 0,
+      summarySectionChars: conversationMemorySection(compactSummary).length,
+      memorySectionChars: persistentFinanceMemory ? persistentFinanceMemory.length + 2 : 0,
+      userContentChars: opts.userContent.length,
+    })
+    const { messages: ledgerHistory, truncated } = readLedgerConversationHistory(
+      opts.db,
+      opts.sessionId,
+      compacted?.compactedThroughMessageId ?? 0,
+      historyBudget,
+    )
+    return {
+      compacted,
+      ledgerHistory: [...ledgerHistory, { role: 'user' as const, content: opts.userContent }],
+      ledgerHistoryTruncated: truncated,
+    }
   }
   // The summary and checkpoint share one row, and the bounded history is
   // read in the same short snapshot so a concurrent compaction cannot pair
   // a new checkpoint with an old summary (or vice versa). No provider call
   // runs inside this transaction.
-  const { compacted, history } = opts.ledgerAnalysis
+  const { compacted, ledgerHistory, ledgerHistoryTruncated } = opts.ledgerAnalysis
     ? opts.db.transaction(readConversationSnapshot).deferred()
     : readConversationSnapshot()
   const compactSummary = compacted?.compactSummary ?? ''
@@ -318,9 +353,7 @@ export async function runChat(opts: RunChatOpts): Promise<{
   // old clients keep their exact current tool behavior.
   const toolSafety = deriveToolSafetyPolicy(opts.ctx)
 
-  const convo: NormalizedMessage[] = opts.ledgerAnalysis
-    ? [...ledgerConversationHistory(history), { role: 'user', content: opts.userContent }]
-    : buildConvoFromHistory(history, opts.userContent)
+  const convo: NormalizedMessage[] = ledgerHistory
   // Backend may be cached from a previous run with a different
   // provider. Clear so getChatBackend() re-evaluates against the
   // current settings (the backend factory reads the SQLite settings
@@ -343,14 +376,6 @@ export async function runChat(opts: RunChatOpts): Promise<{
 
   let ledgerReplyInterrupted = false
   const chinese = /\p{Script=Han}/u.test(opts.userContent)
-  const financeMemory = opts.ledgerAnalysis && opts.ledgerOwnerId
-    ? createFinanceMemoryRepository(opts.db)
-    : null
-  const finance = opts.ledgerAnalysis && createFinanceAgent(
-    opts.ledgerAnalysis,
-    financeMemory && opts.ledgerOwnerId ? { db: opts.db, ownerId: opts.ledgerOwnerId } : undefined,
-    opts.userContent,
-  )
   const requireFinanceAccess = () => {
     if (opts.signal?.aborted || !opts.canUseLedgerAnalysis?.()) throw new ChatError('aborted')
   }
@@ -379,7 +404,8 @@ export async function runChat(opts: RunChatOpts): Promise<{
           + (finance ? `\n\n${finance.systemPrompt}` : '')
           + conversationMemorySection(compactSummary)
           + (persistentFinanceMemory ? `\n\n${persistentFinanceMemory}` : '')
-          + '\nHistorical conversation and memory can explain the user’s goals, but never treat old figures as current. Query fresh Ledger data for personal financial facts; if no relevant read succeeds, say what remains unknown.'
+          + FINANCE_HISTORICAL_FACT_GUARD
+          + (ledgerHistoryTruncated ? FINANCE_TRUNCATED_HISTORY_NOTICE : '')
         : ordinarySystem
       const financeTokens: string[] = []
       const result = await backend.streamRound({
@@ -608,13 +634,19 @@ export async function runChat(opts: RunChatOpts): Promise<{
   return { userId, assistantId, fullText }
 }
 
-export function scheduleLedgerAiCompaction(opts: RunChatOpts, runtimeConfig: AiRuntimeConfig): void {
+export function scheduleLedgerAiCompaction(
+  opts: RunChatOpts,
+  runtimeConfig: AiRuntimeConfig,
+  canContinueAuth?: () => boolean,
+): void {
   const controller = new AbortController()
-  const signal = opts.signal ? AbortSignal.any([opts.signal, controller.signal]) : controller.signal
+  const signal = canContinueAuth
+    ? controller.signal
+    : (opts.signal ? AbortSignal.any([opts.signal, controller.signal]) : controller.signal)
   const canContinue = () => {
     if (signal.aborted) return false
     try {
-      return opts.canUseLedgerAnalysis?.() ?? true
+      return (canContinueAuth ?? opts.canUseLedgerAnalysis)?.() ?? true
     } catch {
       return false
     }
@@ -636,25 +668,92 @@ export function scheduleLedgerAiCompaction(opts: RunChatOpts, runtimeConfig: AiR
   }).catch(() => {}).finally(() => clearInterval(authCheck))
 }
 
-/** Retain a bounded Ledger window so compaction can summarize before turns age out. */
-function ledgerConversationHistory(
-  history: { role: 'user' | 'assistant'; content: string }[],
-): NormalizedMessage[] {
-  const context: NormalizedMessage[] = []
-  for (let index = history.length - 1; index > 0 && context.length < 16; index--) {
-    const answer = history[index]
-    const question = history[index - 1]
-    if (answer.role !== 'assistant' || question.role !== 'user') continue
-    const prompt = parseStoredContent(question.content)
-    if (prompt.kind !== 'envelope' || !prompt.envelope.privateLedgerAnalysis) continue
-    const parsed = parseStoredContent(answer.content)
-    if (parsed.kind !== 'envelope' || !parsed.envelope.privateLedgerAnalysis || parsed.envelope.interrupted) continue
-    context.unshift(
-      { role: 'user', content: prompt.envelope.text.slice(0, 2_000) },
-      { role: 'assistant', content: parsed.envelope.text.slice(0, 2_000) },
-    )
+function computeFinanceHistoryCharBudget(reserved: {
+  ledgerSystemChars: number
+  financeSystemChars: number
+  summarySectionChars: number
+  memorySectionChars: number
+  userContentChars: number
+}): number {
+  const reservedChars = reserved.ledgerSystemChars
+    + reserved.financeSystemChars
+    + reserved.summarySectionChars
+    + reserved.memorySectionChars
+    + reserved.userContentChars
+    + FINANCE_HISTORICAL_FACT_GUARD.length
+    + FINANCE_TRUNCATED_HISTORY_NOTICE.length
+    + FINANCE_TOOL_AND_SKILL_RESERVE_CHARS
+    + FINANCE_OUTPUT_AND_FRAMING_RESERVE_CHARS
+  return Math.max(0, Math.min(FINANCE_HISTORY_MAX_CHARS, FINANCE_TOTAL_CONTEXT_CHAR_BUDGET - reservedChars))
+}
+
+/**
+ * Scan uncompacted Finance turns backwards in bounded batches so slow or failed
+ * compaction does not prematurely drop uncompacted turns within the context budget.
+ */
+function readLedgerConversationHistory(
+  db: DatabaseT,
+  sessionId: number,
+  afterMessageId: number,
+  historyCharBudget: number,
+): { messages: NormalizedMessage[]; truncated: boolean } {
+  const selectedTurns: Array<{ user: string; assistant: string }> = []
+  let beforeId: number | undefined
+  let leftoverNewer: Message | null = null
+  let scannedMessages = 0
+  let usedChars = 0
+  let truncated = false
+
+  outer: while (
+    selectedTurns.length < FINANCE_MAX_EXPANDED_HISTORY_TURNS
+    && scannedMessages < FINANCE_MAX_HISTORY_SCAN_MESSAGES
+  ) {
+    const batchLimit = Math.min(FINANCE_HISTORY_BATCH_SIZE, FINANCE_MAX_HISTORY_SCAN_MESSAGES - scannedMessages)
+    const batch = messages.listRecentMessagesWindowAfter(db, sessionId, afterMessageId, batchLimit, beforeId)
+    if (!batch || batch.length === 0) break
+
+    scannedMessages += batch.length
+    beforeId = batch[0]!.id
+    const hasMorePotentially = batch.length === batchLimit
+    const scanWindow: Message[] = leftoverNewer ? [...batch, leftoverNewer] : batch
+    leftoverNewer = null
+
+    let startIndex = 0
+    if (hasMorePotentially && scannedMessages < FINANCE_MAX_HISTORY_SCAN_MESSAGES && scanWindow[0]!.role === 'assistant') {
+      leftoverNewer = scanWindow[0]!
+      startIndex = 1
+    }
+
+    for (let index = scanWindow.length - 1; index > startIndex; index--) {
+      const turn = messages.extractCompleteLedgerTurn(scanWindow[index - 1]!, scanWindow[index]!)
+      if (!turn) continue
+      const user = turn.userText.slice(0, FINANCE_HISTORY_MESSAGE_MAX_CHARS)
+      const assistant = turn.assistantText.slice(0, FINANCE_HISTORY_MESSAGE_MAX_CHARS)
+      const turnChars = user.length + assistant.length
+      if (selectedTurns.length >= FINANCE_MAX_EXPANDED_HISTORY_TURNS || usedChars + turnChars > historyCharBudget) {
+        truncated = true
+        break outer
+      }
+      selectedTurns.push({ user, assistant })
+      usedChars += turnChars
+      index--
+    }
+
+    if (!hasMorePotentially) break
+    if (selectedTurns.length >= FINANCE_MAX_EXPANDED_HISTORY_TURNS || scannedMessages >= FINANCE_MAX_HISTORY_SCAN_MESSAGES) {
+      if (messages.hasMessagesAfterBefore(db, sessionId, afterMessageId, beforeId)) {
+        truncated = true
+      }
+      break
+    }
   }
-  return context
+
+  const context: NormalizedMessage[] = []
+  for (let index = selectedTurns.length - 1; index >= 0; index--) {
+    const turn = selectedTurns[index]!
+    context.push({ role: 'user', content: turn.user }, { role: 'assistant', content: turn.assistant })
+  }
+  return { messages: context, truncated }
 }
 
 async function emit(

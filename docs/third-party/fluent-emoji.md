@@ -146,21 +146,3 @@ Emoji use the platform glyph renderer without loading remote resources.
 | `event-goal.svg` | `assets/Bullseye/Color/bullseye_color.svg` |
 | `event-work.svg` | `assets/Briefcase/Color/briefcase_color.svg` |
 | `event-health.svg` | `assets/Hospital/Color/hospital_color.svg` |
-
-The Diary lunar calendar tooltip uses static zodiac icons from the same pinned
-Microsoft Fluent Emoji revision and MIT license.
-
-| Nuvyn bundled asset | Microsoft Fluent Emoji upstream Color SVG |
-| --- | --- |
-| `public/emoji/zodiac-rat.svg` | `assets/Rat/Color/rat_color.svg` |
-| `public/emoji/zodiac-ox.svg` | `assets/Ox/Color/ox_color.svg` |
-| `public/emoji/zodiac-tiger.svg` | `assets/Tiger/Color/tiger_color.svg` |
-| `public/emoji/zodiac-rabbit.svg` | `assets/Rabbit/Color/rabbit_color.svg` |
-| `public/emoji/zodiac-dragon.svg` | `assets/Dragon/Color/dragon_color.svg` |
-| `public/emoji/zodiac-snake.svg` | `assets/Snake/Color/snake_color.svg` |
-| `public/emoji/zodiac-horse.svg` | `assets/Horse/Color/horse_color.svg` |
-| `public/emoji/zodiac-goat.svg` | `assets/Goat/Color/goat_color.svg` |
-| `public/emoji/zodiac-monkey.svg` | `assets/Monkey/Color/monkey_color.svg` |
-| `public/emoji/zodiac-rooster.svg` | `assets/Rooster/Color/rooster_color.svg` |
-| `public/emoji/zodiac-dog.svg` | `assets/Dog/Color/dog_color.svg` |
-| `public/emoji/zodiac-pig.svg` | `assets/Pig/Color/pig_color.svg` |

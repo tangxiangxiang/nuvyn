@@ -16,9 +16,15 @@ export interface LunarDate {
 
 export interface LunarCalendarDetails extends LunarDate {
   yearGanZhi: string
-  zodiac: string
   monthGanZhi: string
   dayGanZhi: string
+}
+
+export interface LunarTimePillar {
+  key: string
+  ganZhi: string
+  range: string
+  startHour: number
 }
 
 export interface ChineseEventDateRule {
@@ -73,7 +79,6 @@ export function solarToLunarDetails(date: string): LunarCalendarDetails | null {
     return {
       ...lunarDate,
       yearGanZhi: lunar.getYearInGanZhi(),
-      zodiac: lunar.getYearShengXiao(),
       monthGanZhi: lunar.getMonthInGanZhi(),
       dayGanZhi: lunar.getDayInGanZhi(),
     }
@@ -144,6 +149,43 @@ const LUNAR_DAY_NAMES = [
   '十一', '十二', '十三', '十四', '十五', '十六', '十七', '十八', '十九', '二十',
   '廿一', '廿二', '廿三', '廿四', '廿五', '廿六', '廿七', '廿八', '廿九', '三十',
 ]
+
+const HEAVENLY_STEMS = Array.from('甲乙丙丁戊己庚辛壬癸')
+const EARTHLY_BRANCHES = Array.from('子丑寅卯辰巳午未申酉戌亥')
+const LUNAR_TIME_PILLAR_SPECS: ReadonlyArray<Omit<LunarTimePillar, 'ganZhi'>> = [
+  { key: 'zi', range: '23:00–01:00', startHour: 23 },
+  { key: 'chou', range: '01:00–03:00', startHour: 1 },
+  { key: 'yin', range: '03:00–05:00', startHour: 3 },
+  { key: 'mao', range: '05:00–07:00', startHour: 5 },
+  { key: 'chen', range: '07:00–09:00', startHour: 7 },
+  { key: 'si', range: '09:00–11:00', startHour: 9 },
+  { key: 'wu', range: '11:00–13:00', startHour: 11 },
+  { key: 'wei', range: '13:00–15:00', startHour: 13 },
+  { key: 'shen', range: '15:00–17:00', startHour: 15 },
+  { key: 'you', range: '17:00–19:00', startHour: 17 },
+  { key: 'xu', range: '19:00–21:00', startHour: 19 },
+  { key: 'hai', range: '21:00–23:00', startHour: 21 },
+]
+
+/**
+ * Returns the twelve time pillars for the selected Gregorian date, using its
+ * day stem and the Wu Shu Dun rule. Zi is one interval spanning 23:00–01:00.
+ */
+export function solarToLunarTimePillars(date: string): LunarTimePillar[] | null {
+  const converted = convertSolarDate(date)
+  if (!converted) return null
+  try {
+    const dayStemIndex = HEAVENLY_STEMS.indexOf(converted.lunar.getDayInGanZhi()[0] ?? '')
+    if (dayStemIndex < 0) return null
+    const ziStemIndex = (dayStemIndex % 5) * 2
+    return LUNAR_TIME_PILLAR_SPECS.map((spec, index) => ({
+      ...spec,
+      ganZhi: `${HEAVENLY_STEMS[(ziStemIndex + index) % HEAVENLY_STEMS.length]}${EARTHLY_BRANCHES[index]}`,
+    }))
+  } catch {
+    return null
+  }
+}
 
 export function lunarMonthLabel(month: number): string {
   return LUNAR_MONTH_NAMES[month - 1] ?? `${month}月`

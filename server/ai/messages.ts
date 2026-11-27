@@ -89,6 +89,13 @@ export type StoredContent =
   | { kind: 'envelope'; envelope: AssistantEnvelope }
   | { kind: 'plain'; text: string }
 
+export type CompleteLedgerTurn = {
+  question: Message
+  answer: Message
+  userText: string
+  assistantText: string
+}
+
 /* Lift an Anthropic-shaped `content: ContentBlockParam[]` into a
    NormalizedRound. Anything that isn't a recognized text / tool_use
    block is silently dropped (the model could in theory return
@@ -169,6 +176,43 @@ export function parseStoredContent(raw: string): StoredContent {
   return { kind: 'plain', text: raw }
 }
 
+/** Identify one complete, non-interrupted, non-cancelled Finance Q&A pair. */
+export function extractCompleteLedgerTurn(
+  question: Message,
+  answer: Message,
+): CompleteLedgerTurn | null {
+  if (question.role !== 'user' || answer.role !== 'assistant') return null
+  const prompt = parseStoredContent(question.content)
+  if (prompt.kind !== 'envelope' || !prompt.envelope.privateLedgerAnalysis) return null
+  const reply = parseStoredContent(answer.content)
+  if (
+    reply.kind !== 'envelope'
+    || !reply.envelope.privateLedgerAnalysis
+    || reply.envelope.interrupted
+    || reply.envelope.cancelled
+  ) {
+    return null
+  }
+  return {
+    question,
+    answer,
+    userText: prompt.envelope.text,
+    assistantText: reply.envelope.text,
+  }
+}
+
+/** Collect all complete Finance Q&A turns in chronological order. */
+export function extractCompleteLedgerTurns(input: readonly Message[]): CompleteLedgerTurn[] {
+  const turns: CompleteLedgerTurn[] = []
+  for (let index = 1; index < input.length; index++) {
+    const turn = extractCompleteLedgerTurn(input[index - 1]!, input[index]!)
+    if (!turn) continue
+    turns.push(turn)
+    index++
+  }
+  return turns
+}
+
 const MAX_TITLE_CODEPOINTS = 30
 
 /**
@@ -222,17 +266,50 @@ export function listRecentMessagesAfter(
   afterMessageId: number,
   limit: number,
 ): Message[] | null {
+  return listRecentMessagesWindowAfter(db, sessionId, afterMessageId, limit)
+}
+
+/** Read one bounded newest-first page after the durable checkpoint for cursor scanning. */
+export function listRecentMessagesWindowAfter(
+  db: DatabaseT,
+  sessionId: number,
+  afterMessageId: number,
+  limit: number,
+  beforeMessageId?: number,
+): Message[] | null {
   const sess = db.prepare('SELECT id FROM sessions WHERE id = ?').get(sessionId)
   if (!sess) return null
   if (!Number.isSafeInteger(limit) || limit <= 0) return []
-  const rows = db.prepare(`
-    SELECT id, session_id, role, content, created_at
-    FROM messages
-    WHERE session_id = ? AND id > ?
-    ORDER BY id DESC
-    LIMIT ?
-  `).all(sessionId, afterMessageId, limit) as unknown[]
+  const rows = (beforeMessageId === undefined
+    ? db.prepare(`
+        SELECT id, session_id, role, content, created_at
+        FROM messages
+        WHERE session_id = ? AND id > ?
+        ORDER BY id DESC
+        LIMIT ?
+      `).all(sessionId, afterMessageId, limit)
+    : db.prepare(`
+        SELECT id, session_id, role, content, created_at
+        FROM messages
+        WHERE session_id = ? AND id > ? AND id < ?
+        ORDER BY id DESC
+        LIMIT ?
+      `).all(sessionId, afterMessageId, beforeMessageId, limit)) as unknown[]
   return rows.reverse().map(rowToMessage)
+}
+
+export function hasMessagesAfterBefore(
+  db: DatabaseT,
+  sessionId: number,
+  afterMessageId: number,
+  beforeMessageId: number,
+): boolean {
+  return Boolean(db.prepare(`
+    SELECT 1
+    FROM messages
+    WHERE session_id = ? AND id > ? AND id < ?
+    LIMIT 1
+  `).get(sessionId, afterMessageId, beforeMessageId))
 }
 
 type AppendResult =

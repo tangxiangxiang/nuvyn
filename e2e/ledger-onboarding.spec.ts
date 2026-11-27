@@ -12,6 +12,25 @@ type LedgerModuleLabelStyle = {
   textTransform: string
 }
 
+const expectedModuleLabelStyleByTheme: Record<'light' | 'dark', LedgerModuleLabelStyle> = {
+  light: {
+    color: 'rgb(99, 102, 241)',
+    fontSize: '11.2px',
+    fontWeight: '750',
+    letterSpacing: '1.12px',
+    marginBottom: '7px',
+    textTransform: 'uppercase',
+  },
+  dark: {
+    color: 'rgb(129, 140, 248)',
+    fontSize: '11.2px',
+    fontWeight: '750',
+    letterSpacing: '1.12px',
+    marginBottom: '7px',
+    textTransform: 'uppercase',
+  },
+}
+
 const moduleLabelViewports = [
   { width: 1280, height: 900 },
   { width: 768, height: 1024 },
@@ -21,12 +40,20 @@ const moduleLabelViewports = [
 test.describe.configure({ mode: 'serial' })
 
 async function applyTheme(page: Page, theme: 'light' | 'dark'): Promise<void> {
-  if (await page.locator('html').getAttribute('data-theme') === theme) return
-  await page.locator('.theme-toggle').click()
-  await expect(page.locator('html')).toHaveAttribute('data-theme', theme)
+  const html = page.locator('html')
+  await expect(html).toHaveAttribute('data-theme', /^(light|dark)$/)
+  if (await html.getAttribute('data-theme') !== theme) {
+    await page.locator('.theme-toggle').click()
+  }
+  await expect(html).toHaveAttribute('data-theme', theme)
 }
 
-async function readModuleLabelStyle(page: Page, expectedCount: number): Promise<LedgerModuleLabelStyle> {
+async function readModuleLabelStyle(
+  page: Page,
+  theme: 'light' | 'dark',
+  expectedCount: number,
+): Promise<LedgerModuleLabelStyle> {
+  await expect(page.locator('html')).toHaveAttribute('data-theme', theme)
   const labels = page.getByTestId('ledger-module-label')
   await expect(labels).toHaveCount(expectedCount)
   await expect(labels.first()).toBeVisible()
@@ -45,13 +72,9 @@ async function readModuleLabelStyle(page: Page, expectedCount: number): Promise<
   }))
   const [first, ...remaining] = styles
   if (!first) throw new Error('Ledger module label is missing')
-  expect(first.text).toBe('LEDGER')
   expect(first).toMatchObject({
-    fontSize: '11.2px',
-    fontWeight: '750',
-    letterSpacing: '1.12px',
-    marginBottom: '7px',
-    textTransform: 'uppercase',
+    text: 'LEDGER',
+    ...expectedModuleLabelStyleByTheme[theme],
   })
   for (const style of remaining) expect(style).toEqual(first)
 
@@ -75,6 +98,23 @@ async function readModuleLabelStyle(page: Page, expectedCount: number): Promise<
   }
 }
 
+async function verifyModuleLabelsAcrossViewports(
+  page: Page,
+  theme: 'light' | 'dark',
+  expectedCount: number,
+): Promise<LedgerModuleLabelStyle> {
+  let expectedStyle: LedgerModuleLabelStyle | null = null
+  for (const viewport of moduleLabelViewports) {
+    await page.setViewportSize(viewport)
+    await expect(page.locator('html')).toHaveAttribute('data-theme', theme)
+    const style = await readModuleLabelStyle(page, theme, expectedCount)
+    if (expectedStyle) expect(style).toEqual(expectedStyle)
+    else expectedStyle = style
+  }
+  if (!expectedStyle) throw new Error(`No module label styles were measured for ${theme}`)
+  return expectedStyle
+}
+
 test('real Ledger onboarding and expense survive dashboard refresh', async ({ page, request }) => {
   const settingsResponsePromise = page.waitForResponse((response) => {
     const url = new URL(response.url())
@@ -88,23 +128,19 @@ test('real Ledger onboarding and expense survive dashboard refresh', async ({ pa
   expect(settingsResponse.headers()['content-type']).toContain('application/json')
   expect(settingsResponse.headers()['cache-control']).toBe('no-store')
   expect(await settingsResponse.json()).toBeNull()
+  await expect(page.getByTestId('ledger-onboarding')).toBeVisible()
   await expect(page.getByTestId('ledger-settings-form')).toBeVisible()
+  await expect(page.getByTestId('ledger-onboarding').locator('> .ledger-onboarding-heading [data-testid="ledger-module-label"]')).toBeVisible()
+  await expect(page.getByTestId('ledger-settings-form').getByTestId('ledger-module-label')).toBeVisible()
   await page.setViewportSize(moduleLabelViewports[0]!)
   await applyTheme(page, 'light')
   const onboardingStyleByTheme = new Map<'light' | 'dark', LedgerModuleLabelStyle>()
   for (const theme of ['light', 'dark'] as const) {
     await page.setViewportSize(moduleLabelViewports[0]!)
     await applyTheme(page, theme)
-    let themeStyle: LedgerModuleLabelStyle | null = null
-    for (const viewport of moduleLabelViewports) {
-      await page.setViewportSize(viewport)
-      const style = await readModuleLabelStyle(page, 2)
-      if (themeStyle) expect(style).toEqual(themeStyle)
-      else themeStyle = style
-    }
-    if (!themeStyle) throw new Error(`No onboarding label styles were measured for ${theme}`)
-    onboardingStyleByTheme.set(theme, themeStyle)
+    onboardingStyleByTheme.set(theme, await verifyModuleLabelsAcrossViewports(page, theme, 2))
   }
+  expect(onboardingStyleByTheme.get('light')!.color).not.toBe(onboardingStyleByTheme.get('dark')!.color)
   await page.setViewportSize({ width: 1280, height: 900 })
   await applyTheme(page, 'light')
   await selectOptionContaining(page, '基础货币', 'CNY')
@@ -120,7 +156,11 @@ test('real Ledger onboarding and expense survive dashboard refresh', async ({ pa
   await page.getByRole('button', { name: '继续' }).click()
 
   await expect(page.getByTestId('ledger-dashboard')).toBeVisible()
-  expect(await readModuleLabelStyle(page, 1)).toEqual(onboardingStyleByTheme.get('light'))
+  for (const theme of ['light', 'dark'] as const) {
+    await applyTheme(page, theme)
+    expect(await readModuleLabelStyle(page, theme, 1)).toEqual(onboardingStyleByTheme.get(theme))
+  }
+  await applyTheme(page, 'light')
   await expect(page.locator('.ledger-dashboard-actions')).toHaveCount(1)
   await expect(page.getByTestId('ledger-record-button')).toHaveCount(1)
   await expect(page.locator('.ledger-metric-card')).toHaveCount(3)
@@ -272,21 +312,22 @@ test('Ledger module labels stay consistent across pages, themes, and viewports',
   await page.goto('/ledger')
   await expect(page.getByTestId('ledger-dashboard')).toBeVisible()
 
+  const styleByTheme = new Map<'light' | 'dark', LedgerModuleLabelStyle>()
   for (const theme of ['light', 'dark'] as const) {
     await page.setViewportSize(moduleLabelViewports[0]!)
     await applyTheme(page, theme)
     let expectedStyle: LedgerModuleLabelStyle | null = null
     for (const view of moduleViews) {
       await page.goto(view.path)
+      await expect(page.locator('html')).toHaveAttribute('data-theme', theme)
       await expect(page.getByTestId(view.pageTestId)).toBeVisible()
       await expect(page.locator('h1').first()).toHaveText(view.title)
-      for (const viewport of moduleLabelViewports) {
-        await page.setViewportSize(viewport)
-        const style = await readModuleLabelStyle(page, 1)
-        if (expectedStyle) expect(style).toEqual(expectedStyle)
-        else expectedStyle = style
-      }
+      const style = await verifyModuleLabelsAcrossViewports(page, theme, 1)
+      if (expectedStyle) expect(style).toEqual(expectedStyle)
+      else expectedStyle = style
     }
     if (!expectedStyle) throw new Error(`No module label styles were measured for ${theme}`)
+    styleByTheme.set(theme, expectedStyle)
   }
+  expect(styleByTheme.get('light')!.color).not.toBe(styleByTheme.get('dark')!.color)
 })
