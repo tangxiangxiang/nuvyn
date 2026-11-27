@@ -191,54 +191,64 @@ test('keeps the calendar grid continuous across views, themes, and viewport size
   await setTheme('light')
   const lunarDateCell = calendar.locator('.life-date[data-date="2026-11-16"]')
   const lunarTrigger = lunarDateCell.locator('.life-date-lunar')
-  const lunarPopover = page.locator('#diary-lunar-calendar-popover')
-  await expect(lunarPopover).toHaveCount(0)
-  await calendar.locator('.life-date[data-date="2026-11-17"]').hover()
-  await expect(lunarPopover).toHaveCount(0)
+  const lunarModal = page.locator('#diary-lunar-calendar-modal')
+  await expect(lunarModal).toHaveCount(0)
   await lunarTrigger.hover()
-  await page.clock.runFor(350)
-  await expect(lunarPopover).toHaveCount(0)
+  await expect(lunarModal).toHaveCount(0)
   await expect(lunarTrigger).toHaveCSS('cursor', 'pointer')
   await lunarTrigger.click()
-  await expect(lunarPopover).toBeVisible()
+  await expect(lunarModal).toBeVisible()
+  await expect(page.getByRole('dialog', { name: '农历日期详情' })).toBeVisible()
+  await expect(page.locator('.n-modal-mask')).toBeVisible()
+  await page.clock.runFor(300)
   await expect(lunarTrigger).toHaveAttribute('aria-expanded', 'true')
-  await expect(lunarTrigger).toHaveAttribute('aria-controls', 'diary-lunar-calendar-popover')
+  await expect(lunarTrigger).toHaveAttribute('aria-controls', 'diary-lunar-calendar-modal')
   await expect(page.getByRole('button', { name: '关闭日记' })).toHaveCount(0)
-  expect(await lunarPopover.evaluate(element => getComputedStyle(element.parentElement!).backgroundColor))
+  expect(await lunarModal.evaluate(element => getComputedStyle(element.closest('.lunar-calendar-modal')!).backgroundColor))
     .toBe('rgb(249, 250, 251)')
-  expect(await lunarPopover.evaluate(element => getComputedStyle(element.closest('.n-popover')!).boxShadow))
-    .toBe('none')
-  await expect(lunarPopover.locator('.lunar-calendar-popover-ganzhi')).toHaveText('丙午年 己亥月 甲午日')
-  await expect(lunarPopover.locator('.lunar-calendar-popover-date')).toHaveText('农历 十月初八日')
-  await expect(lunarPopover.locator('.lunar-calendar-time-item')).toHaveCount(12)
-  expect(await lunarPopover.locator('.lunar-calendar-time-grid').evaluate(element => {
+  await expect(lunarModal.locator('.lunar-calendar-modal-ganzhi')).toHaveText('丙午年 己亥月 甲午日')
+  await expect(lunarModal.locator('.lunar-calendar-modal-date')).toHaveText('农历 十月初八日')
+  await expect(lunarModal.locator('.lunar-calendar-time-item')).toHaveCount(12)
+  expect(await lunarModal.locator('.lunar-calendar-time-grid').evaluate(element => {
     const style = getComputedStyle(element)
     return {
       columns: style.gridTemplateColumns.trim().split(/\s+/).length,
       rows: style.gridTemplateRows.trim().split(/\s+/).length,
     }
   })).toEqual({ columns: 3, rows: 4 })
-  await expect(lunarPopover.locator('[data-time-pillar="zi"] .lunar-calendar-time-ganzhi')).toHaveText('甲子')
-  await expect(lunarPopover.locator('[data-time-pillar="zi"] .lunar-calendar-time-range')).toHaveText('23:00–01:00')
-  await expect(lunarPopover.locator('.is-current-time')).toHaveCount(1)
-  await expect(lunarPopover.locator('.is-current-time')).toHaveAttribute('data-time-pillar', 'wu')
-  await expect(lunarPopover.locator('img, svg')).toHaveCount(0)
-  await expect(lunarPopover).not.toContainText(/生肖|马|🐎/)
-  expect(await lunarPopover.evaluate(element => element.closest('.n-popover')!.getBoundingClientRect().width)).toBe(340)
+  await expect(lunarModal.locator('[data-time-pillar="zi"] .lunar-calendar-time-ganzhi')).toHaveText('甲子时')
+  await expect(lunarModal.locator('[data-time-pillar="zi"] .lunar-calendar-time-range')).toHaveText('23:00–01:00')
+  await expect(lunarModal.locator('.is-current-time')).toHaveCount(1)
+  await expect(lunarModal.locator('.is-current-time')).toHaveAttribute('data-time-pillar', 'wu')
+  await expect(lunarModal.locator('img, svg')).toHaveCount(0)
+  await expect(lunarModal).not.toContainText(/生肖|马|🐎/)
 
   for (const width of [320, 390, 430, 768, 1280]) {
     await page.setViewportSize({ width, height: width < 600 ? 844 : 900 })
-    await expect(lunarPopover).toBeVisible()
-    const bounds = await lunarPopover.evaluate(element => {
-      const rect = element.closest('.n-popover')!.getBoundingClientRect()
-      return { x: rect.x, y: rect.y, right: rect.right, bottom: rect.bottom, width: rect.width }
+    await expect(lunarModal).toBeVisible()
+    const bounds = await lunarModal.evaluate(element => {
+      const card = element.closest('.lunar-calendar-modal')!
+      const rect = card.getBoundingClientRect()
+      return {
+        x: rect.x,
+        y: rect.y,
+        right: rect.right,
+        bottom: rect.bottom,
+        width: rect.width,
+        centerX: rect.x + rect.width / 2,
+        centerY: rect.y + rect.height / 2,
+      }
     })
     expect(bounds.x).toBeGreaterThanOrEqual(0)
     expect(bounds.y).toBeGreaterThanOrEqual(0)
     expect(bounds.right).toBeLessThanOrEqual(width)
     expect(bounds.bottom).toBeLessThanOrEqual(width < 600 ? 844 : 900)
+    expect(Math.abs(bounds.centerX - width / 2)).toBeLessThan(1)
+    expect(Math.abs(bounds.centerY - (width < 600 ? 844 : 900) / 2)).toBeLessThan(1)
+    expect(bounds.width).toBeLessThanOrEqual(width - 24)
+    if (width >= 364) expect(bounds.width).toBe(340)
     if ([390, 768, 1280].includes(width)) {
-      await testInfo.attach(`lunar-calendar-popover-${width}.png`, {
+      await testInfo.attach(`lunar-calendar-modal-${width}.png`, {
         body: await page.screenshot(),
         contentType: 'image/png',
       })
@@ -246,45 +256,57 @@ test('keeps the calendar grid continuous across views, themes, and viewport size
   }
   await page.setViewportSize({ width: 1280, height: 900 })
 
-  await lunarTrigger.click()
-  await expect(lunarPopover).toHaveCount(0)
+  await page.mouse.click(4, 4)
+  await expect(lunarModal).toHaveCount(0)
 
   await lunarTrigger.focus()
   await page.keyboard.press('Enter')
-  await expect(lunarPopover).toBeVisible()
+  await expect(lunarModal).toBeVisible()
   await page.keyboard.press('Escape')
-  await expect(lunarPopover).toHaveCount(0)
+  await expect(lunarModal).toHaveCount(0)
   await expect(lunarTrigger).toBeFocused()
   await page.keyboard.press('Space')
-  await expect(lunarPopover).toBeVisible()
+  await expect(lunarModal).toBeVisible()
   await page.keyboard.press('Escape')
-  await expect(lunarPopover).toHaveCount(0)
+  await expect(lunarModal).toHaveCount(0)
 
   await lunarTrigger.click()
+  await expect(lunarModal).toBeVisible()
+  const blockedDateAction = calendar.locator('.life-date[data-date="2026-11-15"] .life-date-action')
+  const blockedDateBounds = await blockedDateAction.boundingBox()
+  expect(blockedDateBounds).not.toBeNull()
+  await page.mouse.click(blockedDateBounds!.x + blockedDateBounds!.width / 2, blockedDateBounds!.y + blockedDateBounds!.height / 2)
+  await expect(lunarModal).toHaveCount(0)
+  await expect(page.getByTestId('diary-day-dialog')).toHaveCount(0)
+  await expect(blockedDateAction).toHaveAttribute('aria-pressed', 'false')
+
   const nextLunarTrigger = calendar.locator('.life-date[data-date="2026-11-17"] .life-date-lunar')
   await nextLunarTrigger.click()
-  await expect(lunarPopover).toBeVisible()
-  await expect(lunarPopover.locator('.lunar-calendar-popover-ganzhi')).toContainText('乙未日')
-  await expect(lunarPopover.locator('.is-current-time')).toHaveCount(0)
+  await expect(lunarModal).toBeVisible()
+  await expect(lunarModal.locator('.lunar-calendar-modal-ganzhi')).toContainText('乙未日')
+  await expect(lunarModal.locator('.is-current-time')).toHaveCount(0)
+  await page.mouse.click(4, 4)
+  await expect(lunarModal).toHaveCount(0)
   await page.getByTestId('diary-view-mode-events').evaluate(button => (button as HTMLButtonElement).click())
   await expect(page.getByTestId('diary-view-mode-events')).toHaveAttribute('aria-pressed', 'true')
-  await expect(lunarPopover).toHaveCount(0)
   await page.getByTestId('diary-view-mode-diary').click()
 
   await lunarTrigger.click()
-  await expect(lunarPopover).toBeVisible()
-  const monthBeforePopoverDismissal = await monthLabel.getAttribute('data-month')
-  await calendar.locator('.n-calendar-header__extra .n-button:last-child').evaluate(button => (button as HTMLButtonElement).click())
-  await expect(monthLabel).not.toHaveAttribute('data-month', monthBeforePopoverDismissal ?? '')
-  await expect(lunarPopover).toHaveCount(0)
-  await calendar.locator('.n-calendar-header__extra .n-button:first-child').evaluate(button => (button as HTMLButtonElement).click())
+  await expect(lunarModal).toBeVisible()
+  await page.mouse.click(4, 4)
+  await expect(lunarModal).toHaveCount(0)
+  const monthBeforeModalDismissal = await monthLabel.getAttribute('data-month')
+  await calendar.locator('.n-calendar-header__extra .n-button:last-child').click()
+  await expect(monthLabel).not.toHaveAttribute('data-month', monthBeforeModalDismissal ?? '')
+  await calendar.locator('.n-calendar-header__extra .n-button:first-child').click()
   await setTheme('dark')
   await lunarTrigger.click()
-  await expect(lunarPopover).toBeVisible()
-  expect(await lunarPopover.evaluate(element => getComputedStyle(element.parentElement!).backgroundColor))
+  await expect(lunarModal).toBeVisible()
+  expect(await lunarModal.evaluate(element => getComputedStyle(element.closest('.lunar-calendar-modal')!).backgroundColor))
     .toBe('rgb(37, 37, 38)')
+  await page.mouse.click(4, 4)
+  await expect(lunarModal).toHaveCount(0)
   await calendar.locator('.life-date[data-date="2026-11-17"] .life-date-action').click()
-  await expect(lunarPopover).toHaveCount(0)
   await expect(page.getByRole('button', { name: '关闭日记' })).toBeVisible()
   await page.getByRole('button', { name: '关闭日记' }).click()
   await setTheme('light')

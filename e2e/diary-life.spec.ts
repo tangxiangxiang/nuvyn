@@ -1192,12 +1192,12 @@ test('clears the date highlight on Escape after opening with a pointer', async (
 
   const dateAction = cell.locator('.life-date-action')
   const lunarTrigger = cell.locator('.life-date-lunar')
-  const lunarPopover = page.locator('#diary-lunar-calendar-popover')
+  const lunarModal = page.locator('#diary-lunar-calendar-modal')
   await lunarTrigger.focus()
   await page.keyboard.press('Enter')
-  await expect(lunarPopover).toBeVisible()
+  await expect(lunarModal).toBeVisible()
   await page.keyboard.press('Escape')
-  await expect(lunarPopover).toHaveCount(0)
+  await expect(lunarModal).toHaveCount(0)
   await expect(lunarTrigger).toBeFocused()
   await expect(page.getByTestId('diary-day-dialog')).toHaveCount(0)
 

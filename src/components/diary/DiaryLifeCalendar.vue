@@ -7,7 +7,7 @@ import { shouldAnimateTodoDayMarker, todoDayMarkerAssets, type TodoDayMarkerAsse
 import type { TodoDayVisualState } from '../../features/diary/deadlineVisualState'
 import DiaryAnimatedEmoji from './DiaryAnimatedEmoji.vue'
 import { lunarDayLabel, lunarMonthLabel, solarToLunarDetails, type LunarCalendarDetails } from '../../../shared/lunarCalendar'
-import LunarCalendarPopover from './LunarCalendarPopover.vue'
+import LunarCalendarModal from './LunarCalendarModal.vue'
 
 const PIXEL_WHEEL_MONTH_THRESHOLD = 220
 const LINE_WHEEL_MONTH_THRESHOLD = 6
@@ -25,14 +25,13 @@ const props = defineProps<{
 const emit = defineEmits<{ select: [date: string]; month: [date: string] }>()
 const { locale } = useI18n()
 const lunarDateDetailsCache = new Map<string, LunarCalendarDetails | null>()
-const activeLunarPopoverDate = ref<string | null>(null)
+const activeLunarModalDate = ref<string | null>(null)
 const activeLunarTrigger = ref<HTMLButtonElement | null>(null)
-const lunarPopoverPosition = ref({ x: 0, y: 0 })
 const calendarContext = computed(() => `${props.month}:${props.revision}:${props.viewMode}`)
-const activeLunarPopoverDetails = computed(() => activeLunarPopoverDate.value
-  ? lunarDateDetails(activeLunarPopoverDate.value)
+const activeLunarModalDetails = computed(() => activeLunarModalDate.value
+  ? lunarDateDetails(activeLunarModalDate.value)
   : null)
-const LUNAR_POPOVER_ID = 'diary-lunar-calendar-popover'
+const LUNAR_MODAL_ID = 'diary-lunar-calendar-modal'
 interface TodoMarkerPresentation extends TodoDayMarkerAssets {
   state: TodoDayVisualState
   animate: boolean
@@ -83,30 +82,11 @@ function lunarDateLabel(date: string): string {
     : lunarDayLabel(lunar.day)
 }
 
-function updateLunarPopoverPosition() {
+function closeLunarModal(restoreFocus = false) {
   const trigger = activeLunarTrigger.value
-  if (!trigger?.isConnected) return
-  const bounds = trigger.getBoundingClientRect()
-  const popoverWidth = Math.min(340, window.innerWidth - 24)
-  const minX = popoverWidth / 2 + 12
-  const maxX = window.innerWidth - popoverWidth / 2 - 12
-  const x = Math.min(Math.max(bounds.left + bounds.width / 2, minX), maxX)
-  lunarPopoverPosition.value = { x, y: bounds.top }
-}
-
-function removeLunarPopoverListeners() {
-  document.removeEventListener('pointerdown', onLunarPopoverPointerDown, true)
-  document.removeEventListener('scroll', updateLunarPopoverPosition, true)
-  window.removeEventListener('resize', updateLunarPopoverPosition)
-  document.removeEventListener('keydown', onLunarPopoverKeydown, true)
-}
-
-function closeLunarPopover(restoreFocus = false) {
-  const trigger = activeLunarTrigger.value
-  const date = activeLunarPopoverDate.value
-  activeLunarPopoverDate.value = null
+  const date = activeLunarModalDate.value
+  activeLunarModalDate.value = null
   activeLunarTrigger.value = null
-  removeLunarPopoverListeners()
   if (restoreFocus && date) {
     void nextTick(() => {
       if (trigger?.isConnected) {
@@ -120,47 +100,19 @@ function closeLunarPopover(restoreFocus = false) {
   }
 }
 
-function onLunarPopoverPointerDown(event: PointerEvent) {
-  const target = event.target
-  if (!(target instanceof Element)) return
-  if (!activeLunarPopoverDate.value) return
-  if (activeLunarTrigger.value?.contains(target)) return
-  if (target.closest('.life-date')) return
-  if (document.getElementById(LUNAR_POPOVER_ID)?.contains(target)) return
-  closeLunarPopover()
-}
-
-function onLunarPopoverKeydown(event: KeyboardEvent) {
-  if (event.key !== 'Escape' || activeLunarPopoverDate.value === null) return
-  event.preventDefault()
-  event.stopPropagation()
-  closeLunarPopover(true)
-}
-
-function toggleLunarPopover(date: string, event: MouseEvent) {
+function openLunarModal(date: string, event: MouseEvent) {
   const trigger = event.currentTarget
   if (!(trigger instanceof HTMLButtonElement)) return
-  if (activeLunarPopoverDate.value === date) {
-    closeLunarPopover()
-    return
-  }
-
-  closeLunarPopover()
-  activeLunarPopoverDate.value = date
+  activeLunarModalDate.value = date
   activeLunarTrigger.value = trigger
-  updateLunarPopoverPosition()
-  document.addEventListener('pointerdown', onLunarPopoverPointerDown, true)
-  document.addEventListener('scroll', updateLunarPopoverPosition, true)
-  window.addEventListener('resize', updateLunarPopoverPosition)
-  document.addEventListener('keydown', onLunarPopoverKeydown, true)
 }
 
 function selectCalendarDate(date: string, event: MouseEvent) {
-  closeLunarPopover()
+  closeLunarModal()
   selectDate(date, event)
 }
 
-watch(calendarContext, () => closeLunarPopover())
+watch(calendarContext, () => closeLunarModal())
 const calendarRef = ref<InstanceType<typeof NCalendar> | null>(null)
 const calendarPickerRevision = ref(0)
 const calendarKey = computed(() => `${props.revision}-${calendarPickerRevision.value}`)
@@ -180,7 +132,7 @@ let wheelTail: { peak: number; low: number } | null = null
 
 onBeforeUnmount(() => {
   if (suppressCalendarClickTimer) clearTimeout(suppressCalendarClickTimer)
-  closeLunarPopover()
+  closeLunarModal()
 })
 
 function navigateMonthByGesture(offset: number) {
@@ -323,13 +275,12 @@ function selectDate(date: string, event: MouseEvent) {
 </script>
 
 <template>
-  <LunarCalendarPopover
-    :show="activeLunarPopoverDate !== null"
-    :date="activeLunarPopoverDate ?? ''"
-    :details="activeLunarPopoverDetails"
+  <LunarCalendarModal
+    :show="activeLunarModalDate !== null"
+    :date="activeLunarModalDate ?? ''"
+    :details="activeLunarModalDetails"
     :today="today"
-    :x="lunarPopoverPosition.x"
-    :y="lunarPopoverPosition.y"
+    @close="closeLunarModal(true)"
   />
   <NCalendar
     :key="calendarKey"
@@ -409,9 +360,9 @@ function selectDate(date: string, event: MouseEvent) {
           class="life-date-lunar"
           :aria-label="`${dateFor(year, month, date)}，农历${lunarDateLabel(dateFor(year, month, date))}，查看历法详情`"
           aria-haspopup="dialog"
-          :aria-expanded="activeLunarPopoverDate === dateFor(year, month, date)"
-          :aria-controls="activeLunarPopoverDate === dateFor(year, month, date) ? LUNAR_POPOVER_ID : undefined"
-          @click.stop="toggleLunarPopover(dateFor(year, month, date), $event)"
+          :aria-expanded="activeLunarModalDate === dateFor(year, month, date)"
+          :aria-controls="activeLunarModalDate === dateFor(year, month, date) ? LUNAR_MODAL_ID : undefined"
+          @click.stop="openLunarModal(dateFor(year, month, date), $event)"
         >{{ lunarDateLabel(dateFor(year, month, date)) }}</button>
       </div>
     </template>

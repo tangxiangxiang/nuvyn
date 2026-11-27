@@ -2,6 +2,7 @@
 import { mount, enableAutoUnmount } from '@vue/test-utils'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import DiaryLifeCalendar from '../DiaryLifeCalendar.vue'
+import LunarCalendarModal from '../LunarCalendarModal.vue'
 import { alarmClockAsset, BOMB_ANIMATED_ASSET, BOMB_STATIC_ASSET, PARTY_POPPER_ASSET } from '../../../features/diary/deadlineReminderAssets'
 import { useI18n } from '../../../composables/useI18n'
 
@@ -191,48 +192,51 @@ describe('Diary calendar wheel navigation', () => {
     expect(alarmClockAsset(false)).toBe('/emoji/alarm-clock-animated.png')
   })
 
-  it('opens one lunar calendar popover without selecting a calendar day', async () => {
+  it('opens one centered lunar calendar modal without selecting a calendar day', async () => {
     const { wrapper } = mountCalendar({}, { month: '2026-11-01', today: '2026-11-16' })
     const lunarTrigger = wrapper.get('.life-date[data-date="2026-11-16"] .life-date-lunar')
 
-    const pointerEnter = new Event('pointerenter', { bubbles: true })
-    Object.defineProperty(pointerEnter, 'pointerType', { value: 'mouse' })
-    lunarTrigger.element.dispatchEvent(pointerEnter)
-    vi.advanceTimersByTime(350)
-    await wrapper.vm.$nextTick()
-    expect(document.querySelector('#diary-lunar-calendar-popover')).toBeNull()
-
     await lunarTrigger.trigger('click')
     await wrapper.vm.$nextTick()
-    const popover = document.querySelector('#diary-lunar-calendar-popover')
-    expect(popover).not.toBeNull()
-    expect(popover?.getAttribute('role')).toBe('dialog')
-    expect(popover?.querySelector('.lunar-calendar-popover-ganzhi')?.textContent?.trim()).toBe('丙午年 己亥月 甲午日')
-    expect(popover?.querySelector('.lunar-calendar-popover-date')?.textContent?.trim()).toBe('农历 十月初八日')
-    expect(popover?.querySelectorAll('.lunar-calendar-time-item')).toHaveLength(12)
-    expect(popover?.querySelector('[data-time-pillar="zi"] .lunar-calendar-time-ganzhi')?.textContent).toBe('甲子')
-    expect(popover?.querySelector('[data-time-pillar="zi"] .lunar-calendar-time-range')?.textContent).toBe('23:00–01:00')
-    expect(popover?.querySelector('img, svg')).toBeNull()
+    const modal = document.querySelector('#diary-lunar-calendar-modal')
+    expect(modal).not.toBeNull()
+    const dialog = modal?.closest('.lunar-calendar-modal.n-card')
+    expect(dialog?.getAttribute('role')).toBe('dialog')
+    expect(dialog?.getAttribute('aria-modal')).toBe('true')
+    expect(dialog?.getAttribute('aria-label')).toBe('农历日期详情')
+    expect(modal?.querySelector('.lunar-calendar-modal-ganzhi')?.textContent?.trim()).toBe('丙午年 己亥月 甲午日')
+    expect(modal?.querySelector('.lunar-calendar-modal-date')?.textContent?.trim()).toBe('农历 十月初八日')
+    expect(modal?.querySelectorAll('.lunar-calendar-time-item')).toHaveLength(12)
+    expect(Array.from(modal?.querySelectorAll('.lunar-calendar-time-ganzhi') ?? []).map(element => element.textContent)).toEqual([
+      '甲子时', '乙丑时', '丙寅时', '丁卯时', '戊辰时', '己巳时',
+      '庚午时', '辛未时', '壬申时', '癸酉时', '甲戌时', '乙亥时',
+    ])
+    expect(modal?.querySelector('[data-time-pillar="zi"] .lunar-calendar-time-range')?.textContent).toBe('23:00–01:00')
+    expect(modal?.querySelector('img, svg')).toBeNull()
     expect(lunarTrigger.attributes('aria-expanded')).toBe('true')
-    expect(lunarTrigger.attributes('aria-controls')).toBe('diary-lunar-calendar-popover')
+    expect(lunarTrigger.attributes('aria-controls')).toBe('diary-lunar-calendar-modal')
     expect(wrapper.emitted('select')).toBeUndefined()
+
+    wrapper.findComponent(LunarCalendarModal).vm.$emit('close')
+    await wrapper.vm.$nextTick()
+    expect(document.querySelector('#diary-lunar-calendar-modal')).toBeNull()
 
     const nextDateTrigger = wrapper.get('.life-date[data-date="2026-11-17"] .life-date-lunar')
     await nextDateTrigger.trigger('click')
     await wrapper.vm.$nextTick()
-    expect(document.querySelectorAll('#diary-lunar-calendar-popover')).toHaveLength(1)
-    expect(document.querySelector('.lunar-calendar-popover-ganzhi')?.textContent?.trim()).toContain('乙未日')
-    expect(document.querySelector('.lunar-calendar-popover-date')?.textContent?.trim()).toBe('农历 十月初九日')
+    expect(document.querySelectorAll('#diary-lunar-calendar-modal')).toHaveLength(1)
+    expect(document.querySelector('.lunar-calendar-modal-ganzhi')?.textContent?.trim()).toContain('乙未日')
+    expect(document.querySelector('.lunar-calendar-modal-date')?.textContent?.trim()).toBe('农历 十月初九日')
 
-    await nextDateTrigger.trigger('click')
+    wrapper.findComponent(LunarCalendarModal).vm.$emit('close')
     await wrapper.vm.$nextTick()
-    expect(document.querySelector('#diary-lunar-calendar-popover')).toBeNull()
+    expect(document.querySelector('#diary-lunar-calendar-modal')).toBeNull()
     await wrapper.get('.life-date[data-date="2026-11-16"] .life-date-action').trigger('click')
     expect(wrapper.emitted('select')?.[0]).toEqual(['2026-11-16'])
     wrapper.unmount()
   })
 
-  it('closes the popover on Escape, view/month changes, and external pointer input', async () => {
+  it('restores focus when the modal closes and clears it on view/month changes', async () => {
     const { wrapper } = mountCalendar({}, { month: '2026-11-01', today: '2026-11-16' })
     document.body.append(wrapper.element as unknown as Node)
     const trigger = wrapper.get('.life-date[data-date="2026-11-16"] .life-date-lunar')
@@ -242,31 +246,29 @@ describe('Diary calendar wheel navigation', () => {
     expect(document.activeElement).toBe(triggerElement)
     await trigger.trigger('click')
     await wrapper.vm.$nextTick()
-    expect(document.querySelector('#diary-lunar-calendar-popover')).not.toBeNull()
-    const escape = new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true })
-    triggerElement.dispatchEvent(escape)
+    expect(document.querySelector('#diary-lunar-calendar-modal')).not.toBeNull()
+    wrapper.findComponent(LunarCalendarModal).vm.$emit('close')
     await wrapper.vm.$nextTick()
-    expect(escape.defaultPrevented).toBe(true)
-    expect(document.querySelector('#diary-lunar-calendar-popover')).toBeNull()
+    expect(document.querySelector('#diary-lunar-calendar-modal')).toBeNull()
     expect(document.activeElement).toBe(wrapper.get('.life-date[data-date="2026-11-16"] .life-date-lunar').element)
 
     await trigger.trigger('click')
     await wrapper.vm.$nextTick()
-    document.body.dispatchEvent(new Event('pointerdown', { bubbles: true }))
+    wrapper.findComponent(LunarCalendarModal).vm.$emit('close')
     await wrapper.vm.$nextTick()
-    expect(document.querySelector('#diary-lunar-calendar-popover')).toBeNull()
+    expect(document.querySelector('#diary-lunar-calendar-modal')).toBeNull()
 
     await trigger.trigger('click')
     await wrapper.setProps({ viewMode: 'events' })
     await wrapper.vm.$nextTick()
-    expect(document.querySelector('#diary-lunar-calendar-popover')).toBeNull()
+    expect(document.querySelector('#diary-lunar-calendar-modal')).toBeNull()
 
     await wrapper.setProps({ viewMode: 'diary' })
     const eventTrigger = wrapper.get('.life-date[data-date="2026-11-16"] .life-date-lunar')
     await eventTrigger.trigger('click')
     await wrapper.setProps({ month: '2026-12-01' })
     await wrapper.vm.$nextTick()
-    expect(document.querySelector('#diary-lunar-calendar-popover')).toBeNull()
+    expect(document.querySelector('#diary-lunar-calendar-modal')).toBeNull()
     wrapper.unmount()
   })
 

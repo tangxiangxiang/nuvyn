@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, ref, watch, type CSSProperties } from 'vue'
-import { NPopover } from 'naive-ui'
+import { NModal } from 'naive-ui'
 import { lunarDayLabel, lunarMonthLabel, solarToLunarTimePillars, type LunarCalendarDetails } from '../../../shared/lunarCalendar'
 import { localToday } from '../../../shared/diaryLife'
 
@@ -9,15 +9,11 @@ const props = defineProps<{
   date: string
   details: LunarCalendarDetails | null
   today: string
-  x: number
-  y: number
 }>()
+const emit = defineEmits<{ close: [] }>()
 
 const currentTimestamp = ref(Date.now())
 const currentToday = ref(props.today)
-const viewportWidth = ref(typeof window === 'undefined' ? 364 : window.innerWidth)
-const popoverMaxWidth = computed(() => Math.max(0, Math.min(340, viewportWidth.value - 24)))
-const popoverSizeStyle = computed<CSSProperties>(() => ({ maxWidth: `${popoverMaxWidth.value}px` }))
 const timePillars = computed(() => props.show ? solarToLunarTimePillars(props.date) : null)
 const currentPillarKey = computed(() => {
   if (!props.show || props.date !== currentToday.value) return null
@@ -32,18 +28,12 @@ const lunarDateLabel = computed(() => {
   return `农历 ${month}${lunarDayLabel(details.day)}日`
 })
 
-const popoverContentStyle: CSSProperties = {
+const modalContentStyle: CSSProperties = {
   minWidth: '0',
   padding: '16px',
   boxSizing: 'border-box',
-  overflow: 'hidden',
-  border: '1px solid color-mix(in srgb, var(--nuvyn-border) 58%, transparent)',
-  borderRadius: '12px',
-  backgroundColor: 'var(--nuvyn-surface-1)',
   color: 'var(--text)',
-  boxShadow: 'none',
 }
-const popoverThemeOverrides = { boxShadow: 'none' }
 
 let boundaryTimer: ReturnType<typeof setTimeout> | null = null
 const TIME_BOUNDARY_HOURS = [1, 3, 5, 7, 9, 11, 13, 15, 17, 19, 21, 23, 24]
@@ -70,18 +60,12 @@ function updateCurrentTimeAndSchedule() {
   boundaryTimer = setTimeout(updateCurrentTimeAndSchedule, delay)
 }
 
-function updateViewportWidth() {
-  viewportWidth.value = window.innerWidth
-}
-
-watch(() => props.show, show => {
-  if (show) {
-    updateViewportWidth()
-    window.addEventListener('resize', updateViewportWidth)
-  } else {
-    window.removeEventListener('resize', updateViewportWidth)
+function preventBackdropClickThrough(event: MouseEvent) {
+  const target = event.composedPath()[0]
+  if (target instanceof Element && target.matches('.n-modal-mask, .n-modal-scroll-content')) {
+    event.preventDefault()
   }
-}, { immediate: true })
+}
 
 watch(() => [props.show, props.date] as const, ([show]) => {
   clearBoundaryTimer()
@@ -94,41 +78,39 @@ watch(() => props.today, today => {
 
 onBeforeUnmount(() => {
   clearBoundaryTimer()
-  window.removeEventListener('resize', updateViewportWidth)
 })
 </script>
 
 <template>
-  <NPopover
+  <NModal
     :show="show"
-    trigger="manual"
-    placement="top"
-    :x="x"
-    :y="y"
-    :width="340"
-    :style="popoverSizeStyle"
-    :flip="true"
-    :show-arrow="false"
-    :animated="false"
-    :raw="true"
-    :theme-overrides="popoverThemeOverrides"
-    :content-style="popoverContentStyle"
+    preset="card"
+    class="lunar-calendar-modal"
+    :content-style="modalContentStyle"
+    size="small"
+    :bordered="false"
+    :mask-closable="true"
+    :close-on-esc="true"
+    :auto-focus="true"
+    :trap-focus="true"
+    :closable="false"
+    aria-label="农历日期详情"
+    @mask-click="preventBackdropClickThrough"
+    @update:show="visible => !visible && emit('close')"
   >
     <section
       v-if="details && timePillars"
-      id="diary-lunar-calendar-popover"
-      class="lunar-calendar-popover-content"
-      role="dialog"
-      aria-label="农历日期详情"
+      id="diary-lunar-calendar-modal"
+      class="lunar-calendar-modal-content"
     >
-      <header class="lunar-calendar-popover-header">
-        <p class="lunar-calendar-popover-ganzhi">
+      <header class="lunar-calendar-modal-header">
+        <p class="lunar-calendar-modal-ganzhi">
           {{ details.yearGanZhi }}年 {{ details.monthGanZhi }}月 {{ details.dayGanZhi }}日
         </p>
-        <p class="lunar-calendar-popover-date">{{ lunarDateLabel }}</p>
+        <p class="lunar-calendar-modal-date">{{ lunarDateLabel }}</p>
       </header>
 
-      <div class="lunar-calendar-popover-divider" aria-hidden="true" />
+      <div class="lunar-calendar-modal-divider" aria-hidden="true" />
 
       <div class="lunar-calendar-time-grid" aria-label="十二时辰">
         <div
@@ -138,48 +120,48 @@ onBeforeUnmount(() => {
           :class="{ 'is-current-time': currentPillarKey === pillar.key }"
           :data-time-pillar="pillar.key"
         >
-          <span class="lunar-calendar-time-ganzhi">{{ pillar.ganZhi }}</span>
+          <span class="lunar-calendar-time-ganzhi">{{ pillar.ganZhi }}时</span>
           <span class="lunar-calendar-time-range">{{ pillar.range }}</span>
         </div>
       </div>
     </section>
-  </NPopover>
+  </NModal>
 </template>
 
 <style scoped>
-.lunar-calendar-popover-content {
+.lunar-calendar-modal-content {
   display: grid;
   min-width: 0;
   color: var(--text);
 }
 
-.lunar-calendar-popover-header {
+.lunar-calendar-modal-header {
   display: grid;
   justify-items: center;
   gap: 4px;
   min-width: 0;
 }
 
-.lunar-calendar-popover-header p {
+.lunar-calendar-modal-header p {
   margin: 0;
   white-space: nowrap;
 }
 
-.lunar-calendar-popover-ganzhi {
+.lunar-calendar-modal-ganzhi {
   color: var(--text);
   font-size: 13px;
   font-weight: 400;
   line-height: 18px;
 }
 
-.lunar-calendar-popover-date {
+.lunar-calendar-modal-date {
   color: var(--text-muted);
   font-size: 12px;
   font-weight: 400;
   line-height: 16px;
 }
 
-.lunar-calendar-popover-divider {
+.lunar-calendar-modal-divider {
   margin: 12px 0;
   border-top: 1px solid color-mix(in srgb, var(--nuvyn-border) 55%, transparent);
 }
@@ -221,6 +203,15 @@ onBeforeUnmount(() => {
 
 .lunar-calendar-time-item.is-current-time {
   background: color-mix(in srgb, var(--accent) 8%, transparent);
+}
+
+:global(.lunar-calendar-modal.n-card) {
+  width: min(340px, calc(100vw - 24px));
+  max-width: calc(100vw - 24px);
+  min-width: 0;
+  border: 1px solid color-mix(in srgb, var(--nuvyn-border) 58%, transparent);
+  border-radius: 12px;
+  background-color: var(--nuvyn-surface-1);
 }
 
 @media (max-width: 360px) {
