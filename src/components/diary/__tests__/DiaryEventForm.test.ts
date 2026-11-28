@@ -103,7 +103,7 @@ describe('DiaryEventForm', () => {
   it('shows only the essential single date fields for a milestone', () => {
     const { wrapper } = mountEventForm()
 
-    expect(wrapper.findAll('[data-testid^="event-type-"]')).toHaveLength(4)
+    expect(wrapper.findAll('[data-testid^="event-type-"]')).toHaveLength(5)
     expect(wrapper.get('[aria-label="事件名称"]').element).toBeTruthy()
     expect(getProp(getControl(wrapper, NInput, '事件名称'), 'placeholder')).toBe('例如：买下第一套房')
     expect(wrapper.get('[aria-label="事件备注"]').element).toBeTruthy()
@@ -112,6 +112,82 @@ describe('DiaryEventForm', () => {
     expect(visibleControls(wrapper, NTimePicker)).toHaveLength(0)
     expect(wrapper.find('.event-advanced').attributes('open')).toBeUndefined()
     expect(wrapper.get('.event-advanced summary').text()).toContain('更多选项')
+    wrapper.unmount()
+  })
+
+  it('creates an open-ended life period without recurrence, time, or countdown controls', async () => {
+    const { wrapper, fields } = mountEventForm()
+    await wrapper.get('[data-testid="event-type-period"]').trigger('click')
+
+    expect(fields.value).toMatchObject({
+      type: 'period', emoji: '💼', startDate: '2026-07-03', endDate: null,
+      recurrence: 'none', allDay: true, startTime: null, endTime: null, showCountdown: false,
+    })
+    expect(getProp(getControl(wrapper, DiaryDatePicker, '结束日期'), 'modelValue')).toBeNull()
+    expect(getProp(getControl(wrapper, DiaryDatePicker, '结束日期'), 'placeholder')).toBe('未结束')
+    expect(getProp(getControl(wrapper, DiaryDatePicker, '结束日期'), 'clearable')).toBe(true)
+    expect(wrapper.find('.event-date-section h2').exists()).toBe(false)
+    expect(visibleControls(wrapper, DiaryDatePicker)).toHaveLength(2)
+    expect(visibleControls(wrapper, NTimePicker)).toHaveLength(0)
+    expect(wrapper.text()).not.toContain('显示倒数日')
+    expect(parseEvent(fields.value)).not.toBeNull()
+
+    await getControl(wrapper, DiaryDatePicker, '结束日期').vm.$emit('update:modelValue', '2027-07-03')
+    expect(parseEvent(fields.value)?.endDate).toBe('2027-07-03')
+    await getControl(wrapper, DiaryDatePicker, '结束日期').vm.$emit('update:modelValue', null)
+    expect(fields.value.endDate).toBeNull()
+    expect(parseEvent(fields.value)).not.toBeNull()
+    wrapper.unmount()
+  })
+
+  it('requires confirmation before converting an open or long Life Period to a bounded Event type', async () => {
+    const period: EventFields = {
+      ...gregorianEvent,
+      type: 'period',
+      emoji: '💼',
+      endDate: null,
+      recurrence: 'none',
+      showCountdown: false,
+    }
+    const { wrapper, fields } = mountEventForm(period, '2026-11-16', true)
+
+    await wrapper.get('[data-testid="event-type-schedule"]').trigger('click')
+    const openEndedPrompt = await answerPendingConfirm(false)
+    expect(openEndedPrompt.detail).toContain('未结束状态')
+    expect(fields.value).toMatchObject({ type: 'period', endDate: null })
+
+    await wrapper.get('[data-testid="event-type-schedule"]').trigger('click')
+    await answerPendingConfirm(true)
+    expect(fields.value).toMatchObject({ type: 'schedule', startDate: '2026-07-03', endDate: '2026-07-03' })
+    expect(parseEvent(fields.value)).not.toBeNull()
+
+    wrapper.unmount()
+
+    const longPeriod = { ...period, endDate: '2028-01-01' }
+    const longWrapper = mountEventForm(longPeriod, '2026-11-16', true)
+    await longWrapper.wrapper.get('[data-testid="event-type-schedule"]').trigger('click')
+    const longRangePrompt = await answerPendingConfirm(false)
+    expect(longRangePrompt.detail).toContain('超过 366 天')
+    expect(longWrapper.fields.value).toMatchObject({ type: 'period', endDate: '2028-01-01' })
+    longWrapper.wrapper.unmount()
+  })
+
+  it('preserves a meaningful bounded date range when converting an Event to a Life Period', async () => {
+    const { wrapper, fields } = mountEventForm({
+      ...gregorianEvent,
+      type: 'schedule',
+      startDate: '2025-01-01',
+      endDate: '2025-12-31',
+      recurrence: 'yearly',
+    }, '2026-11-16', true)
+
+    await wrapper.get('[data-testid="event-type-period"]').trigger('click')
+    await answerPendingConfirm(true)
+    expect(fields.value).toMatchObject({
+      type: 'period', startDate: '2025-01-01', endDate: '2025-12-31',
+      recurrence: 'none', allDay: true, startTime: null, endTime: null, showCountdown: false,
+    })
+    expect(parseEvent(fields.value)).not.toBeNull()
     wrapper.unmount()
   })
 

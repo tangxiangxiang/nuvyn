@@ -148,6 +148,8 @@ routes.get('/events', c => guarded(c, store => {
   const result = store.events(start, end, Number(offset))
   result.items = result.items.filter(event => {
     if (date) return occursOn(event, date)
+    if (event.type === 'period') return (event.startDate >= start && event.startDate <= end)
+      || (event.endDate !== null && event.endDate >= start && event.endDate <= end)
     const next = nextOccurrence(event, start)
     return occursOn(event, start) || (next !== null && next <= end)
   })
@@ -324,7 +326,9 @@ routes.put('/events/:id', c => guarded(c, async store => {
   const body = await c.req.json().catch(() => null)
   const fields = parseEvent(body)
   if (!idValid(id) || !fields || !version(body?.expectedVersion)) return c.json({ code: 'invalid-diary-event' }, 400)
-  return c.json({ event: store.putEvent(id, fields, body.expectedVersion) })
+  const event = store.putEvent(id, fields, body.expectedVersion)
+  await cleanupDiaryAttachmentStorage(metadataDb(), undefined, c.get('authUser')?.id).catch(() => {})
+  return c.json({ event })
 }))
 for (const kind of ['days', 'events'] as const) {
   routes.delete(`/${kind}/:id`, c => guarded(c, async (store, db) => {
@@ -333,7 +337,7 @@ for (const kind of ['days', 'events'] as const) {
     if (!version(body?.expectedVersion) || body.expectedVersion < 1 || !(kind === 'days' ? civilDate(id) : idValid(id))) return c.json({ code: 'invalid-diary-delete' }, 400)
     if (kind === 'days' && id > diaryToday(c.get('diaryTimeZone'))) return c.json({ code: 'diary-future-date' }, 403)
     store.remove(kind === 'days' ? 'day' : 'event', id, body.expectedVersion)
-    if (kind === 'days') await cleanupDiaryAttachmentStorage(db, undefined, c.get('authUser')?.id).catch(() => {})
+    await cleanupDiaryAttachmentStorage(db, undefined, c.get('authUser')?.id).catch(() => {})
     return c.json({ ok: true })
   }))
 }

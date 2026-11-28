@@ -16,7 +16,7 @@ async function assertResponse(response: Response): Promise<void> {
   try { code = String((await response.clone().json() as { code?: unknown }).code ?? '') } catch { /* use the stable fallback below */ }
   if (code === 'diary-future-date') throw new Error('未来日期的日记只能查看。')
   if (response.status === 413 || code === 'diary-attachment-too-large') throw new Error('单个附件不能超过 20 MiB。')
-  if (code === 'diary-attachment-too-many') throw new Error('每天最多添加 20 个附件。')
+  if (code === 'diary-attachment-too-many') throw new Error('最多添加 20 个附件。')
   if (response.status === 409) throw new Error('日记附件已发生变化，请重新打开后再试。')
   if (response.status === 423) throw new Error('日记已锁定，请重新解锁。')
   if (response.status === 415 || code === 'diary-attachment-unsupported') throw new Error('仅支持 PNG、JPEG、WebP、GIF、AVIF 图片和 PDF 文件。')
@@ -39,9 +39,30 @@ export const diaryAttachmentsApi = {
     return result.attachment
   },
 
+  async stageEvent(eventId: string, sessionId: string, file: File, signal?: AbortSignal): Promise<DiaryAttachment> {
+    if (file.size < 1 || file.size > MAX_DIARY_ATTACHMENT_BYTES) throw new Error('单个附件不能超过 20 MiB。')
+    const form = new FormData()
+    form.append('sessionId', sessionId)
+    form.append('file', file, file.name)
+    const response = await diaryAuthFetch(`/api/diary/attachments/events/${encodeURIComponent(eventId)}/stage`, {
+      method: 'POST', signal, cache: 'no-store', headers: { 'Idempotency-Key': createDiaryAttachmentClientId() }, body: form,
+    })
+    await assertResponse(response)
+    const result = await response.json() as { attachment?: DiaryAttachment }
+    if (!result.attachment || result.attachment.eventId !== eventId || result.attachment.size !== file.size) throw new Error('附件响应无效，请重试。')
+    return result.attachment
+  },
+
   async heartbeat(date: string, sessionId: string, signal?: AbortSignal): Promise<void> {
     const response = await diaryAuthFetch(`/api/diary/attachments/sessions/${encodeURIComponent(sessionId)}/heartbeat`, {
       method: 'POST', signal, cache: 'no-store', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ date }),
+    })
+    await assertResponse(response)
+  },
+
+  async heartbeatEvent(eventId: string, sessionId: string, signal?: AbortSignal): Promise<void> {
+    const response = await diaryAuthFetch(`/api/diary/attachments/events/${encodeURIComponent(eventId)}/sessions/${encodeURIComponent(sessionId)}/heartbeat`, {
+      method: 'POST', signal, cache: 'no-store',
     })
     await assertResponse(response)
   },

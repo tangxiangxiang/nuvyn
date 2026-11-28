@@ -27,6 +27,12 @@ function request(method: string, path: string, body?: unknown, unlocked = true, 
   const req = new Request(initial, { headers })
   return app.fetch(unlocked ? withDiaryCapability(auth, req, capability) : withAuthCookie(auth, req))
 }
+function attachmentRequest(method: string, path: string, body?: BodyInit, idempotencyKey?: string) {
+  const headers = new Headers({ Origin: auth.runtime.config.publicOrigin })
+  if (idempotencyKey) headers.set('Idempotency-Key', idempotencyKey)
+  const req = new Request(`http://127.0.0.1:3000/api/diary/attachments${path}`, { method, body, headers })
+  return app.fetch(withDiaryCapability(auth, req, capability))
+}
 const event = { title: '私人生日', description: '加密正文', emoji: '🎂', type: 'anniversary', startDate: '2024-02-29', endDate: '2024-02-29', startTime: null, endTime: null, allDay: true, recurrence: 'yearly', showCountdown: true, isPrimary: false, expectedVersion: 0 }
 describe('Diary database API', () => {
   beforeEach(async () => {
@@ -314,7 +320,7 @@ describe('Diary database API', () => {
     expect(aborted).toEqual({ items: [], nextCursor: null })
   })
   it('repairs a version 43 database missing Diary deletion receipts', async () => {
-    db.exec('DROP TABLE diary_day_attachments; DROP TABLE diary_task_occurrences; DROP TABLE diary_task_series_deleted_records; DROP TABLE diary_task_series; DROP TABLE diary_task_list_cursor_key; DROP TABLE diary_task_list_revisions; DROP TABLE diary_task_deleted_records; DROP TABLE diary_tasks; DROP TABLE diary_deleted_records; DROP TABLE IF EXISTS ai_finance_skill_tombstones; DROP TABLE IF EXISTS ai_finance_skills; DROP TABLE IF EXISTS ai_finance_memory_tombstones; DROP TABLE IF EXISTS ai_finance_memory; UPDATE schema_version SET version = 43')
+    db.exec('DROP TABLE diary_deleted_records; UPDATE schema_version SET version = 43')
     const path = '/days/2026-11-15'
     const eventPath = `/events/${randomUUID()}`
     const day = { moodId: null, description: 'Diary upgrade test', expectedVersion: 0 }
@@ -323,7 +329,7 @@ describe('Diary database API', () => {
     expect((await request('GET', path)).status).toBe(503)
     expect((await request('PUT', eventPath, event)).status).toBe(503)
 
-    database.applyMigrations(db)
+    database.applyMigrations(db, 44)
     const emptyDay = await request('GET', path)
     expect(emptyDay.status).toBe(200)
     expect(await emptyDay.json()).toEqual({ day: null, version: 0, attachments: [], today: diaryToday() })
@@ -398,6 +404,64 @@ describe('Diary database API', () => {
     expect((await countdowns.json()).items.map((item: { id: string }) => item.id).sort()).toEqual([first, second].sort())
     expect((await request('PUT', `/events/${first}`, { ...event, title: '更新', expectedVersion: 1 })).status).toBe(200)
     expect((await request('DELETE', `/events/${first}`, { expectedVersion: 1 })).status).toBe(409)
+  })
+  it('stores open-ended periods, marks only endpoints, and searches from the start date', async () => {
+    const id = randomUUID()
+    const period = {
+      title: '跨年人生阶段', description: '长期经历', emoji: '💼', type: 'period',
+      startDate: '2020-01-31', endDate: '2027-07-01', startTime: null, endTime: null,
+      allDay: true, dateRule: { calendar: 'gregory' }, recurrence: 'none',
+      showCountdown: false, isPrimary: false, expectedVersion: 0,
+    }
+    expect((await request('PUT', `/events/${id}`, { ...period, endDate: null })).status).toBe(200)
+    expect(await (await request('GET', `/events/${id}`)).json()).toMatchObject({ event: { type: 'period', endDate: null } })
+    expect((await request('PUT', `/events/${id}`, { ...period, endDate: '2019-12-31' })).status).toBe(400)
+    expect((await request('PUT', `/events/${id}`, { ...period, recurrence: 'yearly' })).status).toBe(400)
+
+    expect((await request('PUT', `/events/${id}`, { ...period, expectedVersion: 1 })).status).toBe(200)
+    const endpoint = await request('GET', '/events?start=2027-07-01&end=2027-07-31&date=2027-07-01')
+    expect((await endpoint.json()).items.map((item: { id: string }) => item.id)).toEqual([id])
+    const interior = await request('GET', '/events?start=2024-01-01&end=2024-01-31&date=2024-01-15')
+    expect((await interior.json()).items).toEqual([])
+    const search = await (await request('POST', '/events/search', { query: '跨年人生阶段' })).json()
+    expect(search.items).toMatchObject([{ id, type: 'period', targetDate: '2020-01-31' }])
+
+    const sameDay = randomUUID()
+    expect((await request('PUT', `/events/${sameDay}`, { ...period, startDate: '2027-07-01', endDate: '2027-07-01' })).status).toBe(200)
+    const sameDayResult = await request('GET', '/events?start=2027-07-01&end=2027-07-31&date=2027-07-01')
+    expect((await sameDayResult.json()).items.filter((item: { id: string }) => item.id === sameDay)).toHaveLength(1)
+  })
+
+  it('stages and persists event attachments independently, then removes them with the Event', async () => {
+    const id = randomUUID()
+    const sessionId = randomUUID()
+    const requestKey = randomUUID()
+    const bytes = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAAAAAA6fptVAAAACklEQVR4nGNgAAAAAgABSK+kcQAAAABJRU5ErkJggg==', 'base64')
+    const form = new FormData()
+    form.set('sessionId', sessionId)
+    form.set('file', new File([bytes], 'period.png', { type: 'image/png' }))
+    const stage = await attachmentRequest('POST', `/events/${id}/stage`, form, requestKey)
+    expect(stage.status).toBe(201)
+    const { attachment } = await stage.json() as { attachment: { id: string; eventId: string; size: number } }
+    expect(attachment).toMatchObject({ eventId: id, size: bytes.length })
+    expect((await attachmentRequest('POST', `/events/${id}/sessions/${sessionId}/heartbeat`)).status).toBe(204)
+
+    const period = {
+      title: '附有证明材料的阶段', description: '', emoji: '💼', type: 'period',
+      startDate: '2020-01-01', endDate: null, startTime: null, endTime: null,
+      allDay: true, dateRule: { calendar: 'gregory' }, recurrence: 'none',
+      attachmentIds: [attachment.id], showCountdown: false, isPrimary: false, expectedVersion: 0,
+    }
+    const saved = await request('PUT', `/events/${id}`, period)
+    expect(saved.status).toBe(200)
+    expect(await saved.json()).toMatchObject({ event: { attachmentIds: [attachment.id], attachments: [{ id: attachment.id, eventId: id }] } })
+    const content = await attachmentRequest('GET', `/${attachment.id}/content`)
+    expect(content.status).toBe(200)
+    expect(Buffer.from(await content.arrayBuffer())).toEqual(bytes)
+
+    expect((await request('DELETE', `/events/${id}`, { expectedVersion: 1 })).status).toBe(200)
+    expect((db.prepare('SELECT id FROM diary_event_attachments WHERE owner_user_id = ? AND id = ?').get(auth.userId, attachment.id))).toBeUndefined()
+    expect((await attachmentRequest('GET', `/${attachment.id}/content`)).status).toBe(404)
   })
   it('stores lunar rules through the encrypted event API and filters their real Gregorian occurrences', async () => {
     const id = randomUUID()

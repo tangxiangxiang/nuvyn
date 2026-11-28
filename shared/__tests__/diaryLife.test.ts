@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { lunarToSolar } from '../lunarCalendar'
-import { birthdayAgeAt, civilDate, dayDistance, displayEventTitle, eventOccurrenceStart, nextOccurrence, occurrenceInYear, occursOn, parseDay, parseEvent, type EventFields } from '../diaryLife'
+import { birthdayAgeAt, civilDate, dayDistance, displayEventTitle, eventOccurrenceStart, lifePeriodSummary, nextOccurrence, occurrenceInYear, occursOn, parseDay, parseEvent, type EventFields } from '../diaryLife'
 
 const event: EventFields = { title: '生日', description: '', emoji: '🎂', type: 'anniversary', startDate: '2024-02-29', endDate: '2024-02-29', startTime: null, endTime: null, allDay: true, recurrence: 'yearly', showCountdown: true, isPrimary: false }
 describe('Diary natural days', () => {
@@ -77,6 +77,67 @@ describe('Diary natural days', () => {
     expect(parseEvent({ ...event, allDay: false, startTime: '25:00' })).toBeNull()
     expect(parseEvent({ ...event, allDay: false, startTime: '13:00', endTime: '12:00' })).toBeNull()
     expect(parseEvent({ ...event, allDay: false, endDate: '2024-03-01', startTime: '13:00', endTime: '12:00' })).not.toBeNull()
+  })
+  it('validates open-ended life periods without relaxing other Event ranges', () => {
+    const period: EventFields = {
+      ...event,
+      title: '第一份工作',
+      emoji: '💼',
+      type: 'period',
+      startDate: '2010-01-31',
+      endDate: null,
+      recurrence: 'none',
+      showCountdown: false,
+    }
+    expect(parseEvent(period)).toMatchObject({ type: 'period', endDate: null, startDate: '2010-01-31' })
+    expect(parseEvent({ ...period, endDate: '2025-01-31' })).not.toBeNull()
+    expect(parseEvent({ ...period, endDate: '2009-12-31' })).toBeNull()
+    expect(parseEvent({ ...period, recurrence: 'yearly' })).toBeNull()
+    expect(parseEvent({ ...period, showCountdown: true })).toBeNull()
+    expect(parseEvent({ ...period, allDay: false })).toBeNull()
+    expect(parseEvent({ ...period, endTime: '09:00' })).toBeNull()
+    expect(parseEvent({ ...period, dateRule: {
+      calendar: 'chinese', lunarMonth: 1, lunarDay: 1, isLeapMonth: false,
+      leapMonthPolicy: 'regular-month', shortMonthPolicy: 'last-day',
+    } })).toBeNull()
+    expect(parseEvent({ ...period, attachmentIds: ['08a5c822-0d61-4e6c-a62c-1931a4da0771'] })?.attachmentIds)
+      .toEqual(['08a5c822-0d61-4e6c-a62c-1931a4da0771'])
+    expect(parseEvent({ ...event, type: 'schedule', startDate: '2020-01-01', endDate: '2021-01-02' })).toBeNull()
+  })
+  it('marks only life-period endpoints and calculates natural-date status and duration', () => {
+    const period: EventFields = {
+      ...event,
+      title: '居住经历',
+      type: 'period',
+      startDate: '2023-07-01',
+      endDate: '2027-07-01',
+      recurrence: 'none',
+      showCountdown: false,
+    }
+    expect(occursOn(period, '2023-07-01')).toBe(true)
+    expect(occursOn(period, '2025-01-01')).toBe(false)
+    expect(occursOn(period, '2027-07-01')).toBe(true)
+    expect(occursOn({ ...period, endDate: null }, '2027-07-01')).toBe(false)
+    expect(eventOccurrenceStart(period, '2027-07-01')).toBe('2023-07-01')
+    expect(eventOccurrenceStart(period, '2025-01-01')).toBeNull()
+    expect(nextOccurrence(period, '2024-01-01')).toBeNull()
+
+    expect(lifePeriodSummary({ ...period, endDate: null }, '2023-07-01'))
+      .toEqual({ status: 'active', duration: '0 天' })
+    expect(lifePeriodSummary({ ...period, endDate: null }, '2026-11-27'))
+      .toEqual({ status: 'active', duration: '3 年 4 个月 26 天' })
+    expect(lifePeriodSummary(period, '2027-06-30'))
+      .toEqual({ status: 'active', duration: '3 年 11 个月 29 天' })
+    expect(lifePeriodSummary(period, '2027-07-01'))
+      .toEqual({ status: 'ended', duration: '4 年' })
+    expect(lifePeriodSummary(period, '2028-01-01'))
+      .toEqual({ status: 'ended', duration: '4 年' })
+    expect(lifePeriodSummary({ ...period, startDate: '2027-04-03', endDate: null }, '2027-03-01'))
+      .toEqual({ status: 'upcoming', duration: '1 个月 2 天' })
+    expect(lifePeriodSummary({ ...period, startDate: '2024-01-31', endDate: '2024-02-28' }, '2024-02-28'))
+      .toEqual({ status: 'ended', duration: '28 天' })
+    expect(lifePeriodSummary({ ...period, startDate: '2024-02-29', endDate: '2025-02-28' }, '2025-02-28'))
+      .toEqual({ status: 'ended', duration: '11 个月 30 天' })
   })
   it('defaults legacy events to Gregorian and calculates validated lunar yearly occurrences', () => {
     expect(parseEvent(event)?.dateRule).toEqual({ calendar: 'gregory' })

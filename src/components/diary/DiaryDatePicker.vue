@@ -7,11 +7,13 @@ import { Calendar, X } from '@vicons/tabler'
 const props = withDefaults(defineProps<{
   modelValue: string | null
   label: string
+  placeholder?: string
   clearable?: boolean
   status?: 'success' | 'error'
   isDateDisabled?: DatePickerProps['isDateDisabled']
 }>(), {
   clearable: false,
+  placeholder: undefined,
   status: undefined,
   isDateDisabled: undefined,
 })
@@ -81,7 +83,7 @@ function clearDate(): void {
     <NInput
       class="diary-date-picker-input"
       :value="inputValue"
-      :placeholder="`请选择${props.label}`"
+      :placeholder="props.placeholder ?? `请选择${props.label}`"
       :status="props.status"
       :readonly="touchScreen"
       aria-haspopup="dialog"

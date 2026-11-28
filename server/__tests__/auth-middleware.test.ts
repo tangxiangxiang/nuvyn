@@ -8,6 +8,7 @@ import {
   closeAuthTestContext,
   createAuthenticatedTestContext,
 } from './helpers/auth.js'
+import { requiresJsonBody } from '../auth/middleware.js'
 
 let sentinelExecuted = false
 app.get('/api/__auth_boundary_test_sentinel', (c) => {
@@ -16,6 +17,14 @@ app.get('/api/__auth_boundary_test_sentinel', (c) => {
 })
 
 describe('Phase 5 central authentication boundary', () => {
+  it('allows multipart only on the exact authenticated attachment upload routes', () => {
+    expect(requiresJsonBody('POST', '/api/diary/attachments/stage')).toBe(false)
+    expect(requiresJsonBody('POST', '/api/diary/attachments/events/abc-123/stage')).toBe(false)
+    expect(requiresJsonBody('POST', '/api/diary/attachments/events/abc-123')).toBe(true)
+    expect(requiresJsonBody('POST', '/api/diary/attachments/events/abc-123/stage/extra')).toBe(true)
+    expect(requiresJsonBody('PUT', '/api/diary/attachments/events/abc-123/stage')).toBe(true)
+  })
+
   afterEach(() => {
     // Each test owns its context and closes it in the test body. This hook is
     // intentionally empty: it documents that no global test bypass exists.

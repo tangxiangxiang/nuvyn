@@ -1,6 +1,6 @@
 import { Temporal } from '@js-temporal/polyfill'
 import { isMoodId, isDiaryCustomMoodId } from './diaryMood.js'
-import { MAX_DIARY_DAY_ATTACHMENTS } from './diaryAttachments.js'
+import { MAX_DIARY_DAY_ATTACHMENTS, MAX_DIARY_EVENT_ATTACHMENTS } from './diaryAttachments.js'
 import { lunarOccurrenceInYear, lunarToSolar, MAX_LUNAR_SOLAR_DATE, MIN_LUNAR_SOLAR_DATE, nextLunarOccurrence, solarToLunar, type EventDateRule } from './lunarCalendar.js'
 
 export interface DiaryImageGroup { entryId: string | null; attachmentIds: string[] }
@@ -36,22 +36,29 @@ export interface EventFields {
   title: string
   description: string
   emoji: string
-  type: 'milestone' | 'anniversary' | 'schedule' | 'birthday'
+  type: 'milestone' | 'anniversary' | 'schedule' | 'birthday' | 'period'
   /** The source calendar and year used for age-aware annual birthday events. */
   birthday?: { birthLunarYear: number } | { birthGregorianYear: number }
   startDate: string
-  endDate: string
+  endDate: string | null
   startTime: string | null
   endTime: string | null
   allDay: boolean
   /** Missing on historical encrypted records means the original Gregorian calendar. */
   dateRule?: EventDateRule
   recurrence: 'none' | 'yearly'
+  attachmentIds?: string[]
   showCountdown: boolean
   isPrimary: boolean
 }
 export interface DiaryDay extends DayFields { date: string; version: number; createdAt: number; updatedAt: number }
-export interface DiaryEvent extends EventFields { id: string; version: number; createdAt: number; updatedAt: number }
+export interface DiaryEvent extends EventFields {
+  id: string
+  version: number
+  createdAt: number
+  updatedAt: number
+  attachments?: import('./diaryAttachments.js').DiaryAttachment[]
+}
 export function civilDate(value: unknown): value is string {
   if (typeof value !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(value) || value < '0001-01-01') return false
   try { return Temporal.PlainDate.from(value, { overflow: 'reject' }).toString() === value } catch { return false }
@@ -61,6 +68,25 @@ export function dayDistance(from: string, to: string): number {
   return Temporal.PlainDate.from(from).until(Temporal.PlainDate.from(to)).days
 }
 export function addDays(date: string, days: number): string { return Temporal.PlainDate.from(date).add({ days }).toString() }
+export type LifePeriodSummary = {
+  status: 'upcoming' | 'active' | 'ended'
+  duration: string
+}
+function formatPeriodDuration(from: string, to: string): string {
+  const difference = Temporal.PlainDate.from(from).until(Temporal.PlainDate.from(to), { largestUnit: 'year' })
+  const units = [
+    difference.years ? `${difference.years} 年` : '',
+    difference.months ? `${difference.months} 个月` : '',
+    difference.days ? `${difference.days} 天` : '',
+  ].filter(Boolean)
+  return units.join(' ') || '0 天'
+}
+export function lifePeriodSummary(event: Pick<EventFields, 'type' | 'startDate' | 'endDate'>, today: string): LifePeriodSummary | null {
+  if (event.type !== 'period') return null
+  if (today < event.startDate) return { status: 'upcoming', duration: formatPeriodDuration(today, event.startDate) }
+  if (event.endDate !== null && today >= event.endDate) return { status: 'ended', duration: formatPeriodDuration(event.startDate, event.endDate) }
+  return { status: 'active', duration: formatPeriodDuration(event.startDate, today) }
+}
 export const MAX_DAY_ENTRIES = 100
 export const MAX_DAY_ENTRY_CHARACTERS = 4000
 export const MAX_DAY_TOTAL_CHARACTERS = 4000
@@ -157,13 +183,23 @@ export function parseEvent(value: unknown): EventFields | null {
     || typeof v.emoji !== 'string' || !v.emoji || v.emoji.length > 100
     || !/\p{Extended_Pictographic}|\p{Regional_Indicator}|\u20e3/u.test(v.emoji)
     || [...new Intl.Segmenter(undefined, { granularity: 'grapheme' }).segment(v.emoji)].length !== 1
-    || !['milestone', 'anniversary', 'schedule', 'birthday'].includes(v.type)
-    || !civilDate(v.startDate) || !civilDate(v.endDate) || v.endDate < v.startDate
-    || dayDistance(v.startDate, v.endDate) > 366
+    || !['milestone', 'anniversary', 'schedule', 'birthday', 'period'].includes(v.type)
+    || !civilDate(v.startDate)
     || typeof v.allDay !== 'boolean' || typeof v.showCountdown !== 'boolean' || typeof v.isPrimary !== 'boolean'
     || !['none', 'yearly'].includes(v.recurrence)) return null
   const time = (t: unknown) => t === null || (typeof t === 'string' && /^([01]\d|2[0-3]):[0-5]\d$/.test(t))
   if (!time(v.startTime) || !time(v.endTime)) return null
+  if (v.type === 'period') {
+    if (!(v.endDate === null || (civilDate(v.endDate) && v.endDate >= v.startDate))
+      || v.recurrence !== 'none' || dateRule.calendar !== 'gregory' || !v.allDay
+      || v.startTime !== null || v.endTime !== null || v.showCountdown) return null
+  } else if (!civilDate(v.endDate) || v.endDate < v.startDate || dayDistance(v.startDate, v.endDate) > 366) {
+    return null
+  }
+  const attachmentIds = (v as EventFields & { attachmentIds?: unknown }).attachmentIds
+  if (attachmentIds !== undefined && (!Array.isArray(attachmentIds) || attachmentIds.length > MAX_DIARY_EVENT_ATTACHMENTS
+    || attachmentIds.some(id => typeof id !== 'string' || !DIARY_UUID.test(id))
+    || new Set(attachmentIds).size !== attachmentIds.length)) return null
   if (!v.allDay && v.endTime !== null && v.startTime === null) return null
   if (!v.allDay && v.startDate === v.endDate && v.startTime && v.endTime && v.endTime <= v.startTime) return null
   if (dateRule.calendar === 'chinese' && (v.recurrence !== 'yearly' || !v.allDay
@@ -202,7 +238,9 @@ export function parseEvent(value: unknown): EventFields | null {
   return { title, description: v.description.trim(), emoji: v.emoji, type: v.type,
     startDate: v.startDate, endDate: v.endDate, startTime: v.allDay ? null : v.startTime,
     endTime: v.allDay ? null : v.endTime, allDay: v.allDay, dateRule, recurrence: v.recurrence,
-    ...(birthday ? { birthday } : {}), showCountdown: v.showCountdown, isPrimary: v.isPrimary }
+    ...(birthday ? { birthday } : {}),
+    ...(attachmentIds ? { attachmentIds: [...attachmentIds] as string[] } : {}),
+    showCountdown: v.showCountdown, isPrimary: v.isPrimary }
 }
 
 function parseEventDateRule(value: unknown): EventDateRule | null {
@@ -232,7 +270,9 @@ export function occurrenceInYear(event: EventFields, year: number): string | nul
   return Temporal.PlainDate.from(event.startDate).with({ year }, { overflow: 'constrain' }).toString()
 }
 export function occursOn(event: EventFields, date: string): boolean {
+  if (event.type === 'period') return date === event.startDate || (event.endDate !== null && date === event.endDate)
   if (date < event.startDate) return false
+  if (event.endDate === null) return false
   if (event.recurrence === 'none') return date <= event.endDate && date >= event.startDate
   if (event.dateRule?.calendar === 'chinese') return nextOccurrence(event, date) === date
   const year = Temporal.PlainDate.from(date).year
@@ -245,7 +285,9 @@ export function occursOn(event: EventFields, date: string): boolean {
 }
 /** Returns the start date of the Event occurrence containing a displayed date. */
 export function eventOccurrenceStart(event: EventFields, date: string): string | null {
+  if (event.type === 'period') return date === event.startDate || (event.endDate !== null && date === event.endDate) ? event.startDate : null
   if (!civilDate(date) || date < event.startDate) return null
+  if (event.endDate === null) return null
   if (event.recurrence === 'none') return date <= event.endDate ? event.startDate : null
   const year = Temporal.PlainDate.from(date).year
   const duration = dayDistance(event.startDate, event.endDate)
@@ -258,7 +300,9 @@ export function eventOccurrenceStart(event: EventFields, date: string): string |
   return null
 }
 export function nextOccurrence(event: EventFields, today: string): string | null {
+  if (event.type === 'period') return event.startDate >= today ? event.startDate : null
   if (event.recurrence === 'none') return event.startDate >= today ? event.startDate : null
+  if (event.endDate === null) return null
   if (event.dateRule?.calendar === 'chinese') {
     return nextLunarOccurrence(event.dateRule, today < event.startDate ? event.startDate : today)
   }
