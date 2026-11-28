@@ -21,7 +21,30 @@ Follow the existing two-space indentation, single quotes in TypeScript, and semi
 
 ## Testing Guidelines
 
-Vitest tests use `*.test.ts` under colocated `__tests__/` directories. Server tests follow the same pattern in `server/__tests__/`; Playwright specifications live in `e2e/`. Add focused tests for changed behavior, especially persistence, migrations, filtering, recovery, and timezone logic. Run the narrow suite while iterating, then `npm run typecheck`, `npm test`, and relevant E2E coverage before submission.
+Vitest tests use `*.test.ts` under colocated `__tests__/` directories. Server tests follow the same pattern in `server/__tests__/`; Playwright specifications live in `e2e/`. Add focused tests for changed behavior, especially persistence, migrations, filtering, recovery, and timezone logic.
+
+### Development Phase
+
+Optimize for fast iteration; do not run tests by default after each change.
+
+- For routine UI, CSS, layout, spacing, copy, and icon changes, do not proactively run tests.
+- For small code changes, inspect the affected code and Git diff; do not repeat typecheck, build, unit tests, or E2E after every iteration.
+- For core business logic, database migrations, data safety, or complex algorithms, run the directly relevant focused tests when useful.
+- During local UI review and design iteration, do not run the full test suite.
+- If the user explicitly requests tests or verification, follow that request.
+
+### Commit, Push, and Release Phase
+
+Run necessary validation when the user explicitly asks to commit, push, or release. Consider the cumulative changes and validate them together rather than rerunning the same checks after every development edit.
+
+- Run the relevant static checks and tests for the accumulated change set.
+- Prefer GitHub Actions for full-suite validation when it provides the same coverage; avoid duplicating the full CI suite locally without a reason.
+- For releases, confirm all required CI checks pass before creating or pushing a release tag.
+- Never skip CI, weaken tests, or change test configuration to hide failures.
+
+### Development Delivery Report
+
+After development changes, briefly report what changed, which files were affected, what the user should review, and which checks were run. If no tests were run, state: “Tests were not run; they are deferred to the commit-stage validation.” Never describe unrun tests as passing.
 
 ## Commit & Pull Request Guidelines
 
