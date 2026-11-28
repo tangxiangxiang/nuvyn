@@ -1,6 +1,5 @@
 export const MAX_DIARY_ATTACHMENT_BYTES = 20 * 1024 * 1024
 export const MAX_DIARY_DAY_ATTACHMENTS = 20
-export const MAX_DIARY_EVENT_ATTACHMENTS = 20
 export const DIARY_ATTACHMENT_STAGE_LEASE_MS = 15 * 60 * 1000
 export const DIARY_ATTACHMENT_STAGE_HEARTBEAT_INTERVAL_MS = 60 * 1000
 
@@ -22,10 +21,7 @@ type DiaryAttachmentFields = {
   createdAt: number
   order: number
 }
-export type DiaryAttachment = DiaryAttachmentFields & (
-  | { date: string; eventId?: never }
-  | { eventId: string; date?: never }
-)
+export type DiaryAttachment = DiaryAttachmentFields & { date: string }
 
 export function isDiaryAttachmentMimeType(value: unknown): value is DiaryAttachmentMimeType {
   return typeof value === 'string' && (DIARY_ATTACHMENT_MIME_TYPES as readonly string[]).includes(value)

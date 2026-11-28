@@ -95,16 +95,13 @@ export class DiaryAttachmentStorage {
 
 async function cleanupDeleting(db: Database, storage: DiaryAttachmentStorage, owner?: number): Promise<void> {
   const rows = (owner === undefined
-    ? db.prepare(`SELECT id, 'day' AS scope FROM diary_day_attachments WHERE status = 'deleting'
-      UNION ALL SELECT id, 'event' AS scope FROM diary_event_attachments WHERE status = 'deleting'`).all()
-    : db.prepare(`SELECT id, 'day' AS scope FROM diary_day_attachments WHERE owner_user_id = ? AND status = 'deleting'
-      UNION ALL SELECT id, 'event' AS scope FROM diary_event_attachments WHERE owner_user_id = ? AND status = 'deleting'`).all(owner, owner)) as Array<{ id: string; scope: 'day' | 'event' }>
+    ? db.prepare("SELECT id FROM diary_day_attachments WHERE status = 'deleting'").all()
+    : db.prepare("SELECT id FROM diary_day_attachments WHERE owner_user_id = ? AND status = 'deleting'").all(owner)) as Array<{ id: string }>
   for (const row of rows) {
     try {
       await storage.remove(row.id)
-      const table = row.scope === 'day' ? 'diary_day_attachments' : 'diary_event_attachments'
-      if (owner === undefined) db.prepare(`DELETE FROM ${table} WHERE id = ? AND status = 'deleting'`).run(row.id)
-      else db.prepare(`DELETE FROM ${table} WHERE owner_user_id = ? AND id = ? AND status = 'deleting'`).run(owner, row.id)
+      if (owner === undefined) db.prepare("DELETE FROM diary_day_attachments WHERE id = ? AND status = 'deleting'").run(row.id)
+      else db.prepare("DELETE FROM diary_day_attachments WHERE owner_user_id = ? AND id = ? AND status = 'deleting'").run(owner, row.id)
     } catch {
       // Keep this row as a retryable tombstone and continue cleaning other
       // records. A single filesystem failure must not block valid attachments.
@@ -115,7 +112,6 @@ async function cleanupDeleting(db: Database, storage: DiaryAttachmentStorage, ow
 async function recover(db: Database, storage: DiaryAttachmentStorage): Promise<void> {
   await storage.ensureDirectory()
   db.prepare("UPDATE diary_day_attachments SET status = 'deleting', expires_at = NULL, stage_session_id = NULL WHERE status = 'staged' AND expires_at <= ?").run(Date.now())
-  db.prepare("UPDATE diary_event_attachments SET status = 'deleting', stage_event_id = NULL, expires_at = NULL, stage_session_id = NULL WHERE status = 'staged' AND expires_at <= ?").run(Date.now())
   await cleanupDeleting(db, storage)
 
   // A crash after the durable file write but before its SQLite insert leaves
@@ -141,20 +137,14 @@ export async function cleanupDiaryAttachmentStorage(db: Database, storage = new 
   const now = Date.now()
   const needsCleanup = owner === undefined
     ? db.prepare(`SELECT 1 AS found FROM diary_day_attachments
-      WHERE status = 'deleting' OR (status = 'staged' AND expires_at <= ?)
-      UNION ALL SELECT 1 FROM diary_event_attachments
-      WHERE status = 'deleting' OR (status = 'staged' AND expires_at <= ?) LIMIT 1`).get(now, now)
+      WHERE status = 'deleting' OR (status = 'staged' AND expires_at <= ?) LIMIT 1`).get(now)
     : db.prepare(`SELECT 1 AS found FROM diary_day_attachments WHERE owner_user_id = ?
-      AND (status = 'deleting' OR (status = 'staged' AND expires_at <= ?))
-      UNION ALL SELECT 1 FROM diary_event_attachments WHERE owner_user_id = ?
-      AND (status = 'deleting' OR (status = 'staged' AND expires_at <= ?)) LIMIT 1`).get(owner, now, owner, now)
+      AND (status = 'deleting' OR (status = 'staged' AND expires_at <= ?)) LIMIT 1`).get(owner, now)
   if (!needsCleanup && !orphanScanRequired.has(db)) return
   await ensureDiaryAttachmentStorage(db, storage)
   await withDiaryAttachmentStorageLock(async () => {
     if (owner === undefined) db.prepare("UPDATE diary_day_attachments SET status = 'deleting', expires_at = NULL, stage_session_id = NULL WHERE status = 'staged' AND expires_at <= ?").run(now)
     else db.prepare("UPDATE diary_day_attachments SET status = 'deleting', expires_at = NULL, stage_session_id = NULL WHERE owner_user_id = ? AND status = 'staged' AND expires_at <= ?").run(owner, now)
-    if (owner === undefined) db.prepare("UPDATE diary_event_attachments SET status = 'deleting', stage_event_id = NULL, expires_at = NULL, stage_session_id = NULL WHERE status = 'staged' AND expires_at <= ?").run(now)
-    else db.prepare("UPDATE diary_event_attachments SET status = 'deleting', stage_event_id = NULL, expires_at = NULL, stage_session_id = NULL WHERE owner_user_id = ? AND status = 'staged' AND expires_at <= ?").run(owner, now)
     await cleanupDeleting(db, storage, owner)
     if ((needsCleanup || orphanScanRequired.has(db)) && await cleanupOrphans(db, storage)) orphanScanRequired.delete(db)
   })
@@ -162,7 +152,7 @@ export async function cleanupDiaryAttachmentStorage(db: Database, storage = new 
 
 async function cleanupOrphans(db: Database, storage: DiaryAttachmentStorage): Promise<boolean> {
   let complete = true
-  const known = new Set((db.prepare('SELECT id FROM diary_day_attachments UNION SELECT id FROM diary_event_attachments').all() as Array<{ id: string }>).map(row => row.id))
+  const known = new Set((db.prepare('SELECT id FROM diary_day_attachments').all() as Array<{ id: string }>).map(row => row.id))
   for (const name of await storage.list()) {
     if (!UUID_V4.test(name) || known.has(name)) continue
     let stat
@@ -200,6 +190,5 @@ export async function cleanupDiaryAttachmentId(
   await withDiaryAttachmentStorageLock(async () => {
     await storage.remove(id)
     db.prepare("DELETE FROM diary_day_attachments WHERE owner_user_id = ? AND id = ? AND status = 'deleting'").run(owner, id)
-    db.prepare("DELETE FROM diary_event_attachments WHERE owner_user_id = ? AND id = ? AND status = 'deleting'").run(owner, id)
   })
 }

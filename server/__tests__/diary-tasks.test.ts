@@ -68,9 +68,9 @@ function seriesFields(overrides: Record<string, unknown> = {}) {
   }
 }
 
-function scheduleFields(overrides: Record<string, unknown> = {}) {
+function milestoneFields(overrides: Record<string, unknown> = {}) {
   return {
-    title: '周六体检', description: '带好证件', emoji: '🩺', type: 'schedule',
+    title: '周六体检', description: '带好证件', emoji: '🩺', type: 'milestone',
     startDate: '2026-11-21', endDate: '2026-11-21', startTime: null, endTime: null,
     allDay: true, recurrence: 'none', showCountdown: false, isPrimary: false,
     ...overrides,
@@ -296,7 +296,7 @@ describe('Diary task API', () => {
       dueDate: '2026-11-21',
       dueTime: '12:00',
     })
-    const sameDateEvent = { ...scheduleFields(), startDate: '2026-11-21', endDate: '2026-11-21' }
+    const sameDateEvent = { ...milestoneFields(), startDate: '2026-11-21', endDate: '2026-11-21' }
     expect((await request('PUT', `/events/${eventId}`, { ...sameDateEvent, expectedVersion: 0 })).status).toBe(200)
     expect((await request('PUT', `/tasks/${taskId}`, { ...taskFields, expectedVersion: 0 })).status).toBe(200)
 
@@ -773,7 +773,7 @@ describe('Diary task API', () => {
   it('rejects legacy Event-Todo association writes and keeps date-coincident records independent', async () => {
     const eventId = randomUUID()
     const taskId = randomUUID()
-    const sameDate = { ...scheduleFields(), startDate: '2026-11-21', endDate: '2026-11-21' }
+    const sameDate = { ...milestoneFields(), startDate: '2026-11-21', endDate: '2026-11-21' }
     expect((await request('PUT', `/events/${eventId}`, { ...sameDate, expectedVersion: 0 })).status).toBe(200)
 
     for (const legacyFields of [

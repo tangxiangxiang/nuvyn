@@ -1,5 +1,5 @@
 import { test, expect } from './fixtures/auth'
-import { chooseDiaryAction, clearDiaryTaskDate, diaryEventDateInput, diaryMonthLabel, diaryTaskDateInput, diaryTaskTimeInput, fillDiaryEventDate, fillDiaryTaskDate, fillDiaryTaskTime, selectNaiveOption, unlockDiary } from './helpers/diary-life'
+import { chooseDiaryAction, clearDiaryTaskDate, diaryEventDateInput, diaryMonthLabel, diaryTaskDateInput, diaryTaskTimeInput, fillDiaryTaskDate, fillDiaryTaskTime, selectNaiveOption, unlockDiary } from './helpers/diary-life'
 
 const fixtureYear = 1900 + Math.floor(Math.random() * 100)
 let testYear = fixtureYear
@@ -363,8 +363,8 @@ test('keeps Event and Todo markers visually separate across viewport sizes', asy
   await page.goto('/diary')
   await unlockDiary(page)
   const date = `${testYear}-11-16`
-  const event = (id: string, title: string, type: 'birthday' | 'schedule', isPrimary = false) => ({
-    id, title, description: '', emoji: type === 'birthday' ? '🎂' : '💼', type,
+  const event = (id: string, title: string, type: 'birthday' | 'milestone', isPrimary = false) => ({
+    id, title, description: '', emoji: type === 'birthday' ? '🎂' : '🎓', type,
     startDate: date, endDate: date, startTime: null, endTime: null, allDay: true,
     recurrence: 'none', showCountdown: false, isPrimary, version: 1,
     createdAt: 1, updatedAt: 1,
@@ -375,8 +375,8 @@ test('keeps Event and Todo markers visually separate across viewport sizes', asy
     if (request.method() === 'GET' && pathname === '/api/diary/life/events') {
       await route.fulfill({ json: { items: [
         event('birthday', '生日', 'birthday', true),
-        event('schedule-1', '日程一', 'schedule'),
-        event('schedule-2', '日程二', 'schedule'),
+        event('milestone-1', '时刻一', 'milestone'),
+        event('milestone-2', '时刻二', 'milestone'),
       ], next: null } })
     } else if (request.method() === 'GET' && pathname === '/api/diary/life/task-occurrences') {
       await route.fulfill({ json: { items: [{
@@ -1050,10 +1050,7 @@ test('date-coincident Todo and Event use separate views without altering each ot
   const cell = page.locator(`.diary-life-calendar [data-date="${date}"]`)
   await cell.click()
   await page.getByTestId('diary-add-event').click()
-  await page.getByTestId('event-type-schedule').click()
   await page.getByRole('textbox', { name: '事件名称' }).fill(eventTitle)
-  await fillDiaryEventDate(page, '开始日期', date)
-  await fillDiaryEventDate(page, '结束日期', date)
   await page.getByRole('button', { name: '保存', exact: true }).click()
   const eventButton = page.getByRole('button', { name: eventTitle, exact: true })
   await expect(eventButton).toBeVisible()

@@ -137,11 +137,14 @@ describe('Diary deadline visual state', () => {
     ], today)).toBe('completed')
   })
 
-  it('reminds for events today, tomorrow, active multi-day events and lunar birthdays', () => {
+  it('reminds for events today, tomorrow, readable legacy ranges and lunar birthdays', () => {
     expect(shouldShowEventDeadlineReminder(makeEvent(), today)).toBe(false)
     expect(shouldShowEventDeadlineReminder(makeEvent({ startDate: today, endDate: today }), today)).toBe(true)
     expect(shouldShowEventDeadlineReminder(makeEvent({ startDate: '2026-11-19', endDate: '2026-11-19' }), today)).toBe(true)
-    expect(shouldShowEventDeadlineReminder(makeEvent({ startDate: '2026-11-16', endDate: '2026-11-20' }), today)).toBe(true)
+    expect(shouldShowEventDeadlineReminder(makeEvent({
+      type: 'milestone', legacySchedule: true,
+      startDate: '2026-11-16', endDate: '2026-11-20',
+    }), today)).toBe(true)
     const lunarBirthday = makeEvent({
       startDate: '2026-07-03',
       endDate: '2026-07-03',

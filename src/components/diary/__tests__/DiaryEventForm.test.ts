@@ -55,6 +55,7 @@ function mountEventForm(
   initialFields: EventFields = gregorianEvent,
   today = '2026-11-16',
   isEditing = false,
+  legacySchedule = false,
 ) {
   const fields: Ref<EventFields> = ref(structuredClone(initialFields))
   const Host = defineComponent({
@@ -63,6 +64,7 @@ function mountEventForm(
         modelValue: fields.value,
         today,
         isEditing,
+        legacySchedule,
         'onUpdate:modelValue': (next: EventFields) => { fields.value = next },
       })
     },
@@ -103,7 +105,8 @@ describe('DiaryEventForm', () => {
   it('shows only the essential single date fields for a milestone', () => {
     const { wrapper } = mountEventForm()
 
-    expect(wrapper.findAll('[data-testid^="event-type-"]')).toHaveLength(5)
+    expect(wrapper.findAll('[data-testid^="event-type-"]')).toHaveLength(4)
+    expect(wrapper.text()).not.toContain('重要日程')
     expect(wrapper.get('[aria-label="事件名称"]').element).toBeTruthy()
     expect(getProp(getControl(wrapper, NInput, '事件名称'), 'placeholder')).toBe('例如：买下第一套房')
     expect(wrapper.get('[aria-label="事件备注"]').element).toBeTruthy()
@@ -151,21 +154,21 @@ describe('DiaryEventForm', () => {
     }
     const { wrapper, fields } = mountEventForm(period, '2026-11-16', true)
 
-    await wrapper.get('[data-testid="event-type-schedule"]').trigger('click')
+    await wrapper.get('[data-testid="event-type-milestone"]').trigger('click')
     const openEndedPrompt = await answerPendingConfirm(false)
     expect(openEndedPrompt.detail).toContain('未结束状态')
     expect(fields.value).toMatchObject({ type: 'period', endDate: null })
 
-    await wrapper.get('[data-testid="event-type-schedule"]').trigger('click')
+    await wrapper.get('[data-testid="event-type-milestone"]').trigger('click')
     await answerPendingConfirm(true)
-    expect(fields.value).toMatchObject({ type: 'schedule', startDate: '2026-07-03', endDate: '2026-07-03' })
+    expect(fields.value).toMatchObject({ type: 'milestone', startDate: '2026-07-03', endDate: '2026-07-03' })
     expect(parseEvent(fields.value)).not.toBeNull()
 
     wrapper.unmount()
 
     const longPeriod = { ...period, endDate: '2028-01-01' }
     const longWrapper = mountEventForm(longPeriod, '2026-11-16', true)
-    await longWrapper.wrapper.get('[data-testid="event-type-schedule"]').trigger('click')
+    await longWrapper.wrapper.get('[data-testid="event-type-milestone"]').trigger('click')
     const longRangePrompt = await answerPendingConfirm(false)
     expect(longRangePrompt.detail).toContain('超过 366 天')
     expect(longWrapper.fields.value).toMatchObject({ type: 'period', endDate: '2028-01-01' })
@@ -175,7 +178,7 @@ describe('DiaryEventForm', () => {
   it('preserves a meaningful bounded date range when converting an Event to a Life Period', async () => {
     const { wrapper, fields } = mountEventForm({
       ...gregorianEvent,
-      type: 'schedule',
+      type: 'milestone',
       startDate: '2025-01-01',
       endDate: '2025-12-31',
       recurrence: 'yearly',
@@ -187,104 +190,6 @@ describe('DiaryEventForm', () => {
       type: 'period', startDate: '2025-01-01', endDate: '2025-12-31',
       recurrence: 'none', allDay: true, startTime: null, endTime: null, showCountdown: false,
     })
-    expect(parseEvent(fields.value)).not.toBeNull()
-    wrapper.unmount()
-  })
-
-  it('shows schedule ranges and reveals time fields only when the event is not all-day', async () => {
-    const { wrapper, fields } = mountEventForm({
-      ...gregorianEvent,
-      type: 'schedule',
-      title: '家庭旅行',
-      endDate: '2026-07-05',
-    })
-
-    expect(visibleControls(wrapper, DiaryDatePicker)).toHaveLength(2)
-    expect(visibleControls(wrapper, NTimePicker)).toHaveLength(0)
-    await wrapper.get('.event-date-section .n-checkbox').trigger('click')
-    expect(fields.value.allDay).toBe(false)
-    await nextTick()
-    expect(visibleControls(wrapper, NTimePicker)).toHaveLength(2)
-    expect(getProp(getControl(wrapper, NTimePicker, '开始时间'), 'formattedValue')).toBeNull()
-    expect(wrapper.get('[aria-label="开始时间"]').attributes('required')).toBeDefined()
-    expect(wrapper.get('#event-start-time-error').text()).toBe('非全天日程请填写开始时间。')
-    expect(getControl(wrapper, NTimePicker, '开始时间').props('status')).toBe('error')
-    await getControl(wrapper, NTimePicker, '开始时间').vm.$emit('update:formatted-value', '09:30')
-    expect(fields.value.startTime).toBe('09:30')
-    expect(wrapper.find('[role="alert"]').exists()).toBe(false)
-    expect(parseEvent(fields.value)).not.toBeNull()
-    wrapper.unmount()
-  })
-
-  it('allows legacy non-all-day schedules with no time values to be edited and saved', async () => {
-    const { wrapper, fields } = mountEventForm({
-      ...gregorianEvent,
-      type: 'schedule',
-      title: '旧日程',
-      allDay: false,
-      startTime: null,
-      endTime: null,
-    }, '2026-11-16', true)
-
-    expect(wrapper.get('[aria-label="开始时间"]').attributes('required')).toBeUndefined()
-    expect(getControl(wrapper, NTimePicker, '开始时间').props('status')).toBeUndefined()
-    expect(wrapper.find('[role="alert"]').exists()).toBe(false)
-    expect(parseEvent(fields.value)).not.toBeNull()
-    fields.value.title = '旧日程已修改'
-    await nextTick()
-    expect(parseEvent(fields.value)).toMatchObject({ title: '旧日程已修改', allDay: false, startTime: null, endTime: null })
-    wrapper.unmount()
-  })
-
-  it('keeps existing times in the draft and explains that saving as all-day clears them', async () => {
-    const { wrapper, fields } = mountEventForm({
-      ...gregorianEvent,
-      type: 'schedule',
-      title: '有时间的日程',
-      allDay: false,
-      startTime: '09:00',
-      endTime: '10:00',
-    }, '2026-11-16', true)
-
-    await wrapper.get('.event-date-section .n-checkbox').trigger('click')
-    expect(fields.value.allDay).toBe(true)
-    expect(fields.value.startTime).toBe('09:00')
-    expect(fields.value.endTime).toBe('10:00')
-    expect(wrapper.text()).toContain('保存为全天日程后会清除已有时间。')
-    wrapper.unmount()
-  })
-
-  it('keeps schedule dates ordered and validates same-day times while allowing cross-day ranges', async () => {
-    const { wrapper, fields } = mountEventForm({
-      ...gregorianEvent,
-      type: 'schedule',
-      title: '家庭旅行',
-      endDate: '2026-07-05',
-      allDay: false,
-    })
-
-    await getControl(wrapper, DiaryDatePicker, '开始日期').vm.$emit('update:modelValue', '2026-07-06')
-    expect(fields.value.startDate).toBe('2026-07-06')
-    expect(fields.value.endDate).toBe('2026-07-06')
-    expect(parseEvent(fields.value)).not.toBeNull()
-
-    await getControl(wrapper, DiaryDatePicker, '结束日期').vm.$emit('update:modelValue', '2026-07-07')
-    await getControl(wrapper, NTimePicker, '开始时间').vm.$emit('update:formatted-value', '23:00')
-    await getControl(wrapper, NTimePicker, '结束时间').vm.$emit('update:formatted-value', '01:00')
-    expect(parseEvent(fields.value)).not.toBeNull()
-    expect(wrapper.find('[role="alert"]').exists()).toBe(false)
-
-    await getControl(wrapper, DiaryDatePicker, '结束日期').vm.$emit('update:modelValue', '2026-07-06')
-    expect(wrapper.get('[role="alert"]').text()).toContain('同一天的结束时间必须晚于开始时间')
-    expect(getControl(wrapper, NTimePicker, '结束时间').props('status')).toBe('error')
-    expect(parseEvent(fields.value)).toBeNull()
-
-    await getControl(wrapper, NTimePicker, '结束时间').vm.$emit('update:formatted-value', '23:00')
-    expect(wrapper.get('[role="alert"]').text()).toContain('同一天的结束时间必须晚于开始时间')
-    expect(parseEvent(fields.value)).toBeNull()
-
-    await getControl(wrapper, NTimePicker, '结束时间').vm.$emit('update:formatted-value', '23:01')
-    expect(wrapper.find('[role="alert"]').exists()).toBe(false)
     expect(parseEvent(fields.value)).not.toBeNull()
     wrapper.unmount()
   })
@@ -340,21 +245,23 @@ describe('DiaryEventForm', () => {
   })
 
   it('uses type-specific event placeholders and aligns milestone default Emoji without overwriting custom Emoji', async () => {
-    const defaultSchedule: EventFields = { ...gregorianEvent, type: 'schedule', emoji: '💼' }
-    const defaultForm = mountEventForm(defaultSchedule)
-    await defaultForm.wrapper.get('[data-testid="event-type-milestone"]').trigger('click')
+    const defaultEvent: EventFields = { ...gregorianEvent, type: 'milestone', emoji: '🎓' }
+    const defaultForm = mountEventForm(defaultEvent)
+    expect(defaultForm.wrapper.get('[data-testid="event-type-milestone"]').attributes('aria-pressed')).toBe('true')
     expect(defaultForm.fields.value.emoji).toBe('🎓')
     expect(defaultForm.wrapper.get('[aria-label="选择事件 Emoji"] img').attributes('src')).toBe('/emoji/event-graduation.svg')
     await defaultForm.wrapper.get('[data-testid="event-type-anniversary"]').trigger('click')
     expect(getProp(getControl(defaultForm.wrapper, NInput, '事件名称'), 'placeholder')).toBe('例如：结婚纪念日')
-    await defaultForm.wrapper.get('[data-testid="event-type-schedule"]').trigger('click')
-    expect(getProp(getControl(defaultForm.wrapper, NInput, '事件名称'), 'placeholder')).toBe('例如：体检、出差、家庭聚餐')
+    await defaultForm.wrapper.get('[data-testid="event-type-period"]').trigger('click')
+    await answerPendingConfirm(true)
+    expect(getProp(getControl(defaultForm.wrapper, NInput, '事件名称'), 'placeholder')).toBe('例如：第一份工作')
     await defaultForm.wrapper.get('[data-testid="event-type-birthday"]').trigger('click')
+    await answerPendingConfirm(true)
     expect(getProp(getControl(defaultForm.wrapper, NInput, '生日称呼'), 'placeholder')).toBeUndefined()
     defaultForm.wrapper.unmount()
 
-    const customForm = mountEventForm({ ...defaultSchedule, emoji: '🎯' })
-    await customForm.wrapper.get('[data-testid="event-type-milestone"]').trigger('click')
+    const customForm = mountEventForm({ ...defaultEvent, emoji: '🎯' })
+    await customForm.wrapper.get('[data-testid="event-type-period"]').trigger('click')
     expect(customForm.fields.value.emoji).toBe('🎯')
     customForm.wrapper.unmount()
   })
@@ -613,58 +520,57 @@ describe('DiaryEventForm', () => {
     wrapper.unmount()
   })
 
-  it('keeps legacy duration and time values accessible without losing them when advanced options are collapsed', async () => {
-    const initial: EventFields = {
-      ...gregorianEvent,
-      type: 'milestone',
-      startDate: '2026-07-03',
-      endDate: '2026-07-05',
-      startTime: '18:30',
-      endTime: '20:00',
-      allDay: false,
-      recurrence: 'yearly',
-      showCountdown: true,
-      isPrimary: true,
-    }
-    const { wrapper, fields } = mountEventForm(initial, '2026-01-01', true)
+  it('keeps milestone editing to one date without schedule-only controls', async () => {
+    const { wrapper } = mountEventForm()
     const advanced = wrapper.get('.event-advanced')
-    expect(advanced.attributes('open')).toBeUndefined()
+    await advanced.get('summary').trigger('click')
+
     expect(visibleControls(wrapper, DiaryDatePicker)).toHaveLength(1)
     expect(visibleControls(wrapper, NTimePicker)).toHaveLength(0)
-
-    await advanced.get('summary').trigger('click')
-    expect(advanced.attributes('open')).toBeDefined()
-    expect(visibleControls(wrapper, DiaryDatePicker)).toHaveLength(2)
-    expect(getProp(getControl(wrapper, DiaryDatePicker, '结束日期'), 'modelValue')).toBe('2026-07-05')
-    expect(getProp(getControl(wrapper, NTimePicker, '开始时间'), 'formattedValue')).toBe('18:30')
-    expect(getProp(getControl(wrapper, NTimePicker, '结束时间'), 'formattedValue')).toBe('20:00')
-    expect(wrapper.get('.event-advanced').text()).toContain('每年重复')
-
-    await advanced.get('summary').trigger('click')
-    expect(advanced.attributes('open')).toBeUndefined()
-    expect(fields.value).toEqual(initial)
+    expect(advanced.text()).not.toContain('结束日期')
+    expect(advanced.text()).not.toContain('开始时间')
+    expect(advanced.text()).not.toContain('结束时间')
+    expect(advanced.text()).not.toContain('全天')
+    expect(advanced.text()).not.toContain('每年重复')
     wrapper.unmount()
   })
 
-  it('leaves a schedule unchanged when canceling a type switch that would discard its range and times', async () => {
+  it('requires explicit conversion before a legacy schedule can be saved', async () => {
     const initial: EventFields = {
       ...gregorianEvent,
       title: '家庭旅行',
-      type: 'schedule',
+      type: 'milestone',
       startDate: '1951-11-04',
       endDate: '1951-11-05',
       startTime: '09:00',
       endTime: '20:00',
       allDay: false,
+      recurrence: 'yearly',
     }
-    const { wrapper, fields } = mountEventForm(initial, '2026-11-16', true)
+    const { wrapper, fields } = mountEventForm(initial, '2026-11-16', true, true)
+    const form = wrapper.getComponent(DiaryEventForm)
+    const validate = () => (form.vm as unknown as { $: { exposed: { validate: () => boolean } } }).$.exposed.validate()
 
-    await wrapper.get('[data-testid="event-type-birthday"]').trigger('click')
+    expect(wrapper.text()).toContain('这条记录来自旧版重要日程')
+    expect(validate()).toBe(false)
+    expect(visibleControls(wrapper, DiaryDatePicker)).toHaveLength(1)
+    expect(visibleControls(wrapper, NTimePicker)).toHaveLength(0)
+
+    await wrapper.get('[data-testid="event-type-milestone"]').trigger('click')
     const request = await answerPendingConfirm(false)
-    expect(request.message).toBe('切换事件类型？')
-    expect(request.detail).toContain('结束日期和持续天数')
-    expect(request.detail).toContain('开始、结束时间')
+    expect(request.message).toBe('转换旧日程？')
+    expect(request.detail).toContain('名称、开始日期、备注和 Emoji 会保留')
     expect(fields.value).toEqual(initial)
+    expect(validate()).toBe(false)
+
+    await wrapper.get('[data-testid="event-type-milestone"]').trigger('click')
+    await answerPendingConfirm(true)
+    expect(fields.value).toMatchObject({
+      type: 'milestone', startDate: '1951-11-04', endDate: '1951-11-04',
+      startTime: null, endTime: null, allDay: true, recurrence: 'none',
+    })
+    expect(validate()).toBe(true)
+    expect(parseEvent(fields.value)).not.toBeNull()
     wrapper.unmount()
   })
 
@@ -673,7 +579,7 @@ describe('DiaryEventForm', () => {
       ...gregorianEvent,
       title: '爷爷生日',
       emoji: '💼',
-      type: 'schedule',
+      type: 'milestone',
       startDate: '1951-11-04',
       endDate: '1951-11-05',
       startTime: '09:00',
@@ -704,10 +610,9 @@ describe('DiaryEventForm', () => {
     wrapper.unmount()
   })
 
-  it.each([
-    { target: 'milestone', dateLabel: '发生日期' },
-    { target: 'schedule', dateLabel: '开始日期' },
-  ])('protects a lunar anniversary when switching to $target and uses the edited Gregorian date', async ({ target, dateLabel }) => {
+  it('protects a lunar anniversary when switching to a milestone and uses the edited Gregorian date', async () => {
+    const target = 'milestone'
+    const dateLabel = '发生日期'
     const { birthday: _birth, ...annual } = birthdayEvent()
     const initial: EventFields = {
       ...annual,
@@ -731,14 +636,14 @@ describe('DiaryEventForm', () => {
     await targetButton.trigger('click')
     await answerPendingConfirm(true)
     expect(fields.value).toMatchObject({
-      type: target, startDate: baseDate, endDate: baseDate, dateRule: { calendar: 'gregory' }, recurrence: 'yearly',
+      type: target, startDate: baseDate, endDate: baseDate, dateRule: { calendar: 'gregory' }, recurrence: 'none',
     })
     const date = getControl(wrapper, DiaryDatePicker, dateLabel)
     expect(getProp(date, 'modelValue')).toBe(baseDate)
     await date.vm.$emit('update:modelValue', '2026-11-14')
     const saved = parseEvent(fields.value)
-    expect(saved).toMatchObject({ dateRule: { calendar: 'gregory' }, startDate: '2026-11-14', endDate: '2026-11-14' })
-    expect(saved && nextOccurrence(saved, '2027-01-01')).toBe('2027-11-14')
+    expect(saved).toMatchObject({ dateRule: { calendar: 'gregory' }, startDate: '2026-11-14', endDate: '2026-11-14', recurrence: 'none' })
+    expect(saved && nextOccurrence(saved, '2027-01-01')).toBeNull()
     wrapper.unmount()
   })
 
@@ -772,19 +677,6 @@ describe('DiaryEventForm', () => {
     expect(fields.value.birthday).toEqual({ birthLunarYear: 2023 })
     expect(wrapper.text()).toContain('小明3岁生日')
     expect(parseEvent(fields.value)).not.toBeNull()
-    wrapper.unmount()
-  })
-
-  it('edits an existing lunar schedule through lunar controls until explicitly converted', async () => {
-    const { birthday: _birth, ...annual } = birthdayEvent()
-    const { wrapper, fields } = mountEventForm({ ...annual, type: 'schedule' }, '2026-11-16', true)
-    expect(wrapper.findComponent(DiaryDatePicker).exists()).toBe(false)
-    await getControl(wrapper, NSelect, '农历日期').vm.$emit('update:value', 8)
-    expect(fields.value.dateRule).toMatchObject({ calendar: 'chinese', lunarDay: 8 })
-    expect(parseEvent(fields.value)).not.toBeNull()
-    await wrapper.get('.event-date-section .event-date-calendar-toggle button[aria-pressed="false"]').trigger('click')
-    expect(fields.value.dateRule).toEqual({ calendar: 'gregory' })
-    expect(getControl(wrapper, DiaryDatePicker, '开始日期').exists()).toBe(true)
     wrapper.unmount()
   })
 

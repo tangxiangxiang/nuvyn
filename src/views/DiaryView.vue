@@ -14,14 +14,13 @@ import { useToast } from '../composables/useToast'
 import { createDiaryEntryId, createDiaryEventId, diaryLifeApi, DiaryLifeApiError } from '../lib/diary-life-api'
 import { createDiaryAttachmentClientId, diaryAttachmentsApi } from '../lib/diary-attachments-api'
 import { DiaryAttachmentPreviewUrls } from '../lib/diaryAttachmentPreviewUrls'
-import { addDays, compareEvents, displayEventTitle, eventOccurrenceStart, lifePeriodSummary, localToday, MAX_DIARY_IMAGE_GROUP_SIZE, nextOccurrence, occursOn, parseDay, parseEvent, type DiaryDay, type DiaryDaySummary, type DiaryEvent, type DayFields, type DiaryImageGroup, type EventFields } from '../../shared/diaryLife'
+import { addDays, compareEvents, displayEventTitle, eventOccurrenceStart, localToday, MAX_DIARY_IMAGE_GROUP_SIZE, nextOccurrence, occursOn, parseDay, parseEvent, type DiaryDay, type DiaryDaySummary, type DiaryEvent, type DayFields, type DiaryImageGroup, type EventFields } from '../../shared/diaryLife'
 import { parseTaskSeriesFields, parseWritableTaskFields, taskTimeFieldsError, type DiaryRecurringTaskOccurrence, type DiaryTask, type DiaryTaskListItem, type TaskEditorFields } from '../../shared/diaryTasks'
-import { DIARY_ATTACHMENT_STAGE_HEARTBEAT_INTERVAL_MS, MAX_DIARY_ATTACHMENT_BYTES, MAX_DIARY_DAY_ATTACHMENTS, MAX_DIARY_EVENT_ATTACHMENTS, type DiaryAttachment } from '../../shared/diaryAttachments'
+import { DIARY_ATTACHMENT_STAGE_HEARTBEAT_INTERVAL_MS, MAX_DIARY_ATTACHMENT_BYTES, MAX_DIARY_DAY_ATTACHMENTS, type DiaryAttachment } from '../../shared/diaryAttachments'
 import { NUVYN_BROWSER_STORAGE_KEYS, ownerScopedStorageKey, readStorageKey, writeStorageKey } from '../technicalNamespace'
 import DiaryLifeCalendar from '../components/diary/DiaryLifeCalendar.vue'
 import DiaryDayDialog from '../components/diary/DiaryDayDialog.vue'
 import DiaryEventForm from '../components/diary/DiaryEventForm.vue'
-import DiaryAttachmentSection from '../components/diary/DiaryAttachmentSection.vue'
 import DiaryEventRow from '../components/diary/DiaryEventRow.vue'
 import DiaryTaskForm from '../components/diary/DiaryTaskForm.vue'
 import DiaryTaskRows from '../components/diary/DiaryTaskRows.vue'
@@ -74,7 +73,6 @@ type TaskReturnContext =
   { kind: 'day-list'; date: string; taskId: string; restoreFocus: boolean }
 type EventSurface =
   | { kind: 'day-list'; date: string }
-  | { kind: 'period-detail'; event: DiaryEvent; occurrenceDate: string; returnTo: EventReturnContext }
   | { kind: 'edit'; event: DiaryEvent | null; eventId: string; draft: EventFields; initial: string; occurrenceDate: string; returnTo: EventReturnContext }
   | { kind: 'task-edit'; task: DiaryTaskListItem | null; draft: TaskEditorFields; initial: string; returnTo: TaskReturnContext }
 const eventSurface = ref<EventSurface | null>(null)
@@ -83,10 +81,6 @@ const busy = ref(false)
 const loadingDay = ref(false)
 const attachmentBusy = ref(false)
 const attachmentError = ref('')
-const eventDraftAttachments = ref<Array<DiaryAttachment & { pending?: boolean; localPreviewUrl?: string }>>([])
-const eventAttachmentError = ref('')
-const eventAttachmentBusy = ref(false)
-const eventAttachmentInput = ref<HTMLInputElement | null>(null)
 const dayReadFailed = ref(false)
 const searchReveal = ref<{ entryId?: string; entryIndex?: number } | null>(null)
 const searchHighlight = ref<{ kind: 'event' | 'task'; id: string } | null>(null)
@@ -104,20 +98,6 @@ const eventDraft = computed(() => eventSurface.value?.kind === 'edit' ? eventSur
 const taskDraft = computed(() => eventSurface.value?.kind === 'task-edit' ? eventSurface.value.draft : null)
 const editing = computed(() => eventSurface.value?.kind === 'edit' ? eventSurface.value.event : null)
 const editingTask = computed(() => eventSurface.value?.kind === 'task-edit' ? eventSurface.value.task : null)
-const periodDetail = computed(() => eventSurface.value?.kind === 'period-detail' ? eventSurface.value.event : null)
-const periodSummary = computed(() => periodDetail.value ? lifePeriodSummary(periodDetail.value, today.value) : null)
-const periodStatusLabel = computed(() => periodSummary.value?.status === 'upcoming' ? '尚未开始'
-  : periodSummary.value?.status === 'active' ? '已持续'
-    : periodSummary.value?.status === 'ended' ? '持续时间' : '')
-const periodDurationLabel = computed(() => periodSummary.value?.status === 'upcoming'
-  ? `还剩 ${periodSummary.value.duration}`
-  : periodSummary.value?.duration ?? '')
-const periodRange = computed(() => {
-  const event = periodDetail.value
-  if (!event) return ''
-  const end = event.endDate ?? (today.value < event.startDate ? '未定' : '至今')
-  return `${event.startDate} — ${end}`
-})
 const eventSurfaceVisible = computed(() => access.isUnlocked.value && eventSurface.value !== null)
 const calendarTasks = ref<DiaryTaskListItem[]>([])
 const calendarTasksLoading = ref(false)
@@ -138,15 +118,6 @@ function stopAttachmentSession() {
   attachmentLeaseRequest?.abort()
   attachmentLeaseRequest = null
   attachmentSessionId.value = null
-}
-
-function stopEventAttachmentSession() {
-  if (eventAttachmentLeaseTimer) clearInterval(eventAttachmentLeaseTimer)
-  eventAttachmentLeaseTimer = undefined
-  eventAttachmentLeaseRequest?.abort()
-  eventAttachmentLeaseRequest = null
-  eventAttachmentSessionId.value = null
-  eventAttachmentSessionOwner = null
 }
 
 function copyDayFields(fields: Pick<DayFields, 'moodId' | 'entries' | 'entryIds' | 'imageGroups'>): DayFields {
@@ -208,7 +179,6 @@ function onDiaryVisibilityChange() {
   currentTimestamp.value = Date.now()
   void refreshDayPolicy()
   void renewAttachmentSession()
-  void renewEventAttachmentSession()
 }
 type CalendarLoadContext = {
   start: string
@@ -231,11 +201,6 @@ let attachmentUploadRequest: AbortController | null = null
 let attachmentLeaseRequest: AbortController | null = null
 let attachmentLeaseTimer: ReturnType<typeof setInterval> | undefined
 const attachmentSessionId = ref<string | null>(null)
-let eventAttachmentUploadRequest: AbortController | null = null
-let eventAttachmentLeaseRequest: AbortController | null = null
-let eventAttachmentLeaseTimer: ReturnType<typeof setInterval> | undefined
-const eventAttachmentSessionId = ref<string | null>(null)
-let eventAttachmentSessionOwner: string | null = null
 const attachmentPreviewUrls = new DiaryAttachmentPreviewUrls()
 let taskDetailRequest: AbortController | null = null
 let undatedTaskRequest: AbortController | null = null
@@ -447,10 +412,7 @@ function resetForm() {
   detailRequest?.abort()
   attachmentUploadRequest?.abort()
   attachmentUploadRequest = null
-  eventAttachmentUploadRequest?.abort()
-  eventAttachmentUploadRequest = null
   stopAttachmentSession()
-  stopEventAttachmentSession()
   attachmentPreviewUrls.clear()
   selected.value = null
   serverToday.value = null
@@ -458,11 +420,8 @@ function resetForm() {
   day.value = null
   dayAttachments.value = []
   draftAttachments.value = []
-  eventDraftAttachments.value = []
   attachmentBusy.value = false
   attachmentError.value = ''
-  eventAttachmentBusy.value = false
-  eventAttachmentError.value = ''
   draft.value = { moodId: null, entries: [] }
   dayMode.value = 'read'
   dayVersion.value = 0
@@ -595,15 +554,6 @@ function selectEventFromDay(event: DiaryEvent, interaction?: MouseEvent) {
   const surface = eventSurface.value
   if (surface?.kind !== 'day-list') return
   const keyboardActivated = interaction?.detail === 0
-  if (event.type === 'period') {
-    eventSurface.value = {
-      kind: 'period-detail',
-      event,
-      occurrenceDate: surface.date,
-      returnTo: { kind: 'day-list', date: surface.date, eventId: event.id, restoreFocus: keyboardActivated },
-    }
-    return
-  }
   startEventEdit(
     event,
     surface.date,
@@ -879,17 +829,14 @@ function isTaskContextActive(context: TaskReturnContext): boolean {
 }
 
 function startEventEdit(event: DiaryEvent, occurrenceDate: string, returnTo: EventReturnContext, keyboardActivated = false) {
-  if (busy.value || eventAttachmentBusy.value || eventSurface.value?.kind === 'edit' || !access.isUnlocked.value) return
+  if (busy.value || eventSurface.value?.kind === 'edit' || !access.isUnlocked.value) return
   const eventStartDate = eventOccurrenceStart(event, occurrenceDate) ?? occurrenceDate
-  const { attachments: _attachmentMetadata, ...eventFields } = event
+  const { id: _id, version: _version, createdAt: _createdAt, updatedAt: _updatedAt, legacySchedule: _legacySchedule, ...eventFields } = event
   const draft: EventFields = {
     ...eventFields,
-    attachmentIds: event.attachmentIds ?? event.attachments?.map(item => item.id) ?? [],
     ...(event.dateRule ? { dateRule: { ...event.dateRule } } : {}),
     ...(event.birthday ? { birthday: { ...event.birthday } } : {}),
   }
-  eventDraftAttachments.value = event.attachments?.map(item => ({ ...item })) ?? []
-  eventAttachmentError.value = ''
   eventSurface.value = {
     kind: 'edit',
     event,
@@ -899,7 +846,6 @@ function startEventEdit(event: DiaryEvent, occurrenceDate: string, returnTo: Eve
     occurrenceDate: eventStartDate,
     returnTo,
   }
-  startEventAttachmentSession(event.id)
   formError.value = ''
   if (keyboardActivated) {
     const isCurrent = capturePrivateOperation()
@@ -916,7 +862,7 @@ async function refreshEventData(state: Extract<EventSurface, { kind: 'edit' }>, 
 }
 
 async function closeEventSurface(interaction?: MouseEvent) {
-  if (busy.value || attachmentBusy.value || eventAttachmentBusy.value) return
+  if (busy.value || attachmentBusy.value) return
   const surface = eventSurface.value
   if (!surface) return
   if (surface.kind === 'edit') {
@@ -927,22 +873,10 @@ async function closeEventSurface(interaction?: MouseEvent) {
     await cancelTaskEdit(interaction)
     return
   }
-  if (surface.kind === 'period-detail') {
-    restoreEventContext(surface.returnTo)
-    return
-  }
   if (await canLeave()) {
     await discardPendingAttachments()
     resetForm()
   }
-}
-
-function editPeriodDetail() {
-  const surface = eventSurface.value
-  if (surface?.kind !== 'period-detail' || busy.value) return
-  eventSurface.value = { kind: 'day-list', date: surface.occurrenceDate }
-  selected.value = surface.occurrenceDate
-  startEventEdit(surface.event, surface.occurrenceDate, surface.returnTo)
 }
 
 const stopTeardown = subscribeDiaryTeardown(clearPrivateData)
@@ -957,7 +891,7 @@ watch([access.isUnlocked, storageKey, access.epoch], ([unlocked, owner]) => {
   } else clearShellCommands()
 }, { immediate: true })
 async function canLeave() {
-  return !busy.value && !attachmentBusy.value && !eventAttachmentBusy.value && (!dirty.value || await confirm('放弃未保存的修改？'))
+  return !busy.value && !attachmentBusy.value && (!dirty.value || await confirm('放弃未保存的修改？'))
 }
 async function close() {
   if (await canLeave()) {
@@ -1099,143 +1033,9 @@ function moveDayImage(id: string, entryId: string | null) {
   draft.value = { ...draft.value, imageGroups: assignImage(draft.value.imageGroups, id, validEntryId) }
 }
 
-function updateEventAttachmentIds(attachments: typeof eventDraftAttachments.value) {
-  eventDraftAttachments.value = attachments
-  const surface = eventSurface.value
-  if (surface?.kind === 'edit') {
-    eventSurface.value = { ...surface, draft: { ...surface.draft, attachmentIds: attachments.map(item => item.id) } }
-  }
-}
-
-async function discardPendingEventAttachments() {
-  for (const item of eventDraftAttachments.value.filter(item => item.pending)) {
-    try { await diaryAttachmentsApi.discard(item.id) } catch {
-      eventAttachmentError.value = '部分未保存附件将在过期后自动清理。'
-    } finally {
-      attachmentPreviewUrls.release(item.id)
-    }
-  }
-  stopEventAttachmentSession()
-  const event = eventSurface.value?.kind === 'edit' ? eventSurface.value.event : null
-  eventDraftAttachments.value = event?.attachments?.map(item => ({ ...item })) ?? []
-  if (eventSurface.value?.kind === 'edit') {
-    eventSurface.value = { ...eventSurface.value, draft: { ...eventSurface.value.draft, attachmentIds: eventDraftAttachments.value.map(item => item.id) } }
-  }
-}
-
-async function renewEventAttachmentSession() {
-  const sessionId = eventAttachmentSessionId.value
-  const eventId = eventAttachmentSessionOwner
-  if (!sessionId || !eventId || eventSurface.value?.kind !== 'edit' || eventSurface.value.eventId !== eventId
-    || !access.isUnlocked.value || eventAttachmentLeaseRequest) return
-  const controller = new AbortController()
-  eventAttachmentLeaseRequest = controller
-  const generation = captureDiarySessionGeneration()
-  try { await diaryAttachmentsApi.heartbeatEvent(eventId, sessionId, controller.signal) } catch {
-    // Abandoned drafts are reclaimed after their server lease expires.
-  } finally {
-    if (eventAttachmentLeaseRequest === controller) eventAttachmentLeaseRequest = null
-    if (!isDiarySessionGenerationCurrent(generation) || eventAttachmentSessionId.value !== sessionId) controller.abort()
-  }
-}
-
-function startEventAttachmentSession(eventId: string) {
-  stopEventAttachmentSession()
-  eventAttachmentSessionOwner = eventId
-  eventAttachmentSessionId.value = createDiaryAttachmentClientId()
-  void renewEventAttachmentSession()
-  eventAttachmentLeaseTimer = setInterval(() => { void renewEventAttachmentSession() }, DIARY_ATTACHMENT_STAGE_HEARTBEAT_INTERVAL_MS)
-}
-
-async function addEventAttachments(files: File[]) {
-  const editor = eventSurface.value?.kind === 'edit' ? eventSurface.value : null
-  if (!editor || editor.draft.type !== 'period' || busy.value || eventAttachmentBusy.value) return
-  if (!eventAttachmentSessionId.value || eventAttachmentSessionOwner !== editor.eventId) startEventAttachmentSession(editor.eventId)
-  const sessionId = eventAttachmentSessionId.value
-  if (!sessionId) return
-  const generation = captureDiarySessionGeneration()
-  const failures: string[] = []
-  const controller = new AbortController()
-  eventAttachmentUploadRequest = controller
-  eventAttachmentBusy.value = true
-  eventAttachmentError.value = ''
-  try {
-    for (const file of files) {
-      if (controller.signal.aborted || !isDiarySessionGenerationCurrent(generation) || eventSurface.value !== editor) return
-      if (eventDraftAttachments.value.length >= MAX_DIARY_EVENT_ATTACHMENTS) {
-        failures.push(`${file.name}：最多添加 20 个附件。`)
-        continue
-      }
-      if (file.size < 1 || file.size > MAX_DIARY_ATTACHMENT_BYTES) {
-        failures.push(`${file.name}：单个附件不能超过 20 MiB。`)
-        continue
-      }
-      let localPreviewUrl: string | null = null
-      try { localPreviewUrl = attachmentPreviewUrls.create(file) } catch { /* Preview will load from encrypted storage after save. */ }
-      try {
-        const attachment = await diaryAttachmentsApi.stageEvent(editor.eventId, sessionId, file, controller.signal)
-        if (controller.signal.aborted || !isDiarySessionGenerationCurrent(generation) || eventSurface.value !== editor) {
-          void diaryAttachmentsApi.discard(attachment.id).catch(() => {})
-          return
-        }
-        if (localPreviewUrl) attachmentPreviewUrls.associate(attachment.id, localPreviewUrl)
-        updateEventAttachmentIds([...eventDraftAttachments.value, {
-          ...attachment,
-          pending: true,
-          ...(localPreviewUrl ? { localPreviewUrl } : {}),
-        }])
-        localPreviewUrl = null
-      } catch (error) {
-        if (!controller.signal.aborted) failures.push(`${file.name}：${(error as Error).message}`)
-      } finally {
-        attachmentPreviewUrls.releaseUnassigned(localPreviewUrl)
-      }
-    }
-  } finally {
-    if (eventAttachmentUploadRequest === controller) {
-      eventAttachmentUploadRequest = null
-      eventAttachmentBusy.value = false
-      eventAttachmentError.value = isDiarySessionGenerationCurrent(generation) && eventSurface.value === editor
-        ? failures.join('\n')
-        : ''
-    }
-  }
-}
-
-function openEventAttachmentPicker() {
-  if (!busy.value && !eventAttachmentBusy.value && eventSurface.value?.kind === 'edit' && eventSurface.value.draft.type === 'period') {
-    eventAttachmentInput.value?.click()
-  }
-}
-
-function selectEventAttachments(event: Event) {
-  const input = event.target as HTMLInputElement
-  const files = Array.from(input.files ?? [])
-  input.value = ''
-  if (files.length) void addEventAttachments(files)
-}
-
-async function removeEventAttachment(id: string) {
-  const attachment = eventDraftAttachments.value.find(item => item.id === id)
-  if (!attachment || eventAttachmentBusy.value || busy.value) return
-  eventAttachmentError.value = ''
-  if (attachment.pending) {
-    eventAttachmentBusy.value = true
-    try {
-      await diaryAttachmentsApi.discard(id)
-      attachmentPreviewUrls.release(id)
-      updateEventAttachmentIds(eventDraftAttachments.value.filter(item => item.id !== id))
-    } catch (error) { eventAttachmentError.value = (error as Error).message }
-    finally { eventAttachmentBusy.value = false }
-    return
-  }
-  updateEventAttachmentIds(eventDraftAttachments.value.filter(item => item.id !== id))
-}
-
 async function open(date: string, options: { skipLeaveCheck?: boolean; searchResult?: boolean } = {}) {
   const isCurrent = capturePrivateOperation()
   if ((!options.skipLeaveCheck && !(await canLeave())) || !isCurrent()) return false
-  await discardPendingEventAttachments()
   if (!isCurrent()) return false
   await discardPendingAttachments()
   if (!isCurrent()) return false
@@ -1287,7 +1087,6 @@ async function openDiarySearchIntent(intent: DiaryDiarySearchOpenIntent) {
     return
   }
   if (!isCurrent() || !access.isUnlocked.value) return
-  await discardPendingEventAttachments()
   if (!isCurrent() || !access.isUnlocked.value) return
   await discardPendingAttachments()
   if (!isCurrent() || !access.isUnlocked.value) return
@@ -1329,7 +1128,6 @@ async function openDiaryRecordSearchIntent(intent: DiaryEventSearchOpenIntent | 
     return
   }
   if (!isCurrent()) return
-  await discardPendingEventAttachments()
   if (!isCurrent()) return
   await discardPendingAttachments()
   if (!isCurrent()) return
@@ -1338,12 +1136,10 @@ async function openDiaryRecordSearchIntent(intent: DiaryEventSearchOpenIntent | 
     let targetDate: string | null = null
     let highlightKind: 'event' | 'task'
     let highlightId: string
-    let searchEvent: DiaryEvent | null = null
 
     if (intent.kind === 'event') {
       const current = (await diaryLifeApi.event(intent.eventId, controller.signal)).event
       if (!isCurrent()) return
-      searchEvent = current
       highlightKind = 'event'
       highlightId = current.id
       targetDate = current.recurrence === 'none'
@@ -1427,14 +1223,6 @@ async function openDiaryRecordSearchIntent(intent: DiaryEventSearchOpenIntent | 
 
     const opened = await open(targetDate, { skipLeaveCheck: true })
     if (!opened || !isCurrent()) return
-    if (intent.kind === 'event' && searchEvent?.type === 'period') {
-      eventSurface.value = {
-        kind: 'period-detail',
-        event: searchEvent,
-        occurrenceDate: targetDate,
-        returnTo: { kind: 'day-list', date: targetDate, eventId: searchEvent.id, restoreFocus: false },
-      }
-    }
     highlightSearchRecord(highlightKind, highlightId)
     consumeDiarySearchOpen(intent.id)
   } catch (error) {
@@ -1465,7 +1253,6 @@ async function refreshDayPolicy() {
 }
 async function switchMode(target: DiaryCalendarMode) {
   if (mode.value === target || !await canLeave()) return
-  await discardPendingEventAttachments()
   await discardPendingAttachments()
   resetForm()
   mode.value = target
@@ -1474,11 +1261,9 @@ function createEvent() {
   const surface = eventSurface.value
   const date = surface?.kind === 'day-list' ? surface.date : selected.value
   if (!date || surface?.kind !== 'day-list' || !access.isUnlocked.value) return
-  const type = date >= today.value ? 'schedule' : 'milestone'
+  const type = 'milestone'
   const eventId = createDiaryEventId()
-  const draft: EventFields = { title: '', description: '', emoji: type === 'schedule' ? '💼' : '🎓', type, startDate: date, endDate: date, startTime: null, endTime: null, allDay: true, dateRule: { calendar: 'gregory' }, recurrence: 'none', attachmentIds: [], showCountdown: false, isPrimary: false }
-  eventDraftAttachments.value = []
-  eventAttachmentError.value = ''
+  const draft: EventFields = { title: '', description: '', emoji: '🎓', type, startDate: date, endDate: date, startTime: null, endTime: null, allDay: true, dateRule: { calendar: 'gregory' }, recurrence: 'none', showCountdown: false, isPrimary: false }
   eventSurface.value = {
     kind: 'edit',
     event: null,
@@ -1488,7 +1273,6 @@ function createEvent() {
     occurrenceDate: date,
     returnTo: { kind: 'day-list', date, eventId, restoreFocus: false },
   }
-  startEventAttachmentSession(eventId)
 }
 
 function updateEventDraft(next: EventFields) {
@@ -1636,10 +1420,9 @@ async function reloadTaskEditor() {
 
 async function cancelEventEdit(interaction?: MouseEvent) {
   const surface = eventSurface.value
-  if (surface?.kind !== 'edit' || busy.value || eventAttachmentBusy.value) return
+  if (surface?.kind !== 'edit' || busy.value) return
   if (JSON.stringify(surface.draft) !== surface.initial && !await confirm('放弃未保存的修改？')) return
   if (eventSurface.value !== surface || !access.isUnlocked.value) return
-  await discardPendingEventAttachments()
   if (surface.event) {
     restoreEventContext({
       ...surface.returnTo,
@@ -1650,7 +1433,7 @@ async function cancelEventEdit(interaction?: MouseEvent) {
   }
 }
 async function save(keyboardActivated = false) {
-  if (busy.value || attachmentBusy.value || eventAttachmentBusy.value || !access.isUnlocked.value) return
+  if (busy.value || attachmentBusy.value || !access.isUnlocked.value) return
   const isCurrent = capturePrivateOperation()
   const date = selected.value
   const editor = eventSurface.value?.kind === 'edit' ? eventSurface.value : null
@@ -1704,9 +1487,6 @@ async function save(keyboardActivated = false) {
       }
       const result = await diaryLifeApi.saveEvent(editor.eventId, fields, editor.event?.version ?? 0)
       if (!isCurrent() || eventSurface.value !== editor) return
-      stopEventAttachmentSession()
-      for (const attachment of eventDraftAttachments.value) attachmentPreviewUrls.release(attachment.id)
-      eventDraftAttachments.value = result.event.attachments?.map(item => ({ ...item })) ?? []
       const occurrenceDate = eventNavigationDate(result.event, editor.occurrenceDate)
       const returnTo: EventReturnContext = editor.returnTo.kind === 'day-list'
         ? { ...editor.returnTo, date: occurrenceDate, eventId: editor.eventId }
@@ -1724,25 +1504,21 @@ async function save(keyboardActivated = false) {
 async function remove() {
   const date = selected.value
   const editor = eventSurface.value?.kind === 'edit' ? eventSurface.value : null
-  const detail = eventSurface.value?.kind === 'period-detail' ? eventSurface.value : null
-  const event = editor?.event ?? detail?.event ?? null
-  const dayEntry = editor || detail ? null : day.value
-  if (busy.value || attachmentBusy.value || eventAttachmentBusy.value || !access.isUnlocked.value) return
+  const event = editor?.event ?? null
+  const dayEntry = editor ? null : day.value
+  if (busy.value || attachmentBusy.value || !access.isUnlocked.value) return
   if (!event && (!date || !dayEntry || !canWriteDay.value)) return
   const isCurrent = capturePrivateOperation()
   busy.value = true
   try {
     if (!await confirm(event ? '删除这条事件？' : '删除这条记录？') || !isCurrent()
-      || editor && eventSurface.value !== editor || detail && eventSurface.value !== detail) return
-    if (event) {
+      || editor && eventSurface.value !== editor) return
+    if (editor && event) {
       await diaryLifeApi.deleteEvent(event.id, event.version)
-      if (isCurrent() && (editor && eventSurface.value === editor || detail && eventSurface.value === detail)) {
-        stopEventAttachmentSession()
-        for (const attachment of eventDraftAttachments.value) attachmentPreviewUrls.release(attachment.id)
-        eventDraftAttachments.value = []
+      if (isCurrent() && eventSurface.value === editor) {
         await reloadCalendarEvents()
         if (!isCurrent()) return
-        restoreEventContext(editor?.returnTo ?? detail!.returnTo)
+        restoreEventContext(editor.returnTo)
       }
     } else if (date && dayEntry) {
       await diaryLifeApi.deleteDay(date, dayEntry.version)
@@ -1759,7 +1535,6 @@ async function remove() {
 
 onBeforeRouteLeave(async () => {
   if (!await canLeave()) return false
-  await discardPendingEventAttachments()
   await discardPendingAttachments()
   return true
 })
@@ -1840,9 +1615,9 @@ onBeforeUnmount(() => {
         :show="eventSurfaceVisible"
         preset="card"
         class="diary-life-dialog"
-        :class="{ 'diary-event-edit-dialog': eventSurface?.kind === 'edit' || eventSurface?.kind === 'task-edit', 'diary-period-detail-dialog': eventSurface?.kind === 'period-detail', 'diary-task-edit-dialog': eventSurface?.kind === 'task-edit' }"
-        :mask-closable="!busy && !attachmentBusy && !eventAttachmentBusy"
-        :close-on-esc="!busy && !attachmentBusy && !eventAttachmentBusy"
+        :class="{ 'diary-event-edit-dialog': eventSurface?.kind === 'edit' || eventSurface?.kind === 'task-edit', 'diary-task-edit-dialog': eventSurface?.kind === 'task-edit' }"
+        :mask-closable="!busy && !attachmentBusy"
+        :close-on-esc="!busy && !attachmentBusy"
         :auto-focus="false"
         :closable="false"
         @mask-click="preventDiaryBackdropClickThrough"
@@ -1851,7 +1626,6 @@ onBeforeUnmount(() => {
         <template #header>
           <span v-if="eventSurface?.kind === 'edit'">{{ eventSurface.event ? '编辑事件' : '新增事件' }}</span>
           <span v-else-if="eventSurface?.kind === 'task-edit'">{{ eventSurface.task ? '编辑待办' : '新增待办' }}</span>
-          <span v-else-if="eventSurface?.kind === 'period-detail'" class="sr-only">人生阶段详情</span>
           <span v-else>{{ selected }}</span>
         </template>
         <template #header-extra>
@@ -1860,12 +1634,12 @@ onBeforeUnmount(() => {
               v-if="eventSurface?.kind === 'day-list'"
               quaternary circle class="diary-day-list-add-button"
               :data-testid="mode === 'tasks' ? 'diary-add-task' : 'diary-add-event'"
-              :aria-label="mode === 'tasks' ? '新增待办' : '新增重要日程'"
-              :title="mode === 'tasks' ? '新增待办' : '新增重要日程'"
-              :disabled="busy || attachmentBusy || eventAttachmentBusy"
+              :aria-label="mode === 'tasks' ? '新增待办' : '新增事件'"
+              :title="mode === 'tasks' ? '新增待办' : '新增事件'"
+              :disabled="busy || attachmentBusy"
               @click="mode === 'tasks' ? createTaskFromDay() : createEvent()"
             ><NIcon aria-hidden="true" :size="16"><Plus /></NIcon></NButton>
-            <NButton quaternary circle class="diary-event-close-button" :disabled="busy || attachmentBusy || eventAttachmentBusy" :aria-label="eventSurface?.kind === 'edit' ? '关闭事件编辑' : eventSurface?.kind === 'task-edit' ? '关闭待办编辑' : eventSurface?.kind === 'period-detail' ? '关闭人生阶段详情' : mode === 'tasks' ? '关闭当天待办' : '关闭当天事件'" @click="closeEventSurface($event)">
+            <NButton quaternary circle class="diary-event-close-button" :disabled="busy || attachmentBusy" :aria-label="eventSurface?.kind === 'edit' ? '关闭事件编辑' : eventSurface?.kind === 'task-edit' ? '关闭待办编辑' : mode === 'tasks' ? '关闭当天待办' : '关闭当天事件'" @click="closeEventSurface($event)">
               <NIcon aria-hidden="true" :size="16"><X /></NIcon>
             </NButton>
           </div>
@@ -1878,52 +1652,11 @@ onBeforeUnmount(() => {
             :model-value="eventDraft"
             :today="today"
             :is-editing="editing !== null"
+            :legacy-schedule="eventSurface?.kind === 'edit' && eventSurface.event?.legacySchedule === true"
             :inert="busy"
             @update:model-value="updateEventDraft"
           />
-          <section v-if="eventDraft.type === 'period' || eventDraftAttachments.length" class="diary-event-attachments">
-            <div class="diary-event-attachments-heading">
-              <h3>附件</h3>
-              <NButton v-if="eventDraft.type === 'period'" size="small" :disabled="busy || eventAttachmentBusy" data-testid="diary-event-add-attachment" @click="openEventAttachmentPicker">添加附件</NButton>
-            </div>
-            <DiaryAttachmentSection
-              v-if="eventDraftAttachments.length"
-              :date="eventDraft.startDate"
-              :attachments="eventDraftAttachments"
-              :embedded="true"
-              mode="edit"
-              :disabled="busy || eventAttachmentBusy"
-              @remove="removeEventAttachment"
-            />
-            <input
-              v-if="eventDraft.type === 'period'"
-              ref="eventAttachmentInput"
-              data-testid="diary-event-attachment-input"
-              type="file"
-              hidden
-              multiple
-              accept="image/png,image/jpeg,image/webp,image/gif,image/avif,application/pdf,.png,.jpg,.jpeg,.webp,.gif,.avif,.pdf"
-              @change="selectEventAttachments"
-            >
-            <p v-if="eventAttachmentBusy" class="diary-event-attachment-status" role="status"><NSpin size="small" />正在加密上传…</p>
-            <p v-if="eventAttachmentError" class="diary-event-attachment-error" role="alert">{{ eventAttachmentError }}</p>
-          </section>
         </div>
-        <section v-else-if="periodDetail" class="diary-period-detail" data-testid="diary-period-detail">
-          <img v-if="eventEmojiSource(periodDetail.emoji)" class="diary-period-emoji" :src="eventEmojiSource(periodDetail.emoji)" alt="">
-          <span v-else class="diary-period-emoji-text" aria-hidden="true">{{ periodDetail.emoji }}</span>
-          <h2>{{ periodDetail.title }}</h2>
-          <p class="diary-period-range">{{ periodRange }}</p>
-          <p class="diary-period-status">{{ periodStatusLabel }}</p>
-          <p class="diary-period-duration" data-testid="diary-period-duration">{{ periodDurationLabel }}</p>
-          <p v-if="periodDetail.description" class="diary-period-description">{{ periodDetail.description }}</p>
-          <DiaryAttachmentSection
-            v-if="periodDetail.attachments?.length"
-            :date="periodDetail.startDate"
-            :attachments="periodDetail.attachments"
-            mode="read"
-          />
-        </section>
         <div v-else-if="taskDraft" class="diary-event-form-content diary-task-form-content">
           <p v-if="taskFormError" class="diary-event-form-error" role="alert">{{ taskFormError }}</p>
           <NButton v-if="taskConflictNeedsReload" text type="primary" class="diary-task-reload" :disabled="busy" @click="reloadTaskEditor">重新加载</NButton>
@@ -1977,9 +1710,10 @@ onBeforeUnmount(() => {
               :search-highlighted="searchHighlight?.kind === 'event' && searchHighlight.id === event.id"
               :data-event-id="event.id"
               :aria-label="dayEventLabel(event)"
+              :aria-describedby="event.type === 'period' ? `event-distance-${event.id}` : undefined"
               @click="selectEventFromDay(event, $event)"
             >
-              <small class="diary-task-detail diary-event-distance">{{ selectedEventDistance(event) }}</small>
+              <small :id="event.type === 'period' ? `event-distance-${event.id}` : undefined" class="diary-task-detail diary-event-distance">{{ selectedEventDistance(event) }}</small>
             </DiaryEventRow>
           </section>
         </div>
@@ -2005,13 +1739,6 @@ onBeforeUnmount(() => {
             <span />
             <NButton size="medium" :disabled="busy" @click="cancelEventEdit($event)">取消</NButton>
             <NButton type="primary" size="medium" :loading="busy" @click="save($event.detail === 0)">保存</NButton>
-          </div>
-        </template>
-        <template v-if="eventSurface?.kind === 'period-detail'" #footer>
-          <div class="life-actions">
-            <NButton quaternary type="error" size="medium" :disabled="busy" @click="remove">删除阶段</NButton>
-            <span />
-            <NButton type="primary" size="medium" :disabled="busy" @click="editPeriodDetail">编辑</NButton>
           </div>
         </template>
       </NModal>
@@ -2053,7 +1780,7 @@ onBeforeUnmount(() => {
 .diary-task-series-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; }
 .diary-event-header-actions { display: flex; align-items: center; gap: 4px; }
 .diary-day-status { display: flex; align-items: center; gap: 8px; padding: 4px 0; color: var(--text-muted, #6b7280); }
-.diary-event-distance { min-width: 0; color: var(--text-muted, #6b7280); font-size: 12px; font-weight: 400; line-height: 20px; text-align: right; white-space: nowrap; }
+.diary-event-distance { min-width: 0; color: var(--text-muted, #6b7280); font-size: 12px; font-weight: 400; line-height: 20px; text-align: right; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .unlock-diary { display: block; margin: 20vh auto; }
 @media (max-width: 520px) {
   .diary-undated-task-notice { align-items: flex-start; flex-direction: column; gap: 4px; }
@@ -2080,29 +1807,6 @@ onBeforeUnmount(() => {
   max-height: calc(100dvh - 40px);
   overflow: hidden;
 }
-.diary-period-detail-dialog.n-card { width: min(540px, calc(100vw - 32px)); }
-.diary-period-detail {
-  display: flex;
-  min-width: 0;
-  flex-direction: column;
-  align-items: center;
-  gap: 10px;
-  padding: 4px 0 8px;
-  text-align: center;
-}
-.diary-period-emoji { display: block; width: 44px; height: 44px; object-fit: contain; }
-.diary-period-emoji-text { font-size: 40px; line-height: 1; }
-.diary-period-detail h2 { max-width: 100%; margin: 0; font-size: 1.25rem; line-height: 1.4; overflow-wrap: anywhere; }
-.diary-period-range { margin: 0; color: var(--text-muted, #6b7280); font-size: .92rem; font-variant-numeric: tabular-nums; }
-.diary-period-status { margin: 8px 0 0; color: var(--text-muted, #6b7280); font-size: .9rem; }
-.diary-period-duration { max-width: 100%; margin: -6px 0 0; font-size: 1.25rem; line-height: 1.5; font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
-.diary-period-description { width: 100%; box-sizing: border-box; margin: 10px 0 0; color: var(--text-muted, #6b7280); line-height: 1.65; text-align: start; white-space: pre-wrap; overflow-wrap: anywhere; }
-.diary-period-detail > .diary-attachment-section { width: 100%; margin-top: 8px; text-align: start; }
-.diary-event-attachments { display: flex; min-width: 0; flex-direction: column; gap: 10px; padding-top: 4px; }
-.diary-event-attachments-heading { display: flex; min-height: 32px; align-items: center; justify-content: space-between; gap: 12px; }
-.diary-event-attachments-heading h3 { margin: 0; color: var(--text-muted, #6b7280); font-size: 13px; font-weight: 500; }
-.diary-event-attachment-status { display: flex; align-items: center; gap: 8px; margin: 0; color: var(--text-muted, #6b7280); font-size: .88rem; }
-.diary-event-attachment-error { margin: 0; color: var(--error, #d03050); font-size: .88rem; white-space: pre-line; }
 .diary-task-edit-dialog.n-card { width: min(540px, calc(100vw - 32px)); }
 .diary-event-edit-dialog .n-card-header,
 .diary-event-edit-dialog .n-card__footer { flex: none; }

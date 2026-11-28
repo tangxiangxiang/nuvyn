@@ -6,7 +6,7 @@ import { eventDistanceLabel } from '../eventDistance'
 function makeEvent(overrides: Partial<DiaryEvent> = {}): DiaryEvent {
   return {
     id: 'event-1',
-    title: '重要日程',
+    title: '人生时刻',
     description: '',
     emoji: '🎯',
     type: 'milestone',
@@ -26,6 +26,14 @@ function makeEvent(overrides: Partial<DiaryEvent> = {}): DiaryEvent {
 }
 
 describe('eventDistanceLabel', () => {
+  it('labels upcoming, active and ended life periods on their endpoint rows', () => {
+    const period = makeEvent({ type: 'period', startDate: '2023-07-01', endDate: '2027-07-01' })
+    expect(eventDistanceLabel(period, period.startDate, '2023-06-16')).toBe('还剩 15 天')
+    expect(eventDistanceLabel({ ...period, endDate: null }, period.startDate, '2026-11-28')).toBe('已持续 3 年 4 个月 27 天')
+    expect(eventDistanceLabel(period, period.endDate!, '2027-07-01')).toBe('持续 4 年')
+    expect(eventDistanceLabel(period, '2027-06-30', '2027-07-02')).toBe('')
+  })
+
   it('labels yesterday, today, tomorrow, month and year boundaries', () => {
     expect(eventDistanceLabel(makeEvent({ startDate: '2026-11-18', endDate: '2026-11-18' }), '2026-11-18', '2026-11-19')).toBe('已过去1天')
     expect(eventDistanceLabel(makeEvent(), '2026-11-19', '2026-11-19')).toBe('今天')
@@ -87,8 +95,11 @@ describe('eventDistanceLabel', () => {
     expect(eventDistanceLabel(event, occurrence2027, '2026-11-19')).toBe('还剩350天')
   })
 
-  it('shows progress for a multi-day Event and measures from its end after it finishes', () => {
-    const event = makeEvent({ startDate: '2026-11-17', endDate: '2026-11-21' })
+  it('retains progress labels for a readable legacy schedule range', () => {
+    const event = makeEvent({
+      type: 'milestone', legacySchedule: true,
+      startDate: '2026-11-17', endDate: '2026-11-21',
+    })
 
     expect(eventDistanceLabel(event, '2026-11-19', '2026-11-16')).toBe('还剩1天')
     expect(eventDistanceLabel(event, '2026-11-19', '2026-11-19')).toBe('进行中')

@@ -1,9 +1,9 @@
 import type { Database } from 'better-sqlite3'
 import type { DiaryBodyOperation } from './diaryAccess/service.js'
-import { displayEventTitle, nextOccurrence, occursOn, parseDay, parseEvent, type DiaryDay, type DiaryEvent, type DiaryEventSearchItem, type DiaryEventSearchPage, type DiarySearchItem, type DiarySearchPage, type DayFields, type EventFields } from '../shared/diaryLife.js'
+import { displayEventTitle, nextOccurrence, occursOn, parseDay, parseEvent, parseLegacySchedule, type DiaryDay, type DiaryEvent, type DiaryEventSearchItem, type DiaryEventSearchPage, type DiarySearchItem, type DiarySearchPage, type DayFields, type EventFields } from '../shared/diaryLife.js'
 import { formatLunarRule } from '../shared/lunarCalendar.js'
-import { isDiaryAttachmentMimeType, MAX_DIARY_DAY_ATTACHMENTS, MAX_DIARY_EVENT_ATTACHMENTS } from '../shared/diaryAttachments.js'
-import { DiaryAttachmentError, listDiaryDayAttachments, listDiaryEventAttachments } from './diaryAttachments/service.js'
+import { isDiaryAttachmentMimeType, MAX_DIARY_DAY_ATTACHMENTS } from '../shared/diaryAttachments.js'
+import { DiaryAttachmentError, listDiaryDayAttachments } from './diaryAttachments/service.js'
 import { decodeDiarySearchCursor, diarySearchSnippet, encodeDiarySearchCursor, type DiarySearchCursor } from './diarySearch.js'
 
 export class DiaryConflict extends Error {}
@@ -13,7 +13,6 @@ const EVENT_TYPE_LABEL: Record<EventFields['type'], string> = {
   birthday: '生日',
   anniversary: '纪念日',
   milestone: '人生时刻',
-  schedule: '重要日程',
   period: '人生阶段',
 }
 
@@ -25,9 +24,10 @@ function eventSearchTargetDate(value: DiaryEvent, today: string): string | null 
 }
 
 function eventSearchSubtitle(value: DiaryEvent, targetDate: string | null): string {
-  if (!targetDate) return `${EVENT_TYPE_LABEL[value.type]} · 暂无可定位日期`
+  const label = value.legacySchedule ? '旧重要日程' : EVENT_TYPE_LABEL[value.type]
+  if (!targetDate) return `${label} · 暂无可定位日期`
   const lunar = value.dateRule?.calendar === 'chinese' ? formatLunarRule(value.dateRule) : null
-  return [EVENT_TYPE_LABEL[value.type], lunar, targetDate].filter(Boolean).join(' · ')
+  return [label, lunar, targetDate].filter(Boolean).join(' · ')
 }
 export function diaryLifeStore(db: Database, owner: number, operation: DiaryBodyOperation) {
   const crypto = operation.life
@@ -40,14 +40,10 @@ export function diaryLifeStore(db: Database, owner: number, operation: DiaryBody
     return { ...fields, date: row.date, version: row.version, createdAt: row.created_at, updatedAt: row.updated_at }
   }
   function event(row: Row): DiaryEvent {
-    const fields = parseEvent(crypto!.decrypt(row.encrypted_fields, identity('event', row.id, row.version)))
+    const plaintext = crypto!.decrypt(row.encrypted_fields, identity('event', row.id, row.version))
+    const fields = parseEvent(plaintext) ?? parseLegacySchedule(plaintext)
     if (!fields || fields.startDate !== row.start_date || fields.endDate !== row.end_date || fields.recurrence !== row.recurrence) throw new Error('Invalid Diary event')
-    const attachments = listDiaryEventAttachments(db, owner, row.id, operation)
-    const attachmentIds = fields.attachmentIds ?? []
-    if (attachments.length !== attachmentIds.length || attachments.some((attachment, index) => attachment.id !== attachmentIds[index])) {
-      throw new Error('Invalid Diary event attachments')
-    }
-    return { ...fields, id: row.id, version: row.version, createdAt: row.created_at, updatedAt: row.updated_at, attachments }
+    return { ...fields, id: row.id, version: row.version, createdAt: row.created_at, updatedAt: row.updated_at }
   }
   return {
     dayVersion(date: string) { return this.getDay(date)?.version ?? deletedVersion('day', date) },
@@ -261,49 +257,17 @@ export function diaryLifeStore(db: Database, owner: number, operation: DiaryBody
       db.transaction(() => {
         const row = db.prepare('SELECT version FROM diary_events WHERE owner_user_id = ? AND id = ?').get(owner, id) as { version: number } | undefined
         if ((row?.version ?? deletedVersion('event', id)) !== expected) throw new DiaryConflict()
-        const currentIds = (db.prepare(`SELECT id FROM diary_event_attachments
-          WHERE owner_user_id = ? AND event_id = ? AND status = 'attached' ORDER BY display_order, created_at, id`).all(owner, id) as Array<{ id: string }>).map(item => item.id)
-        const attachmentIds = fields.attachmentIds ?? currentIds
-        if (attachmentIds.length > MAX_DIARY_EVENT_ATTACHMENTS || new Set(attachmentIds).size !== attachmentIds.length) throw new DiaryAttachmentError('invalid', 400)
-        const wanted = new Set(attachmentIds)
-        for (const attachmentId of attachmentIds) {
-          const attachment = db.prepare(`SELECT event_id, stage_event_id, status FROM diary_event_attachments
-            WHERE owner_user_id = ? AND id = ?`).get(owner, attachmentId) as { event_id: string | null; stage_event_id: string | null; status: string } | undefined
-          if (!attachment || attachment.status !== 'attached' && attachment.status !== 'staged'
-            || attachment.status === 'attached' && attachment.event_id !== id
-            || attachment.status === 'staged' && attachment.stage_event_id !== id) throw new DiaryAttachmentError('conflict', 409)
-        }
-        const storedFields = { ...fields, attachmentIds }
-        const payload = crypto.encrypt(storedFields, identity('event', id, expected + 1))
+        const payload = crypto.encrypt(fields, identity('event', id, expected + 1))
         db.prepare(`INSERT INTO diary_events (owner_user_id, id, start_date, end_date, recurrence, encrypted_fields, created_at, updated_at, version)
           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
           ON CONFLICT(owner_user_id, id) DO UPDATE SET start_date = excluded.start_date, end_date = excluded.end_date,
           recurrence = excluded.recurrence, encrypted_fields = excluded.encrypted_fields,
           updated_at = excluded.updated_at, version = excluded.version`)
           .run(owner, id, fields.startDate, fields.endDate, fields.recurrence, payload, now, now, expected + 1)
-        for (const currentId of currentIds) {
-          if (wanted.has(currentId)) continue
-          db.prepare(`UPDATE diary_event_attachments SET status = 'deleting', event_id = NULL, expires_at = NULL, stage_session_id = NULL
-            WHERE owner_user_id = ? AND id = ? AND status = 'attached'`).run(owner, currentId)
-        }
-        const stagedForEvent = db.prepare(`SELECT id FROM diary_event_attachments
-          WHERE owner_user_id = ? AND stage_event_id = ? AND status = 'staged'`).all(owner, id) as Array<{ id: string }>
-        for (const attachment of stagedForEvent) {
-          if (!wanted.has(attachment.id)) db.prepare(`UPDATE diary_event_attachments
-            SET status = 'deleting', stage_event_id = NULL, expires_at = NULL, stage_session_id = NULL
-            WHERE owner_user_id = ? AND id = ? AND status = 'staged'`).run(owner, attachment.id)
-        }
-        attachmentIds.forEach((attachmentId, index) => {
-          db.prepare(`UPDATE diary_event_attachments SET event_id = ?, stage_event_id = NULL, status = 'attached',
-            display_order = ?, expires_at = NULL, stage_session_id = NULL
-            WHERE owner_user_id = ? AND id = ? AND status IN ('staged', 'attached')`)
-            .run(id, index, owner, attachmentId)
-        })
         db.prepare("DELETE FROM diary_deleted_records WHERE owner_user_id = ? AND kind = 'event' AND id = ?").run(owner, id)
       })()
       return this.getEvent(id)!
     },
-    eventAttachments(id: string) { return listDiaryEventAttachments(db, owner, id, operation) },
     remove(kind: 'day' | 'event', id: string, version: number) {
       operation.assertCurrent()
       const table = kind === 'day' ? 'diary_days' : 'diary_events'
@@ -312,12 +276,6 @@ export function diaryLifeStore(db: Database, owner: number, operation: DiaryBody
         if (kind === 'day') {
           db.prepare(`UPDATE diary_day_attachments SET status = 'deleting', expires_at = NULL, stage_session_id = NULL
             WHERE owner_user_id = ? AND day_date = ? AND status IN ('staged', 'attached')`).run(owner, id)
-        }
-        else {
-          db.prepare(`UPDATE diary_event_attachments SET status = 'deleting', event_id = NULL, stage_event_id = NULL,
-            expires_at = NULL, stage_session_id = NULL WHERE owner_user_id = ? AND stage_event_id = ? AND status = 'staged'`).run(owner, id)
-          db.prepare(`UPDATE diary_event_attachments SET status = 'deleting', event_id = NULL, expires_at = NULL, stage_session_id = NULL
-            WHERE owner_user_id = ? AND event_id = ? AND status = 'attached'`).run(owner, id)
         }
         const result = db.prepare(`DELETE FROM ${table} WHERE owner_user_id = ? AND ${column} = ? AND version = ?`).run(owner, id, version)
         if (!result.changes) throw new DiaryConflict()

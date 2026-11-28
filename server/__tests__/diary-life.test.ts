@@ -272,6 +272,89 @@ describe('Diary database API', () => {
     expect(second.nextCursor).toBeNull()
     expect(new Set([...first.items, ...second.items].map((item: { id: string }) => item.id))).toHaveProperty('size', 23)
   })
+  it('reads legacy encrypted Event attachment fields without rewriting the payload', async () => {
+    const id = randomUUID()
+    const attachmentId = randomUUID()
+    const fields = {
+      ...event,
+      attachmentIds: [attachmentId],
+      attachments: [{ id: attachmentId, eventId: id, name: 'legacy.pdf' }],
+    }
+    const identity = JSON.stringify([auth.userId, 'event', id, 1])
+    let originalCiphertext: Buffer | null = null
+    await auth.runtime.diaryAccess.withBodyOperation(auth.session.id, capability, operation => {
+      originalCiphertext = operation.life!.encrypt(fields, identity)
+      db.prepare(`INSERT INTO diary_events
+        (owner_user_id, id, start_date, end_date, recurrence, encrypted_fields, created_at, updated_at, version)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1)`)
+        .run(auth.userId, id, event.startDate, event.endDate, event.recurrence, originalCiphertext, Date.now(), Date.now())
+    })
+
+    const response = await request('GET', `/events/${id}`)
+    const body = await response.json() as { event: Record<string, unknown> }
+    expect(response.status).toBe(200)
+    expect(body.event).toMatchObject({ id, title: event.title, type: event.type })
+    expect(body.event).not.toHaveProperty('attachmentIds')
+    expect(body.event).not.toHaveProperty('attachments')
+    expect(db.prepare('SELECT encrypted_fields FROM diary_events WHERE owner_user_id = ? AND id = ?').get(auth.userId, id))
+      .toEqual({ encrypted_fields: originalCiphertext })
+  })
+  it('reads, searches, and explicitly converts legacy schedule records without rewriting them on read', async () => {
+    const id = randomUUID()
+    const oldSchedule = {
+      title: '旧版旅行日程', description: '保留的旧备注', emoji: '💼', type: 'schedule',
+      startDate: '2020-01-01', endDate: '2020-01-05', startTime: '08:30', endTime: '18:00',
+      allDay: false, dateRule: { calendar: 'gregory' }, recurrence: 'none',
+      showCountdown: false, isPrimary: false,
+    }
+    const identity = JSON.stringify([auth.userId, 'event', id, 1])
+    let originalCiphertext: Buffer | null = null
+    await auth.runtime.diaryAccess.withBodyOperation(auth.session.id, capability, operation => {
+      originalCiphertext = operation.life!.encrypt(oldSchedule, identity)
+      db.prepare(`INSERT INTO diary_events
+        (owner_user_id, id, start_date, end_date, recurrence, encrypted_fields, created_at, updated_at, version)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1)`)
+        .run(auth.userId, id, oldSchedule.startDate, oldSchedule.endDate, oldSchedule.recurrence,
+          originalCiphertext, Date.now(), Date.now())
+    })
+
+    const calendar = await (await request('GET', '/events?start=2020-01-01&end=2020-01-10&date=2020-01-03')).json()
+    expect(calendar.items).toMatchObject([{ id, type: 'milestone', legacySchedule: true, startDate: '2020-01-01', endDate: '2020-01-05' }])
+
+    const search = await (await request('POST', '/events/search', { query: '旧版旅行日程' })).json()
+    expect(search.items).toMatchObject([{ id, type: 'milestone', targetDate: '2020-01-01', subtitle: '旧重要日程 · 2020-01-01' }])
+    const detailResponse = await request('GET', `/events/${id}`)
+    const detail = await detailResponse.json() as { event: Record<string, unknown> }
+    expect(detailResponse.status).toBe(200)
+    expect(detail.event).toMatchObject({
+      id, type: 'milestone', legacySchedule: true,
+      startDate: '2020-01-01', endDate: '2020-01-05',
+      startTime: '08:30', endTime: '18:00', allDay: false,
+      recurrence: 'none', description: '保留的旧备注',
+    })
+    expect(db.prepare('SELECT encrypted_fields FROM diary_events WHERE owner_user_id = ? AND id = ?').get(auth.userId, id))
+      .toEqual({ encrypted_fields: originalCiphertext })
+
+    const converted = await request('PUT', `/events/${id}`, {
+      ...detail.event,
+      type: 'milestone',
+      endDate: '2020-01-01',
+      startTime: null,
+      endTime: null,
+      allDay: true,
+      recurrence: 'none',
+      expectedVersion: 1,
+    })
+    expect(converted.status).toBe(200)
+    const convertedBody = await converted.json() as { event: Record<string, unknown> }
+    expect(convertedBody.event).toMatchObject({ id, type: 'milestone', endDate: '2020-01-01', version: 2 })
+    expect(convertedBody.event).not.toHaveProperty('legacySchedule')
+    await auth.runtime.diaryAccess.withBodyOperation(auth.session.id, capability, operation => {
+      const row = db.prepare('SELECT encrypted_fields FROM diary_events WHERE owner_user_id = ? AND id = ?').get(auth.userId, id) as { encrypted_fields: Buffer }
+      expect(operation.life!.decrypt(row.encrypted_fields, JSON.stringify([auth.userId, 'event', id, 2])))
+        .toMatchObject({ type: 'milestone', title: '旧版旅行日程', description: '保留的旧备注', startDate: '2020-01-01', endDate: '2020-01-01' })
+    })
+  })
   it('scopes Diary search to the authenticated owner and validates the query', async () => {
     expect((await request('POST', '/search', { query: '   ' })).status).toBe(400)
     expect((await request('POST', '/search', { query: 'x'.repeat(121) })).status).toBe(400)
@@ -432,37 +515,6 @@ describe('Diary database API', () => {
     expect((await sameDayResult.json()).items.filter((item: { id: string }) => item.id === sameDay)).toHaveLength(1)
   })
 
-  it('stages and persists event attachments independently, then removes them with the Event', async () => {
-    const id = randomUUID()
-    const sessionId = randomUUID()
-    const requestKey = randomUUID()
-    const bytes = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAAAAAA6fptVAAAACklEQVR4nGNgAAAAAgABSK+kcQAAAABJRU5ErkJggg==', 'base64')
-    const form = new FormData()
-    form.set('sessionId', sessionId)
-    form.set('file', new File([bytes], 'period.png', { type: 'image/png' }))
-    const stage = await attachmentRequest('POST', `/events/${id}/stage`, form, requestKey)
-    expect(stage.status).toBe(201)
-    const { attachment } = await stage.json() as { attachment: { id: string; eventId: string; size: number } }
-    expect(attachment).toMatchObject({ eventId: id, size: bytes.length })
-    expect((await attachmentRequest('POST', `/events/${id}/sessions/${sessionId}/heartbeat`)).status).toBe(204)
-
-    const period = {
-      title: '附有证明材料的阶段', description: '', emoji: '💼', type: 'period',
-      startDate: '2020-01-01', endDate: null, startTime: null, endTime: null,
-      allDay: true, dateRule: { calendar: 'gregory' }, recurrence: 'none',
-      attachmentIds: [attachment.id], showCountdown: false, isPrimary: false, expectedVersion: 0,
-    }
-    const saved = await request('PUT', `/events/${id}`, period)
-    expect(saved.status).toBe(200)
-    expect(await saved.json()).toMatchObject({ event: { attachmentIds: [attachment.id], attachments: [{ id: attachment.id, eventId: id }] } })
-    const content = await attachmentRequest('GET', `/${attachment.id}/content`)
-    expect(content.status).toBe(200)
-    expect(Buffer.from(await content.arrayBuffer())).toEqual(bytes)
-
-    expect((await request('DELETE', `/events/${id}`, { expectedVersion: 1 })).status).toBe(200)
-    expect((db.prepare('SELECT id FROM diary_event_attachments WHERE owner_user_id = ? AND id = ?').get(auth.userId, attachment.id))).toBeUndefined()
-    expect((await attachmentRequest('GET', `/${attachment.id}/content`)).status).toBe(404)
-  })
   it('stores lunar rules through the encrypted event API and filters their real Gregorian occurrences', async () => {
     const id = randomUUID()
     const lunarEvent = {

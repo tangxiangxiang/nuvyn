@@ -27,7 +27,7 @@ defineProps<{
 .diary-event-row {
   display: grid;
   width: 100%;
-  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-columns: minmax(0, 1fr) fit-content(75%);
   align-items: center;
   column-gap: 8px;
   padding: 0 12px;

@@ -6,8 +6,8 @@ export function eventDistanceLabel(event: DiaryEvent, occurrenceDate: string, to
   if (event.type === 'period') {
     const summary = lifePeriodSummary(event, today)
     if (!summary) return ''
-    if (summary.status === 'upcoming') return `还剩${summary.duration}`
-    return `已持续${summary.duration}`
+    if (summary.status === 'upcoming') return `还剩 ${summary.duration}`
+    return `${summary.status === 'ended' ? '持续' : '已持续'} ${summary.duration}`
   }
 
   const start = eventOccurrenceStart(event, occurrenceDate)

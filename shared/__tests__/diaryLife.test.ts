@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { lunarToSolar } from '../lunarCalendar'
-import { birthdayAgeAt, civilDate, dayDistance, displayEventTitle, eventOccurrenceStart, lifePeriodSummary, nextOccurrence, occurrenceInYear, occursOn, parseDay, parseEvent, type EventFields } from '../diaryLife'
+import { birthdayAgeAt, civilDate, dayDistance, displayEventTitle, eventOccurrenceStart, lifePeriodSummary, nextOccurrence, occurrenceInYear, occursOn, parseDay, parseEvent, parseLegacySchedule, type EventFields } from '../diaryLife'
 
 const event: EventFields = { title: '生日', description: '', emoji: '🎂', type: 'anniversary', startDate: '2024-02-29', endDate: '2024-02-29', startTime: null, endTime: null, allDay: true, recurrence: 'yearly', showCountdown: true, isPrimary: false }
 describe('Diary natural days', () => {
@@ -48,35 +48,44 @@ describe('Diary natural days', () => {
     expect(occursOn(event, '2025-02-28')).toBe(true)
     expect(occursOn(event, '2023-02-28')).toBe(false)
   })
-  it('uses civil days across DST and year boundaries', () => {
+  it('keeps legacy schedule ranges readable across DST and year boundaries', () => {
     expect(dayDistance('2026-03-07', '2026-03-09')).toBe(2)
     expect(dayDistance('2026-10-31', '2026-11-02')).toBe(2)
     expect(dayDistance('2026-12-31', '2027-01-01')).toBe(1)
-    const trip = { ...event, startDate: '2024-12-30', endDate: '2025-01-02' }
+    const trip = parseLegacySchedule({
+      ...event, type: 'schedule', startDate: '2024-12-30', endDate: '2025-01-02',
+    })!
     expect(occursOn(trip, '2027-01-01')).toBe(true)
     expect(occursOn(trip, '2027-01-03')).toBe(false)
     expect(eventOccurrenceStart(trip, '2027-01-01')).toBe('2026-12-30')
     const oneTimeTrip = { ...trip, recurrence: 'none' as const }
     expect(eventOccurrenceStart(oneTimeTrip, '2024-12-31')).toBe('2024-12-30')
   })
-  it('prefers an exact annual occurrence start when long event ranges overlap', () => {
-    const longAnnualEvent = {
+  it('preserves legacy annual schedule ranges when occurrences overlap', () => {
+    const longAnnualEvent = parseLegacySchedule({
       ...event,
+      type: 'schedule',
       startDate: '2020-06-01',
       endDate: '2021-06-02',
-    }
+    })!
     expect(eventOccurrenceStart(longAnnualEvent, '2021-06-01')).toBe('2021-06-01')
     expect(eventOccurrenceStart(longAnnualEvent, '2021-06-02')).toBe('2021-06-01')
   })
   it('does not count expired one-time events', () => {
     expect(nextOccurrence({ ...event, recurrence: 'none' }, '2025-01-01')).toBeNull()
   })
-  it('validates times, ranges, and required title', () => {
+  it('requires single-date, all-day milestone and anniversary records', () => {
     expect(parseEvent({ ...event, title: ' ' })).toBeNull()
     expect(parseEvent({ ...event, endDate: '2024-02-28' })).toBeNull()
     expect(parseEvent({ ...event, allDay: false, startTime: '25:00' })).toBeNull()
     expect(parseEvent({ ...event, allDay: false, startTime: '13:00', endTime: '12:00' })).toBeNull()
-    expect(parseEvent({ ...event, allDay: false, endDate: '2024-03-01', startTime: '13:00', endTime: '12:00' })).not.toBeNull()
+    expect(parseEvent({ ...event, endDate: '2024-03-01' })).toBeNull()
+    expect(parseEvent({ ...event, type: 'milestone', recurrence: 'yearly' })).toBeNull()
+    expect(parseEvent({ ...event, type: 'milestone', recurrence: 'none' })).not.toBeNull()
+    expect(parseEvent({ ...event, type: 'milestone', dateRule: {
+      calendar: 'chinese', lunarMonth: 2, lunarDay: 1, isLeapMonth: false,
+      leapMonthPolicy: 'regular-month', shortMonthPolicy: 'last-day',
+    } })).toBeNull()
   })
   it('validates open-ended life periods without relaxing other Event ranges', () => {
     const period: EventFields = {
@@ -100,9 +109,33 @@ describe('Diary natural days', () => {
       calendar: 'chinese', lunarMonth: 1, lunarDay: 1, isLeapMonth: false,
       leapMonthPolicy: 'regular-month', shortMonthPolicy: 'last-day',
     } })).toBeNull()
-    expect(parseEvent({ ...period, attachmentIds: ['08a5c822-0d61-4e6c-a62c-1931a4da0771'] })?.attachmentIds)
-      .toEqual(['08a5c822-0d61-4e6c-a62c-1931a4da0771'])
-    expect(parseEvent({ ...event, type: 'schedule', startDate: '2020-01-01', endDate: '2021-01-02' })).toBeNull()
+    const legacyWithAttachments = parseEvent({
+      ...period,
+      attachmentIds: ['08a5c822-0d61-4e6c-a62c-1931a4da0771'],
+      attachments: [{ id: '08a5c822-0d61-4e6c-a62c-1931a4da0771' }],
+    })
+    expect(legacyWithAttachments).toMatchObject({ type: 'period', endDate: null })
+    expect(legacyWithAttachments).not.toHaveProperty('attachmentIds')
+    expect(legacyWithAttachments).not.toHaveProperty('attachments')
+    const legacySchedule = {
+      ...event,
+      type: 'schedule',
+      title: '旧版旅行日程',
+      startDate: '2020-01-01',
+      endDate: '2020-01-05',
+      startTime: '08:30',
+      endTime: '18:00',
+      allDay: false,
+      recurrence: 'none',
+      description: '旧版备注保留',
+    }
+    expect(parseEvent(legacySchedule)).toBeNull()
+    expect(parseLegacySchedule(legacySchedule)).toMatchObject({
+      type: 'milestone', legacySchedule: true, title: '旧版旅行日程',
+      startDate: '2020-01-01', endDate: '2020-01-05',
+      startTime: '08:30', endTime: '18:00', allDay: false,
+      recurrence: 'none', description: '旧版备注保留',
+    })
   })
   it('marks only life-period endpoints and calculates natural-date status and duration', () => {
     const period: EventFields = {
