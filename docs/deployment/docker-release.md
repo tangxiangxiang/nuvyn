@@ -67,8 +67,16 @@ Back up both persistent stores before changing the image. Then change only the
 `NUVYN_IMAGE` value in `.env` to the next exact release tag:
 
 ```dotenv
-NUVYN_IMAGE=ghcr.io/tangxiangxiang/nuvyn:0.1.0-alpha.2
+NUVYN_IMAGE=ghcr.io/tangxiangxiang/nuvyn:0.1.0-alpha.17
 ```
+
+For Alpha.17, record the current image tag and digest first. Stop the service
+and back up the complete Content directory and `nuvyn-data` volume, including
+SQLite, WAL/SHM files and attachments. Preserve the matching configuration and
+master-key material. Alpha.17 advances the SQLite schema from v52 to v56; the
+upgrade applies each migration and its schema-version update transactionally.
+The migrations add Ledger change tracking and Finance Memory/Skills tables and
+do not rewrite existing Ledger transaction rows.
 
 Apply the upgrade without a source checkout, npm install, or Docker build:
 
@@ -84,11 +92,13 @@ complete. The named `nuvyn-data` volume and the content bind mount are reused.
 
 ## Rollback
 
-For a release that did not perform an incompatible or irreversible database
-migration, restore the previous exact image tag in `.env` and apply it:
+Do not assume that changing only the image tag is a safe rollback after a
+database migration. For an Alpha.17 rollback, stop Nuvyn and restore the
+matching pre-upgrade Content directory, `nuvyn-data` volume and key material
+from the backup. Then set the previous image tag in `.env`:
 
 ```dotenv
-NUVYN_IMAGE=ghcr.io/tangxiangxiang/nuvyn:0.1.0-alpha.1
+NUVYN_IMAGE=ghcr.io/tangxiangxiang/nuvyn:0.1.0-alpha.16
 ```
 
 ```bash
@@ -96,11 +106,9 @@ docker compose -f compose.production.yml pull
 docker compose -f compose.production.yml up -d
 ```
 
-An image rollback is not automatically safe after an irreversible SQLite
-schema or data migration. In that case, stop the service and restore the
-pre-upgrade `nuvyn-data` volume backup together with the matching content
-backup before starting the older image. Do not assume that every release can
-be rolled back by changing only the image tag.
+Start the previous image only after restoring the matching backup. Keep the
+pre-upgrade image digest and backup together so the database, Content and key
+material return to the same point in time.
 
 ## Backup Before Upgrade
 

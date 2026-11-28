@@ -3,6 +3,55 @@
 All notable changes to Nuvyn are documented in this file. Entries dated before
 the Nuvyn brand baseline may refer to Nuvyn as the historical product name.
 
+## Nuvyn v0.1.0-alpha.17 — 2026-11-28
+
+Changes since `v0.1.0-alpha.16`.
+
+### Added
+
+#### Global AI Assistant
+
+- Added a shared AI assistant panel with workspace-aware entry points, model selection, conversation history and quick prompts. Note has the general assistant and Ledger has its dedicated Finance assistant; Diary and Board show a Coming Soon state without chat controls.
+
+#### AI Finance
+
+- Added a dedicated Ledger Finance conversation with multi-turn, tool-assisted analysis of Ledger data. The assistant reads an initial snapshot and then uses revision-based incremental reads as Ledger data changes.
+- Added owner-scoped Finance Memory with user and agent entries, management controls and tombstones that prevent forgotten entries from being silently restored from stale context.
+- Added built-in Finance Skills and owner-scoped custom skill management. The agent can maintain custom skills, with revision checks protecting concurrent edits and deletes.
+- Added `/clear`, `/memory` and `/skills` Finance commands, plus automatic context budgeting and conversation compaction.
+
+#### Diary Calendar
+
+- Added a shared calendar with Diary, Events and Todo views, Gregorian and lunar dates, and a consistent date grid.
+- Added a centered lunar details modal showing the year, month and day pillars, all twelve two-hour periods, and a highlight for the current period. The displayed hour pillars follow the Wu Shu Dun rule; the highlight updates across hour changes and midnight.
+
+### Changed
+
+- Refined calendar grid borders, spacing, date selection and lunar date presentation across Diary, Events and Todo. Lunar details now open in a centered modal rather than a hover tooltip or anchored popover.
+- Unified the global AI panel presentation and improved Markdown rendering, session selection and workspace-specific model preferences.
+- Finance conversation compaction now runs automatically in the background without blocking the next request. The manual `/compact` command is not available.
+- Unified the Ledger module label and refined Ledger onboarding, workspace navigation and responsive interactions across desktop, tablet and phone layouts.
+
+### Fixed
+
+- Closed gaps in Finance conversation context and Ledger data refresh, including revision tracking for account, category, transaction, settings and statistics-exclusion changes.
+- Hardened Finance compaction against concurrent requests, failures, retries and stale background writes; context history remains bounded by the configured budget.
+- Added revision-aware Memory and custom Skill writes to reject stale updates, and tombstones to preserve explicit deletions across older conversation context.
+- Isolated lunar-date actions from calendar date selection and business dialogs; improved modal focus, Escape and outside-click behavior.
+- Updated Diary Search browser assertions to check the selected calendar cell and its date action after the calendar interaction structure changed.
+- Improved Ledger Finance and onboarding regression coverage, including responsive and clean-onboarding scenarios.
+
+### Migration
+
+- SQLite schema advances from v52 to v56 through migrations `0053_ledger_ai_revision.sql` to `0056_ai_finance_custom_skills.sql`. Migration 0053 adds a bounded Ledger change-revision journal and triggers; 0054 adds Finance Memory and deletion-tombstone tables with an owner index; 0055 adds a revision column to Finance Memory (defaulting to 1); and 0056 adds custom Finance Skills and skill tombstones with an owner index. Existing Ledger transaction rows are not rewritten. There is no new AI session migration; Finance conversations use the existing session/message schema. Each migration and its `schema_version` update run in one SQLite transaction.
+- **Before upgrading production, stop Nuvyn and make a consistent backup of the complete Content directory and `nuvyn-data` volume, including SQLite WAL/SHM files and attachments. Preserve the matching configuration and key material.** An image-only downgrade is not a safe rollback after the schema has advanced; restore the matching pre-upgrade database, Content and keys before starting the previous image.
+
+### Known Limitations
+
+- Finance analysis quality depends on the configured model. This release does not claim verification against every real AI provider.
+- Automatic compaction and context budgeting do not guarantee complete retention of unlimited conversation history.
+- AI for Diary and Board remains Coming Soon. This release does not add proactive financial analysis or scheduled AI tasks.
+
 ## Nuvyn v0.1.0-alpha.16 — 2026-11-21
 
 Changes since `v0.1.0-alpha.15`.
